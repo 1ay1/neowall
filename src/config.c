@@ -379,66 +379,146 @@ static bool config_create_default(const char *config_path) {
     /* Get the installation path or use built-in default */
     const char *default_wallpaper_path = NULL;
 
-    /* Try to find default.png in common locations */
-    const char *possible_paths[] = {
-        "/usr/share/staticwall/default.png",
-        "/usr/local/share/staticwall/default.png",
-        "~/.local/share/staticwall/default.png",
-        NULL
-    };
-
-    for (int i = 0; possible_paths[i] != NULL; i++) {
-        char expanded[MAX_PATH_LENGTH];
-        if (possible_paths[i][0] == '~') {
-            const char *home = getenv("HOME");
-            if (home) {
-                snprintf(expanded, sizeof(expanded), "%s%s", home, possible_paths[i] + 1);
-            } else {
-                continue;
-            }
+    /* Copy default wallpaper to user's local directory if it doesn't exist */
+    const char *home = getenv("HOME");
+    if (home) {
+        char user_wallpaper_dir[MAX_PATH_LENGTH];
+        char user_wallpaper_path[MAX_PATH_LENGTH];
+        int ret1 = snprintf(user_wallpaper_dir, sizeof(user_wallpaper_dir), "%s/.local/share/staticwall", home);
+        if (ret1 < 0 || (size_t)ret1 >= sizeof(user_wallpaper_dir)) {
+            log_error("Path too long for user wallpaper directory");
+            default_wallpaper_path = "~/Pictures/wallpaper.png";
         } else {
-            strncpy(expanded, possible_paths[i], sizeof(expanded) - 1);
-            expanded[sizeof(expanded) - 1] = '\0';
+            int ret2 = snprintf(user_wallpaper_path, sizeof(user_wallpaper_path), "%s/default.png", user_wallpaper_dir);
+            if (ret2 < 0 || (size_t)ret2 >= sizeof(user_wallpaper_path)) {
+                log_error("Path too long for user wallpaper path");
+                default_wallpaper_path = "~/Pictures/wallpaper.png";
+            } else {
+        
+        /* Check if user already has the default wallpaper */
+        if (access(user_wallpaper_path, F_OK) != 0) {
+            /* Try to find and copy the default wallpaper from installation */
+            const char *source_paths[] = {
+                "/usr/share/staticwall/default.png",
+                "/usr/local/share/staticwall/default.png",
+                NULL
+            };
+            
+            for (int i = 0; source_paths[i] != NULL; i++) {
+                if (access(source_paths[i], R_OK) == 0) {
+                    /* Create user wallpaper directory recursively */
+                    char tmp[MAX_PATH_LENGTH];
+                    snprintf(tmp, sizeof(tmp), "%s/.local", home);
+                    mkdir(tmp, 0755);
+                    snprintf(tmp, sizeof(tmp), "%s/.local/share", home);
+                    mkdir(tmp, 0755);
+                    mkdir(user_wallpaper_dir, 0755);
+                    
+                    /* Copy the file */
+                    FILE *src = fopen(source_paths[i], "rb");
+                    if (src) {
+                        FILE *dst = fopen(user_wallpaper_path, "wb");
+                        if (dst) {
+                            char buffer[4096];
+                            size_t bytes;
+                            while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+                                fwrite(buffer, 1, bytes, dst);
+                            }
+                            fclose(dst);
+                            log_info("Copied default wallpaper to %s", user_wallpaper_path);
+                        }
+                        fclose(src);
+                    }
+                    break;
+                }
+            }
         }
-
-        if (access(expanded, F_OK) == 0) {
-            default_wallpaper_path = possible_paths[i];
-            break;
+        
+                /* Use the user's local copy if it exists */
+                if (access(user_wallpaper_path, F_OK) == 0) {
+                    default_wallpaper_path = "~/.local/share/staticwall/default.png";
+                } else {
+                    default_wallpaper_path = "~/Pictures/wallpaper.png";
+                }
+            }
         }
-    }
-
-    /* If no default wallpaper found, use a simple path that users should replace */
-    if (!default_wallpaper_path) {
+    } else {
         default_wallpaper_path = "~/Pictures/wallpaper.png";
     }
 
-    /* Create default config content */
+    /* Try to copy example config from installation if available */
+    const char *example_config_paths[] = {
+        "/usr/share/staticwall/config.vibe.example",
+        "/usr/local/share/staticwall/config.vibe.example",
+        NULL
+    };
+    
+    bool copied_example = false;
+    for (int i = 0; example_config_paths[i] != NULL; i++) {
+        if (access(example_config_paths[i], R_OK) == 0) {
+            /* Copy example config to user config directory as reference */
+            char example_dest[MAX_PATH_LENGTH];
+            snprintf(example_dest, sizeof(example_dest), "%s/.config/staticwall/config.vibe.example", home ? home : "");
+            
+            FILE *src = fopen(example_config_paths[i], "rb");
+            if (src) {
+                FILE *dst = fopen(example_dest, "wb");
+                if (dst) {
+                    char buffer[4096];
+                    size_t bytes;
+                    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+                        fwrite(buffer, 1, bytes, dst);
+                    }
+                    fclose(dst);
+                    log_info("Copied example config to %s", example_dest);
+                    copied_example = true;
+                }
+                fclose(src);
+            }
+            break;
+        }
+    }
+    
+    /* Create default config content using VIBE syntax */
     const char *default_config =
         "# Staticwall Configuration\n"
-        "# Generated on first run\n\n"
+        "# Generated on first run\n"
+        "# Sets wallpapers until it... doesn't.\n\n"
         "# Default wallpaper for all outputs\n"
-        "[default]\n"
-        "path %s\n"
-        "mode fill\n"
-        "duration 300  # Change wallpaper every 5 minutes (optional)\n\n"
-        "# Example: Specific output configuration\n"
-        "# Uncomment and modify to configure specific monitors\n"
-        "# [output \"Monitor-Name\"]\n"
-        "# path ~/Pictures/wallpapers/\n"
-        "# mode fill\n"
-        "# duration 300\n"
-        "# transition fade\n\n"
+        "default {\n"
+        "  path %s\n"
+        "  mode fill\n"
+        "}\n\n"
+        "# Uncomment to enable wallpaper cycling:\n"
+        "# default {\n"
+        "#   path ~/Pictures/wallpapers/\n"
+        "#   mode fill\n"
+        "#   duration 300  # Change every 5 minutes\n"
+        "#   transition fade\n"
+        "# }\n\n"
+        "# Example: Configure specific monitors\n"
+        "# Find your monitor names with: swaymsg -t get_outputs\n"
+        "# output {\n"
+        "#   eDP-1 {\n"
+        "#     path ~/Pictures/laptop.jpg\n"
+        "#     mode fill\n"
+        "#   }\n"
+        "#   HDMI-A-1 {\n"
+        "#     path ~/Pictures/monitor.png\n"
+        "#     mode fit\n"
+        "#   }\n"
+        "# }\n\n"
         "# Display modes:\n"
-        "#   center  - Center image without scaling\n"
         "#   fill    - Scale to fill screen, crop if needed (recommended)\n"
         "#   fit     - Scale to fit inside screen, may have black bars\n"
+        "#   center  - Center image without scaling\n"
         "#   stretch - Stretch to fill screen, may distort\n"
         "#   tile    - Tile the image\n\n"
         "# Transition effects:\n"
-        "#   none         - Instant change\n"
-        "#   fade         - Fade between images\n"
-        "#   slide_left   - Slide from right to left\n"
-        "#   slide_right  - Slide from left to right\n";
+        "#   none        - Instant change\n"
+        "#   fade        - Fade between images\n"
+        "#   slide_left  - Slide from right to left\n"
+        "#   slide_right - Slide from left to right\n";
 
     /* Write config file */
     FILE *fp = fopen(config_path, "w");
@@ -451,7 +531,10 @@ static bool config_create_default(const char *config_path) {
     fclose(fp);
 
     log_info("Created default configuration file: %s", config_path);
-    log_info("Please edit the configuration and set your wallpaper path");
+    if (copied_example) {
+        log_info("Example config available at ~/.config/staticwall/config.vibe.example");
+    }
+    log_info("Edit the configuration to set your wallpaper path");
 
     return true;
 }

@@ -99,15 +99,18 @@ $(TARGET): $(OBJECTS) $(PROTO_OBJECTS)
 # Install
 install: $(TARGET)
 	install -Dm755 $(TARGET) $(DESTDIR)/usr/local/bin/$(PROJECT)
-	install -Dm644 config/staticwall.vibe $(DESTDIR)/etc/$(PROJECT)/config.vibe.example
+	install -Dm644 config/staticwall.vibe $(DESTDIR)/usr/share/$(PROJECT)/config.vibe.example
 	install -Dm644 $(ASSETS_DIR)/default.png $(DESTDIR)/usr/share/$(PROJECT)/default.png
 	@echo "Installed to $(DESTDIR)/usr/local/bin/$(PROJECT)"
-	@echo "Default wallpaper installed to $(DESTDIR)/usr/share/$(PROJECT)/default.png"
+	@echo "Example config: $(DESTDIR)/usr/share/$(PROJECT)/config.vibe.example"
+	@echo "Default wallpaper: $(DESTDIR)/usr/share/$(PROJECT)/default.png"
+	@echo ""
+	@echo "Note: Staticwall runs as normal user. No sudo needed to run!"
+	@echo "On first run, config will be created at ~/.config/staticwall/config.vibe"
 
 # Uninstall
 uninstall:
 	rm -f $(DESTDIR)/usr/local/bin/$(PROJECT)
-	rm -rf $(DESTDIR)/etc/$(PROJECT)
 	rm -rf $(DESTDIR)/usr/share/$(PROJECT)
 	@echo "Uninstalled $(PROJECT)"
 
@@ -137,10 +140,12 @@ help:
 	@echo "  all         - Build the project (default)"
 	@echo "  clean       - Remove build artifacts"
 	@echo "  distclean   - Remove all generated files"
-	@echo "  install     - Install to system"
-	@echo "  uninstall   - Remove from system"
+	@echo "  install     - Install to system (requires sudo)"
+	@echo "  uninstall   - Remove from system (requires sudo)"
 	@echo "  run         - Build and run"
 	@echo "  debug       - Build with debug symbols"
 	@echo "  help        - Show this help"
+	@echo ""
+	@echo "Note: Staticwall runs as a normal user. No root privileges needed!"
 
 .PHONY: all clean distclean install uninstall run debug help directories protocols

@@ -254,14 +254,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* Check if config file exists */
-    struct stat st;
-    if (stat(config_path, &st) == -1) {
-        log_error("Configuration file not found: %s", config_path);
-        log_info("Please create a configuration file. See --help for examples.");
-        return EXIT_FAILURE;
-    }
-
     log_info("Using configuration file: %s", config_path);
 
     /* Daemonize if requested */

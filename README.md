@@ -4,6 +4,8 @@
 
 A lightweight, reliable Wayland wallpaper daemon written in C. Perfect for tiling window managers and minimal setups.
 
+![Staticwall Default Wallpaper](assets/default.png)
+
 > **Why "Staticwall" if it cycles wallpapers?** Because it's *static*ally compiled C code that sets wallpapers. The fact that it can also change them dynamically is just a happy accident. We're committed to the bit.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -54,9 +56,15 @@ make
 sudo make install
 ```
 
+**Note:** Staticwall runs as a normal user and doesn't require root privileges to run! Only the binary installation requires sudo. On first run, config and default wallpaper will be automatically copied to your user directories.
+
 ### Usage
 
-On first run, Staticwall will create a default configuration file at `~/.config/staticwall/config.vibe`:
+On first run, Staticwall will automatically:
+- Create config at `~/.config/staticwall/config.vibe`
+- Copy default wallpaper to `~/.local/share/staticwall/default.png`
+
+No root/sudo needed to run!
 
 ```bash
 # Run in foreground (see logs)

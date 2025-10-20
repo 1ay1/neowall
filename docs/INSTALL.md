@@ -112,11 +112,16 @@ sudo make install
 
 This installs:
 - Binary: `/usr/local/bin/staticwall`
-- Example config: `/etc/staticwall/config.vibe.example`
+- Example config: `/usr/share/staticwall/config.vibe.example`
+- Default wallpaper: `/usr/share/staticwall/default.png`
+
+**Note:** Only the binary installation requires sudo. Staticwall runs as a normal user and on first run will automatically:
+- Create config at `~/.config/staticwall/config.vibe`
+- Copy default wallpaper to `~/.local/share/staticwall/default.png`
 
 To install to a different prefix:
 ```bash
-sudo make install DESTDIR=/usr
+sudo make install DESTDIR=/custom/path
 ```
 
 ### Step 5: Configuration
@@ -185,7 +190,9 @@ Example output names:
 - HDMI: `HDMI-A-1`, `HDMI-A-2`
 - DisplayPort: `DP-1`, `DP-2`
 
-### Step 3: Build Staticwall
+### Step 3: Run Staticwall
+
+**Important:** Staticwall runs as your normal user. No root/sudo needed!
 
 #### Manual Start
 
@@ -354,6 +361,17 @@ systemctl --user stop staticwall.service
 systemctl --user disable staticwall.service
 rm ~/.config/systemd/user/staticwall.service
 ```
+
+## Security Note
+
+**Staticwall is designed to run as a normal user** and does not require root privileges:
+
+- ✅ Runs with your user permissions
+- ✅ Config stored in `~/.config/staticwall/` (created on first run)
+- ✅ Default wallpaper copied to `~/.local/share/staticwall/` (on first run)
+- ✅ Only binary installation requires sudo, not runtime
+- ❌ Never needs root/sudo to run
+- ❌ Doesn't write to system directories during operation
 
 ## Next Steps
 
