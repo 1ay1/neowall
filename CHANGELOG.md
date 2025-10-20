@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+*Sets wallpapers until it... doesn't.*
+
 ## [Unreleased]
 
 ### Added
@@ -44,12 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial public release
-- Core wallpaper daemon functionality
+- Core wallpaper daemon functionality (sets wallpapers until it doesn't)
 - Wayland protocol support
 - Multi-monitor management
 - Image loading and rendering
 - Configuration file parsing
 - Documentation and examples
+- Embraced the irony of "Staticwall" dynamically cycling wallpapers
+- Self-aware humor about our naming choices
 
 [Unreleased]: https://github.com/1ay1/staticwall/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/1ay1/staticwall/releases/tag/v0.1.0
