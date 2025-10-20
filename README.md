@@ -81,26 +81,32 @@ Edit `~/.config/staticwall/config.vibe`:
 
 ```vibe
 # Simple single wallpaper for all monitors
-[default]
-path ~/Pictures/wallpaper.png
-mode fill
+default {
+  path ~/Pictures/wallpaper.png
+  mode fill
+}
 
 # Cycle through a directory of wallpapers
-[default]
-path ~/Pictures/wallpapers/
-duration 300  # Change every 5 minutes
-transition fade
+default {
+  path ~/Pictures/wallpapers/
+  duration 300  # Change every 5 minutes
+  transition fade
+}
 
 # Configure specific monitor
-[output "HDMI-A-1"]
-path ~/Pictures/monitor1/
-mode fill
-duration 600
-transition fade
-
-[output "DP-1"]
-path ~/Pictures/monitor2.jpg
-mode center
+output {
+  HDMI-A-1 {
+    path ~/Pictures/monitor1/
+    mode fill
+    duration 600
+    transition fade
+  }
+  
+  DP-1 {
+    path ~/Pictures/monitor2.jpg
+    mode center
+  }
+}
 ```
 
 #### Display Modes

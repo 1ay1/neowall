@@ -12,9 +12,7 @@ sudo apt install build-essential pkg-config libwayland-dev \
     libwayland-egl-backend-dev libegl1-mesa-dev libgles2-mesa-dev \
     libpng-dev libjpeg-dev wayland-protocols
 
-# Install tomlc99
-git clone https://github.com/cktan/tomlc99.git
-cd tomlc99 && make && sudo make install && cd ..
+# No external config dependencies needed - VIBE parser is embedded!
 
 # Build and install staticwall
 cd staticwall
@@ -23,9 +21,9 @@ sudo make install
 
 # Create config
 mkdir -p ~/.config/staticwall
-cp config/staticwall.toml ~/.config/staticwall/config.toml
+cp config/staticwall.vibe ~/.config/staticwall/config.vibe
 # Edit the config file with your wallpaper paths
-nano ~/.config/staticwall/config.toml
+nano ~/.config/staticwall/config.vibe
 
 # Run
 staticwall
@@ -70,25 +68,9 @@ sudo xbps-install -S base-devel pkg-config \
     MesaLib-devel libpng-devel libjpeg-turbo-devel
 ```
 
-### Step 2: Install libtoml (tomlc99)
+### Step 2: No External Config Library Needed!
 
-Most distributions don't package libtoml, so we need to install it manually:
-
-```bash
-cd /tmp
-git clone https://github.com/cktan/tomlc99.git
-cd tomlc99
-make
-sudo make install
-sudo ldconfig  # Update library cache
-```
-
-**Arch Linux users** can install from AUR:
-```bash
-yay -S tomlc99
-# or
-paru -S tomlc99
-```
+Staticwall uses the VIBE configuration format with an embedded parser - no external dependencies required! This makes installation much simpler than other wallpaper daemons.
 
 ### Step 3: Clone and Build Staticwall
 
@@ -130,7 +112,7 @@ sudo make install
 
 This installs:
 - Binary: `/usr/local/bin/staticwall`
-- Example config: `/etc/staticwall/config.toml.example`
+- Example config: `/etc/staticwall/config.vibe.example`
 
 To install to a different prefix:
 ```bash
@@ -149,15 +131,16 @@ mkdir -p ~/.config/staticwall
 
 Copy the example config:
 ```bash
-cp config/staticwall.toml ~/.config/staticwall/config.toml
+cp config/staticwall.vibe ~/.config/staticwall/config.vibe
 ```
 
 Or create from scratch:
 ```bash
-cat > ~/.config/staticwall/config.toml << 'EOF'
-[default]
-path = "~/Pictures/wallpaper.png"
-mode = "fill"
+cat > ~/.config/staticwall/config.vibe << 'EOF'
+default {
+  path ~/Pictures/wallpaper.png
+  mode fill
+}
 EOF
 ```
 
@@ -165,11 +148,11 @@ EOF
 
 Edit the config file with your preferred editor:
 ```bash
-nano ~/.config/staticwall/config.toml
+nano ~/.config/staticwall/config.vibe
 # or
-vim ~/.config/staticwall/config.toml
+vim ~/.config/staticwall/config.vibe
 # or
-code ~/.config/staticwall/config.toml
+code ~/.config/staticwall/config.vibe
 ```
 
 **Important**: Update the `path` values to point to your actual wallpaper images!
@@ -202,7 +185,7 @@ Example output names:
 - HDMI: `HDMI-A-1`, `HDMI-A-2`
 - DisplayPort: `DP-1`, `DP-2`
 
-### Step 7: Run Staticwall
+### Step 3: Build Staticwall
 
 #### Manual Start
 
@@ -235,7 +218,7 @@ exec staticwall --daemon
 
 Add to `~/.config/hypr/hyprland.conf`:
 ```
-exec-once = staticwall --daemon
+exec-once staticwall --daemon
 ```
 
 ### river
@@ -250,7 +233,7 @@ staticwall --daemon &
 Add to `~/.config/wayfire.ini`:
 ```ini
 [autostart]
-staticwall = staticwall --daemon
+staticwall staticwall --daemon
 ```
 
 ## Systemd Service (Optional)
@@ -326,16 +309,12 @@ Your compositor doesn't support wlr-layer-shell. See the README for supported co
 
 Check your config file syntax:
 ```bash
-cat ~/.config/staticwall/config.toml
+cat ~/.config/staticwall/config.vibe
 ```
 
 Make sure paths use quotes and are valid.
 
 ### Build Errors
-
-**"toml.h: No such file or directory"**
-- Install libtoml (tomlc99) as shown in Step 2
-- Run `sudo ldconfig` after installing
 
 **"wayland-scanner: command not found"**
 - Install wayland-protocols package
@@ -379,7 +358,7 @@ rm ~/.config/systemd/user/staticwall.service
 ## Next Steps
 
 - Read the [README.md](README.md) for usage examples
-- Check [config/staticwall.toml](config/staticwall.toml) for all options
+- Check [config/staticwall.vibe](config/staticwall.vibe) for all options
 - Join the community for support and updates
 
 ## Getting Help

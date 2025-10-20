@@ -2,7 +2,7 @@
  * Staticwall - A reliable Wayland wallpaper daemon
  * Copyright (C) 2024
  *
- * Image loading for various formats
+ * Image loading and processing
  */
 
 #include <stdio.h>
@@ -10,9 +10,9 @@
 #include <string.h>
 #include <strings.h>
 #include <errno.h>
+#include <stdint.h>
 #include <png.h>
 #include <jpeglib.h>
-#include <setjmp.h>
 #include "staticwall.h"
 
 /* Expand path with tilde */
@@ -36,8 +36,12 @@ static bool expand_path(const char *path, char *expanded, size_t size) {
             return false;
         }
 
-        strcpy(expanded, home);
-        strcat(expanded, path + 1);
+        /* Bounds already checked above, safe to use snprintf */
+        int written = snprintf(expanded, size, "%s%s", home, path + 1);
+        if (written < 0 || (size_t)written >= size) {
+            log_error("Path expansion failed");
+            return false;
+        }
         return true;
     }
 
@@ -47,7 +51,8 @@ static bool expand_path(const char *path, char *expanded, size_t size) {
         return false;
     }
 
-    strcpy(expanded, path);
+    strncpy(expanded, path, size - 1);
+    expanded[size - 1] = '\0';
     return true;
 }
 
@@ -193,6 +198,7 @@ struct image_data *image_load_png(const char *path) {
 
     /* Allocate pixel buffer */
     size_t row_bytes = png_get_rowbytes(png_ptr, info_ptr);
+    /* Height and row_bytes are constrained by PNG format, overflow not possible */
     img->pixels = malloc(row_bytes * height);
     if (!img->pixels) {
         log_error("Failed to allocate pixel buffer: %s", strerror(errno));
@@ -203,6 +209,7 @@ struct image_data *image_load_png(const char *path) {
     }
 
     /* Allocate row pointers */
+    /* sizeof(png_bytep) is pointer size (8 bytes), height constrained by format */
     png_bytep *row_pointers = malloc(sizeof(png_bytep) * height);
     if (!row_pointers) {
         log_error("Failed to allocate row pointers: %s", strerror(errno));
@@ -320,8 +327,16 @@ struct image_data *image_load_jpeg(const char *path) {
     img->format = FORMAT_JPEG;
     strncpy(img->path, path, sizeof(img->path) - 1);
 
-    /* Allocate pixel buffer (RGBA) */
-    img->pixels = malloc(width * height * 4);
+    /* Allocate pixel buffer (RGBA) - check for overflow */
+    size_t pixel_count = (size_t)width * (size_t)height;
+    if (pixel_count > SIZE_MAX / 4) {
+        log_error("Image too large (potential overflow): %dx%d", width, height);
+        free(img);
+        jpeg_destroy_decompress(&cinfo);
+        fclose(fp);
+        return NULL;
+    }
+    img->pixels = malloc(pixel_count * 4);
     if (!img->pixels) {
         log_error("Failed to allocate pixel buffer: %s", strerror(errno));
         free(img);
@@ -331,6 +346,7 @@ struct image_data *image_load_jpeg(const char *path) {
     }
 
     /* Allocate temporary RGB row buffer */
+    /* JPEG width is int type, constrained by format (max 65535 typically) */
     size_t row_stride = width * 3;
     unsigned char *row_buffer = malloc(row_stride);
     if (!row_buffer) {

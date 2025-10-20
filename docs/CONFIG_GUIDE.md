@@ -117,7 +117,7 @@ output {
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `mode` | string | `fill` | Display mode (see below) |
-| `duration` | integer | `0` | Seconds between wallpaper changes (0 = no cycling) |
+| `duration` | integer | `0` | Seconds between wallpaper changes (0 no cycling) |
 | `transition` | string | `none` | Transition effect when changing wallpapers |
 | `transition_duration` | integer | `300` | Transition duration in milliseconds |
 | `cycle` | array | none | List of wallpapers to cycle through |
@@ -538,7 +538,7 @@ staticwall -c ~/.config/staticwall/home.vibe
 ### Example 6: Minimal Resource Usage
 
 ```vibe
-# No cycling, no transitions = minimal CPU usage
+# No cycling, no transitions minimal CPU usage
 default {
   path ~/Pictures/wallpaper.png
   mode fill
@@ -648,8 +648,8 @@ output {
 ❌ **Wrong:**
 ```vibe
 default {
-  path = ~/Pictures/wallpaper.png  # No = sign needed
-  mode = "fill"                     # No quotes needed
+  path ~/Pictures/wallpaper.png  # No sign needed
+  mode fill                     # No quotes needed
 }
 ```
 

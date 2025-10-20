@@ -150,8 +150,7 @@ bool expand_path(const char *path, char *expanded, size_t size) {
             return false;
         }
 
-        strcpy(expanded, home);
-        strcat(expanded, path + 1);
+        snprintf(expanded, size, "%s%s", home, path + 1);
         return true;
     }
 
@@ -161,7 +160,8 @@ bool expand_path(const char *path, char *expanded, size_t size) {
         return false;
     }
 
-    strcpy(expanded, path);
+    strncpy(expanded, path, size - 1);
+    expanded[size - 1] = '\0';
     return true;
 }
 

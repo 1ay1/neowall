@@ -480,9 +480,21 @@ static VibeValue* parse_value_from_token(Token* token) {
 
         case TOKEN_NUMBER: {
             if (strchr(token->value, '.')) {
-                return vibe_value_new_float(atof(token->value));
+                char *endptr;
+                double val = strtod(token->value, &endptr);
+                if (endptr == token->value) {
+                    /* Conversion failed */
+                    return NULL;
+                }
+                return vibe_value_new_float(val);
             } else {
-                return vibe_value_new_integer(atoll(token->value));
+                char *endptr;
+                long long val = strtoll(token->value, &endptr, 10);
+                if (endptr == token->value) {
+                    /* Conversion failed */
+                    return NULL;
+                }
+                return vibe_value_new_integer(val);
             }
         }
 
@@ -787,7 +799,8 @@ VibeValue* vibe_get(VibeValue* root, const char* path) {
 
     VibeValue* current = root;
     char* path_copy = strdup(path);
-    char* token = strtok(path_copy, ".");
+    char* saveptr;
+    char* token = strtok_r(path_copy, ".", &saveptr);
 
     while (token && current) {
         if (current->type == VIBE_TYPE_OBJECT) {
@@ -796,7 +809,7 @@ VibeValue* vibe_get(VibeValue* root, const char* path) {
             free(path_copy);
             return NULL;
         }
-        token = strtok(NULL, ".");
+        token = strtok_r(NULL, ".", &saveptr);
     }
 
     free(path_copy);

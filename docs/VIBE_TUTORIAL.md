@@ -199,12 +199,12 @@ section3 {
 
 ```toml
 [default]
-path = "~/Pictures/wallpaper.png"
-mode = "fill"
+path "~/Pictures/wallpaper.png"
+mode fill
 
 [output.eDP-1]
-path = "~/Pictures/laptop.jpg"
-mode = "fill"
+path "~/Pictures/laptop.jpg"
+mode fill
 ```
 
 ### VIBE
@@ -265,7 +265,7 @@ value with-dashes-and_underscores
 
 ❌ **Wrong:**
 ```vibe
-key = value  # No equals sign needed
+key value  # No equals sign needed
 key: value   # No colon needed
 key "value"  # No quotes needed
 ```
