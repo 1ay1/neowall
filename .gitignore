@@ -5,9 +5,9 @@ build/
 *.so
 *.dylib
 
-# Generated protocol files
-protocols/*.c
-protocols/*.h
+# Generated protocol files are now committed for portability
+# protocols/*.c
+# protocols/*.h
 
 # Binary
 staticwall
