@@ -1,6 +1,6 @@
 /*
  * VIBE Parser Implementation
- * 
+ *
  * This file does all the heavy lifting - tokenizing, parsing, building the value tree.
  * The approach is pretty straightforward: read characters, turn them into tokens,
  * then build a tree structure from those tokens.
@@ -92,7 +92,7 @@ static VibeValue* parse_value_from_token(Token* token);
 VibeParser* vibe_parser_new(void) {
     VibeParser* parser = calloc(1, sizeof(VibeParser));
     if (!parser) return NULL;
-    
+
     parser->line = 1;
     parser->column = 1;
     return parser;
@@ -100,11 +100,11 @@ VibeParser* vibe_parser_new(void) {
 
 void vibe_parser_free(VibeParser* parser) {
     if (!parser) return;
-    
+
     if (parser->error.message) {
         free(parser->error.message);
     }
-    
+
     free(parser);
 }
 
@@ -112,13 +112,13 @@ void vibe_parser_free(VibeParser* parser) {
 
 static void set_error(VibeParser* parser, const char* fmt, ...) {
     if (parser->error.has_error) return; /* Keep first error */
-    
+
     char buffer[1024];
     va_list args;
     va_start(args, fmt);
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
-    
+
     parser->error.has_error = true;
     parser->error.message = strdup(buffer);
     parser->error.line = parser->line;
@@ -160,19 +160,19 @@ static bool is_unquoted_string_char(char c) {
 
 static bool is_valid_number(const char* str) {
     if (!str || *str == '\0') return false;
-    
+
     const char* p = str;
-    
+
     /* Skip optional negative sign */
     if (*p == '-') p++;
-    
+
     /* Must have at least one digit */
     if (!isdigit(*p)) return false;
-    
+
     /* Count digits and dots */
     bool has_dot = false;
     bool has_digit_after_dot = false;
-    
+
     while (*p) {
         if (isdigit(*p)) {
             if (has_dot) has_digit_after_dot = true;
@@ -185,10 +185,10 @@ static bool is_valid_number(const char* str) {
             return false;  /* Non-numeric character */
         }
     }
-    
+
     /* If there's a dot, there must be digits after it */
     if (has_dot && !has_digit_after_dot) return false;
-    
+
     return true;
 }
 
@@ -198,7 +198,7 @@ static char* strdup_range(const char* start, const char* end) {
     size_t len = end - start;
     char* result = malloc(len + 1);
     if (!result) return NULL;
-    
+
     memcpy(result, start, len);
     result[len] = '\0';
     return result;
@@ -233,13 +233,13 @@ static void skip_comment(VibeParser* parser) {
 static char* parse_quoted_string(VibeParser* parser) {
     parser->pos++; /* Skip opening quote */
     parser->column++;
-    
+
     char buffer[4096];
     size_t buf_pos = 0;
-    
+
     while (parser->pos < parser->length) {
         char c = parser->input[parser->pos];
-        
+
         if (c == '"') {
             parser->pos++;
             parser->column++;
@@ -249,7 +249,7 @@ static char* parse_quoted_string(VibeParser* parser) {
             parser->pos++;
             parser->column++;
             char next = parser->input[parser->pos];
-            
+
             switch (next) {
                 case '"': buffer[buf_pos++] = '"'; break;
                 case '\\': buffer[buf_pos++] = '\\'; break;
@@ -270,33 +270,33 @@ static char* parse_quoted_string(VibeParser* parser) {
             parser->pos++;
             parser->column++;
         }
-        
+
         if (buf_pos >= sizeof(buffer) - 1) {
             set_error(parser, "String too long");
             return NULL;
         }
     }
-    
+
     set_error(parser, "Unterminated string");
     return NULL;
 }
 
 static Token next_token(VibeParser* parser) {
     Token token = {0};
-    
+
     skip_whitespace(parser);
     skip_comment(parser);
     skip_whitespace(parser);
-    
+
     if (parser->pos >= parser->length) {
         token.type = TOKEN_EOF;
         return token;
     }
-    
+
     char c = parser->input[parser->pos];
     token.line = parser->line;
     token.column = parser->column;
-    
+
     /* Newline */
     if (c == '\n') {
         token.type = TOKEN_NEWLINE;
@@ -305,7 +305,7 @@ static Token next_token(VibeParser* parser) {
         parser->column = 1;
         return token;
     }
-    
+
     /* Braces and brackets */
     if (c == '{') {
         token.type = TOKEN_LEFT_BRACE;
@@ -331,7 +331,7 @@ static Token next_token(VibeParser* parser) {
         parser->column++;
         return token;
     }
-    
+
     /* Quoted string */
     if (c == '"') {
         token.type = TOKEN_STRING;
@@ -341,18 +341,18 @@ static Token next_token(VibeParser* parser) {
         }
         return token;
     }
-    
+
     /* Identifier or unquoted string/number/boolean */
     if (is_identifier_start(c) || isdigit(c) || c == '-' || c == '/' || c == '.' || c == '~') {
         const char* start = parser->input + parser->pos;
-        
+
         /* Handle negative numbers */
         if (c == '-' && parser->pos + 1 < parser->length && isdigit(parser->input[parser->pos + 1])) {
             parser->pos++;
             parser->column++;
             c = parser->input[parser->pos];
         }
-        
+
         /* Collect all valid unquoted string characters */
         while (parser->pos < parser->length) {
             c = parser->input[parser->pos];
@@ -363,10 +363,10 @@ static Token next_token(VibeParser* parser) {
                 break;
             }
         }
-        
+
         const char* end = parser->input + parser->pos;
         token.value = strdup_range(start, end);
-        
+
         /* Determine token type based on content */
         if (strcmp(token.value, "true") == 0 || strcmp(token.value, "false") == 0) {
             token.type = TOKEN_BOOLEAN;
@@ -385,10 +385,10 @@ static Token next_token(VibeParser* parser) {
         } else {
             token.type = TOKEN_STRING;
         }
-        
+
         return token;
     }
-    
+
     set_error(parser, "Unexpected character '%c'", c);
     token.type = TOKEN_ERROR;
     return token;
@@ -406,7 +406,7 @@ static void token_free(Token* token) {
 VibeValue* vibe_value_new_integer(int64_t value) {
     VibeValue* v = calloc(1, sizeof(VibeValue));
     if (!v) return NULL;
-    
+
     v->type = VIBE_TYPE_INTEGER;
     v->as_integer = value;
     return v;
@@ -415,7 +415,7 @@ VibeValue* vibe_value_new_integer(int64_t value) {
 VibeValue* vibe_value_new_float(double value) {
     VibeValue* v = calloc(1, sizeof(VibeValue));
     if (!v) return NULL;
-    
+
     v->type = VIBE_TYPE_FLOAT;
     v->as_float = value;
     return v;
@@ -424,7 +424,7 @@ VibeValue* vibe_value_new_float(double value) {
 VibeValue* vibe_value_new_boolean(bool value) {
     VibeValue* v = calloc(1, sizeof(VibeValue));
     if (!v) return NULL;
-    
+
     v->type = VIBE_TYPE_BOOLEAN;
     v->as_boolean = value;
     return v;
@@ -433,7 +433,7 @@ VibeValue* vibe_value_new_boolean(bool value) {
 VibeValue* vibe_value_new_string(const char* value) {
     VibeValue* v = calloc(1, sizeof(VibeValue));
     if (!v) return NULL;
-    
+
     v->type = VIBE_TYPE_STRING;
     v->as_string = strdup(value);
     return v;
@@ -442,14 +442,14 @@ VibeValue* vibe_value_new_string(const char* value) {
 VibeValue* vibe_value_new_array(void) {
     VibeValue* v = calloc(1, sizeof(VibeValue));
     if (!v) return NULL;
-    
+
     v->type = VIBE_TYPE_ARRAY;
     v->as_array = calloc(1, sizeof(VibeArray));
     if (!v->as_array) {
         free(v);
         return NULL;
     }
-    
+
     v->as_array->capacity = INITIAL_CAPACITY;
     v->as_array->values = calloc(INITIAL_CAPACITY, sizeof(VibeValue*));
     return v;
@@ -458,14 +458,14 @@ VibeValue* vibe_value_new_array(void) {
 VibeValue* vibe_value_new_object(void) {
     VibeValue* v = calloc(1, sizeof(VibeValue));
     if (!v) return NULL;
-    
+
     v->type = VIBE_TYPE_OBJECT;
     v->as_object = calloc(1, sizeof(VibeObject));
     if (!v->as_object) {
         free(v);
         return NULL;
     }
-    
+
     v->as_object->capacity = INITIAL_CAPACITY;
     v->as_object->entries = calloc(INITIAL_CAPACITY, sizeof(VibeObjectEntry));
     return v;
@@ -473,11 +473,11 @@ VibeValue* vibe_value_new_object(void) {
 
 static VibeValue* parse_value_from_token(Token* token) {
     if (!token) return NULL;
-    
+
     switch (token->type) {
         case TOKEN_BOOLEAN:
             return vibe_value_new_boolean(strcmp(token->value, "true") == 0);
-        
+
         case TOKEN_NUMBER: {
             if (strchr(token->value, '.')) {
                 return vibe_value_new_float(atof(token->value));
@@ -485,11 +485,11 @@ static VibeValue* parse_value_from_token(Token* token) {
                 return vibe_value_new_integer(atoll(token->value));
             }
         }
-        
+
         case TOKEN_STRING:
         case TOKEN_IDENTIFIER:
             return vibe_value_new_string(token->value);
-        
+
         default:
             return NULL;
     }
@@ -499,7 +499,7 @@ static VibeValue* parse_value_from_token(Token* token) {
 
 void vibe_object_set(VibeObject* obj, const char* key, VibeValue* value) {
     if (!obj || !key || !value) return;
-    
+
     /* Check if key exists */
     for (size_t i = 0; i < obj->count; i++) {
         if (strcmp(obj->entries[i].key, key) == 0) {
@@ -509,17 +509,17 @@ void vibe_object_set(VibeObject* obj, const char* key, VibeValue* value) {
             return;
         }
     }
-    
+
     /* Add new entry */
     if (obj->count >= obj->capacity) {
         size_t new_capacity = obj->capacity * 2;
         VibeObjectEntry* new_entries = realloc(obj->entries, new_capacity * sizeof(VibeObjectEntry));
         if (!new_entries) return;
-        
+
         obj->entries = new_entries;
         obj->capacity = new_capacity;
     }
-    
+
     obj->entries[obj->count].key = strdup(key);
     obj->entries[obj->count].value = value;
     obj->count++;
@@ -527,13 +527,13 @@ void vibe_object_set(VibeObject* obj, const char* key, VibeValue* value) {
 
 VibeValue* vibe_object_get(VibeObject* obj, const char* key) {
     if (!obj || !key) return NULL;
-    
+
     for (size_t i = 0; i < obj->count; i++) {
         if (strcmp(obj->entries[i].key, key) == 0) {
             return obj->entries[i].value;
         }
     }
-    
+
     return NULL;
 }
 
@@ -541,16 +541,16 @@ VibeValue* vibe_object_get(VibeObject* obj, const char* key) {
 
 void vibe_array_push(VibeArray* arr, VibeValue* value) {
     if (!arr || !value) return;
-    
+
     if (arr->count >= arr->capacity) {
         size_t new_capacity = arr->capacity * 2;
         VibeValue** new_values = realloc(arr->values, new_capacity * sizeof(VibeValue*));
         if (!new_values) return;
-        
+
         arr->values = new_values;
         arr->capacity = new_capacity;
     }
-    
+
     arr->values[arr->count++] = value;
 }
 
@@ -563,12 +563,12 @@ VibeValue* vibe_array_get(VibeArray* arr, size_t index) {
 
 void vibe_value_free(VibeValue* value) {
     if (!value) return;
-    
+
     switch (value->type) {
         case VIBE_TYPE_STRING:
             free(value->as_string);
             break;
-        
+
         case VIBE_TYPE_ARRAY:
             if (value->as_array) {
                 for (size_t i = 0; i < value->as_array->count; i++) {
@@ -578,7 +578,7 @@ void vibe_value_free(VibeValue* value) {
                 free(value->as_array);
             }
             break;
-        
+
         case VIBE_TYPE_OBJECT:
             if (value->as_object) {
                 for (size_t i = 0; i < value->as_object->count; i++) {
@@ -589,11 +589,11 @@ void vibe_value_free(VibeValue* value) {
                 free(value->as_object);
             }
             break;
-        
+
         default:
             break;
     }
-    
+
     free(value);
 }
 
@@ -601,60 +601,60 @@ void vibe_value_free(VibeValue* value) {
 
 VibeValue* vibe_parse_string(VibeParser* parser, const char* input) {
     if (!parser || !input) return NULL;
-    
+
     parser->input = input;
     parser->length = strlen(input);
     parser->pos = 0;
     parser->line = 1;
     parser->column = 1;
     parser->error.has_error = false;
-    
+
     VibeValue* root = vibe_value_new_object();
     if (!root) return NULL;
-    
+
     ParseStack stack = {0};
     stack.frames[0].state = STATE_ROOT;
     stack.frames[0].container = root;
     stack.depth = 0;
-    
+
     Token token;
     char* current_key = NULL;
-    
+
     while (true) {
         token = next_token(parser);
-        
+
         if (token.type == TOKEN_ERROR || parser->error.has_error) {
             token_free(&token);
             vibe_value_free(root);
             free(current_key);
             return NULL;
         }
-        
+
         if (token.type == TOKEN_EOF) {
             token_free(&token);
             break;
         }
-        
+
         if (token.type == TOKEN_NEWLINE) {
             token_free(&token);
             continue;
         }
-        
+
         StateFrame* frame = &stack.frames[stack.depth];
-        
+
         if (frame->state == STATE_ROOT || frame->state == STATE_OBJECT) {
             if (token.type == TOKEN_IDENTIFIER) {
                 current_key = strdup(token.value);
                 token_free(&token);
-                
+
                 /* Peek next token */
                 Token next = next_token(parser);
-                
+
                 if (next.type == TOKEN_LEFT_BRACE) {
                     /* Object */
                     VibeValue* obj = vibe_value_new_object();
                     vibe_object_set(frame->container->as_object, current_key, obj);
-                    
+
                     stack.depth++;
                     if (stack.depth >= MAX_NESTING_DEPTH) {
                         set_error(parser, "Maximum nesting depth exceeded");
@@ -663,7 +663,7 @@ VibeValue* vibe_parse_string(VibeParser* parser, const char* input) {
                         vibe_value_free(root);
                         return NULL;
                     }
-                    
+
                     stack.frames[stack.depth].state = STATE_OBJECT;
                     stack.frames[stack.depth].container = obj;
                     token_free(&next);
@@ -673,7 +673,7 @@ VibeValue* vibe_parse_string(VibeParser* parser, const char* input) {
                     /* Array */
                     VibeValue* arr = vibe_value_new_array();
                     vibe_object_set(frame->container->as_object, current_key, arr);
-                    
+
                     stack.depth++;
                     if (stack.depth >= MAX_NESTING_DEPTH) {
                         set_error(parser, "Maximum nesting depth exceeded");
@@ -682,7 +682,7 @@ VibeValue* vibe_parse_string(VibeParser* parser, const char* input) {
                         vibe_value_free(root);
                         return NULL;
                     }
-                    
+
                     stack.frames[stack.depth].state = STATE_ARRAY;
                     stack.frames[stack.depth].container = arr;
                     token_free(&next);
@@ -716,7 +716,7 @@ VibeValue* vibe_parse_string(VibeParser* parser, const char* input) {
                 /* Object within array */
                 VibeValue* obj = vibe_value_new_object();
                 vibe_array_push(frame->container->as_array, obj);
-                
+
                 if (stack.depth < MAX_NESTING_DEPTH - 1) {
                     stack.depth++;
                     stack.frames[stack.depth].state = STATE_OBJECT;
@@ -745,38 +745,38 @@ VibeValue* vibe_parse_string(VibeParser* parser, const char* input) {
             token_free(&token);
         }
     }
-    
+
     free(current_key);
     return root;
 }
 
 VibeValue* vibe_parse_file(VibeParser* parser, const char* filename) {
     if (!parser || !filename) return NULL;
-    
+
     FILE* file = fopen(filename, "rb");
     if (!file) {
         set_error(parser, "Cannot open file '%s'", filename);
         return NULL;
     }
-    
+
     fseek(file, 0, SEEK_END);
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
-    
+
     char* buffer = malloc(size + 1);
     if (!buffer) {
         fclose(file);
         set_error(parser, "Memory allocation failed");
         return NULL;
     }
-    
+
     fread(buffer, 1, size, file);
     buffer[size] = '\0';
     fclose(file);
-    
+
     VibeValue* result = vibe_parse_string(parser, buffer);
     free(buffer);
-    
+
     return result;
 }
 
@@ -784,11 +784,11 @@ VibeValue* vibe_parse_file(VibeParser* parser, const char* filename) {
 
 VibeValue* vibe_get(VibeValue* root, const char* path) {
     if (!root || !path) return NULL;
-    
+
     VibeValue* current = root;
     char* path_copy = strdup(path);
     char* token = strtok(path_copy, ".");
-    
+
     while (token && current) {
         if (current->type == VIBE_TYPE_OBJECT) {
             current = vibe_object_get(current->as_object, token);
@@ -798,7 +798,7 @@ VibeValue* vibe_get(VibeValue* root, const char* path) {
         }
         token = strtok(NULL, ".");
     }
-    
+
     free(path_copy);
     return current;
 }
@@ -843,26 +843,26 @@ VibeObject* vibe_get_object(VibeValue* value, const char* path) {
 
 void vibe_value_print(VibeValue* value, int indent) {
     if (!value) return;
-    
+
     const char* indent_str = "  ";
-    
+
     switch (value->type) {
         case VIBE_TYPE_INTEGER:
             printf("%lld", (long long)value->as_integer);
             break;
-        
+
         case VIBE_TYPE_FLOAT:
             printf("%g", value->as_float);
             break;
-        
+
         case VIBE_TYPE_BOOLEAN:
             printf("%s", value->as_boolean ? "true" : "false");
             break;
-        
+
         case VIBE_TYPE_STRING:
             printf("\"%s\"", value->as_string);
             break;
-        
+
         case VIBE_TYPE_ARRAY:
             printf("[\n");
             for (size_t i = 0; i < value->as_array->count; i++) {
@@ -873,7 +873,7 @@ void vibe_value_print(VibeValue* value, int indent) {
             for (int j = 0; j < indent; j++) printf("%s", indent_str);
             printf("]");
             break;
-        
+
         case VIBE_TYPE_OBJECT:
             printf("{\n");
             for (size_t i = 0; i < value->as_object->count; i++) {
@@ -885,7 +885,7 @@ void vibe_value_print(VibeValue* value, int indent) {
             for (int j = 0; j < indent; j++) printf("%s", indent_str);
             printf("}");
             break;
-        
+
         default:
             printf("null");
             break;

@@ -1,7 +1,7 @@
 /*
  * Staticwall - A reliable Wayland wallpaper daemon
  * Copyright (C) 2024
- * 
+ *
  * OpenGL ES 2.0 rendering implementation
  */
 
@@ -69,10 +69,10 @@ static GLuint compile_shader(GLenum type, const char *source) {
         log_error("Failed to create %s shader", type_str);
         return 0;
     }
-    
+
     glShaderSource(shader, 1, &source, NULL);
     glCompileShader(shader);
-    
+
     /* Check compilation status */
     GLint compiled;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
@@ -92,9 +92,9 @@ static GLuint compile_shader(GLenum type, const char *source) {
         glDeleteShader(shader);
         return 0;
     }
-    
+
     log_debug("%s shader compiled successfully", type_str);
-    
+
     return shader;
 }
 
@@ -104,19 +104,19 @@ bool shader_create_program(GLuint *program) {
         log_error("Invalid program pointer");
         return false;
     }
-    
+
     /* Compile shaders */
     GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, vertex_shader_source);
     if (vertex_shader == 0) {
         return false;
     }
-    
+
     GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, fragment_shader_source);
     if (fragment_shader == 0) {
         glDeleteShader(vertex_shader);
         return false;
     }
-    
+
     /* Create program */
     GLuint prog = glCreateProgram();
     if (prog == 0) {
@@ -125,14 +125,14 @@ bool shader_create_program(GLuint *program) {
         glDeleteShader(fragment_shader);
         return false;
     }
-    
+
     /* Attach shaders */
     glAttachShader(prog, vertex_shader);
     glAttachShader(prog, fragment_shader);
-    
+
     /* Link program */
     glLinkProgram(prog);
-    
+
     /* Check link status */
     GLint linked;
     glGetProgramiv(prog, GL_LINK_STATUS, &linked);
@@ -152,11 +152,11 @@ bool shader_create_program(GLuint *program) {
         glDeleteShader(fragment_shader);
         return false;
     }
-    
+
     /* Shaders can be deleted now */
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
-    
+
     *program = prog;
     return true;
 }
@@ -173,30 +173,30 @@ bool render_init_output(struct output_state *output) {
         log_error("Invalid output for render_init_output");
         return false;
     }
-    
+
     /* Context should already be current when this is called from egl.c */
-    
+
     /* Create shader program */
     if (!shader_create_program(&output->program)) {
         log_error("Failed to create shader program for output %s", output->model);
         return false;
     }
-    
+
     /* Create VBO */
     glGenBuffers(1, &output->vbo);
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), quad_vertices, GL_STATIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
-    
+
     /* Check for errors */
     GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
         log_error("OpenGL error during render init: 0x%x", error);
         return false;
     }
-    
+
     log_debug("Rendering initialized for output %s", output->model);
-    
+
     return true;
 }
 
@@ -204,26 +204,26 @@ void render_cleanup_output(struct output_state *output) {
     if (!output) {
         return;
     }
-    
+
     log_debug("Cleaning up rendering for output %s", output->model);
-    
+
     /* Delete textures */
     if (output->texture != 0) {
         glDeleteTextures(1, &output->texture);
         output->texture = 0;
     }
-    
+
     if (output->next_texture != 0) {
         glDeleteTextures(1, &output->next_texture);
         output->next_texture = 0;
     }
-    
+
     /* Delete VBO */
     if (output->vbo != 0) {
         glDeleteBuffers(1, &output->vbo);
         output->vbo = 0;
     }
-    
+
     /* Delete program */
     if (output->program != 0) {
         shader_destroy_program(output->program);
@@ -237,24 +237,24 @@ GLuint render_create_texture(struct image_data *img) {
         log_error("Invalid image data for texture creation");
         return 0;
     }
-    
+
     GLuint texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
-    
+
     /* Set texture parameters */
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    
+
     /* Upload texture data */
     GLenum format = (img->channels == 4) ? GL_RGBA : GL_RGB;
-    glTexImage2D(GL_TEXTURE_2D, 0, format, img->width, img->height, 
+    glTexImage2D(GL_TEXTURE_2D, 0, format, img->width, img->height,
                  0, format, GL_UNSIGNED_BYTE, img->pixels);
-    
+
     glBindTexture(GL_TEXTURE_2D, 0);
-    
+
     /* Check for errors */
     GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
@@ -262,10 +262,10 @@ GLuint render_create_texture(struct image_data *img) {
         glDeleteTextures(1, &texture);
         return 0;
     }
-    
-    log_debug("Created texture %u (%ux%u, %d channels)", 
+
+    log_debug("Created texture %u (%ux%u, %d channels)",
               texture, img->width, img->height, img->channels);
-    
+
     return texture;
 }
 
@@ -283,85 +283,85 @@ bool render_frame(struct output_state *output) {
         log_error("Invalid output for render_frame");
         return false;
     }
-    
+
     if (!output->current_image || output->texture == 0) {
         /* No wallpaper loaded yet */
         return true;
     }
-    
+
     /* Set viewport */
     glViewport(0, 0, output->width, output->height);
-    
+
     /* Clear screen */
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    
+
     /* Use shader program */
     glUseProgram(output->program);
-    
+
     /* Get attribute locations */
     GLint pos_attrib = glGetAttribLocation(output->program, "position");
     GLint tex_attrib = glGetAttribLocation(output->program, "texcoord");
-    
+
     /* Bind VBO */
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-    
+
     /* Set up vertex attributes */
-    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 
+    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
                          4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(pos_attrib);
-    
-    glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE, 
+
+    glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
                          4 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(tex_attrib);
-    
+
     /* Bind texture */
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, output->texture);
-    
+
     /* Set texture unit uniform */
     GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
     glUniform1i(tex_uniform, 0);
-    
+
     /* Set alpha uniform (for transitions) */
     GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
     if (alpha_uniform >= 0) {
         glUniform1f(alpha_uniform, 1.0f);
     }
-    
+
     /* Handle tile mode texture wrapping */
     if (output->config.mode == MODE_TILE) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     }
-    
+
     /* Enable blending for transparency */
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    
+
     /* Draw quad */
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    
+
     /* Disable blending */
     glDisable(GL_BLEND);
-    
+
     /* Clean up */
     glDisableVertexAttribArray(pos_attrib);
     glDisableVertexAttribArray(tex_attrib);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
-    
+
     /* Check for errors */
     GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
         log_error("OpenGL error during rendering: 0x%x", error);
         return false;
     }
-    
+
     output->needs_redraw = false;
     output->frames_rendered++;
-    
+
     return true;
 }
 
@@ -371,10 +371,10 @@ bool render_frame_transition(struct output_state *output, float progress) {
     if (!output || !output->current_image || !output->next_image) {
         return render_frame(output);
     }
-    
+
     /* Similar to render_frame but uses transition shader */
     /* For simplicity, we'll just use alpha blending for now */
-    
+
     /* TODO: Implement proper transition shader */
     return render_frame(output);
 }

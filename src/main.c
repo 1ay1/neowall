@@ -1,7 +1,7 @@
 /*
  * Staticwall - A reliable Wayland wallpaper daemon
  * Copyright (C) 2024
- * 
+ *
  * Main entry point
  */
 
@@ -94,56 +94,56 @@ static void setup_signal_handlers(void) {
     sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-    
+
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGHUP, &sa, NULL);
-    
+
     /* Ignore SIGPIPE */
     signal(SIGPIPE, SIG_IGN);
 }
 
 static bool daemonize(void) {
     pid_t pid = fork();
-    
+
     if (pid < 0) {
         log_error("Failed to fork: %s", strerror(errno));
         return false;
     }
-    
+
     if (pid > 0) {
         /* Parent process exits */
         exit(EXIT_SUCCESS);
     }
-    
+
     /* Child process continues */
     if (setsid() < 0) {
         log_error("Failed to create new session: %s", strerror(errno));
         return false;
     }
-    
+
     /* Fork again to prevent acquiring a controlling terminal */
     pid = fork();
     if (pid < 0) {
         log_error("Failed to fork second time: %s", strerror(errno));
         return false;
     }
-    
+
     if (pid > 0) {
         exit(EXIT_SUCCESS);
     }
-    
+
     /* Change working directory to root */
     if (chdir("/") < 0) {
         log_error("Failed to change directory: %s", strerror(errno));
         return false;
     }
-    
+
     /* Close standard file descriptors */
     close(STDIN_FILENO);
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
-    
+
     /* Redirect to /dev/null */
     int fd = open("/dev/null", O_RDWR);
     if (fd >= 0) {
@@ -154,14 +154,14 @@ static bool daemonize(void) {
             close(fd);
         }
     }
-    
+
     return true;
 }
 
 static bool create_config_directory(void) {
     const char *config_home = getenv("XDG_CONFIG_HOME");
     char config_dir[MAX_PATH_LENGTH];
-    
+
     if (config_home) {
         snprintf(config_dir, sizeof(config_dir), "%s/staticwall", config_home);
     } else {
@@ -172,17 +172,17 @@ static bool create_config_directory(void) {
         }
         snprintf(config_dir, sizeof(config_dir), "%s/.config/staticwall", home);
     }
-    
+
     struct stat st;
     if (stat(config_dir, &st) == -1) {
         if (mkdir(config_dir, 0755) == -1) {
-            log_error("Failed to create config directory %s: %s", 
+            log_error("Failed to create config directory %s: %s",
                      config_dir, strerror(errno));
             return false;
         }
         log_info("Created config directory: %s", config_dir);
     }
-    
+
     return true;
 }
 
@@ -192,7 +192,7 @@ int main(int argc, char *argv[]) {
     bool daemon_mode = false;
     bool watch_config = false;
     int opt;
-    
+
     static struct option long_options[] = {
         {"config",     required_argument, 0, 'c'},
         {"daemon",     no_argument,       0, 'd'},
@@ -203,7 +203,7 @@ int main(int argc, char *argv[]) {
         {"version",    no_argument,       0, 'V'},
         {0, 0, 0, 0}
     };
-    
+
     /* Parse command line arguments */
     while ((opt = getopt_long(argc, argv, "c:dfwvhV", long_options, NULL)) != -1) {
         switch (opt) {
@@ -233,16 +233,16 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
         }
     }
-    
+
     /* Set up logging */
     log_info("Staticwall v%s starting...", STATICWALL_VERSION);
-    
+
     /* Ensure config directory exists */
     if (!create_config_directory()) {
         log_error("Failed to create configuration directory");
         return EXIT_FAILURE;
     }
-    
+
     /* Determine config file path */
     if (config_path[0] == '\0') {
         const char *default_path = config_get_default_path();
@@ -253,7 +253,7 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
     }
-    
+
     /* Check if config file exists */
     struct stat st;
     if (stat(config_path, &st) == -1) {
@@ -261,9 +261,9 @@ int main(int argc, char *argv[]) {
         log_info("Please create a configuration file. See --help for examples.");
         return EXIT_FAILURE;
     }
-    
+
     log_info("Using configuration file: %s", config_path);
-    
+
     /* Daemonize if requested */
     if (daemon_mode) {
         log_info("Running as daemon...");
@@ -271,31 +271,31 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
     }
-    
+
     /* Set up signal handlers */
     setup_signal_handlers();
     global_state = &state;
-    
+
     /* Initialize state */
     state.running = true;
     state.watch_config = watch_config;
     strncpy(state.config_path, config_path, sizeof(state.config_path) - 1);
     state.config_path[sizeof(state.config_path) - 1] = '\0';
     pthread_mutex_init(&state.state_mutex, NULL);
-    
+
     /* Initialize Wayland connection first */
     if (!wayland_init(&state)) {
         log_error("Failed to initialize Wayland");
         return EXIT_FAILURE;
     }
-    
+
     /* Initialize EGL/OpenGL */
     if (!egl_init(&state)) {
         log_error("Failed to initialize EGL");
         wayland_cleanup(&state);
         return EXIT_FAILURE;
     }
-    
+
     /* Load configuration and apply to outputs */
     if (!config_load(&state, config_path)) {
         log_error("Failed to load configuration");
@@ -303,31 +303,31 @@ int main(int argc, char *argv[]) {
         wayland_cleanup(&state);
         return EXIT_FAILURE;
     }
-    
+
     log_info("Initialization complete, entering main loop...");
-    
+
     /* Start config watcher thread if requested */
     if (watch_config) {
         log_info("Starting configuration file watcher...");
         pthread_create(&state.watch_thread, NULL, config_watch_thread, &state);
     }
-    
+
     /* Run main event loop */
     event_loop_run(&state);
-    
+
     /* Cleanup */
     log_info("Shutting down...");
-    
+
     if (watch_config) {
         pthread_cancel(state.watch_thread);
         pthread_join(state.watch_thread, NULL);
     }
-    
+
     egl_cleanup(&state);
     wayland_cleanup(&state);
     pthread_mutex_destroy(&state.state_mutex);
-    
+
     log_info("Staticwall terminated successfully");
-    
+
     return EXIT_SUCCESS;
 }

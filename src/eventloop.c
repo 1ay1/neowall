@@ -1,7 +1,7 @@
 /*
  * Staticwall - A reliable Wayland wallpaper daemon
  * Copyright (C) 2024
- * 
+ *
  * Main event loop and rendering dispatch
  */
 
@@ -25,10 +25,10 @@ static void render_outputs(struct staticwall_state *state) {
     if (!state) {
         return;
     }
-    
+
     struct output_state *output = state->outputs;
     uint64_t current_time = get_time_ms();
-    
+
     while (output) {
         /* Check if we should cycle wallpaper (before rendering) */
         if (output->config.cycle && output->config.duration > 0) {
@@ -36,7 +36,7 @@ static void render_outputs(struct staticwall_state *state) {
                 output_cycle_wallpaper(output);
             }
         }
-        
+
         /* Check if this output needs rendering */
         if (output->needs_redraw && output->egl_surface != EGL_NO_SURFACE) {
             /* Make EGL context current for this output */
@@ -47,24 +47,24 @@ static void render_outputs(struct staticwall_state *state) {
                 output = output->next;
                 continue;
             }
-            
+
             /* Handle transitions */
-            if (output->transition_start_time > 0 && 
+            if (output->transition_start_time > 0 &&
                 output->config.transition != TRANSITION_NONE) {
                 uint64_t elapsed = current_time - output->transition_start_time;
                 float progress = (float)elapsed / (float)output->config.transition_duration;
-                
+
                 if (progress >= 1.0f) {
                     /* Transition complete */
                     output->transition_progress = 1.0f;
                     output->transition_start_time = 0;
-                    
+
                     /* Clean up old texture */
                     if (output->next_texture) {
                         render_destroy_texture(output->next_texture);
                         output->next_texture = 0;
                     }
-                    
+
                     if (output->next_image) {
                         image_free(output->next_image);
                         output->next_image = NULL;
@@ -74,7 +74,7 @@ static void render_outputs(struct staticwall_state *state) {
                     output->transition_progress = ease_in_out_cubic(progress);
                 }
             }
-            
+
             /* Render frame */
             if (!render_frame(output)) {
                 log_error("Failed to render frame for output %s", output->model);
@@ -93,7 +93,7 @@ static void render_outputs(struct staticwall_state *state) {
                 }
             }
         }
-        
+
         output = output->next;
     }
 }
@@ -103,13 +103,13 @@ static bool handle_wayland_events(struct staticwall_state *state) {
     if (!state || !state->display) {
         return false;
     }
-    
+
     /* Dispatch pending events */
     if (wl_display_dispatch_pending(state->display) < 0) {
         log_error("Failed to dispatch pending Wayland events");
         return false;
     }
-    
+
     /* Flush outgoing requests */
     if (wl_display_flush(state->display) < 0) {
         if (errno != EAGAIN) {
@@ -117,7 +117,7 @@ static bool handle_wayland_events(struct staticwall_state *state) {
             return false;
         }
     }
-    
+
     return true;
 }
 
@@ -127,11 +127,11 @@ void event_loop_run(struct staticwall_state *state) {
         log_error("Invalid state for event loop");
         return;
     }
-    
+
     event_loop_state = state;
-    
+
     log_info("Starting event loop");
-    
+
     /* Log initial cycling configuration for debugging */
     struct output_state *output = state->outputs;
     while (output) {
@@ -143,34 +143,34 @@ void event_loop_run(struct staticwall_state *state) {
         }
         output = output->next;
     }
-    
+
     /* Get Wayland display file descriptor */
     int wl_fd = wl_display_get_fd(state->display);
     if (wl_fd < 0) {
         log_error("Failed to get Wayland display file descriptor");
         return;
     }
-    
+
     struct pollfd fds[1];
     fds[0].fd = wl_fd;
     fds[0].events = POLLIN;
-    
+
     /* Initial render for all outputs */
     output = state->outputs;
     while (output) {
         output->needs_redraw = true;
         output = output->next;
     }
-    
+
     uint64_t last_stats_time = get_time_ms();
     uint64_t frame_count = 0;
-    
+
     while (state->running) {
         /* Handle configuration reload if requested */
         if (state->reload_requested) {
             config_reload(state);
         }
-        
+
         /* Prepare for reading events */
         while (wl_display_prepare_read(state->display) != 0) {
             if (wl_display_dispatch_pending(state->display) < 0) {
@@ -179,12 +179,12 @@ void event_loop_run(struct staticwall_state *state) {
                 break;
             }
         }
-        
+
         if (!state->running) {
             wl_display_cancel_read(state->display);
             break;
         }
-        
+
         /* Flush before polling */
         if (wl_display_flush(state->display) < 0) {
             if (errno != EAGAIN) {
@@ -194,11 +194,11 @@ void event_loop_run(struct staticwall_state *state) {
                 break;
             }
         }
-        
+
         /* Poll for events with timeout */
         int timeout_ms = 16; /* ~60 FPS */
         int ret = poll(fds, 1, timeout_ms);
-        
+
         if (ret < 0) {
             if (errno == EINTR) {
                 wl_display_cancel_read(state->display);
@@ -209,7 +209,7 @@ void event_loop_run(struct staticwall_state *state) {
             state->running = false;
             break;
         }
-        
+
         if (ret == 0) {
             /* Timeout - no events */
             wl_display_cancel_read(state->display);
@@ -225,31 +225,31 @@ void event_loop_run(struct staticwall_state *state) {
                 wl_display_cancel_read(state->display);
             }
         }
-        
+
         /* Dispatch any events that were read */
         if (!handle_wayland_events(state)) {
             log_error("Failed to handle Wayland events");
             state->running = false;
             break;
         }
-        
+
         /* Render outputs that need updating */
         render_outputs(state);
         frame_count++;
-        
+
         /* Print statistics every 10 seconds */
         uint64_t current_time = get_time_ms();
         if (current_time - last_stats_time >= 10000) {
             double elapsed_sec = (current_time - last_stats_time) / 1000.0;
             double fps = frame_count / elapsed_sec;
-            
+
             log_debug("Stats: %.1f FPS, %lu frames rendered, %lu errors",
                      fps, state->frames_rendered, state->errors_count);
-            
+
             last_stats_time = current_time;
             frame_count = 0;
         }
-        
+
         /* Keep outputs with cycling enabled marked for redraw */
         output = state->outputs;
         while (output) {
@@ -259,7 +259,7 @@ void event_loop_run(struct staticwall_state *state) {
             output = output->next;
         }
     }
-    
+
     log_info("Event loop stopped");
 }
 
@@ -276,7 +276,7 @@ void event_loop_request_redraw(struct staticwall_state *state) {
     if (!state) {
         return;
     }
-    
+
     struct output_state *output = state->outputs;
     while (output) {
         output->needs_redraw = true;

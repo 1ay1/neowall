@@ -1,7 +1,7 @@
 /*
  * Staticwall - A reliable Wayland wallpaper daemon
  * Copyright (C) 2024
- * 
+ *
  * Utility functions
  */
 
@@ -49,20 +49,20 @@ static void get_timestamp(char *buf, size_t size) {
 }
 
 /* Generic logging function */
-static void log_message(const char *level, const char *color, 
+static void log_message(const char *level, const char *color,
                        const char *format, va_list args) {
     char timestamp[32];
     get_timestamp(timestamp, sizeof(timestamp));
-    
+
     /* Check if stdout is a TTY for color support */
     if (use_colors && isatty(STDOUT_FILENO)) {
-        fprintf(stderr, "%s[%s]%s %s%s%s: ", 
+        fprintf(stderr, "%s[%s]%s %s%s%s: ",
                 COLOR_GRAY, timestamp, COLOR_RESET,
                 color, level, COLOR_RESET);
     } else {
         fprintf(stderr, "[%s] %s: ", timestamp, level);
     }
-    
+
     vfprintf(stderr, format, args);
     fprintf(stderr, "\n");
     fflush(stderr);
@@ -81,7 +81,7 @@ void log_info(const char *format, ...) {
     if (log_level < LOG_LEVEL_INFO) {
         return;
     }
-    
+
     va_list args;
     va_start(args, format);
     log_message("INFO", COLOR_GREEN, format, args);
@@ -93,7 +93,7 @@ void log_debug(const char *format, ...) {
     if (log_level < LOG_LEVEL_DEBUG) {
         return;
     }
-    
+
     va_list args;
     va_start(args, format);
     log_message("DEBUG", COLOR_CYAN, format, args);
@@ -117,15 +117,15 @@ int strcasecmp(const char *s1, const char *s2) {
     while (*s1 && *s2) {
         int c1 = (*s1 >= 'A' && *s1 <= 'Z') ? *s1 + 32 : *s1;
         int c2 = (*s2 >= 'A' && *s2 <= 'Z') ? *s2 + 32 : *s2;
-        
+
         if (c1 != c2) {
             return c1 - c2;
         }
-        
+
         s1++;
         s2++;
     }
-    
+
     return *s1 - *s2;
 }
 
@@ -134,33 +134,33 @@ bool expand_path(const char *path, char *expanded, size_t size) {
     if (!path || !expanded || size == 0) {
         return false;
     }
-    
+
     if (path[0] == '~') {
         const char *home = getenv("HOME");
         if (!home) {
             log_error("Cannot expand ~: HOME not set");
             return false;
         }
-        
+
         size_t home_len = strlen(home);
         size_t path_len = strlen(path + 1);
-        
+
         if (home_len + path_len + 1 > size) {
             log_error("Expanded path too long");
             return false;
         }
-        
+
         strcpy(expanded, home);
         strcat(expanded, path + 1);
         return true;
     }
-    
+
     /* No expansion needed */
     if (strlen(path) >= size) {
         log_error("Path too long");
         return false;
     }
-    
+
     strcpy(expanded, path);
     return true;
 }
@@ -176,11 +176,11 @@ long file_size(const char *path) {
     if (!fp) {
         return -1;
     }
-    
+
     fseek(fp, 0, SEEK_END);
     long size = ftell(fp);
     fclose(fp);
-    
+
     return size;
 }
 
@@ -189,12 +189,12 @@ void format_bytes(uint64_t bytes, char *buf, size_t size) {
     const char *units[] = {"B", "KB", "MB", "GB", "TB"};
     int unit_index = 0;
     double value = (double)bytes;
-    
+
     while (value >= 1024.0 && unit_index < 4) {
         value /= 1024.0;
         unit_index++;
     }
-    
+
     if (unit_index == 0) {
         snprintf(buf, size, "%lu %s", (unsigned long)value, units[unit_index]);
     } else {

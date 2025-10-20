@@ -1,7 +1,7 @@
 /*
  * Staticwall - A reliable Wayland wallpaper daemon
  * Copyright (C) 2024
- * 
+ *
  * Main header file with core structures and definitions
  */
 
@@ -84,36 +84,36 @@ struct output_state {
     struct wl_surface *surface;
     struct wl_egl_window *egl_window;
     EGLSurface egl_surface;
-    
+
     uint32_t name;              /* Wayland output name/ID */
     int32_t width;
     int32_t height;
     int32_t scale;
     int32_t transform;
-    
+
     char make[64];
     char model[64];
-    
+
     bool configured;
     bool needs_redraw;
-    
+
     struct staticwall_state *state;  /* Back-pointer to global state */
-    
+
     struct wallpaper_config config;
     struct image_data *current_image;
     struct image_data *next_image;      /* For transitions */
-    
+
     GLuint texture;
     GLuint next_texture;                /* For transitions */
     GLuint program;
     GLuint vbo;
-    
+
     uint64_t last_frame_time;
     uint64_t last_cycle_time;           /* Last time wallpaper was changed/cycled */
     uint64_t transition_start_time;
     float transition_progress;
     uint64_t frames_rendered;
-    
+
     struct output_state *next;
 };
 
@@ -125,27 +125,27 @@ struct staticwall_state {
     struct wl_compositor *compositor;
     struct wl_shm *shm;
     struct zwlr_layer_shell_v1 *layer_shell;
-    
+
     /* EGL context */
     EGLDisplay egl_display;
     EGLContext egl_context;
     EGLConfig egl_config;
-    
+
     /* Outputs */
     struct output_state *outputs;
     uint32_t output_count;
-    
+
     /* Configuration */
     char config_path[MAX_PATH_LENGTH];
     time_t config_mtime;        /* Last modification time */
     bool watch_config;          /* Watch for config changes */
-    
+
     /* Runtime state */
     bool running;
     bool reload_requested;
     pthread_t watch_thread;
     pthread_mutex_t state_mutex;
-    
+
     /* Statistics */
     uint64_t frames_rendered;
     uint64_t errors_count;
@@ -174,7 +174,7 @@ bool egl_init(struct staticwall_state *state);
 void egl_cleanup(struct staticwall_state *state);
 
 /* Output management */
-struct output_state *output_create(struct staticwall_state *state, 
+struct output_state *output_create(struct staticwall_state *state,
                                    struct wl_output *output, uint32_t name);
 void output_destroy(struct output_state *output);
 bool output_configure_layer_surface(struct output_state *output);
