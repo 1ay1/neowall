@@ -1,0 +1,243 @@
+# ============================================================================
+# Staticwall Configuration File
+# ============================================================================
+# "Sets wallpapers until it... doesn't."
+#
+# This file uses VIBE (Values In Bracket Expression) format - a simple,
+# human-readable configuration syntax.
+#
+# Quick syntax guide:
+#   - No quotes needed for simple strings
+#   - Comments start with #
+#   - Objects use { }
+#   - Arrays use [ ]
+#   - Whitespace is flexible
+#
+# For a complete guide, see: CONFIG_GUIDE.md
+# ============================================================================
+
+# ============================================================================
+# DEFAULT CONFIGURATION
+# ============================================================================
+# This section applies to ALL monitors unless overridden below.
+# At minimum, you need to set a 'path' to your wallpaper image.
+
+default {
+  # Path to wallpaper image (required)
+  # Formats: PNG, JPEG/JPG
+  # Use ~ for home directory, absolute paths, or relative paths
+  path ~/Pictures/wallpaper.png
+
+  # Display mode (optional, default: fill)
+  # Options:
+  #   - fill    : Scale to fill screen, crop if needed (recommended)
+  #   - fit     : Scale to fit inside screen, may show borders
+  #   - center  : Center without scaling
+  #   - stretch : Stretch to fill (may distort)
+  #   - tile    : Repeat image to fill screen
+  mode fill
+
+  # Wallpaper cycling duration in seconds (optional, default: 0)
+  # Set to 0 to disable cycling
+  # Examples: 60 (1 min), 300 (5 min), 1800 (30 min), 3600 (1 hour)
+  duration 0
+
+  # Transition effect when changing wallpapers (optional, default: none)
+  # Options: none, fade, slide-left, slide-right
+  transition none
+
+  # Transition duration in milliseconds (optional, default: 300)
+  # Examples: 100 (fast), 300 (default), 500 (smooth), 1000 (slow)
+  transition_duration 300
+
+  # Wallpaper cycling list (optional)
+  # Option 1: List individual files
+  # cycle [
+  #   ~/Pictures/wallpaper1.png
+  #   ~/Pictures/wallpaper2.jpg
+  #   ~/Pictures/wallpaper3.png
+  # ]
+  #
+  # Option 2: Use a directory (automatically loads all images)
+  # cycle ~/Pictures/Wallpapers
+}
+
+# ============================================================================
+# PER-MONITOR CONFIGURATION
+# ============================================================================
+# Override default settings for specific monitors.
+#
+# To find your monitor names, run:
+#   - Sway:     swaymsg -t get_outputs
+#   - Hyprland: hyprctl monitors
+#   - Generic:  wlr-randr
+#
+# Common monitor names:
+#   - Laptop:  eDP-1, LVDS-1
+#   - HDMI:    HDMI-A-1, HDMI-A-2
+#   - DP:      DP-1, DP-2, DP-3
+
+output {
+  # Example: Laptop display
+  # Uncomment and modify for your setup
+  # eDP-1 {
+  #   path ~/Pictures/laptop-wallpaper.jpg
+  #   mode fill
+  # }
+
+  # Example: External monitor via HDMI
+  # HDMI-A-1 {
+  #   path ~/Pictures/monitor-wallpaper.png
+  #   mode fit
+  # }
+
+  # Example: DisplayPort monitor with cycling wallpapers from directory
+  # DP-1 {
+  #   path ~/Pictures/Nature/forest.jpg
+  #   mode fill
+  #   duration 300
+  #   transition fade
+  #   transition_duration 500
+  #   cycle ~/Pictures/Nature  # Loads all PNG/JPG files from this directory
+  # }
+
+  # Example: Vertical/portrait monitor
+  # DP-2 {
+  #   path ~/Pictures/portrait-wallpaper.png
+  #   mode fit  # 'fit' works well for unusual aspect ratios
+  # }
+}
+
+# ============================================================================
+# EXAMPLE CONFIGURATIONS
+# ============================================================================
+
+# --- Example 1: Simple Single Monitor ---
+# default {
+#   path ~/Pictures/my-wallpaper.png
+#   mode fill
+# }
+
+# --- Example 2: Laptop + External Monitor ---
+# default {
+#   path ~/Pictures/default.png
+#   mode fill
+# }
+# output {
+#   eDP-1 {
+#     path ~/Pictures/laptop.jpg
+#   }
+#   HDMI-A-1 {
+#     path ~/Pictures/external.jpg
+#   }
+# }
+
+# --- Example 3: Cycling Wallpapers from Directory ---
+# default {
+#   path ~/Pictures/Wallpapers/001.png
+#   mode fill
+#   duration 600
+#   transition fade
+#   transition_duration 1000
+#   cycle ~/Pictures/Wallpapers  # Auto-loads all images from directory!
+# }
+
+# --- Example 4: Multi-Monitor Gaming Setup ---
+# output {
+#   DP-1 {
+#     path ~/Pictures/Gaming/main-screen.png
+#     mode fill
+#   }
+#   DP-2 {
+#     path ~/Pictures/Gaming/side-screen-left.png
+#     mode fill
+#   }
+#   DP-3 {
+#     path ~/Pictures/Gaming/side-screen-right.png
+#     mode fill
+#   }
+# }
+
+# --- Example 5: Work Mode (Minimal Distractions) ---
+# default {
+#   path ~/Pictures/Work/minimal-dark.png
+#   mode fill
+# }
+# output {
+#   eDP-1 {
+#     path ~/Pictures/Work/company-logo.png
+#     mode center
+#   }
+# }
+
+# ============================================================================
+# TIPS & TRICKS
+# ============================================================================
+#
+# 1. Hot-reload configuration:
+#    killall -HUP staticwall
+#
+# 2. Run with auto-reload:
+#    staticwall --watch --daemon
+#
+# 3. Test configuration before daemonizing:
+#    staticwall -v
+#
+# 4. Use absolute paths if ~ doesn't work:
+#    path /home/username/Pictures/wallpaper.png
+#
+# 5. Organize wallpapers in folders and use directory cycling:
+#    mkdir -p ~/Pictures/Wallpapers/{Nature,Abstract,Space}
+#    cycle ~/Pictures/Wallpapers/Nature
+#
+# 6. Check logs for errors:
+#    journalctl --user -u staticwall.service -f
+#
+# 7. Different configs for different scenarios:
+#    staticwall -c ~/.config/staticwall/work.vibe
+#    staticwall -c ~/.config/staticwall/home.vibe
+#
+# 8. Recommended cycling durations:
+#    - Quick:    300 (5 minutes)
+#    - Moderate: 900 (15 minutes)
+#    - Slow:    1800 (30 minutes)
+#    - Hourly:  3600 (1 hour)
+#
+# 9. Directory cycling (NEW!):
+#    Instead of listing files, just specify a directory:
+#    cycle ~/Pictures/Wallpapers
+#    This automatically loads all PNG and JPEG files
+#
+# ============================================================================
+# TROUBLESHOOTING
+# ============================================================================
+#
+# Problem: "Configuration file not found"
+# Solution: Make sure this file is at ~/.config/staticwall/config.vibe
+#
+# Problem: "Failed to parse VIBE config"
+# Solution: Check for mismatched braces { } and brackets [ ]
+#
+# Problem: Wallpaper not showing
+# Solution: Verify the image file exists: ls -la ~/Pictures/wallpaper.png
+#
+# Problem: Monitor not recognized
+# Solution: Check exact monitor name with: swaymsg -t get_outputs
+#
+# Problem: Wallpapers not cycling
+# Solution: Ensure duration > 0 and cycle array is populated
+#
+# ============================================================================
+# MORE INFORMATION
+# ============================================================================
+#
+# Full documentation:     README.md
+# Configuration guide:    CONFIG_GUIDE.md
+# Installation guide:     INSTALL.md
+# Quick start:            QUICKSTART.md
+# Project repository:     https://github.com/yourusername/staticwall
+#
+# Report issues or get help:
+#   https://github.com/yourusername/staticwall/issues
+#
+# ============================================================================

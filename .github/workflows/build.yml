@@ -1,0 +1,86 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-arch:
+    name: Build on Arch Linux
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
+    steps:
+    - name: Update system and install dependencies
+      run: |
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm base-devel git wayland wayland-protocols \
+          egl-wayland mesa libpng libjpeg-turbo
+
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Build
+      run: make
+
+    - name: Check binary
+      run: |
+        test -f build/bin/staticwall
+        ./build/bin/staticwall --version
+        ./build/bin/staticwall --help
+
+  build-ubuntu:
+    name: Build on Ubuntu
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential pkg-config \
+          libwayland-dev libwayland-egl-backend-dev \
+          libegl1-mesa-dev libgles2-mesa-dev \
+          libpng-dev libjpeg-dev wayland-protocols
+
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Build
+      run: make
+
+    - name: Check binary
+      run: |
+        test -f build/bin/staticwall
+        ./build/bin/staticwall --version
+        ./build/bin/staticwall --help
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: staticwall-ubuntu
+        path: build/bin/staticwall
+
+  lint:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libwayland-dev \
+          libegl1-mesa-dev libgles2-mesa-dev libpng-dev libjpeg-dev
+
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Check for compilation warnings
+      run: make clean && make 2>&1 | tee build.log && ! grep -i "warning:" build.log
+
+    - name: Check file formatting
+      run: |
+        # Check for trailing whitespace
+        ! find src include -name "*.c" -o -name "*.h" | xargs grep -n " $"

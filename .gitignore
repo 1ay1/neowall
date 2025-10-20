@@ -1,0 +1,51 @@
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.dylib
+
+# Generated protocol files
+protocols/*.c
+protocols/*.h
+
+# Binary
+staticwall
+staticwall.exe
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+vgcore.*
+core
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Compilation database
+compile_commands.json
+
+# Dependency files
+*.d
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# Package files
+*.tar.gz
+*.zip
+*.deb
+*.rpm
+
+# Distribution files
+dist/
+pkg/
