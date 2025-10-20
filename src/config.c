@@ -394,46 +394,45 @@ static bool config_create_default(const char *config_path) {
                 log_error("Path too long for user wallpaper path");
                 default_wallpaper_path = "~/Pictures/wallpaper.png";
             } else {
-        
-        /* Check if user already has the default wallpaper */
-        if (access(user_wallpaper_path, F_OK) != 0) {
-            /* Try to find and copy the default wallpaper from installation */
-            const char *source_paths[] = {
-                "/usr/share/staticwall/default.png",
-                "/usr/local/share/staticwall/default.png",
-                NULL
-            };
-            
-            for (int i = 0; source_paths[i] != NULL; i++) {
-                if (access(source_paths[i], R_OK) == 0) {
-                    /* Create user wallpaper directory recursively */
-                    char tmp[MAX_PATH_LENGTH];
-                    snprintf(tmp, sizeof(tmp), "%s/.local", home);
-                    mkdir(tmp, 0755);
-                    snprintf(tmp, sizeof(tmp), "%s/.local/share", home);
-                    mkdir(tmp, 0755);
-                    mkdir(user_wallpaper_dir, 0755);
+                /* Check if user already has the default wallpaper */
+                if (access(user_wallpaper_path, F_OK) != 0) {
+                    /* Try to find and copy the default wallpaper from installation */
+                    const char *source_paths[] = {
+                        "/usr/share/staticwall/default.png",
+                        "/usr/local/share/staticwall/default.png",
+                        NULL
+                    };
                     
-                    /* Copy the file */
-                    FILE *src = fopen(source_paths[i], "rb");
-                    if (src) {
-                        FILE *dst = fopen(user_wallpaper_path, "wb");
-                        if (dst) {
-                            char buffer[4096];
-                            size_t bytes;
-                            while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
-                                fwrite(buffer, 1, bytes, dst);
+                    for (int i = 0; source_paths[i] != NULL; i++) {
+                        if (access(source_paths[i], R_OK) == 0) {
+                            /* Create user wallpaper directory recursively */
+                            char tmp[MAX_PATH_LENGTH];
+                            snprintf(tmp, sizeof(tmp), "%s/.local", home);
+                            mkdir(tmp, 0755);
+                            snprintf(tmp, sizeof(tmp), "%s/.local/share", home);
+                            mkdir(tmp, 0755);
+                            mkdir(user_wallpaper_dir, 0755);
+                            
+                            /* Copy the file */
+                            FILE *src = fopen(source_paths[i], "rb");
+                            if (src) {
+                                FILE *dst = fopen(user_wallpaper_path, "wb");
+                                if (dst) {
+                                    char buffer[4096];
+                                    size_t bytes;
+                                    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+                                        fwrite(buffer, 1, bytes, dst);
+                                    }
+                                    fclose(dst);
+                                    log_info("Copied default wallpaper to %s", user_wallpaper_path);
+                                }
+                                fclose(src);
                             }
-                            fclose(dst);
-                            log_info("Copied default wallpaper to %s", user_wallpaper_path);
+                            break;
                         }
-                        fclose(src);
                     }
-                    break;
                 }
-            }
-        }
-        
+                
                 /* Use the user's local copy if it exists */
                 if (access(user_wallpaper_path, F_OK) == 0) {
                     default_wallpaper_path = "~/.local/share/staticwall/default.png";
