@@ -56,12 +56,13 @@ static void print_usage(const char *program_name) {
 static void print_version(void) {
     printf("Staticwall v%s\n", STATICWALL_VERSION);
     printf("Sets wallpapers until it... doesn't.\n");
+    printf("(Statically compiled, dynamically cycling. We contain multitudes.)\n");
     printf("\nSupported features:\n");
     printf("  - Wayland (wlr-layer-shell)\n");
     printf("  - Multi-monitor support\n");
     printf("  - Multiple display modes (center, stretch, fit, fill, tile)\n");
     printf("  - Hot-reload configuration\n");
-    printf("  - Wallpaper transitions\n");
+    printf("  - Wallpaper transitions (the irony is not lost on us)\n");
     printf("\nSupported image formats:\n");
     printf("  - PNG\n");
     printf("  - JPEG/JPG\n");

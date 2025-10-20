@@ -1,6 +1,8 @@
 # Staticwall Quick Start Guide
 
-Get up and running with Staticwall in 5 minutes!
+**Sets wallpapers until it... doesn't.**
+
+Get up and running with Staticwall in minutes.
 
 ## Prerequisites
 

@@ -1,6 +1,10 @@
 # Staticwall
 
+**Sets wallpapers until it... doesn't.**
+
 A lightweight, reliable Wayland wallpaper daemon written in C. Perfect for tiling window managers and minimal setups.
+
+> **Why "Staticwall" if it cycles wallpapers?** Because it's *static*ally compiled C code that sets wallpapers. The fact that it can also change them dynamically is just a happy accident. We're committed to the bit.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -19,10 +23,11 @@ A lightweight, reliable Wayland wallpaper daemon written in C. Perfect for tilin
 ## Why Staticwall?
 
 Built as a reliable replacement for `wpaperd` and similar tools, Staticwall focuses on:
-- **Stability**: Robust error handling and clean resource management
+- **Stability**: Robust error handling and clean resource management (sets wallpapers until it doesn't crash)
 - **Performance**: Direct Wayland protocol usage with minimal overhead
 - **Simplicity**: Easy configuration with sensible defaults
 - **Compatibility**: Works with any wlroots-based compositor (Sway, Hyprland, River, etc.)
+- **Name Irony**: Yes, we know it cycles wallpapers dynamically. The name stays. It's static in spirit.
 
 ## Quick Start
 
@@ -243,6 +248,26 @@ If Staticwall doesn't meet your needs, check out:
 - [swaybg](https://github.com/swaywm/swaybg) - Simple wallpaper tool for Sway
 - [mpvpaper](https://github.com/GhostNaN/mpvpaper) - Video wallpapers with mpv
 - [hyprpaper](https://github.com/hyprwm/hyprpaper) - Wallpaper utility for Hyprland
+
+## FAQ
+
+### Why is it called "Staticwall" if it changes wallpapers dynamically?
+
+Because it's written in statically compiled C code. The fact that your wallpaper cycles is merely a dynamic side effect of our static determinism. We're committed to the name, even if it doesn't make sense anymore.
+
+Also, "Dynamicwall" was taken and "Sometimesstaticwall" didn't have the same ring to it.
+
+### Does it really set wallpapers until it doesn't?
+
+Yes. It sets wallpapers reliably until something goes wrong (like you unplugging all your monitors, or the heat death of the universe). We're being honest about our limitations.
+
+### Why another wallpaper daemon?
+
+Because the existing ones didn't crash the way we wanted them to. Just kidding – we actually focused on *not* crashing, which turned out to be surprisingly effective.
+
+### Is this production-ready?
+
+It sets wallpapers. On Wayland. Until it doesn't. You decide what "production-ready" means to you.
 
 ## Support
 
