@@ -34,6 +34,8 @@ static void render_outputs(struct staticwall_state *state) {
         if (output->config.cycle && output->config.duration > 0) {
             if (output_should_cycle(output, current_time)) {
                 output_cycle_wallpaper(output);
+                /* Recalculate current_time after cycling since it may have taken some time */
+                current_time = get_time_ms();
             }
         }
 
@@ -47,6 +49,9 @@ static void render_outputs(struct staticwall_state *state) {
                 output = output->next;
                 continue;
             }
+
+            /* Recalculate time for accurate transition timing */
+            current_time = get_time_ms();
 
             /* Handle transitions */
             if (output->transition_start_time > 0 &&
@@ -250,10 +255,15 @@ void event_loop_run(struct staticwall_state *state) {
             frame_count = 0;
         }
 
-        /* Keep outputs with cycling enabled marked for redraw */
+        /* Keep outputs with cycling enabled or active transitions marked for redraw */
         output = state->outputs;
         while (output) {
             if (output->config.cycle && output->config.duration > 0) {
+                output->needs_redraw = true;
+            }
+            /* Keep redrawing during transitions */
+            if (output->transition_start_time > 0 && 
+                output->config.transition != TRANSITION_NONE) {
                 output->needs_redraw = true;
             }
             output = output->next;

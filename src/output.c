@@ -158,8 +158,18 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         return;
     }
 
+    /* Make EGL context current before creating textures */
+    if (output->state && output->egl_surface != EGL_NO_SURFACE) {
+        if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                           output->egl_surface, output->state->egl_context)) {
+            log_error("Failed to make EGL context current: 0x%x", eglGetError());
+            image_free(new_image);
+            return;
+        }
+    }
+
     /* Handle transition */
-    if (output->config.transition != TRANSITION_NONE && output->current_image) {
+    if (output->config.transition != TRANSITION_NONE && output->current_image && output->texture) {
         /* Store current image as "next_image" for transition */
         if (output->next_image) {
             image_free(output->next_image);
@@ -177,6 +187,10 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         }
         output->next_texture = output->texture;
         output->texture = render_create_texture(new_image);
+        
+        log_debug("Transition started: %s -> %s (type=%d, duration=%ums)",
+                  output->config.path, path,
+                  output->config.transition, output->config.transition_duration);
     } else {
         /* No transition, just replace */
         if (output->current_image) {

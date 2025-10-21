@@ -100,9 +100,9 @@ static enum transition_type transition_type_from_string(const char *str) {
         return TRANSITION_NONE;
     } else if (strcasecmp(str, "fade") == 0) {
         return TRANSITION_FADE;
-    } else if (strcasecmp(str, "slide-left") == 0) {
+    } else if (strcasecmp(str, "slide-left") == 0 || strcasecmp(str, "slide_left") == 0) {
         return TRANSITION_SLIDE_LEFT;
-    } else if (strcasecmp(str, "slide-right") == 0) {
+    } else if (strcasecmp(str, "slide-right") == 0 || strcasecmp(str, "slide_right") == 0) {
         return TRANSITION_SLIDE_RIGHT;
     }
 

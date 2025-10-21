@@ -188,6 +188,7 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time);
 bool render_init_output(struct output_state *output);
 void render_cleanup_output(struct output_state *output);
 bool render_frame(struct output_state *output);
+bool render_frame_transition(struct output_state *output, float progress);
 GLuint render_create_texture(struct image_data *img);
 void render_destroy_texture(GLuint texture);
 
@@ -208,9 +209,16 @@ void config_reload(struct staticwall_state *state);
 uint64_t get_time_ms(void);
 const char *wallpaper_mode_to_string(enum wallpaper_mode mode);
 enum wallpaper_mode wallpaper_mode_from_string(const char *str);
+
+/* Logging */
+#define LOG_LEVEL_ERROR 0
+#define LOG_LEVEL_INFO  1
+#define LOG_LEVEL_DEBUG 2
+
 void log_error(const char *format, ...);
 void log_info(const char *format, ...);
 void log_debug(const char *format, ...);
+void log_set_level(int level);
 float ease_in_out_cubic(float t);
 
 /* Signal handling */

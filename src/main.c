@@ -338,6 +338,7 @@ int main(int argc, char *argv[]) {
     char config_path[MAX_PATH_LENGTH] = {0};
     bool daemon_mode = false;
     bool watch_config = false;
+    bool verbose = false;
     int opt;
 
     static struct option long_options[] = {
@@ -371,7 +372,8 @@ int main(int argc, char *argv[]) {
                 /* Kill daemon and exit */
                 return kill_daemon() ? EXIT_SUCCESS : EXIT_FAILURE;
             case 'v':
-                /* Verbose mode - would set log level */
+                /* Verbose mode - enable debug logging */
+                verbose = true;
                 break;
             case 'h':
                 print_usage(argv[0]);
@@ -386,6 +388,9 @@ int main(int argc, char *argv[]) {
     }
 
     /* Set up logging */
+    if (verbose) {
+        log_set_level(LOG_LEVEL_DEBUG);
+    }
     log_info("Staticwall v%s starting...", STATICWALL_VERSION);
 
     /* Ensure config directory exists */

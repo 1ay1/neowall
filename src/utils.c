@@ -14,12 +14,8 @@
 #include <unistd.h>
 #include "staticwall.h"
 
-/* Log levels */
-static enum {
-    LOG_LEVEL_ERROR = 0,
-    LOG_LEVEL_INFO = 1,
-    LOG_LEVEL_DEBUG = 2
-} log_level = LOG_LEVEL_INFO;
+/* Current log level */
+static int log_level = LOG_LEVEL_INFO;
 
 /* Enable colors in terminal */
 static bool use_colors = true;

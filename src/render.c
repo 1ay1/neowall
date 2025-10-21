@@ -35,22 +35,7 @@ static const char *fragment_shader_source =
     "    gl_FragColor = vec4(color.rgb, color.a * alpha);\n"
     "}\n";
 
-/* Transition fragment shader (for fade effect) */
-/* Currently unused - will be used when transitions are fully implemented */
-/*
-static const char *transition_fragment_shader_source =
-    "#version 100\n"
-    "precision mediump float;\n"
-    "varying vec2 v_texcoord;\n"
-    "uniform sampler2D texture0;\n"
-    "uniform sampler2D texture1;\n"
-    "uniform float progress;\n"
-    "void main() {\n"
-    "    vec4 color0 = texture2D(texture0, v_texcoord);\n"
-    "    vec4 color1 = texture2D(texture1, v_texcoord);\n"
-    "    gl_FragColor = mix(color1, color0, progress);\n"
-    "}\n";
-*/
+/* Note: Transitions are implemented using alpha blending instead of a dual-texture shader */
 
 /* Fullscreen quad vertices (position + texcoord) */
 static const float quad_vertices[] = {
@@ -289,6 +274,14 @@ bool render_frame(struct output_state *output) {
         return true;
     }
 
+    /* Check if we're in a transition */
+    if (output->transition_start_time > 0 && 
+        output->config.transition != TRANSITION_NONE &&
+        output->next_image && output->next_texture) {
+        /* Use transition rendering */
+        return render_frame_transition(output, output->transition_progress);
+    }
+
     /* Set viewport */
     glViewport(0, 0, output->width, output->height);
 
@@ -367,14 +360,198 @@ bool render_frame(struct output_state *output) {
 
 /* Render frame with transition effect */
 bool render_frame_transition(struct output_state *output, float progress) {
-    (void)progress;
     if (!output || !output->current_image || !output->next_image) {
         return render_frame(output);
     }
 
-    /* Similar to render_frame but uses transition shader */
-    /* For simplicity, we'll just use alpha blending for now */
+    if (output->texture == 0 || output->next_texture == 0) {
+        return render_frame(output);
+    }
 
-    /* TODO: Implement proper transition shader */
+    /* Handle different transition types */
+    if (output->config.transition == TRANSITION_FADE) {
+        /* Fade transition using alpha blending */
+        
+        /* Set viewport */
+        glViewport(0, 0, output->width, output->height);
+
+        /* Clear screen */
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        /* Use shader program */
+        glUseProgram(output->program);
+
+        /* Get attribute locations */
+        GLint pos_attrib = glGetAttribLocation(output->program, "position");
+        GLint tex_attrib = glGetAttribLocation(output->program, "texcoord");
+
+        /* Bind VBO */
+        glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
+
+        /* Set up vertex attributes */
+        glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
+                             4 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(pos_attrib);
+
+        glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
+                             4 * sizeof(float), (void*)(2 * sizeof(float)));
+        glEnableVertexAttribArray(tex_attrib);
+
+        /* Enable blending */
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        /* First, render the old image (next_image) fully opaque */
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, output->next_texture);
+
+        GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
+        glUniform1i(tex_uniform, 0);
+
+        GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
+        if (alpha_uniform >= 0) {
+            glUniform1f(alpha_uniform, 1.0f);
+        }
+
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        /* Then, render the new image (current_image) with alpha based on progress */
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, output->texture);
+
+        glUniform1i(tex_uniform, 0);
+
+        if (alpha_uniform >= 0) {
+            glUniform1f(alpha_uniform, progress);
+        }
+
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        /* Clean up */
+        glDisable(GL_BLEND);
+        glDisableVertexAttribArray(pos_attrib);
+        glDisableVertexAttribArray(tex_attrib);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glUseProgram(0);
+
+        /* Check for errors */
+        GLenum error = glGetError();
+        if (error != GL_NO_ERROR) {
+            log_error("OpenGL error during transition rendering: 0x%x", error);
+            return false;
+        }
+
+        output->needs_redraw = true;  /* Keep redrawing during transition */
+        output->frames_rendered++;
+
+        return true;
+        
+    } else if (output->config.transition == TRANSITION_SLIDE_LEFT || 
+               output->config.transition == TRANSITION_SLIDE_RIGHT) {
+        /* Slide transition using texture coordinate offset */
+        
+        /* Set viewport */
+        glViewport(0, 0, output->width, output->height);
+
+        /* Clear screen */
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        /* Use shader program */
+        glUseProgram(output->program);
+
+        /* Get attribute locations */
+        GLint pos_attrib = glGetAttribLocation(output->program, "position");
+        GLint tex_attrib = glGetAttribLocation(output->program, "texcoord");
+
+        /* Enable blending */
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
+        GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
+
+        /* Calculate slide offset */
+        float offset = (output->config.transition == TRANSITION_SLIDE_LEFT) ? progress : -progress;
+
+        /* Create modified quad vertices for sliding */
+        float slide_vertices[16];
+        memcpy(slide_vertices, quad_vertices, sizeof(quad_vertices));
+
+        /* Render old image (sliding out) */
+        /* Adjust position based on slide direction */
+        for (int i = 0; i < 4; i++) {
+            slide_vertices[i * 4] = quad_vertices[i * 4] - (offset * 2.0f);
+        }
+
+        glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(slide_vertices), slide_vertices, GL_DYNAMIC_DRAW);
+
+        glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
+                             4 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(pos_attrib);
+
+        glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
+                             4 * sizeof(float), (void*)(2 * sizeof(float)));
+        glEnableVertexAttribArray(tex_attrib);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, output->next_texture);
+        glUniform1i(tex_uniform, 0);
+
+        if (alpha_uniform >= 0) {
+            glUniform1f(alpha_uniform, 1.0f);
+        }
+
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        /* Render new image (sliding in) */
+        /* Adjust position to slide in from opposite side */
+        float slide_in_offset = (output->config.transition == TRANSITION_SLIDE_LEFT) ? 
+                                (1.0f - progress) : -(1.0f - progress);
+        
+        for (int i = 0; i < 4; i++) {
+            slide_vertices[i * 4] = quad_vertices[i * 4] + (slide_in_offset * 2.0f);
+        }
+
+        glBufferData(GL_ARRAY_BUFFER, sizeof(slide_vertices), slide_vertices, GL_DYNAMIC_DRAW);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, output->texture);
+        glUniform1i(tex_uniform, 0);
+
+        if (alpha_uniform >= 0) {
+            glUniform1f(alpha_uniform, 1.0f);
+        }
+
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        /* Restore original quad data */
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), quad_vertices, GL_STATIC_DRAW);
+
+        /* Clean up */
+        glDisable(GL_BLEND);
+        glDisableVertexAttribArray(pos_attrib);
+        glDisableVertexAttribArray(tex_attrib);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glUseProgram(0);
+
+        /* Check for errors */
+        GLenum error = glGetError();
+        if (error != GL_NO_ERROR) {
+            log_error("OpenGL error during slide transition: 0x%x", error);
+            return false;
+        }
+
+        output->needs_redraw = true;  /* Keep redrawing during transition */
+        output->frames_rendered++;
+
+        return true;
+    }
+
+    /* Fallback to regular render */
     return render_frame(output);
 }
