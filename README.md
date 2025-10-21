@@ -32,6 +32,7 @@ Built as a reliable replacement for `wpaperd` and similar tools, Staticwall focu
 - **Performance**: Direct Wayland protocol usage with minimal overhead (your CPU has better things to worry about)
 - **Simplicity**: Easy configuration with sensible defaults (we assume you want your wallpaper visible, which is a pretty bold assumption)
 - **Compatibility**: Works with any wlroots-based compositor (Sway, Hyprland, River, etc.)
+- **Single Instance**: Prevents multiple instances from running (because one wallpaper daemon is enough chaos for anyone)
 - **Name Irony**: Yes, we know it cycles wallpapers dynamically. The name stays. It's static in spirit, dynamic in practice, and confusing in marketing.
 
 ## Quick Start
@@ -76,14 +77,20 @@ staticwall
 # Run in background (daemon mode)
 staticwall -d
 
+# Stop running daemon (graceful shutdown)
+staticwall --kill
+
 # Run with verbose logging
 staticwall -v
 
 # Use custom config
 staticwall -c /path/to/config.vibe
 
-# Watch config for changes
+# Watch config for changes (auto-reload on config edit)
 staticwall --watch
+
+# Combine options (daemon + watch)
+staticwall -d -w
 ```
 
 ### Configuration
@@ -175,6 +182,7 @@ OPTIONS:
   -d, --daemon         Run in background
   -f, --foreground     Run in foreground (default)
   -w, --watch          Watch config file for changes
+  -k, --kill           Stop running daemon
   -v, --verbose        Enable verbose logging
   -h, --help           Show help message
   -V, --version        Show version information
@@ -186,14 +194,25 @@ OPTIONS:
 - `SIGTERM/SIGINT` - Graceful shutdown
 
 ```bash
-# Reload config
-killall -HUP staticwall
+# Stop daemon (preferred method)
+staticwall --kill
 
-# Stop daemon
+# Alternative: using killall
 killall staticwall
+
+# Reload config without restarting
+killall -HUP staticwall
 ```
 
+**Note:** Staticwall automatically prevents multiple instances from running. If you try to start it while it's already running, you'll get a helpful error message with the PID of the running instance. Just use `staticwall --kill` to stop it first.
+
 ## Troubleshooting
+
+### Already running error
+If you get "Staticwall is already running", this means an instance is already active:
+1. Stop it with: `staticwall --kill`
+2. Or check if it's a stale PID: the error shows the PID, verify with `ps -p <PID>`
+3. If PID doesn't exist, remove the PID file: `rm $XDG_RUNTIME_DIR/staticwall.pid`
 
 ### Wallpaper not showing
 1. Check compositor supports `wlr-layer-shell`
@@ -281,6 +300,14 @@ Yes. It sets wallpapers reliably until something goes wrong (like you unplugging
 ### Why another wallpaper daemon?
 
 Because the existing ones didn't crash the way we wanted them to. Just kidding – we actually focused on *not* crashing, which turned out to be surprisingly effective. Turns out proper error handling is better than artistic segfaults. Who knew?
+
+### How do I stop the daemon?
+
+Just run `staticwall --kill`. It'll gracefully stop the running daemon, clean up resources, and remove the PID file. Much more civilized than `killall`, though that works too if you're feeling nostalgic for the old ways.
+
+### Can I run multiple instances?
+
+No, and you don't want to. Staticwall prevents multiple instances from running simultaneously because having multiple wallpaper daemons fighting over your display is a recipe for confusion (and possibly a avant-garde art installation). If you need to restart it, use `staticwall --kill` first.
 
 ### Is this production-ready?
 

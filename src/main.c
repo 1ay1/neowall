@@ -15,9 +15,150 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <time.h>
 #include "staticwall.h"
 
 static struct staticwall_state *global_state = NULL;
+
+/* Get PID file path */
+static const char *get_pid_file_path(void) {
+    static char pid_path[MAX_PATH_LENGTH];
+    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+    
+    if (runtime_dir) {
+        snprintf(pid_path, sizeof(pid_path), "%s/staticwall.pid", runtime_dir);
+    } else {
+        const char *home = getenv("HOME");
+        if (home) {
+            snprintf(pid_path, sizeof(pid_path), "%s/.staticwall.pid", home);
+        } else {
+            snprintf(pid_path, sizeof(pid_path), "/tmp/staticwall-%d.pid", getuid());
+        }
+    }
+    
+    return pid_path;
+}
+
+/* Write PID file */
+static bool write_pid_file(void) {
+    const char *pid_path = get_pid_file_path();
+    FILE *fp = fopen(pid_path, "w");
+    
+    if (!fp) {
+        log_error("Failed to create PID file %s: %s", pid_path, strerror(errno));
+        return false;
+    }
+    
+    fprintf(fp, "%d\n", getpid());
+    fclose(fp);
+    
+    log_debug("Created PID file: %s", pid_path);
+    return true;
+}
+
+/* Remove PID file */
+static void remove_pid_file(void) {
+    const char *pid_path = get_pid_file_path();
+    if (unlink(pid_path) == 0) {
+        log_debug("Removed PID file: %s", pid_path);
+    }
+}
+
+/* Check if daemon is already running */
+static bool is_daemon_running(void) {
+    const char *pid_path = get_pid_file_path();
+    FILE *fp = fopen(pid_path, "r");
+    
+    if (!fp) {
+        /* No PID file, daemon not running */
+        return false;
+    }
+    
+    pid_t pid;
+    if (fscanf(fp, "%d", &pid) != 1) {
+        fclose(fp);
+        /* Invalid PID file, clean it up */
+        log_debug("Invalid PID file, removing");
+        remove_pid_file();
+        return false;
+    }
+    fclose(fp);
+    
+    /* Check if process exists */
+    if (kill(pid, 0) == 0) {
+        /* Process exists and we can signal it */
+        return true;
+    }
+    
+    if (errno == ESRCH) {
+        /* Process doesn't exist, stale PID file */
+        log_debug("Stale PID file found (PID %d not running), removing", pid);
+        remove_pid_file();
+        return false;
+    }
+    
+    /* Other error (EPERM, etc.) - assume process exists */
+    return true;
+}
+
+/* Kill running daemon */
+static bool kill_daemon(void) {
+    const char *pid_path = get_pid_file_path();
+    FILE *fp = fopen(pid_path, "r");
+    
+    if (!fp) {
+        printf("No running staticwall daemon found (no PID file at %s)\n", pid_path);
+        return false;
+    }
+    
+    pid_t pid;
+    if (fscanf(fp, "%d", &pid) != 1) {
+        fclose(fp);
+        log_error("Failed to read PID from %s", pid_path);
+        return false;
+    }
+    fclose(fp);
+    
+    /* Check if process exists */
+    if (kill(pid, 0) == -1) {
+        if (errno == ESRCH) {
+            printf("Staticwall daemon (PID %d) is not running. Cleaning up stale PID file.\n", pid);
+            remove_pid_file();
+            return false;
+        }
+    }
+    
+    /* Send SIGTERM */
+    printf("Stopping staticwall daemon (PID %d)...\n", pid);
+    if (kill(pid, SIGTERM) == -1) {
+        log_error("Failed to kill process %d: %s", pid, strerror(errno));
+        return false;
+    }
+    
+    /* Wait a bit for graceful shutdown */
+    struct timespec sleep_time = {0, 100000000};  /* 100ms */
+    int attempts = 0;
+    while (attempts < 50) {  /* Wait up to 5 seconds */
+        if (kill(pid, 0) == -1 && errno == ESRCH) {
+            printf("Staticwall daemon stopped successfully.\n");
+            remove_pid_file();
+            return true;
+        }
+        nanosleep(&sleep_time, NULL);
+        attempts++;
+    }
+    
+    /* Force kill if still running */
+    printf("Daemon didn't stop gracefully, forcing...\n");
+    if (kill(pid, SIGKILL) == 0) {
+        printf("Staticwall daemon killed.\n");
+        remove_pid_file();
+        return true;
+    }
+    
+    log_error("Failed to kill daemon process");
+    return false;
+}
 
 static void print_usage(const char *program_name) {
     printf("Staticwall v%s - Sets wallpapers until it... doesn't.\n\n", STATICWALL_VERSION);
@@ -27,6 +168,7 @@ static void print_usage(const char *program_name) {
     printf("  -d, --daemon          Run as daemon (background process)\n");
     printf("  -f, --foreground      Run in foreground (default, explicit)\n");
     printf("  -w, --watch           Watch config file for changes and reload\n");
+    printf("  -k, --kill            Stop running daemon\n");
     printf("  -v, --verbose         Enable verbose logging\n");
     printf("  -h, --help            Show this help message\n");
     printf("  -V, --version         Show version information\n");
@@ -155,6 +297,11 @@ static bool daemonize(void) {
         }
     }
 
+    /* Write PID file */
+    if (!write_pid_file()) {
+        log_error("Failed to write PID file, but continuing anyway");
+    }
+
     return true;
 }
 
@@ -198,6 +345,7 @@ int main(int argc, char *argv[]) {
         {"daemon",     no_argument,       0, 'd'},
         {"foreground", no_argument,       0, 'f'},
         {"watch",      no_argument,       0, 'w'},
+        {"kill",       no_argument,       0, 'k'},
         {"verbose",    no_argument,       0, 'v'},
         {"help",       no_argument,       0, 'h'},
         {"version",    no_argument,       0, 'V'},
@@ -205,7 +353,7 @@ int main(int argc, char *argv[]) {
     };
 
     /* Parse command line arguments */
-    while ((opt = getopt_long(argc, argv, "c:dfwvhV", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:dfwkvhV", long_options, NULL)) != -1) {
         switch (opt) {
             case 'c':
                 strncpy(config_path, optarg, sizeof(config_path) - 1);
@@ -219,6 +367,9 @@ int main(int argc, char *argv[]) {
             case 'w':
                 watch_config = true;
                 break;
+            case 'k':
+                /* Kill daemon and exit */
+                return kill_daemon() ? EXIT_SUCCESS : EXIT_FAILURE;
             case 'v':
                 /* Verbose mode - would set log level */
                 break;
@@ -255,6 +406,22 @@ int main(int argc, char *argv[]) {
     }
 
     log_info("Using configuration file: %s", config_path);
+
+    /* Check if already running */
+    if (is_daemon_running()) {
+        const char *pid_path = get_pid_file_path();
+        FILE *fp = fopen(pid_path, "r");
+        pid_t existing_pid = 0;
+        if (fp) {
+            fscanf(fp, "%d", &existing_pid);
+            fclose(fp);
+        }
+        log_error("Staticwall is already running (PID %d)", existing_pid);
+        fprintf(stderr, "Error: Staticwall is already running (PID %d)\n", existing_pid);
+        fprintf(stderr, "PID file: %s\n", pid_path);
+        fprintf(stderr, "Use 'staticwall --kill' to stop the running instance.\n");
+        return EXIT_FAILURE;
+    }
 
     /* Daemonize if requested */
     if (daemon_mode) {
@@ -318,6 +485,11 @@ int main(int argc, char *argv[]) {
     egl_cleanup(&state);
     wayland_cleanup(&state);
     pthread_mutex_destroy(&state.state_mutex);
+
+    /* Remove PID file if running as daemon */
+    if (daemon_mode) {
+        remove_pid_file();
+    }
 
     log_info("Staticwall terminated successfully");
 
