@@ -148,6 +148,10 @@ struct staticwall_state {
     atomic_int next_requested;  /* Counter for skip to next wallpaper requests */
     pthread_t watch_thread;
     pthread_mutex_t state_mutex;
+    
+    /* Event-driven timer for wallpaper cycling */
+    int timer_fd;               /* timerfd for next wallpaper cycle */
+    int wakeup_fd;              /* eventfd for waking poll on internal events */
 
     /* Statistics */
     uint64_t frames_rendered;

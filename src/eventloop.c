@@ -12,13 +12,67 @@
 #include <poll.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/timerfd.h>
+#include <sys/eventfd.h>
 #include "staticwall.h"
 
 /* Forward declaration of state pointer for EGL operations */
 static struct staticwall_state *event_loop_state = NULL;
 
+/* Update timerfd to wake up at next cycle time */
+static void update_cycle_timer(struct staticwall_state *state) {
+    if (!state || state->timer_fd < 0) {
+        return;
+    }
 
-
+    uint64_t now = get_time_ms();
+    uint64_t next_wake_ms = UINT64_MAX;
+    
+    /* Find the earliest cycle time across all outputs */
+    struct output_state *output = state->outputs;
+    while (output) {
+        if (!state->paused && output->config.cycle && output->config.duration > 0 &&
+            output->config.cycle_count > 1 && output->current_image) {
+            uint64_t elapsed_ms = now - output->last_cycle_time;
+            uint64_t duration_ms = output->config.duration * 1000;
+            
+            if (elapsed_ms >= duration_ms) {
+                /* Should cycle now */
+                next_wake_ms = 0;
+                break;
+            } else {
+                uint64_t time_until_cycle = duration_ms - elapsed_ms;
+                if (time_until_cycle < next_wake_ms) {
+                    next_wake_ms = time_until_cycle;
+                }
+            }
+        }
+        output = output->next;
+    }
+    
+    /* Set the timer */
+    struct itimerspec timer_spec;
+    memset(&timer_spec, 0, sizeof(timer_spec));
+    
+    if (next_wake_ms == UINT64_MAX) {
+        /* No cycling needed, disarm timer */
+        timer_spec.it_value.tv_sec = 0;
+        timer_spec.it_value.tv_nsec = 0;
+    } else {
+        /* Set timer to wake at next cycle time */
+        timer_spec.it_value.tv_sec = next_wake_ms / 1000;
+        timer_spec.it_value.tv_nsec = (next_wake_ms % 1000) * 1000000;
+    }
+    
+    timer_spec.it_interval.tv_sec = 0;
+    timer_spec.it_interval.tv_nsec = 0;
+    
+    if (timerfd_settime(state->timer_fd, 0, &timer_spec, NULL) < 0) {
+        log_error("Failed to set timerfd: %s", strerror(errno));
+    } else if (next_wake_ms != UINT64_MAX) {
+        log_debug("Cycle timer set to wake in %lums", next_wake_ms);
+    }
+}
 
 /* Render all outputs that need redrawing */
 static void render_outputs(struct staticwall_state *state) {
@@ -29,25 +83,33 @@ static void render_outputs(struct staticwall_state *state) {
     struct output_state *output = state->outputs;
     uint64_t current_time = get_time_ms();
     
-    /* Load next_requested counter once at the beginning to avoid race conditions */
-    int next_count = atomic_exchange(&state->next_requested, 0);
+    /* Check if there are any pending next requests - process ONE globally per frame to ensure rendering */
+    int next_count = atomic_load(&state->next_requested);
+    bool processed_next = false;
+    
+    if (next_count > 0) {
+        log_debug("Processing next request: %d pending in queue", next_count);
+    }
 
     while (output) {
-        /* Handle next wallpaper request(s) - process all queued requests */
-        if (next_count > 0 && output->config.cycle && output->config.cycle_count > 0) {
-            /* Cycle through all queued next requests for this output */
-            for (int i = 0; i < next_count; i++) {
-                output_cycle_wallpaper(output);
-            }
+        /* Handle next wallpaper request - ONE total per frame (ensures each change is actually rendered) */
+        if (next_count > 0 && !processed_next && output->config.cycle && output->config.cycle_count > 0) {
+            log_debug("Cycling to next wallpaper for output %s (%d requests remaining)",
+                     output->model[0] ? output->model : "unknown", next_count - 1);
+            output_cycle_wallpaper(output);
             current_time = get_time_ms();
+            processed_next = true;
+            /* Decrement counter immediately after processing */
+            atomic_fetch_sub(&state->next_requested, 1);
         }
         
-        /* Check if we should cycle wallpaper (before rendering) */
+        /* Check if we should cycle wallpaper (timer-driven) */
         if (!state->paused && output->config.cycle && output->config.duration > 0) {
             if (output_should_cycle(output, current_time)) {
                 output_cycle_wallpaper(output);
-                /* Recalculate current_time after cycling since it may have taken some time */
                 current_time = get_time_ms();
+                /* Update timer for next cycle */
+                update_cycle_timer(state);
             }
         }
 
@@ -107,12 +169,21 @@ static void render_outputs(struct staticwall_state *state) {
                     wl_surface_commit(output->surface);
                     output->last_frame_time = current_time;
                     state->frames_rendered++;
+                    
+                    /* Reset needs_redraw unless we're in a transition */
+                    if (output->transition_start_time == 0 || 
+                        output->config.transition == TRANSITION_NONE) {
+                        output->needs_redraw = false;
+                    }
                 }
             }
         }
 
         output = output->next;
     }
+    
+    /* Update timer after rendering changes */
+    update_cycle_timer(state);
 }
 
 /* Handle pending Wayland events */
@@ -148,6 +219,23 @@ void event_loop_run(struct staticwall_state *state) {
     event_loop_state = state;
 
     log_info("Starting event loop");
+    
+    /* Create timerfd for event-driven wallpaper cycling */
+    state->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (state->timer_fd < 0) {
+        log_error("Failed to create timerfd: %s", strerror(errno));
+        return;
+    }
+    log_info("Created timerfd for event-driven cycling");
+    
+    /* Create eventfd for waking poll on internal events (config reload, etc) */
+    state->wakeup_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (state->wakeup_fd < 0) {
+        log_error("Failed to create eventfd: %s", strerror(errno));
+        close(state->timer_fd);
+        return;
+    }
+    log_info("Created eventfd for internal event notifications");
 
     /* Log initial cycling configuration for debugging */
     struct output_state *output = state->outputs;
@@ -168,9 +256,13 @@ void event_loop_run(struct staticwall_state *state) {
         return;
     }
 
-    struct pollfd fds[1];
+    struct pollfd fds[3];
     fds[0].fd = wl_fd;
     fds[0].events = POLLIN;
+    fds[1].fd = state->timer_fd;
+    fds[1].events = POLLIN;
+    fds[2].fd = state->wakeup_fd;
+    fds[2].events = POLLIN;
 
     /* Initial render for all outputs */
     output = state->outputs;
@@ -181,11 +273,26 @@ void event_loop_run(struct staticwall_state *state) {
 
     uint64_t last_stats_time = get_time_ms();
     uint64_t frame_count = 0;
+    
+    /* Perform initial render BEFORE entering event loop */
+    log_info("Performing initial wallpaper render");
+    render_outputs(state);
+    handle_wayland_events(state);
+    wl_display_flush(state->display);
+    
+    /* Set initial timer for cycling */
+    update_cycle_timer(state);
 
     while (state->running) {
         /* Handle configuration reload if requested */
         if (state->reload_requested) {
+            log_info("Config reload requested, reloading...");
             config_reload(state);
+            /* Update cycle timer with new configuration */
+            update_cycle_timer(state);
+            /* Trigger render to apply new config */
+            render_outputs(state);
+            wl_display_flush(state->display);
         }
 
         /* Prepare for reading events */
@@ -212,9 +319,34 @@ void event_loop_run(struct staticwall_state *state) {
             }
         }
 
-        /* Poll for events with timeout */
-        int timeout_ms = 16; /* ~60 FPS */
-        int ret = poll(fds, 1, timeout_ms);
+        /* Calculate poll timeout - only for transitions, otherwise wait indefinitely */
+        int timeout_ms = -1; /* -1 = infinite, pure event-driven */
+        
+        /* Check if any output has active transitions */
+        output = state->outputs;
+        while (output) {
+            if (output->transition_start_time > 0 && 
+                output->config.transition != TRANSITION_NONE) {
+                timeout_ms = 16; /* ~60 FPS for smooth transitions */
+                break;
+            }
+            output = output->next;
+        }
+        
+        /* If next requests pending, wake immediately */
+        if (atomic_load(&state->next_requested) > 0) {
+            timeout_ms = 0;
+        }
+        
+        if (timeout_ms == -1) {
+            log_debug("Poll: infinite timeout (pure event-driven mode)");
+        } else if (timeout_ms == 16) {
+            log_debug("Poll: 16ms timeout (transition active)");
+        } else if (timeout_ms == 0) {
+            log_debug("Poll: immediate (next request pending)");
+        }
+        
+        int ret = poll(fds, 3, timeout_ms);
 
         if (ret < 0) {
             if (errno == EINTR) {
@@ -240,6 +372,25 @@ void event_loop_run(struct staticwall_state *state) {
                 }
             } else {
                 wl_display_cancel_read(state->display);
+            }
+            
+            /* Check timerfd - time to cycle wallpaper */
+            if (fds[1].revents & POLLIN) {
+                uint64_t expirations;
+                ssize_t s = read(state->timer_fd, &expirations, sizeof(expirations));
+                if (s == sizeof(expirations)) {
+                    log_debug("Cycle timer expired (%lu expirations), checking outputs", expirations);
+                    /* Timer expired, render_outputs will check which output needs cycling */
+                }
+            }
+            
+            /* Check eventfd - internal wakeup (config reload, etc) */
+            if (fds[2].revents & POLLIN) {
+                uint64_t value;
+                ssize_t s = read(state->wakeup_fd, &value, sizeof(value));
+                if (s == sizeof(value)) {
+                    log_debug("Wakeup event received (value=%lu)", value);
+                }
             }
         }
 
@@ -267,19 +418,30 @@ void event_loop_run(struct staticwall_state *state) {
             frame_count = 0;
         }
 
-        /* Keep outputs with cycling enabled or active transitions marked for redraw */
+        /* Only keep redrawing during active transitions */
         output = state->outputs;
         while (output) {
-            if (output->config.cycle && output->config.duration > 0) {
-                output->needs_redraw = true;
-            }
             /* Keep redrawing during transitions */
             if (output->transition_start_time > 0 && 
                 output->config.transition != TRANSITION_NONE) {
                 output->needs_redraw = true;
             }
+            /* needs_redraw is set to true by:
+             * - output_set_wallpaper() when wallpaper changes
+             * - Wayland events (output mode changes, etc.)
+             * No need to force redraw every frame for static wallpapers */
             output = output->next;
         }
+    }
+
+    /* Clean up file descriptors */
+    if (state->timer_fd >= 0) {
+        close(state->timer_fd);
+        state->timer_fd = -1;
+    }
+    if (state->wakeup_fd >= 0) {
+        close(state->wakeup_fd);
+        state->wakeup_fd = -1;
     }
 
     log_info("Event loop stopped");

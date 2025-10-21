@@ -271,9 +271,18 @@ static void signal_handler(int signum) {
             }
             break;
         case SIGUSR1:
-            log_info("Received SIGUSR1, skipping to next wallpaper...");
             if (global_state) {
-                atomic_fetch_add(&global_state->next_requested, 1);
+                int old_count = atomic_fetch_add(&global_state->next_requested, 1);
+                int new_count = old_count + 1;
+                log_info("Received SIGUSR1, skipping to next wallpaper (queue: %d -> %d)", 
+                         old_count, new_count);
+                /* Prevent counter overflow from rapid signals */
+                if (new_count > 100) {
+                    log_error("Too many queued next requests (%d), resetting to 10", new_count);
+                    atomic_store(&global_state->next_requested, 10);
+                }
+            } else {
+                log_error("Received SIGUSR1 but global_state is NULL");
             }
             break;
         case SIGUSR2:
@@ -300,14 +309,17 @@ static void setup_signal_handlers(void) {
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
+    sa.sa_flags = SA_RESTART;  /* Restart interrupted system calls */
 
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
-    sigaction(SIGHUP, &sa, NULL);
     sigaction(SIGUSR1, &sa, NULL);
     sigaction(SIGUSR2, &sa, NULL);
     sigaction(SIGCONT, &sa, NULL);
+
+    /* SIGHUP (reload) should NOT use SA_RESTART - we want it to interrupt poll() */
+    sa.sa_flags = 0;
+    sigaction(SIGHUP, &sa, NULL);
 
     /* Ignore SIGPIPE */
     signal(SIGPIPE, SIG_IGN);
@@ -535,6 +547,8 @@ int main(int argc, char *argv[]) {
     state.paused = false;
     atomic_init(&state.next_requested, 0);
     state.watch_config = watch_config;
+    state.timer_fd = -1;
+    state.wakeup_fd = -1;
     strncpy(state.config_path, config_path, sizeof(state.config_path) - 1);
     state.config_path[sizeof(state.config_path) - 1] = '\0';
     pthread_mutex_init(&state.state_mutex, NULL);

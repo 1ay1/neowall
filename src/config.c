@@ -766,6 +766,15 @@ void config_reload(struct staticwall_state *state) {
         log_error("Failed to reload configuration");
     } else {
         log_info("Configuration reloaded successfully");
+        
+        /* Mark all outputs for redraw to apply new configuration */
+        output = state->outputs;
+        while (output) {
+            output->needs_redraw = true;
+            log_debug("Marked output %s for redraw after config reload", 
+                     output->model[0] ? output->model : "unknown");
+            output = output->next;
+        }
     }
 
     pthread_mutex_unlock(&state->state_mutex);
@@ -793,6 +802,17 @@ void *config_watch_thread(void *arg) {
         if (config_has_changed(state)) {
             log_info("Configuration file changed, triggering reload");
             state->reload_requested = true;
+            
+            /* Wake up the event loop by writing to eventfd */
+            if (state->wakeup_fd >= 0) {
+                uint64_t value = 1;
+                ssize_t s = write(state->wakeup_fd, &value, sizeof(value));
+                if (s != sizeof(value)) {
+                    log_error("Failed to wake event loop: %s", strerror(errno));
+                } else {
+                    log_debug("Event loop woken for config reload");
+                }
+            }
         }
     }
 
