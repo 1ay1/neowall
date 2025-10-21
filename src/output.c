@@ -151,8 +151,8 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     log_info("Setting wallpaper for output %s: %s",
              output->model[0] ? output->model : "unknown", path);
 
-    /* Load new image */
-    struct image_data *new_image = image_load(path);
+    /* Load new image with display-aware scaling */
+    struct image_data *new_image = image_load(path, output->width, output->height, output->config.mode);
     if (!new_image) {
         log_error("Failed to load wallpaper image: %s", path);
         return;

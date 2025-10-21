@@ -15,6 +15,11 @@
 #include <jpeglib.h>
 #include "staticwall.h"
 
+/* Forward declarations */
+static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 
+                                                   int32_t display_height, enum wallpaper_mode mode);
+static struct image_data *image_scale_bilinear(struct image_data *img, uint32_t new_width, uint32_t new_height);
+
 /* Expand path with tilde */
 static bool expand_path(const char *path, char *expanded, size_t size) {
     if (!path || !expanded || size == 0) {
@@ -389,27 +394,39 @@ struct image_data *image_load_jpeg(const char *path) {
     return img;
 }
 
-/* Load image (auto-detect format) */
-struct image_data *image_load(const char *path) {
+/* Load image from file (auto-detect format) with display-aware scaling */
+struct image_data *image_load(const char *path, int32_t display_width, 
+                              int32_t display_height, enum wallpaper_mode mode) {
     if (!path) {
-        log_error("Invalid path for image loading");
+        log_error("Invalid path for image_load");
         return NULL;
     }
 
     enum image_format format = image_detect_format(path);
-
+    struct image_data *img = NULL;
+    
     switch (format) {
         case FORMAT_PNG:
-            return image_load_png(path);
-
+            img = image_load_png(path);
+            break;
         case FORMAT_JPEG:
-            return image_load_jpeg(path);
-
-        case FORMAT_UNKNOWN:
+            img = image_load_jpeg(path);
+            break;
         default:
-            log_error("Unknown or unsupported image format: %s", path);
+            log_error("Unsupported or unknown image format: %s", path);
             return NULL;
     }
+
+    if (!img) {
+        return NULL;
+    }
+
+    /* Scale image intelligently based on display dimensions and mode */
+    if (display_width > 0 && display_height > 0) {
+        img = image_scale_to_display(img, display_width, display_height, mode);
+    }
+
+    return img;
 }
 
 /* Free image data */
@@ -424,4 +441,169 @@ void image_free(struct image_data *img) {
     }
 
     free(img);
+}
+
+/* Calculate optimal dimensions based on display mode */
+static void calculate_optimal_dimensions(uint32_t img_width, uint32_t img_height,
+                                         int32_t display_width, int32_t display_height,
+                                         enum wallpaper_mode mode,
+                                         uint32_t *out_width, uint32_t *out_height) {
+    float img_aspect = (float)img_width / (float)img_height;
+    float display_aspect = (float)display_width / (float)display_height;
+    
+    switch (mode) {
+        case MODE_FILL:
+            /* Scale to fill display, maintaining aspect ratio (will crop) */
+            if (img_aspect > display_aspect) {
+                /* Image is wider - match height */
+                *out_height = display_height;
+                *out_width = (uint32_t)(display_height * img_aspect);
+            } else {
+                /* Image is taller - match width */
+                *out_width = display_width;
+                *out_height = (uint32_t)(display_width / img_aspect);
+            }
+            break;
+            
+        case MODE_FIT:
+            /* Scale to fit inside display, maintaining aspect ratio */
+            if (img_aspect > display_aspect) {
+                /* Image is wider - match width */
+                *out_width = display_width;
+                *out_height = (uint32_t)(display_width / img_aspect);
+            } else {
+                /* Image is taller - match height */
+                *out_height = display_height;
+                *out_width = (uint32_t)(display_height * img_aspect);
+            }
+            break;
+            
+        case MODE_STRETCH:
+            /* Stretch to exact display dimensions */
+            *out_width = display_width;
+            *out_height = display_height;
+            break;
+            
+        case MODE_CENTER:
+        case MODE_TILE:
+            /* For center/tile, only scale down if larger than display */
+            if (img_width > (uint32_t)display_width || img_height > (uint32_t)display_height) {
+                /* Scale to fit */
+                if (img_aspect > display_aspect) {
+                    *out_width = display_width;
+                    *out_height = (uint32_t)(display_width / img_aspect);
+                } else {
+                    *out_height = display_height;
+                    *out_width = (uint32_t)(display_height * img_aspect);
+                }
+            } else {
+                /* Keep original size */
+                *out_width = img_width;
+                *out_height = img_height;
+            }
+            break;
+            
+        default:
+            *out_width = img_width;
+            *out_height = img_height;
+            break;
+    }
+}
+
+/* Scale image to optimal size for display mode */
+static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 
+                                                   int32_t display_height, enum wallpaper_mode mode) {
+    if (!img || !img->pixels) {
+        return img;
+    }
+    
+    /* Calculate optimal dimensions for this display mode */
+    uint32_t target_width, target_height;
+    calculate_optimal_dimensions(img->width, img->height, display_width, display_height,
+                                 mode, &target_width, &target_height);
+    
+    /* Only scale if dimensions changed */
+    if (target_width == img->width && target_height == img->height) {
+        log_debug("Image %ux%u already optimal for display %dx%d (mode=%d)",
+                 img->width, img->height, display_width, display_height, mode);
+        return img;
+    }
+    
+    /* Only downscale, never upscale */
+    if (target_width > img->width || target_height > img->height) {
+        log_debug("Keeping original size %ux%u (would upscale to %ux%u)",
+                 img->width, img->height, target_width, target_height);
+        return img;
+    }
+    
+    log_info("Scaling image from %ux%u to %ux%u for %dx%d display (mode=%d)",
+             img->width, img->height, target_width, target_height, 
+             display_width, display_height, mode);
+    
+    return image_scale_bilinear(img, target_width, target_height);
+}
+
+/* High-quality bilinear image scaling */
+static struct image_data *image_scale_bilinear(struct image_data *img, uint32_t new_width, uint32_t new_height) {
+    if (!img || !img->pixels) {
+        return img;
+    }
+    
+    /* Allocate new pixel buffer */
+    size_t new_size = (size_t)new_width * new_height * 4;
+    uint8_t *new_pixels = malloc(new_size);
+    if (!new_pixels) {
+        log_error("Failed to allocate scaled image buffer");
+        return img;
+    }
+    
+    float x_ratio = (float)(img->width - 1) / (float)new_width;
+    float y_ratio = (float)(img->height - 1) / (float)new_height;
+    
+    /* Bilinear interpolation */
+    for (uint32_t y = 0; y < new_height; y++) {
+        for (uint32_t x = 0; x < new_width; x++) {
+            float src_x = x * x_ratio;
+            float src_y = y * y_ratio;
+            
+            uint32_t x1 = (uint32_t)src_x;
+            uint32_t y1 = (uint32_t)src_y;
+            uint32_t x2 = (x1 < img->width - 1) ? x1 + 1 : x1;
+            uint32_t y2 = (y1 < img->height - 1) ? y1 + 1 : y1;
+            
+            float x_diff = src_x - x1;
+            float y_diff = src_y - y1;
+            
+            /* Get the four surrounding pixels */
+            size_t idx_tl = (y1 * img->width + x1) * 4;  /* Top-left */
+            size_t idx_tr = (y1 * img->width + x2) * 4;  /* Top-right */
+            size_t idx_bl = (y2 * img->width + x1) * 4;  /* Bottom-left */
+            size_t idx_br = (y2 * img->width + x2) * 4;  /* Bottom-right */
+            
+            size_t dst_idx = (y * new_width + x) * 4;
+            
+            /* Interpolate each channel (RGBA) */
+            for (int c = 0; c < 4; c++) {
+                float tl = img->pixels[idx_tl + c];
+                float tr = img->pixels[idx_tr + c];
+                float bl = img->pixels[idx_bl + c];
+                float br = img->pixels[idx_br + c];
+                
+                /* Bilinear interpolation formula */
+                float top = tl * (1.0f - x_diff) + tr * x_diff;
+                float bottom = bl * (1.0f - x_diff) + br * x_diff;
+                float value = top * (1.0f - y_diff) + bottom * y_diff;
+                
+                new_pixels[dst_idx + c] = (uint8_t)(value + 0.5f);  /* Round */
+            }
+        }
+    }
+    
+    /* Free old pixels and update image */
+    free(img->pixels);
+    img->pixels = new_pixels;
+    img->width = new_width;
+    img->height = new_height;
+    
+    return img;
 }

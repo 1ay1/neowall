@@ -161,7 +161,7 @@ const char *config_get_default_path(void);
 char **load_images_from_directory(const char *dir_path, size_t *count);
 
 /* Image loading */
-struct image_data *image_load(const char *path);
+struct image_data *image_load(const char *path, int32_t display_width, int32_t display_height, enum wallpaper_mode mode);
 void image_free(struct image_data *img);
 enum image_format image_detect_format(const char *path);
 

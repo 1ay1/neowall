@@ -555,7 +555,30 @@ It sets wallpapers. On Wayland. Until it doesn't. You decide what "production-re
 
 ### Will this eat my RAM?
 
-Only a little bit. Like, a polite amount. Your browser tabs are doing far worse things behind your back.
+Staticwall uses **intelligent display-aware scaling** that optimizes images based on your actual display resolution and wallpaper mode. Images are automatically downscaled (never upscaled) to save memory while maintaining quality.
+
+**How it works:**
+- **FILL mode**: Scales to match display dimensions (may crop)
+- **FIT mode**: Scales to fit entirely within display
+- **STRETCH mode**: Scales to exact display size
+- **CENTER/TILE modes**: Only scales down if larger than display
+
+**Example scaling on 3440x1440 display:**
+- 5000×2500 image in FILL mode → 3440×1720 (~24 MB uncompressed)
+- 5000×2500 image in FIT mode → 2880×1440 (~17 MB uncompressed)
+- 5669×2835 image in FILL mode → 3440×1720 (~24 MB uncompressed)
+
+**Memory usage:** Two 5000×2500 images on a 3440×1440 display uses ~245 MB total:
+- Image data: ~50 MB (scaled down from ~114 MB)
+- GPU textures: ~50 MB (mirrors image data)
+- OpenGL/EGL/Wayland libraries: ~100 MB
+- Process overhead: ~45 MB
+
+**Quality:** Uses high-quality bilinear interpolation for smooth, artifact-free scaling.
+
+Your browser tabs are still doing far worse things behind your back.
+
+**Tip:** Staticwall automatically optimizes everything. Just use whatever images you want - they'll be scaled intelligently!
 
 ### Can I trust C code written by someone with this sense of humor?
 
