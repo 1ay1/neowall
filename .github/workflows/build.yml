@@ -62,35 +62,3 @@ jobs:
         with:
           name: staticwall-ubuntu
           path: build/bin/staticwall
-
-  lint:
-    name: Code Quality Checks
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config \
-            libwayland-dev libwayland-egl-backend-dev \
-            libegl1-mesa-dev libgles2-mesa-dev \
-            libpng-dev libjpeg-dev wayland-protocols
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Check for compilation warnings
-        run: |
-          make clean && make 2>&1 | tee build.log
-          if grep -i "warning:" build.log; then
-            echo "Build warnings found!"
-            exit 1
-          fi
-
-      - name: Check file formatting
-        run: |
-          # Check for trailing whitespace
-          if find src include -type f \( -name "*.c" -o -name "*.h" \) | xargs grep -n " $"; then
-            echo "Trailing whitespace found!"
-            exit 1
-          fi

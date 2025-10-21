@@ -421,7 +421,10 @@ static bool config_create_default(const char *config_path) {
                                     char buffer[4096];
                                     size_t bytes;
                                     while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
-                                        fwrite(buffer, 1, bytes, dst);
+                                        if (fwrite(buffer, 1, bytes, dst) != bytes) {
+                                            log_error("Failed to write to %s", user_wallpaper_path);
+                                            break;
+                                        }
                                     }
                                     fclose(dst);
                                     log_info("Copied default wallpaper to %s", user_wallpaper_path);
@@ -466,7 +469,10 @@ static bool config_create_default(const char *config_path) {
                     char buffer[4096];
                     size_t bytes;
                     while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
-                        fwrite(buffer, 1, bytes, dst);
+                        if (fwrite(buffer, 1, bytes, dst) != bytes) {
+                            log_error("Failed to write to %s", example_dest);
+                            break;
+                        }
                     }
                     fclose(dst);
                     log_info("Copied example config to %s", example_dest);
