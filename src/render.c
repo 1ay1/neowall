@@ -262,6 +262,88 @@ void render_destroy_texture(GLuint texture) {
 
 
 
+/* Calculate vertex coordinates based on display mode */
+static void calculate_vertex_coords(struct output_state *output, float vertices[16]) {
+    /* Default: fullscreen quad */
+    memcpy(vertices, quad_vertices, sizeof(quad_vertices));
+    
+    if (!output->current_image) {
+        return;
+    }
+    
+    float img_width = (float)output->current_image->width;
+    float img_height = (float)output->current_image->height;
+    float disp_width = (float)output->width;
+    float disp_height = (float)output->height;
+    
+    switch (output->config.mode) {
+        case MODE_CENTER: {
+            /* Center image without scaling (image was pre-scaled if too large) */
+            float scale_x = img_width / disp_width;
+            float scale_y = img_height / disp_height;
+            
+            /* Adjust vertex positions to center the image */
+            vertices[0] = -scale_x; vertices[1] = scale_y;   /* top-left position */
+            vertices[4] = scale_x;  vertices[5] = scale_y;   /* top-right position */
+            vertices[8] = -scale_x; vertices[9] = -scale_y;  /* bottom-left position */
+            vertices[12] = scale_x; vertices[13] = -scale_y; /* bottom-right position */
+            break;
+        }
+        
+        case MODE_FIT: {
+            /* Scale to fit inside display (image was pre-scaled) */
+            float scale_x = img_width / disp_width;
+            float scale_y = img_height / disp_height;
+            
+            vertices[0] = -scale_x; vertices[1] = scale_y;   /* top-left position */
+            vertices[4] = scale_x;  vertices[5] = scale_y;   /* top-right position */
+            vertices[8] = -scale_x; vertices[9] = -scale_y;  /* bottom-left position */
+            vertices[12] = scale_x; vertices[13] = -scale_y; /* bottom-right position */
+            break;
+        }
+        
+        case MODE_FILL: {
+            /* Image was pre-scaled to fill display, crop excess to center */
+            /* The scaled image is larger than display in one dimension */
+            if (img_width > disp_width) {
+                /* Image is wider - crop horizontal */
+                float crop_ratio = disp_width / img_width;
+                float crop_offset = (1.0f - crop_ratio) / 2.0f;
+                vertices[2] = crop_offset;        /* top-left texcoord */
+                vertices[6] = 1.0f - crop_offset; /* top-right texcoord */
+                vertices[10] = crop_offset;       /* bottom-left texcoord */
+                vertices[14] = 1.0f - crop_offset; /* bottom-right texcoord */
+            } else if (img_height > disp_height) {
+                /* Image is taller - crop vertical */
+                float crop_ratio = disp_height / img_height;
+                float crop_offset = (1.0f - crop_ratio) / 2.0f;
+                vertices[3] = crop_offset;        /* top-left texcoord */
+                vertices[7] = crop_offset;        /* top-right texcoord */
+                vertices[11] = 1.0f - crop_offset; /* bottom-left texcoord */
+                vertices[15] = 1.0f - crop_offset; /* bottom-right texcoord */
+            }
+            /* else: image fits exactly, no cropping needed */
+            break;
+        }
+        
+        case MODE_STRETCH:
+            /* Stretch to fill entire screen - use default fullscreen quad */
+            break;
+            
+        case MODE_TILE: {
+            /* Tile image across screen - adjust texture coordinates */
+            float tile_x = disp_width / img_width;
+            float tile_y = disp_height / img_height;
+            
+            vertices[2] = 0.0f;    vertices[3] = 0.0f;      /* top-left texcoord */
+            vertices[6] = tile_x;  vertices[7] = 0.0f;      /* top-right texcoord */
+            vertices[10] = 0.0f;   vertices[11] = tile_y;   /* bottom-left texcoord */
+            vertices[14] = tile_x; vertices[15] = tile_y;   /* bottom-right texcoord */
+            break;
+        }
+    }
+}
+
 /* Render a frame for an output */
 bool render_frame(struct output_state *output) {
     if (!output) {
@@ -296,8 +378,13 @@ bool render_frame(struct output_state *output) {
     GLint pos_attrib = glGetAttribLocation(output->program, "position");
     GLint tex_attrib = glGetAttribLocation(output->program, "texcoord");
 
-    /* Bind VBO */
+    /* Calculate mode-aware vertex coordinates */
+    float mode_vertices[16];
+    calculate_vertex_coords(output, mode_vertices);
+
+    /* Bind VBO and update with mode-specific vertices */
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(mode_vertices), mode_vertices, GL_DYNAMIC_DRAW);
 
     /* Set up vertex attributes */
     glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
@@ -326,6 +413,9 @@ bool render_frame(struct output_state *output) {
     if (output->config.mode == MODE_TILE) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    } else {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
     /* Enable blending for transparency */

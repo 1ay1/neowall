@@ -518,6 +518,11 @@ int main(int argc, char *argv[]) {
         if (!daemonize()) {
             return EXIT_FAILURE;
         }
+    } else {
+        /* In foreground mode, still write PID file for client commands */
+        if (!write_pid_file()) {
+            log_error("Failed to write PID file, but continuing anyway");
+        }
     }
 
     /* Set up signal handlers */
@@ -578,10 +583,8 @@ int main(int argc, char *argv[]) {
     wayland_cleanup(&state);
     pthread_mutex_destroy(&state.state_mutex);
 
-    /* Remove PID file if running as daemon */
-    if (daemon_mode) {
-        remove_pid_file();
-    }
+    /* Remove PID file */
+    remove_pid_file();
 
     log_info("Staticwall terminated successfully");
 
