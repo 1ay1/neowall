@@ -30,9 +30,13 @@ static void render_outputs(struct staticwall_state *state) {
     uint64_t current_time = get_time_ms();
 
     while (output) {
-        /* Handle next wallpaper request */
-        if (state->next_requested && output->config.cycle && output->config.cycle_count > 0) {
-            output_cycle_wallpaper(output);
+        /* Handle next wallpaper request(s) - process all queued requests */
+        int next_count = atomic_load(&state->next_requested);
+        if (next_count > 0 && output->config.cycle && output->config.cycle_count > 0) {
+            /* Cycle through all queued next requests for this output */
+            for (int i = 0; i < next_count; i++) {
+                output_cycle_wallpaper(output);
+            }
             current_time = get_time_ms();
         }
         
@@ -275,9 +279,10 @@ void event_loop_run(struct staticwall_state *state) {
             output = output->next;
         }
         
-        /* Reset next_requested flag after processing all outputs */
-        if (state->next_requested) {
-            state->next_requested = false;
+        /* Reset next_requested counter after processing all outputs */
+        int next_count = atomic_load(&state->next_requested);
+        if (next_count > 0) {
+            atomic_fetch_sub(&state->next_requested, next_count);
         }
     }
 

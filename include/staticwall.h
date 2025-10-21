@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include <EGL/egl.h>
@@ -144,7 +145,7 @@ struct staticwall_state {
     bool running;
     bool reload_requested;
     bool paused;                /* Pause wallpaper cycling */
-    bool next_requested;        /* Skip to next wallpaper */
+    atomic_int next_requested;  /* Counter for skip to next wallpaper requests */
     pthread_t watch_thread;
     pthread_mutex_t state_mutex;
 

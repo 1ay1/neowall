@@ -273,7 +273,7 @@ static void signal_handler(int signum) {
         case SIGUSR1:
             log_info("Received SIGUSR1, skipping to next wallpaper...");
             if (global_state) {
-                global_state->next_requested = true;
+                atomic_fetch_add(&global_state->next_requested, 1);
             }
             break;
         case SIGUSR2:
@@ -533,7 +533,7 @@ int main(int argc, char *argv[]) {
     state.running = true;
     state.reload_requested = false;
     state.paused = false;
-    state.next_requested = false;
+    atomic_init(&state.next_requested, 0);
     state.watch_config = watch_config;
     strncpy(state.config_path, config_path, sizeof(state.config_path) - 1);
     state.config_path[sizeof(state.config_path) - 1] = '\0';
