@@ -413,7 +413,9 @@ int main(int argc, char *argv[]) {
         FILE *fp = fopen(pid_path, "r");
         pid_t existing_pid = 0;
         if (fp) {
-            fscanf(fp, "%d", &existing_pid);
+            if (fscanf(fp, "%d", &existing_pid) != 1) {
+                existing_pid = 0;
+            }
             fclose(fp);
         }
         log_error("Staticwall is already running (PID %d)", existing_pid);
