@@ -1,0 +1,27 @@
+[Unit]
+Description=Staticwall - Wayland Wallpaper Daemon
+Documentation=https://github.com/1ay1/staticwall
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/staticwall
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+NoNewPrivileges=true
+RestrictRealtime=true
+
+# Resource limits
+MemoryHigh=128M
+MemoryMax=256M
+
+[Install]
+WantedBy=graphical-session.target
