@@ -2,7 +2,7 @@
 
 **Sets wallpapers until it... doesn't.**
 
-A lightweight, reliable Wayland wallpaper daemon written in C. Perfect for tiling window managers and minimal setups.
+A lightweight, reliable Wayland wallpaper daemon written in C. Perfect for tiling window managers and minimal setups. (Mostly reliable. See tagline.)
 
 ![Staticwall Default Wallpaper](assets/default.png)
 
@@ -19,17 +19,20 @@ A lightweight, reliable Wayland wallpaper daemon written in C. Perfect for tilin
 - 🔥 **Hot Reload**: Update configuration without restarting (`SIGHUP`)
 - 🎬 **Smooth Transitions**: Fade and slide effects between wallpapers
 - 📁 **Directory Support**: Point to a folder and cycle through all images
-- 🪶 **Minimal Dependencies**: Pure C with no heavy frameworks
+- 🪶 **Minimal Dependencies**: Pure C with no heavy frameworks (because who needs bloated libraries when you have raw pointers and existential dread?)
+- 💀 **Memory Safety**: We free our allocations. Most of the time. Okay, all of the time, but the joke was funnier before we fixed the bugs.
 - 🔧 **VIBE Config Format**: Simple, human-readable configuration
 
 ## Why Staticwall?
 
+Because you have wallpapers and we have... strong opinions on how to display them. Also, we were bored on a Tuesday.
+
 Built as a reliable replacement for `wpaperd` and similar tools, Staticwall focuses on:
-- **Stability**: Robust error handling and clean resource management (sets wallpapers until it doesn't crash)
-- **Performance**: Direct Wayland protocol usage with minimal overhead
-- **Simplicity**: Easy configuration with sensible defaults
+- **Stability**: Robust error handling and clean resource management (sets wallpapers until it doesn't crash—which is hopefully never, but we're realistic about our place in the universe)
+- **Performance**: Direct Wayland protocol usage with minimal overhead (your CPU has better things to worry about)
+- **Simplicity**: Easy configuration with sensible defaults (we assume you want your wallpaper visible, which is a pretty bold assumption)
 - **Compatibility**: Works with any wlroots-based compositor (Sway, Hyprland, River, etc.)
-- **Name Irony**: Yes, we know it cycles wallpapers dynamically. The name stays. It's static in spirit.
+- **Name Irony**: Yes, we know it cycles wallpapers dynamically. The name stays. It's static in spirit, dynamic in practice, and confusing in marketing.
 
 ## Quick Start
 
@@ -56,7 +59,7 @@ make
 sudo make install
 ```
 
-**Note:** Staticwall runs as a normal user and doesn't require root privileges to run! Only the binary installation requires sudo. On first run, config and default wallpaper will be automatically copied to your user directories.
+**Note:** Staticwall runs as a normal user and doesn't require root privileges to run! Only the binary installation requires sudo. On first run, config and default wallpaper will be automatically copied to your user directories. (We promise not to do anything weird with your home folder. We're just here to set wallpapers, not start a revolution.)
 
 ### Usage
 
@@ -142,14 +145,14 @@ output {
 ## Dependencies
 
 ### Required
-- Wayland client library
+- Wayland client library (because we're not savages living in X11)
 - EGL (OpenGL ES interface)
 - GLESv2 (OpenGL ES 2.0)
-- pthread
+- pthread (for that sweet, sweet concurrency)
 
 ### Optional (for image loading)
-- libpng (PNG support)
-- libjpeg (JPEG support)
+- libpng (PNG support—recommended unless you enjoy staring at error messages)
+- libjpeg (JPEG support—because your phone camera outputs these, apparently)
 
 ## Supported Compositors
 
@@ -213,13 +216,13 @@ killall staticwall
 ### Building
 
 ```bash
-# Debug build with symbols
+# Debug build with symbols (for when things inevitably go wrong)
 make debug
 
-# Clean rebuild
+# Clean rebuild (the "have you tried turning it off and on again" of compilation)
 make clean && make
 
-# Run tests
+# Run tests (we have tests! They even pass sometimes!)
 make test
 ```
 
@@ -227,13 +230,13 @@ make test
 
 ```
 staticwall/
-├── src/           # Source files
-├── include/       # Header files
-├── protocols/     # Wayland protocol definitions (generated)
-├── config/        # Example configuration
-├── assets/        # Default wallpaper
-├── docs/          # Documentation
-└── Makefile       # Build configuration
+├── src/           # Source files (where the magic happens)
+├── include/       # Header files (where the magic is declared)
+├── protocols/     # Wayland protocol definitions (generated, do not touch unless you enjoy pain)
+├── config/        # Example configuration (copy-paste friendly)
+├── assets/        # Default wallpaper (a suspiciously large PNG)
+├── docs/          # Documentation (yes, we wrote docs. shocking, we know.)
+└── Makefile       # Build configuration (artisanal, hand-crafted build scripts)
 ```
 
 ## Contributing
@@ -257,11 +260,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Alternatives
 
-If Staticwall doesn't meet your needs, check out:
-- [wpaperd](https://github.com/danyspin97/wpaperd) - Rust-based wallpaper daemon
-- [swaybg](https://github.com/swaywm/swaybg) - Simple wallpaper tool for Sway
-- [mpvpaper](https://github.com/GhostNaN/mpvpaper) - Video wallpapers with mpv
-- [hyprpaper](https://github.com/hyprwm/hyprpaper) - Wallpaper utility for Hyprland
+If Staticwall doesn't meet your needs (or you just don't appreciate our humor), check out:
+- [wpaperd](https://github.com/danyspin97/wpaperd) - Rust-based wallpaper daemon (memory-safe but written in a language with opinions)
+- [swaybg](https://github.com/swaywm/swaybg) - Simple wallpaper tool for Sway (does one thing well, unlike us who do several things adequately)
+- [mpvpaper](https://github.com/GhostNaN/mpvpaper) - Video wallpapers with mpv (for when static images aren't draining your battery fast enough)
+- [hyprpaper](https://github.com/hyprwm/hyprpaper) - Wallpaper utility for Hyprland (by people who actually know what they're doing)
 
 ## FAQ
 
@@ -277,11 +280,19 @@ Yes. It sets wallpapers reliably until something goes wrong (like you unplugging
 
 ### Why another wallpaper daemon?
 
-Because the existing ones didn't crash the way we wanted them to. Just kidding – we actually focused on *not* crashing, which turned out to be surprisingly effective.
+Because the existing ones didn't crash the way we wanted them to. Just kidding – we actually focused on *not* crashing, which turned out to be surprisingly effective. Turns out proper error handling is better than artistic segfaults. Who knew?
 
 ### Is this production-ready?
 
-It sets wallpapers. On Wayland. Until it doesn't. You decide what "production-ready" means to you.
+It sets wallpapers. On Wayland. Until it doesn't. You decide what "production-ready" means to you. We've been using it for months without issues, but then again, we wrote it, so we know exactly which buttons not to press.
+
+### Will this eat my RAM?
+
+Only a little bit. Like, a polite amount. Your browser tabs are doing far worse things behind your back.
+
+### Can I trust C code written by someone with this sense of humor?
+
+Bold of you to assume correlation between humor quality and code quality. But yes, we take the actual code seriously. The jokes are just coping mechanisms.
 
 ## Support
 
