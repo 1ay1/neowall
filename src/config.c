@@ -141,6 +141,12 @@ char **load_images_from_directory(const char *dir_path, size_t *count) {
         strncpy(expanded_path, dir_path, sizeof(expanded_path) - 1);
         expanded_path[sizeof(expanded_path) - 1] = '\0';
     }
+    
+    /* Remove trailing slash to prevent double slashes in paths */
+    size_t len = strlen(expanded_path);
+    if (len > 1 && expanded_path[len - 1] == '/') {
+        expanded_path[len - 1] = '\0';
+    }
 
     /* Check if it's a directory */
     struct stat st;

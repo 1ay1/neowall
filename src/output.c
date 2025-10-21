@@ -214,6 +214,12 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     output->last_frame_time = now;
     output->last_cycle_time = now;
 
+    /* Write current state to file */
+    const char *mode_str = wallpaper_mode_to_string(output->config.mode);
+    write_wallpaper_state(output->model, path, mode_str, 
+                         output->config.current_cycle_index,
+                         output->config.cycle_count);
+
     /* Mark for redraw */
     output->needs_redraw = true;
 }

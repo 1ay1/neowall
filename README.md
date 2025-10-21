@@ -112,6 +112,9 @@ staticwall resume
 
 # Reload configuration without restarting
 staticwall reload
+
+# Show current wallpaper
+staticwall current
 ```
 
 **Note:** Staticwall prevents multiple instances from running. If you try to start it while a daemon is already running, you'll get an error. Use `staticwall kill` first to stop the existing instance.
@@ -366,6 +369,7 @@ staticwall next      # Skip to next wallpaper immediately
 staticwall pause     # Pause wallpaper cycling
 staticwall resume    # Resume wallpaper cycling
 staticwall reload    # Reload configuration without restarting
+staticwall current   # Show current wallpaper and status
 ```
 
 ### Signals (Advanced)

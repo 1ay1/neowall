@@ -215,6 +215,7 @@ static void print_usage(const char *program_name) {
     printf("  pause                 Pause wallpaper cycling\n");
     printf("  resume                Resume wallpaper cycling\n");
     printf("  reload                Reload configuration\n");
+    printf("  current               Show current wallpaper\n");
     printf("\n");
     printf("Note: By default, staticwall runs as a daemon. Use -f for foreground.\n");
     printf("If a daemon is already running, subsequent calls act as control commands.\n");
@@ -421,9 +422,11 @@ int main(int argc, char *argv[]) {
             return send_daemon_signal(SIGCONT, "Resuming wallpaper cycling...") ? EXIT_SUCCESS : EXIT_FAILURE;
         } else if (strcmp(cmd, "reload") == 0) {
             return send_daemon_signal(SIGHUP, "Reloading configuration...") ? EXIT_SUCCESS : EXIT_FAILURE;
+        } else if (strcmp(cmd, "current") == 0 || strcmp(cmd, "status") == 0) {
+            return read_wallpaper_state() ? EXIT_SUCCESS : EXIT_FAILURE;
         } else {
             fprintf(stderr, "Unknown command: %s\n", cmd);
-            fprintf(stderr, "Valid commands: kill, next, pause, resume, reload\n");
+            fprintf(stderr, "Valid commands: kill, next, pause, resume, reload, current\n");
             return EXIT_FAILURE;
         }
     }

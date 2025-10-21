@@ -12,6 +12,7 @@
 #include <sys/time.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include "staticwall.h"
 
 /* Current log level */
@@ -218,4 +219,107 @@ float ease_in_out_cubic(float t) {
         float f = (2.0f * t) - 2.0f;
         return 0.5f * f * f * f + 1.0f;
     }
+}
+
+/* Get state file path */
+const char *get_state_file_path(void) {
+    static char state_path[MAX_PATH_LENGTH];
+    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+    
+    if (runtime_dir) {
+        snprintf(state_path, sizeof(state_path), "%s/staticwall-state.txt", runtime_dir);
+    } else {
+        const char *home = getenv("HOME");
+        if (home) {
+            snprintf(state_path, sizeof(state_path), "%s/.staticwall-state", home);
+        } else {
+            snprintf(state_path, sizeof(state_path), "/tmp/staticwall-state-%d.txt", getuid());
+        }
+    }
+    
+    return state_path;
+}
+
+/* Write current wallpaper state */
+bool write_wallpaper_state(const char *output_name, const char *wallpaper_path, 
+                           const char *mode, int cycle_index, int cycle_total) {
+    const char *state_path = get_state_file_path();
+    FILE *fp = fopen(state_path, "w");
+    
+    if (!fp) {
+        log_error("Failed to write state file %s: %s", state_path, strerror(errno));
+        return false;
+    }
+    
+    fprintf(fp, "output=%s\n", output_name ? output_name : "unknown");
+    fprintf(fp, "wallpaper=%s\n", wallpaper_path ? wallpaper_path : "none");
+    fprintf(fp, "mode=%s\n", mode ? mode : "unknown");
+    fprintf(fp, "cycle_index=%d\n", cycle_index);
+    fprintf(fp, "cycle_total=%d\n", cycle_total);
+    fprintf(fp, "timestamp=%ld\n", (long)time(NULL));
+    
+    fclose(fp);
+    return true;
+}
+
+/* Read and display current wallpaper state */
+bool read_wallpaper_state(void) {
+    const char *state_path = get_state_file_path();
+    FILE *fp = fopen(state_path, "r");
+    
+    if (!fp) {
+        printf("No wallpaper state found.\n");
+        printf("The daemon may not be running or no wallpaper has been set yet.\n");
+        return false;
+    }
+    
+    char line[MAX_PATH_LENGTH];
+    char output[256] = "unknown";
+    char wallpaper[MAX_PATH_LENGTH] = "none";
+    char mode[64] = "unknown";
+    int cycle_index = 0;
+    int cycle_total = 0;
+    long timestamp = 0;
+    
+    while (fgets(line, sizeof(line), fp)) {
+        /* Remove newline */
+        line[strcspn(line, "\n")] = 0;
+        
+        if (strncmp(line, "output=", 7) == 0) {
+            strncpy(output, line + 7, sizeof(output) - 1);
+            output[sizeof(output) - 1] = '\0';
+        } else if (strncmp(line, "wallpaper=", 10) == 0) {
+            strncpy(wallpaper, line + 10, sizeof(wallpaper) - 1);
+            wallpaper[sizeof(wallpaper) - 1] = '\0';
+        } else if (strncmp(line, "mode=", 5) == 0) {
+            strncpy(mode, line + 5, sizeof(mode) - 1);
+            mode[sizeof(mode) - 1] = '\0';
+        } else if (strncmp(line, "cycle_index=", 12) == 0) {
+            cycle_index = atoi(line + 12);
+        } else if (strncmp(line, "cycle_total=", 12) == 0) {
+            cycle_total = atoi(line + 12);
+        } else if (strncmp(line, "timestamp=", 10) == 0) {
+            timestamp = atol(line + 10);
+        }
+    }
+    
+    fclose(fp);
+    
+    /* Display the state */
+    printf("Current Wallpaper Status:\n");
+    printf("  Output: %s\n", output);
+    printf("  Wallpaper: %s\n", wallpaper);
+    printf("  Mode: %s\n", mode);
+    
+    if (cycle_total > 0) {
+        printf("  Cycle: %d/%d\n", cycle_index + 1, cycle_total);
+    }
+    
+    if (timestamp > 0) {
+        time_t now = time(NULL);
+        long elapsed = now - timestamp;
+        printf("  Last changed: %ld seconds ago\n", elapsed);
+    }
+    
+    return true;
 }

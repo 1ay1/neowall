@@ -223,6 +223,12 @@ void log_debug(const char *format, ...);
 void log_set_level(int level);
 float ease_in_out_cubic(float t);
 
+/* State file functions */
+const char *get_state_file_path(void);
+bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
+                           const char *mode, int cycle_index, int cycle_total);
+bool read_wallpaper_state(void);
+
 /* Signal handling */
 void signal_handler_init(struct staticwall_state *state);
 void signal_handler_cleanup(void);
