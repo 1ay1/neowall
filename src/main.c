@@ -165,15 +165,14 @@ static void print_usage(const char *program_name) {
     printf("Usage: %s [OPTIONS]\n\n", program_name);
     printf("Options:\n");
     printf("  -c, --config PATH     Path to configuration file\n");
-    printf("  -d, --daemon          Run as daemon (background process)\n");
-    printf("  -f, --foreground      Run in foreground (default, explicit)\n");
+    printf("  -f, --foreground      Run in foreground (for debugging)\n");
     printf("  -w, --watch           Watch config file for changes and reload\n");
     printf("  -k, --kill            Stop running daemon\n");
     printf("  -v, --verbose         Enable verbose logging\n");
     printf("  -h, --help            Show this help message\n");
     printf("  -V, --version         Show version information\n");
     printf("\n");
-    printf("Note: By default, staticwall runs in foreground. Use -d for background.\n");
+    printf("Note: By default, staticwall runs as a daemon. Use -f for foreground.\n");
     printf("\n");
     printf("Configuration file locations (in order of preference):\n");
     printf("  1. $XDG_CONFIG_HOME/staticwall/config.vibe\n");
@@ -336,7 +335,7 @@ static bool create_config_directory(void) {
 int main(int argc, char *argv[]) {
     struct staticwall_state state = {0};
     char config_path[MAX_PATH_LENGTH] = {0};
-    bool daemon_mode = false;
+    bool daemon_mode = true;  /* Default to daemon mode */
     bool watch_config = false;
     bool verbose = false;
     int opt;
@@ -354,13 +353,10 @@ int main(int argc, char *argv[]) {
     };
 
     /* Parse command line arguments */
-    while ((opt = getopt_long(argc, argv, "c:dfwkvhV", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:fwkvhV", long_options, NULL)) != -1) {
         switch (opt) {
             case 'c':
                 strncpy(config_path, optarg, sizeof(config_path) - 1);
-                break;
-            case 'd':
-                daemon_mode = true;
                 break;
             case 'f':
                 daemon_mode = false;  /* Explicit foreground */

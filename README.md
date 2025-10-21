@@ -71,17 +71,20 @@ On first run, Staticwall will automatically:
 No root/sudo needed to run!
 
 ```bash
-# Run in foreground (see logs)
+# Run as daemon (default - runs in background)
 staticwall
 
-# Run in background (daemon mode)
-staticwall -d
+# Run in foreground (for debugging/viewing logs)
+staticwall -f
 
 # Stop running daemon (graceful shutdown)
 staticwall --kill
 
-# Run with verbose logging
+# Run with verbose logging (daemon mode)
 staticwall -v
+
+# Run in foreground with verbose logging
+staticwall -f -v
 
 # Use custom config
 staticwall -c /path/to/config.vibe
@@ -89,8 +92,8 @@ staticwall -c /path/to/config.vibe
 # Watch config for changes (auto-reload on config edit)
 staticwall --watch
 
-# Combine options (daemon + watch)
-staticwall -d -w
+# Combine options (foreground + watch + verbose)
+staticwall -f -w -v
 ```
 
 ### Quick Examples
