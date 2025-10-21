@@ -485,8 +485,14 @@ static void calculate_optimal_dimensions(uint32_t img_width, uint32_t img_height
             break;
             
         case MODE_CENTER:
+            /* Center mode: show at actual size (1:1 pixels), crop if too large */
+            /* No scaling - keep original dimensions, will crop in rendering if needed */
+            *out_width = img_width;
+            *out_height = img_height;
+            break;
+            
         case MODE_TILE:
-            /* For center/tile, only scale down if larger than display */
+            /* For tile, only scale down if larger than display */
             if (img_width > (uint32_t)display_width || img_height > (uint32_t)display_height) {
                 /* Scale to fit */
                 if (img_aspect > display_aspect) {
@@ -529,11 +535,13 @@ static struct image_data *image_scale_to_display(struct image_data *img, int32_t
         return img;
     }
     
-    /* Only downscale, never upscale */
-    if (target_width > img->width || target_height > img->height) {
-        log_debug("Keeping original size %ux%u (would upscale to %ux%u)",
-                 img->width, img->height, target_width, target_height);
-        return img;
+    /* Only downscale for modes other than FILL/STRETCH (which need to fill display) */
+    if (mode != MODE_FILL && mode != MODE_STRETCH) {
+        if (target_width > img->width || target_height > img->height) {
+            log_debug("Keeping original size %ux%u (would upscale to %ux%u)",
+                     img->width, img->height, target_width, target_height);
+            return img;
+        }
     }
     
     log_info("Scaling image from %ux%u to %ux%u for %dx%d display (mode=%d)",

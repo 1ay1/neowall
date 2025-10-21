@@ -278,15 +278,38 @@ static void calculate_vertex_coords(struct output_state *output, float vertices[
     
     switch (output->config.mode) {
         case MODE_CENTER: {
-            /* Center image without scaling (image was pre-scaled if too large) */
-            float scale_x = img_width / disp_width;
-            float scale_y = img_height / disp_height;
-            
-            /* Adjust vertex positions to center the image */
-            vertices[0] = -scale_x; vertices[1] = scale_y;   /* top-left position */
-            vertices[4] = scale_x;  vertices[5] = scale_y;   /* top-right position */
-            vertices[8] = -scale_x; vertices[9] = -scale_y;  /* bottom-left position */
-            vertices[12] = scale_x; vertices[13] = -scale_y; /* bottom-right position */
+            /* Center image at actual size (1:1 pixels) */
+            if (img_width > disp_width || img_height > disp_height) {
+                /* Image is larger than display - crop to show center portion */
+                if (img_width > disp_width) {
+                    /* Crop horizontally */
+                    float crop_ratio = disp_width / img_width;
+                    float crop_offset = (1.0f - crop_ratio) / 2.0f;
+                    vertices[2] = crop_offset;        /* top-left texcoord */
+                    vertices[6] = 1.0f - crop_offset; /* top-right texcoord */
+                    vertices[10] = crop_offset;       /* bottom-left texcoord */
+                    vertices[14] = 1.0f - crop_offset; /* bottom-right texcoord */
+                }
+                if (img_height > disp_height) {
+                    /* Crop vertically */
+                    float crop_ratio = disp_height / img_height;
+                    float crop_offset = (1.0f - crop_ratio) / 2.0f;
+                    vertices[3] = crop_offset;        /* top-left texcoord */
+                    vertices[7] = crop_offset;        /* top-right texcoord */
+                    vertices[11] = 1.0f - crop_offset; /* bottom-left texcoord */
+                    vertices[15] = 1.0f - crop_offset; /* bottom-right texcoord */
+                }
+                /* Vertices stay fullscreen to fill display */
+            } else {
+                /* Image is smaller than display - center it */
+                float scale_x = img_width / disp_width;
+                float scale_y = img_height / disp_height;
+                
+                vertices[0] = -scale_x; vertices[1] = scale_y;   /* top-left position */
+                vertices[4] = scale_x;  vertices[5] = scale_y;   /* top-right position */
+                vertices[8] = -scale_x; vertices[9] = -scale_y;  /* bottom-left position */
+                vertices[12] = scale_x; vertices[13] = -scale_y; /* bottom-right position */
+            }
             break;
         }
         

@@ -238,11 +238,41 @@ output {
 
 #### Display Modes
 
-- **fill** - Scale to fill screen, crop if needed (recommended for most wallpapers)
-- **fit** - Scale to fit inside screen, maintain aspect ratio (may show black bars)
-- **center** - Center image without scaling (good for logos or patterns)
-- **stretch** - Stretch to fill screen (may distort image)
-- **tile** - Repeat/tile the image to fill screen (good for patterns)
+Staticwall supports five display modes, each handling images differently based on their size relative to your display.
+
+**Available Modes:**
+
+- **fill** - Scale to cover entire display, crop excess edges (no black bars, maintains aspect ratio)
+- **fit** - Scale to fit inside display, show complete image (may show black bars, maintains aspect ratio)
+- **center** - Show image at actual pixel size (1:1, no scaling)
+- **stretch** - Stretch to exact display dimensions (distorts aspect ratio)
+- **tile** - Repeat image pattern across screen
+
+**Mode Comparison:**
+
+Assuming a **1920x1080 display**, here's how each mode handles different image sizes:
+
+| Image Size | fill | fit | center | stretch | tile |
+|------------|------|-----|--------|---------|------|
+| **800x600** (small) | Upscaled to 1920x1440, cropped vertically | Centered at 800x600 with black bars | Centered at 800x600 with black bars | Stretched to 1920x1080 (distorted) | Repeated ~2.4×1.8 times |
+| **1920x1080** (exact) | Fills screen perfectly | Fills screen perfectly | Fills screen perfectly | Fills screen perfectly | Shows once (full screen) |
+| **1600x1200** (4:3) | Upscaled to 1920x1440, cropped top/bottom | Scaled to 1440x1080, black bars on sides | Shows at 1600x1200, edges cropped | Stretched to 1920x1080 (distorted) | Scaled down, then tiled |
+| **3840x2160** (4K) | Scaled to 1920x1080 (same aspect) | Scaled to 1920x1080 | Center 1920x1080 portion shown (NOT scaled) | Scaled to 1920x1080 (same aspect) | Scaled down, then tiled |
+
+**Key Differences:**
+
+- **fill** vs **stretch**: Both fill the screen, but `fill` maintains aspect ratio (crops edges), while `stretch` distorts the image
+- **fit** vs **center**: Both show small images centered with black bars, but `fit` scales down large images while `center` crops them at full resolution
+- **fill** vs **center** (large images): `fill` scales and crops, `center` shows native resolution center portion
+- **tile**: Repeats the image pattern; scales down first if image is larger than display
+
+**When to Use Each Mode:**
+
+- **fill** - Most common for wallpapers; fills screen without distortion (recommended)
+- **fit** - When you want to see the entire image without any cropping
+- **center** - For pixel art or when you want true 1:1 pixel mapping
+- **stretch** - Rarely used; only when you want exact screen fit regardless of distortion
+- **tile** - For patterns, textures, or small repeating backgrounds
 
 #### Transitions
 
