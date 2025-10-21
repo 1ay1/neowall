@@ -203,13 +203,13 @@ staticwall
 #### Background/Daemon Mode
 
 ```bash
-staticwall --daemon
+staticwall
 ```
 
 #### With Config File Watching
 
 ```bash
-staticwall --watch --daemon
+staticwall -w
 ```
 
 ## Autostart with Your Compositor
@@ -218,21 +218,21 @@ staticwall --watch --daemon
 
 Add to `~/.config/sway/config`:
 ```
-exec staticwall --daemon
+exec staticwall
 ```
 
 ### Hyprland
 
 Add to `~/.config/hypr/hyprland.conf`:
 ```
-exec-once staticwall --daemon
+exec-once staticwall
 ```
 
 ### river
 
 Add to `~/.config/river/init`:
 ```bash
-staticwall --daemon &
+staticwall &
 ```
 
 ### wayfire
@@ -240,7 +240,7 @@ staticwall --daemon &
 Add to `~/.config/wayfire.ini`:
 ```ini
 [autostart]
-staticwall staticwall --daemon
+staticwall staticwall
 ```
 
 ## Systemd Service (Optional)

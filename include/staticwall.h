@@ -143,6 +143,8 @@ struct staticwall_state {
     /* Runtime state */
     bool running;
     bool reload_requested;
+    bool paused;                /* Pause wallpaper cycling */
+    bool next_requested;        /* Skip to next wallpaper */
     pthread_t watch_thread;
     pthread_mutex_t state_mutex;
 

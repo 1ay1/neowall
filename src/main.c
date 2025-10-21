@@ -160,6 +160,44 @@ static bool kill_daemon(void) {
     return false;
 }
 
+/* Send signal to running daemon */
+static bool send_daemon_signal(int signal, const char *action) {
+    const char *pid_path = get_pid_file_path();
+    FILE *fp = fopen(pid_path, "r");
+    
+    if (!fp) {
+        printf("No running staticwall daemon found.\n");
+        printf("Start the daemon first with: staticwall\n");
+        return false;
+    }
+    
+    pid_t pid;
+    if (fscanf(fp, "%d", &pid) != 1) {
+        fclose(fp);
+        log_error("Failed to read PID from %s", pid_path);
+        return false;
+    }
+    fclose(fp);
+    
+    /* Check if process exists */
+    if (kill(pid, 0) == -1) {
+        if (errno == ESRCH) {
+            printf("Staticwall daemon (PID %d) is not running.\n", pid);
+            remove_pid_file();
+            return false;
+        }
+    }
+    
+    /* Send signal */
+    if (kill(pid, signal) == -1) {
+        log_error("Failed to send signal to daemon: %s", strerror(errno));
+        return false;
+    }
+    
+    printf("%s\n", action);
+    return true;
+}
+
 static void print_usage(const char *program_name) {
     printf("Staticwall v%s - Sets wallpapers until it... doesn't.\n\n", STATICWALL_VERSION);
     printf("Usage: %s [OPTIONS]\n\n", program_name);
@@ -167,12 +205,19 @@ static void print_usage(const char *program_name) {
     printf("  -c, --config PATH     Path to configuration file\n");
     printf("  -f, --foreground      Run in foreground (for debugging)\n");
     printf("  -w, --watch           Watch config file for changes and reload\n");
-    printf("  -k, --kill            Stop running daemon\n");
     printf("  -v, --verbose         Enable verbose logging\n");
     printf("  -h, --help            Show this help message\n");
     printf("  -V, --version         Show version information\n");
     printf("\n");
+    printf("Daemon Control Commands (when daemon is running):\n");
+    printf("  kill                  Stop running daemon\n");
+    printf("  next                  Skip to next wallpaper\n");
+    printf("  pause                 Pause wallpaper cycling\n");
+    printf("  resume                Resume wallpaper cycling\n");
+    printf("  reload                Reload configuration\n");
+    printf("\n");
     printf("Note: By default, staticwall runs as a daemon. Use -f for foreground.\n");
+    printf("If a daemon is already running, subsequent calls act as control commands.\n");
     printf("\n");
     printf("Configuration file locations (in order of preference):\n");
     printf("  1. $XDG_CONFIG_HOME/staticwall/config.vibe\n");
@@ -224,6 +269,26 @@ static void signal_handler(int signum) {
                 global_state->reload_requested = true;
             }
             break;
+        case SIGUSR1:
+            log_info("Received SIGUSR1, skipping to next wallpaper...");
+            if (global_state) {
+                global_state->next_requested = true;
+            }
+            break;
+        case SIGUSR2:
+            log_info("Received SIGUSR2, pausing wallpaper cycling...");
+            if (global_state) {
+                global_state->paused = true;
+                log_info("Wallpaper cycling paused");
+            }
+            break;
+        case SIGCONT:
+            log_info("Received SIGCONT, resuming wallpaper cycling...");
+            if (global_state) {
+                global_state->paused = false;
+                log_info("Wallpaper cycling resumed");
+            }
+            break;
         default:
             break;
     }
@@ -239,6 +304,9 @@ static void setup_signal_handlers(void) {
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGHUP, &sa, NULL);
+    sigaction(SIGUSR1, &sa, NULL);
+    sigaction(SIGUSR2, &sa, NULL);
+    sigaction(SIGCONT, &sa, NULL);
 
     /* Ignore SIGPIPE */
     signal(SIGPIPE, SIG_IGN);
@@ -340,12 +408,30 @@ int main(int argc, char *argv[]) {
     bool verbose = false;
     int opt;
 
+    /* Check for non-option arguments (control commands) */
+    if (argc >= 2 && argv[1][0] != '-') {
+        const char *cmd = argv[1];
+        if (strcmp(cmd, "kill") == 0) {
+            return kill_daemon() ? EXIT_SUCCESS : EXIT_FAILURE;
+        } else if (strcmp(cmd, "next") == 0) {
+            return send_daemon_signal(SIGUSR1, "Skipping to next wallpaper...") ? EXIT_SUCCESS : EXIT_FAILURE;
+        } else if (strcmp(cmd, "pause") == 0) {
+            return send_daemon_signal(SIGUSR2, "Pausing wallpaper cycling...") ? EXIT_SUCCESS : EXIT_FAILURE;
+        } else if (strcmp(cmd, "resume") == 0) {
+            return send_daemon_signal(SIGCONT, "Resuming wallpaper cycling...") ? EXIT_SUCCESS : EXIT_FAILURE;
+        } else if (strcmp(cmd, "reload") == 0) {
+            return send_daemon_signal(SIGHUP, "Reloading configuration...") ? EXIT_SUCCESS : EXIT_FAILURE;
+        } else {
+            fprintf(stderr, "Unknown command: %s\n", cmd);
+            fprintf(stderr, "Valid commands: kill, next, pause, resume, reload\n");
+            return EXIT_FAILURE;
+        }
+    }
+
     static struct option long_options[] = {
         {"config",     required_argument, 0, 'c'},
-        {"daemon",     no_argument,       0, 'd'},
         {"foreground", no_argument,       0, 'f'},
         {"watch",      no_argument,       0, 'w'},
-        {"kill",       no_argument,       0, 'k'},
         {"verbose",    no_argument,       0, 'v'},
         {"help",       no_argument,       0, 'h'},
         {"version",    no_argument,       0, 'V'},
@@ -353,7 +439,7 @@ int main(int argc, char *argv[]) {
     };
 
     /* Parse command line arguments */
-    while ((opt = getopt_long(argc, argv, "c:fwkvhV", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:fwvhV", long_options, NULL)) != -1) {
         switch (opt) {
             case 'c':
                 strncpy(config_path, optarg, sizeof(config_path) - 1);
@@ -364,9 +450,6 @@ int main(int argc, char *argv[]) {
             case 'w':
                 watch_config = true;
                 break;
-            case 'k':
-                /* Kill daemon and exit */
-                return kill_daemon() ? EXIT_SUCCESS : EXIT_FAILURE;
             case 'v':
                 /* Verbose mode - enable debug logging */
                 verbose = true;
@@ -422,7 +505,7 @@ int main(int argc, char *argv[]) {
         log_error("Staticwall is already running (PID %d)", existing_pid);
         fprintf(stderr, "Error: Staticwall is already running (PID %d)\n", existing_pid);
         fprintf(stderr, "PID file: %s\n", pid_path);
-        fprintf(stderr, "Use 'staticwall --kill' to stop the running instance.\n");
+        fprintf(stderr, "Use 'staticwall kill' to stop the running instance.\n");
         return EXIT_FAILURE;
     }
 
@@ -440,6 +523,9 @@ int main(int argc, char *argv[]) {
 
     /* Initialize state */
     state.running = true;
+    state.reload_requested = false;
+    state.paused = false;
+    state.next_requested = false;
     state.watch_config = watch_config;
     strncpy(state.config_path, config_path, sizeof(state.config_path) - 1);
     state.config_path[sizeof(state.config_path) - 1] = '\0';

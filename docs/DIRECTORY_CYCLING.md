@@ -260,11 +260,11 @@ default {
 Switch between them:
 ```bash
 # Work mode
-staticwall -c ~/.config/staticwall/work.vibe -d
+staticwall -c ~/.config/staticwall/work.vibe
 
 # Leisure mode
-staticwall --kill
-staticwall -c ~/.config/staticwall/leisure.vibe -d
+staticwall kill
+staticwall -c ~/.config/staticwall/leisure.vibe
 ```
 
 ## 🐛 Troubleshooting
@@ -384,7 +384,7 @@ ln -s ~/Pictures/abstract/*.jpg ~/Pictures/all-walls/
 
 5. **Use hot-reload for experimentation**
    ```bash
-   staticwall -d -w    # Daemon mode with config watching
+   staticwall -w    # Daemon with config watching
    # Edit config, changes apply automatically!
    ```
 

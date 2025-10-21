@@ -30,8 +30,14 @@ static void render_outputs(struct staticwall_state *state) {
     uint64_t current_time = get_time_ms();
 
     while (output) {
+        /* Handle next wallpaper request */
+        if (state->next_requested && output->config.cycle && output->config.cycle_count > 0) {
+            output_cycle_wallpaper(output);
+            current_time = get_time_ms();
+        }
+        
         /* Check if we should cycle wallpaper (before rendering) */
-        if (output->config.cycle && output->config.duration > 0) {
+        if (!state->paused && output->config.cycle && output->config.duration > 0) {
             if (output_should_cycle(output, current_time)) {
                 output_cycle_wallpaper(output);
                 /* Recalculate current_time after cycling since it may have taken some time */
@@ -267,6 +273,11 @@ void event_loop_run(struct staticwall_state *state) {
                 output->needs_redraw = true;
             }
             output = output->next;
+        }
+        
+        /* Reset next_requested flag after processing all outputs */
+        if (state->next_requested) {
+            state->next_requested = false;
         }
     }
 

@@ -691,10 +691,10 @@ output {
 killall -HUP staticwall
 
 # Or restart
-killall staticwall && staticwall --daemon
+staticwall kill && staticwall
 
 # Or use watch mode (automatic reload)
-staticwall --watch --daemon
+staticwall -w
 ```
 
 ## Best Practices
@@ -727,10 +727,10 @@ default {
 ### 4. Test Before Daemonizing
 ```bash
 # Test in foreground first
-staticwall -v
+staticwall -f -v
 
 # Then run as daemon
-staticwall --daemon
+staticwall
 ```
 
 ### 5. Use Reasonable Durations

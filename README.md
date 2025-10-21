@@ -71,14 +71,11 @@ On first run, Staticwall will automatically:
 No root/sudo needed to run!
 
 ```bash
-# Run as daemon (default - runs in background)
+# Start daemon (default - runs in background)
 staticwall
 
 # Run in foreground (for debugging/viewing logs)
 staticwall -f
-
-# Stop running daemon (graceful shutdown)
-staticwall --kill
 
 # Run with verbose logging (daemon mode)
 staticwall -v
@@ -90,11 +87,34 @@ staticwall -f -v
 staticwall -c /path/to/config.vibe
 
 # Watch config for changes (auto-reload on config edit)
-staticwall --watch
+staticwall -w
 
 # Combine options (foreground + watch + verbose)
 staticwall -f -w -v
 ```
+
+### Controlling the Daemon
+
+Once the daemon is running, use these commands to control it:
+
+```bash
+# Stop the daemon
+staticwall kill
+
+# Skip to next wallpaper immediately
+staticwall next
+
+# Pause wallpaper cycling
+staticwall pause
+
+# Resume wallpaper cycling
+staticwall resume
+
+# Reload configuration without restarting
+staticwall reload
+```
+
+**Note:** Staticwall prevents multiple instances from running. If you try to start it while a daemon is already running, you'll get an error. Use `staticwall kill` first to stop the existing instance.
 
 ### Quick Examples
 
@@ -320,43 +340,60 @@ Staticwall works with any Wayland compositor that implements `wlr-layer-shell`:
 
 ## Commands
 
+### Starting Staticwall
+
 ```bash
 staticwall [OPTIONS]
 
 OPTIONS:
   -c, --config PATH    Specify config file path
-  -d, --daemon         Run in background
-  -f, --foreground     Run in foreground (default)
+  -f, --foreground     Run in foreground (for debugging)
   -w, --watch          Watch config file for changes
-  -k, --kill           Stop running daemon
   -v, --verbose        Enable verbose logging
   -h, --help           Show help message
   -V, --version        Show version information
 ```
 
-### Signals
+By default, `staticwall` runs as a daemon (background process). Use `-f` to run in foreground.
 
+### Daemon Control Commands
+
+When the daemon is running, control it with these commands:
+
+```bash
+staticwall kill      # Stop the daemon gracefully
+staticwall next      # Skip to next wallpaper immediately
+staticwall pause     # Pause wallpaper cycling
+staticwall resume    # Resume wallpaper cycling
+staticwall reload    # Reload configuration without restarting
+```
+
+### Signals (Advanced)
+
+You can also control the daemon using signals:
+
+- `SIGUSR1` - Skip to next wallpaper
+- `SIGUSR2` - Pause wallpaper cycling
+- `SIGCONT` - Resume wallpaper cycling
 - `SIGHUP` - Reload configuration
 - `SIGTERM/SIGINT` - Graceful shutdown
 
 ```bash
-# Stop daemon (preferred method)
-staticwall --kill
-
-# Alternative: using killall
-killall staticwall
-
-# Reload config without restarting
-killall -HUP staticwall
+# Examples using killall
+killall -USR1 staticwall    # Next wallpaper
+killall -USR2 staticwall    # Pause cycling
+killall -CONT staticwall    # Resume cycling
+killall -HUP staticwall     # Reload config
+killall -TERM staticwall    # Stop daemon
 ```
 
-**Note:** Staticwall automatically prevents multiple instances from running. If you try to start it while it's already running, you'll get a helpful error message with the PID of the running instance. Just use `staticwall --kill` to stop it first.
+**Note:** Staticwall automatically prevents multiple instances from running. If you try to start it while it's already running, you'll get a helpful error message with the PID of the running instance. Use `staticwall kill` to stop it first.
 
 ## Troubleshooting
 
 ### Already running error
 If you get "Staticwall is already running", this means an instance is already active:
-1. Stop it with: `staticwall --kill`
+1. Stop it with: `staticwall kill`
 2. Or check if it's a stale PID: the error shows the PID, verify with `ps -p <PID>`
 3. If PID doesn't exist, remove the PID file: `rm $XDG_RUNTIME_DIR/staticwall.pid`
 
@@ -479,7 +516,7 @@ Because the existing ones didn't crash the way we wanted them to. Just kidding â
 
 ### How do I stop the daemon?
 
-Just run `staticwall --kill`. It'll gracefully stop the running daemon, clean up resources, and remove the PID file. Much more civilized than `killall`, though that works too if you're feeling nostalgic for the old ways.
+Just run `staticwall kill`. It'll gracefully stop the running daemon, clean up resources, and remove the PID file. Much more civilized than `killall`, though that works too if you're feeling nostalgic for the old ways.
 
 ### How do I cycle through all wallpapers in a folder?
 
@@ -508,7 +545,9 @@ This is intentional to keep things simple and predictable.
 
 ### Can I run multiple instances?
 
-No, and you don't want to. Staticwall prevents multiple instances from running simultaneously because having multiple wallpaper daemons fighting over your display is a recipe for confusion (and possibly a avant-garde art installation). If you need to restart it, use `staticwall --kill` first.
+No, and you don't want to. Staticwall prevents multiple instances from running simultaneously because having multiple wallpaper daemons fighting over your display is a recipe for confusion (and possibly an avant-garde art installation). If you need to restart it, use `staticwall kill` first.
+
+Once the daemon is running, any subsequent calls to `staticwall` with control commands (`kill`, `next`, `pause`, `resume`, `reload`) will control the running daemon instead of starting a new instance.
 
 ### Is this production-ready?
 

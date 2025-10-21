@@ -121,7 +121,7 @@ killall -HUP staticwall
 killall staticwall
 
 # Auto-reload on config changes
-staticwall --watch --daemon
+staticwall -w
 ```
 
 ## Finding Your Monitor Names
