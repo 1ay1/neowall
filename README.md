@@ -18,7 +18,7 @@ A lightweight, reliable Wayland wallpaper daemon written in C. Perfect for tilin
 - ⚡ **Hardware Accelerated**: OpenGL ES rendering via EGL
 - 🔥 **Hot Reload**: Update configuration without restarting (`SIGHUP`)
 - 🎬 **Smooth Transitions**: Fade and slide effects between wallpapers
-- 📁 **Directory Support**: Point to a folder and cycle through all images
+- 📁 **Directory Support**: Point to a folder and automatically cycle through all images - just set `path` to a directory!
 - 🪶 **Minimal Dependencies**: Pure C with no heavy frameworks (because who needs bloated libraries when you have raw pointers and existential dread?)
 - 💀 **Memory Safety**: We free our allocations. Most of the time. Okay, all of the time, but the joke was funnier before we fixed the bugs.
 - 🔧 **VIBE Config Format**: Simple, human-readable configuration
@@ -93,6 +93,52 @@ staticwall --watch
 staticwall -d -w
 ```
 
+### Quick Examples
+
+**Example 1: Cycle through wallpapers in a directory (most common)**
+```vibe
+default {
+  path ~/Pictures/wallpapers/    # ← Directory with trailing slash!
+  duration 300                    # Change every 5 minutes
+  mode fill
+  transition fade
+}
+```
+
+**Example 2: Static wallpaper (no cycling)**
+```vibe
+default {
+  path ~/Pictures/my-wallpaper.png    # ← Single file, no trailing slash
+  mode fill
+}
+```
+
+**Example 3: Different wallpapers per monitor**
+```vibe
+output {
+  eDP-1 {
+    path ~/Pictures/laptop-walls/    # Laptop: cycle through directory
+    duration 600
+  }
+  
+  HDMI-A-1 {
+    path ~/Pictures/desk.jpg         # External monitor: static image
+    mode center
+  }
+}
+```
+
+**Example 4: Fast cycling with transitions**
+```vibe
+default {
+  path ~/Pictures/slideshow/
+  duration 60                         # Change every minute
+  transition slide_left
+  transition_duration 500             # Smooth 500ms transition
+  mode fill
+}
+```
+
 ### Configuration
 
 Edit `~/.config/staticwall/config.vibe`:
@@ -104,11 +150,12 @@ default {
   mode fill
 }
 
-# Cycle through a directory of wallpapers
+# 🔥 Cycle through ALL images in a directory (recommended!)
+# Just point path to a directory and Staticwall automatically loads all PNG/JPEG files
 default {
-  path ~/Pictures/wallpapers/
-  duration 300  # Change every 5 minutes
-  transition fade
+  path ~/Pictures/wallpapers/    # ← Note the trailing slash for directories!
+  duration 300                    # Change every 5 minutes (in seconds)
+  transition fade                 # Smooth fade between wallpapers
 }
 
 # Configure specific monitor
@@ -127,26 +174,122 @@ output {
 }
 ```
 
+#### Configuration Options
+
+**`path`** (required) - The most important setting!
+
+**📁 DIRECTORY MODE (Recommended for cycling):**
+- Point to a folder to automatically cycle through ALL images inside
+- Example: `path ~/Pictures/wallpapers/`
+- **IMPORTANT:** Must end with `/` slash for directories!
+- Staticwall auto-detects and loads all PNG/JPEG files in the directory
+- Images cycle in alphabetical order by filename
+- Subdirectories are NOT scanned (only top-level files)
+- Hidden files (starting with `.`) are ignored
+
+**📄 SINGLE FILE MODE:**
+- Path to one specific image file (PNG or JPEG)
+- Example: `path ~/Pictures/wallpaper.png`
+- Wallpaper stays static unless manually changed
+
+**`mode`** (optional, default: `fill`)
+- Display mode for the wallpaper
+
+**`duration`** (optional, default: `0` - disabled)
+- Time in seconds before switching to next wallpaper
+- Only works when `path` is a directory or when cycling is configured
+- Set to `0` to disable automatic cycling
+- Examples: `300` (5 min), `600` (10 min), `1800` (30 min), `3600` (1 hour)
+
+**`transition`** (optional, default: `none`)
+- Animation effect when changing wallpapers
+- Only visible when cycling between wallpapers
+
+**`transition_duration`** (optional, default: `300` ms)
+- How long the transition animation takes
+- Value in milliseconds
+- Examples: `100` (fast), `500` (smooth), `1000` (slow)
+
 #### Display Modes
 
-- **fill** - Scale to fill screen, crop if needed (recommended)
-- **fit** - Scale to fit inside screen, may have black bars
-- **center** - Center image without scaling
-- **stretch** - Stretch to fill screen, may distort
-- **tile** - Tile the image
+- **fill** - Scale to fill screen, crop if needed (recommended for most wallpapers)
+- **fit** - Scale to fit inside screen, maintain aspect ratio (may show black bars)
+- **center** - Center image without scaling (good for logos or patterns)
+- **stretch** - Stretch to fill screen (may distort image)
+- **tile** - Repeat/tile the image to fill screen (good for patterns)
 
 #### Transitions
 
-- **none** - Instant change
-- **fade** - Smooth fade between images
-- **slide_left** - Slide from right to left
-- **slide_right** - Slide from left to right
+- **none** - Instant change (no animation)
+- **fade** - Smooth fade/crossfade between images
+- **slide_left** - New wallpaper slides in from right to left
+- **slide_right** - New wallpaper slides in from left to right
+
+#### Configuration Sections
+
+**`default { }`**
+- Applies to all monitors unless overridden
+- Required if you don't specify per-monitor configs
+
+**`output { monitor-name { } }`**
+- Per-monitor configuration
+- Overrides `default` settings for specific monitors
+- Find monitor names with: `swaymsg -t get_outputs` or `hyprctl monitors`
+
+#### Complete Configuration Example
+
+```vibe
+# Default config for all monitors
+default {
+  path ~/Pictures/Wallpapers/
+  mode fill
+  duration 900
+  transition fade
+  transition_duration 500
+}
+
+# Per-monitor overrides
+output {
+  # Laptop display - slower cycle
+  eDP-1 {
+    path ~/Pictures/Laptop/
+    mode fit
+    duration 1800
+    transition fade
+  }
+  
+  # Main monitor - different wallpaper set
+  DP-1 {
+    path ~/Pictures/Desktop/
+    mode fill
+    duration 600
+    transition slide_left
+    transition_duration 300
+  }
+  
+  # Vertical monitor - static wallpaper
+  HDMI-A-1 {
+    path ~/Pictures/vertical.png
+    mode fit
+    # No duration = no cycling
+  }
+}
+```
+
+**Pro Tips:**
+- Organize wallpapers in subdirectories: `~/Pictures/Wallpapers/Nature/`, `~/Pictures/Wallpapers/Abstract/`
+- Point `path` to different directories for different moods/themes
+- Use `mode fit` for ultrawide monitors to avoid excessive cropping
+- Set longer `duration` for work hours, shorter for leisure
+- Use `transition none` for minimal resource usage
+- Hot-reload config with `killall -HUP staticwall` or `staticwall --watch` to test settings live
 
 ## Documentation
 
 - [Installation Guide](docs/INSTALL.md) - Detailed installation instructions
 - [Quick Start Guide](docs/QUICKSTART.md) - Get up and running fast
 - [Configuration Guide](docs/CONFIG_GUIDE.md) - Complete configuration reference
+- [Directory Cycling Guide](docs/DIRECTORY_CYCLING.md) - How to cycle through wallpaper folders
 - [VIBE Tutorial](docs/VIBE_TUTORIAL.md) - Learn the VIBE config format
 
 ## Dependencies
@@ -221,9 +364,39 @@ If you get "Staticwall is already running", this means an instance is already ac
 4. Check permissions on image files
 
 ### Cycling not working
-1. Ensure `duration` is set in config
-2. Verify directory contains supported images (PNG, JPEG)
-3. Check logs for cycling messages with `-v` flag
+1. **Check path is a directory:** Make sure path ends with `/` (e.g., `~/Pictures/wallpapers/`)
+2. **Ensure duration is set:** `duration 300` (or any value > 0) must be in your config
+3. **Verify directory has images:** 
+   ```bash
+   ls ~/Pictures/wallpapers/*.{png,jpg,jpeg}
+   ```
+4. **Check supported formats:** Only PNG and JPEG/JPG files are loaded
+5. **Run with verbose logging:** `staticwall -v` to see cycling messages
+6. **Verify directory permissions:** Ensure you have read access to the directory and images
+7. **Check for hidden files:** Files starting with `.` are ignored
+
+**Example working config:**
+```vibe
+default {
+  path ~/Pictures/wallpapers/    # Note the trailing slash!
+  duration 300                    # 5 minutes
+  mode fill
+}
+```
+
+### Directory not being detected as directory
+- **Problem:** Staticwall treats your directory as a single file
+- **Solution:** Add a trailing slash: `~/Pictures/wallpapers/` not `~/Pictures/wallpapers`
+- **Verify:** Run `staticwall -v` and check if it says "Loading images from directory" or "Loading single image"
+
+### No images found in directory
+1. **Check file extensions:** Only `.png`, `.jpg`, `.jpeg` are supported (case-insensitive)
+2. **Check subdirectories:** Staticwall only scans the specified directory, not subdirectories
+3. **Test manually:** 
+   ```bash
+   find ~/Pictures/wallpapers/ -maxdepth 1 -type f \( -iname "*.png" -o -iname "*.jpg" -o -iname "*.jpeg" \)
+   ```
+4. **File permissions:** Ensure image files are readable: `chmod 644 ~/Pictures/wallpapers/*`
 
 ### Config not loading
 1. Verify config syntax (no quotes on values)
@@ -304,6 +477,31 @@ Because the existing ones didn't crash the way we wanted them to. Just kidding �
 ### How do I stop the daemon?
 
 Just run `staticwall --kill`. It'll gracefully stop the running daemon, clean up resources, and remove the PID file. Much more civilized than `killall`, though that works too if you're feeling nostalgic for the old ways.
+
+### How do I cycle through all wallpapers in a folder?
+
+Just point `path` to a directory with a trailing slash! Staticwall automatically detects all PNG/JPEG files and cycles through them.
+
+```vibe
+default {
+  path ~/Pictures/wallpapers/    # ← Trailing slash is important!
+  duration 300                    # Change every 5 minutes
+}
+```
+
+That's it! No need to list each file manually. Organize your wallpapers in folders and point to the folder.
+
+### Why isn't my directory being recognized?
+
+Make sure you include the trailing slash: `~/Pictures/wallpapers/` not `~/Pictures/wallpapers`. Without the slash, Staticwall thinks it's a single file, not a directory.
+
+Run `staticwall -v` to see if it says "Loading images from directory" or trying to load a single file.
+
+### Can I cycle through subdirectories?
+
+No, Staticwall only scans the immediate directory you specify (non-recursive). If you want to include subdirectories, you'll need to move or symlink the images to a single folder.
+
+This is intentional to keep things simple and predictable.
 
 ### Can I run multiple instances?
 

@@ -23,8 +23,19 @@
 # At minimum, you need to set a 'path' to your wallpaper image.
 
 default {
-  # Path to wallpaper image (required)
-  # Formats: PNG, JPEG/JPG
+  # Path to wallpaper (required)
+  #
+  # 📁 DIRECTORY MODE (Recommended!):
+  #    Point to a folder to automatically cycle through ALL images
+  #    Example: path ~/Pictures/wallpapers/
+  #    IMPORTANT: Must end with / for directories!
+  #    Loads all PNG/JPEG files in alphabetical order
+  #
+  # 📄 SINGLE FILE MODE:
+  #    Path to one specific image file
+  #    Example: path ~/Pictures/wallpaper.png
+  #
+  # Supported formats: PNG, JPEG/JPG
   # Use ~ for home directory, absolute paths, or relative paths
   path ~/Pictures/wallpaper.png
 
@@ -50,16 +61,9 @@ default {
   # Examples: 100 (fast), 300 (default), 500 (smooth), 1000 (slow)
   transition_duration 300
 
-  # Wallpaper cycling list (optional)
-  # Option 1: List individual files
-  # cycle [
-  #   ~/Pictures/wallpaper1.png
-  #   ~/Pictures/wallpaper2.jpg
-  #   ~/Pictures/wallpaper3.png
-  # ]
-  #
-  # Option 2: Use a directory (automatically loads all images)
-  # cycle ~/Pictures/Wallpapers
+  # ⚠️ NOTE: You don't need a 'cycle' option anymore!
+  # Just set path to a directory (with trailing /) and set duration > 0
+  # Staticwall automatically cycles through all images in the directory
 }
 
 # ============================================================================
@@ -132,14 +136,14 @@ output {
 #   }
 # }
 
-# --- Example 3: Cycling Wallpapers from Directory ---
+# --- Example 3: Cycling Wallpapers from Directory (RECOMMENDED!) ---
 # default {
-#   path ~/Pictures/Wallpapers/001.png
+#   path ~/Pictures/Wallpapers/       # ← Trailing slash = directory mode!
 #   mode fill
-#   duration 600
+#   duration 600                      # Change every 10 minutes
 #   transition fade
 #   transition_duration 1000
-#   cycle ~/Pictures/Wallpapers  # Auto-loads all images from directory!
+#   # That's it! Staticwall auto-loads ALL PNG/JPEG files from the directory
 # }
 
 # --- Example 4: Multi-Monitor Gaming Setup ---
@@ -203,10 +207,11 @@ output {
 #    - Slow:    1800 (30 minutes)
 #    - Hourly:  3600 (1 hour)
 #
-# 9. Directory cycling (NEW!):
-#    Instead of listing files, just specify a directory:
-#    cycle ~/Pictures/Wallpapers
+# 9. Directory cycling:
+#    Just set path to a directory with trailing slash:
+#    path ~/Pictures/Wallpapers/
 #    This automatically loads all PNG and JPEG files
+#    Much easier than listing files manually!
 #
 # ============================================================================
 # TROUBLESHOOTING

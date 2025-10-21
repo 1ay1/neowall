@@ -1,0 +1,161 @@
+name: 🐛 Bug Report
+description: Report a bug or crash in Staticwall
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug!
+
+        **"Sets wallpapers until it... doesn't"** - Well, it looks like we hit the "doesn't" part. Let's fix it.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of what went wrong
+      placeholder: "Staticwall crashed when I tried to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Start staticwall with `staticwall -d`
+        2. Change wallpaper to...
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: "Wallpaper should change smoothly"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+      placeholder: "Staticwall crashed / froze / displayed wrong wallpaper"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Run with verbose logging: `staticwall -v`
+        Or check logs: `journalctl --user -u staticwall.service -n 50`
+      render: shell
+      placeholder: |
+        Paste relevant logs here...
+
+  - type: input
+    id: version
+    attributes:
+      label: Staticwall Version
+      description: Run `staticwall --version`
+      placeholder: "v0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: compositor
+    attributes:
+      label: Wayland Compositor
+      description: Which compositor are you using?
+      options:
+        - Sway
+        - Hyprland
+        - River
+        - Wayfire
+        - Newm
+        - Other (specify below)
+    validations:
+      required: true
+
+  - type: input
+    id: compositor-version
+    attributes:
+      label: Compositor Version
+      description: "e.g., `sway --version` or `hyprctl version`"
+      placeholder: "sway version 1.8"
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Arch Linux
+        - Ubuntu
+        - Debian
+        - Fedora
+        - NixOS
+        - Gentoo
+        - Void Linux
+        - Other (specify below)
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS Version
+      placeholder: "e.g., Ubuntu 24.04, Arch (2024-01-15)"
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration File
+      description: Share your `~/.config/staticwall/config.vibe` (remove sensitive paths if needed)
+      render: vibe
+      placeholder: |
+        default {
+          path ~/Pictures/wallpaper.png
+          mode fill
+        }
+
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation Method
+      options:
+        - Built from source (make)
+        - AUR (staticwall-git)
+        - Package manager
+        - Other
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: |
+        - Number of monitors?
+        - Using transitions?
+        - Does it happen consistently or randomly?
+        - Any recent system updates?
+      placeholder: "Any other context about the problem..."
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues for duplicates
+          required: true
+        - label: I have included the output of `staticwall --version`
+          required: true
+        - label: I have included relevant logs from `staticwall -v`
+          required: true
+        - label: I have included my configuration file
+          required: false

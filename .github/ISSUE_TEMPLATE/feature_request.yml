@@ -1,0 +1,114 @@
+name: ✨ Feature Request
+description: Suggest a new feature or enhancement for Staticwall
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature!
+
+        Remember: Staticwall sets wallpapers until it doesn't. Let's make sure it keeps doing that (with style).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? Is your feature request related to a problem?
+      placeholder: "I'm frustrated when... / It would be helpful if..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature or enhancement you'd like to see
+      placeholder: "Add support for... / Implement a way to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any alternative solutions or workarounds?
+      placeholder: "I've tried... / Another approach could be..."
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples or Mockups
+      description: |
+        If applicable, add examples, mockups, or references to similar features in other tools
+        (You can drag and drop images here)
+      placeholder: "Similar to how wpaperd does X... / Example config snippet..."
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Feature Category
+      description: Which category does this feature fall under?
+      options:
+        - Display Modes (new ways to show wallpapers)
+        - Transitions (new animation effects)
+        - Image Formats (support for new file types)
+        - Configuration (config options or syntax)
+        - Performance (optimization)
+        - Multi-Monitor (monitor-specific features)
+        - CLI (command-line interface)
+        - Integration (with other tools/services)
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority (Your Opinion)
+      description: How important is this feature to you?
+      options:
+        - Critical (blocking my workflow)
+        - High (would significantly improve my experience)
+        - Medium (nice to have)
+        - Low (minor improvement)
+    validations:
+      required: true
+
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Use Case
+      description: How would you use this feature? What's your workflow?
+      placeholder: |
+        I use Staticwall with a 3-monitor setup where...
+        This feature would help me...
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to implement this feature (with guidance)
+        - label: I would be willing to test this feature
+        - label: I would be willing to help with documentation
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context, screenshots, or references about the feature request
+      placeholder: "Links to discussions, similar implementations, technical considerations..."
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues and discussions
+          required: true
+        - label: This feature aligns with Staticwall's goals (reliable, minimal, Wayland-focused)
+          required: true
+        - label: I have clearly described the problem and proposed solution
+          required: true
