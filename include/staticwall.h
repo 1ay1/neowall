@@ -1,10 +1,3 @@
-/*
- * Staticwall - A reliable Wayland wallpaper daemon
- * Copyright (C) 2024
- *
- * Main header file with core structures and definitions
- */
-
 #ifndef STATICWALL_H
 #define STATICWALL_H
 

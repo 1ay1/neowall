@@ -1,10 +1,3 @@
-/*
- * Staticwall - A reliable Wayland wallpaper daemon
- * Copyright (C) 2024
- *
- * OpenGL ES 2.0 rendering implementation
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -1,10 +1,3 @@
-/*
- * Staticwall - A reliable Wayland wallpaper daemon
- * Copyright (C) 2024
- *
- * Configuration file parsing (VIBE format)
- */
-
 #define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 

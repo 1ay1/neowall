@@ -1,10 +1,3 @@
-/*
- * Staticwall - A reliable Wayland wallpaper daemon
- * Copyright (C) 2024
- *
- * Wayland connection and registry handling
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

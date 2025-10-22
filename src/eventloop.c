@@ -1,10 +1,3 @@
-/*
- * Staticwall - A reliable Wayland wallpaper daemon
- * Copyright (C) 2024
- *
- * Main event loop and rendering dispatch
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +9,6 @@
 #include <sys/eventfd.h>
 #include "staticwall.h"
 
-/* Forward declaration of state pointer for EGL operations */
 static struct staticwall_state *event_loop_state = NULL;
 
 /* Update timerfd to wake up at next cycle time */

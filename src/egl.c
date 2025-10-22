@@ -1,10 +1,3 @@
-/*
- * Staticwall - A reliable Wayland wallpaper daemon
- * Copyright (C) 2024
- *
- * EGL initialization and context management
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
