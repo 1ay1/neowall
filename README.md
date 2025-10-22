@@ -2,7 +2,7 @@
 
 **Sets wallpapers until it... doesn't.**
 
-A lightweight, reliable Wayland wallpaper daemon written in C. Perfect for tiling window managers and minimal setups. (Mostly reliable. See tagline.)
+A lightweight, reliable Wayland wallpaper engine written in C. Perfect for tiling window managers and minimal setups. (Mostly reliable. See tagline.)
 
 ![Staticwall Default Wallpaper](assets/default.png)
 
