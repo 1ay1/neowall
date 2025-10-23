@@ -99,6 +99,8 @@ static enum transition_type transition_type_from_string(const char *str) {
         return TRANSITION_SLIDE_RIGHT;
     } else if (strcasecmp(str, "glitch") == 0) {
         return TRANSITION_GLITCH;
+    } else if (strcasecmp(str, "pixelate") == 0) {
+        return TRANSITION_PIXELATE;
     }
 
     log_error("Unknown transition type '%s', using 'none'", str);

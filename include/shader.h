@@ -27,5 +27,6 @@ void shader_destroy_program(GLuint program);
 bool shader_create_fade_program(GLuint *program);
 bool shader_create_slide_program(GLuint *program);
 bool shader_create_glitch_program(GLuint *program);
+bool shader_create_pixelate_program(GLuint *program);
 
 #endif /* SHADER_H */

@@ -163,6 +163,7 @@ Add smooth transitions when wallpapers change:
 - **slide_left** - Slide from right to left
 - **slide_right** - Slide from left to right
 - **glitch** - Digital glitch effect (cyberpunk!)
+- **pixelate** - Pixelation and dissolve effect (retro!)
 
 Example:
 ```vibe

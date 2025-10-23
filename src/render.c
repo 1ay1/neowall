@@ -41,6 +41,14 @@ bool render_init_output(struct output_state *output) {
         return false;
     }
 
+    /* Create pixelate shader program */
+    if (!shader_create_pixelate_program(&output->pixelate_program)) {
+        log_error("Failed to create pixelate shader program for output %s", output->model);
+        shader_destroy_program(output->program);
+        shader_destroy_program(output->glitch_program);
+        return false;
+    }
+
     /* Create VBO */
     glGenBuffers(1, &output->vbo);
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
@@ -92,6 +100,11 @@ void render_cleanup_output(struct output_state *output) {
     if (output->glitch_program != 0) {
         shader_destroy_program(output->glitch_program);
         output->glitch_program = 0;
+    }
+
+    if (output->pixelate_program != 0) {
+        shader_destroy_program(output->pixelate_program);
+        output->pixelate_program = 0;
     }
 }
 

@@ -22,8 +22,6 @@ bool transition_fade_render(struct output_state *output, float progress);
 bool transition_slide_left_render(struct output_state *output, float progress);
 bool transition_slide_right_render(struct output_state *output, float progress);
 bool transition_glitch_render(struct output_state *output, float progress);
-
-/* Shader sources for transitions that need custom shaders */
-extern const char *transition_glitch_shader_source;
+bool transition_pixelate_render(struct output_state *output, float progress);
 
 #endif /* TRANSITIONS_H */

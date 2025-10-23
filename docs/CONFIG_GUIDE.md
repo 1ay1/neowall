@@ -361,6 +361,7 @@ Smooth transitions when changing wallpapers.
 - `slide_left` - Slide from right to left
 - `slide_right` - Slide from left to right
 - `glitch` - Digital glitch effect with RGB separation, scan lines, and corruption
+- `pixelate` - Image breaks into pixels and dissolves block-by-block (retro aesthetic!)
 
 ### Transition Configuration
 
@@ -383,7 +384,7 @@ transition_duration 1000  # Slow (dramatic)
 transition_duration 2000  # Very slow (artistic)
 ```
 
-**Note:** The `glitch` transition looks best with slightly longer durations (500-800ms) to let the full effect play out.
+**Note:** The `glitch` and `pixelate` transitions look best with slightly longer durations (500-800ms) to let the full effect play out.
 
 ## Complete Examples
 
