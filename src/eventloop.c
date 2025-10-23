@@ -337,13 +337,7 @@ void event_loop_run(struct staticwall_state *state) {
             timeout_ms = 0;
         }
         
-        if (timeout_ms == -1) {
-            log_debug("Poll: infinite timeout (pure event-driven mode)");
-        } else if (timeout_ms == 16) {
-            log_debug("Poll: 16ms timeout (transition/shader active)");
-        } else if (timeout_ms == 0) {
-            log_debug("Poll: immediate (next request pending)");
-        }
+        /* Poll debug messages removed to reduce log spam during shader rendering */
         
         int ret = poll(fds, 3, timeout_ms);
 
