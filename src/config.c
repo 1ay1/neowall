@@ -336,6 +336,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     config->duration = 0;
     config->transition = TRANSITION_NONE;
     config->transition_duration = 300;
+    config->shader_speed = 1.0f;
     config->cycle = false;
     config->cycle_paths = NULL;
     config->cycle_count = 0;
@@ -392,9 +393,24 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     }
 
     /* Parse transition_duration */
-    VibeValue *trans_dur = vibe_object_get(obj->as_object, "transition_duration");
-    if (trans_dur && trans_dur->type == VIBE_TYPE_INTEGER) {
-        config->transition_duration = (uint32_t)trans_dur->as_integer;
+    VibeValue *transition_duration = vibe_object_get(obj->as_object, "transition_duration");
+    if (transition_duration && transition_duration->type == VIBE_TYPE_INTEGER) {
+        config->transition_duration = (uint32_t)transition_duration->as_integer;
+    }
+
+    /* Parse shader_speed */
+    VibeValue *shader_speed = vibe_object_get(obj->as_object, "shader_speed");
+    if (shader_speed) {
+        if (shader_speed->type == VIBE_TYPE_FLOAT) {
+            config->shader_speed = (float)shader_speed->as_float;
+        } else if (shader_speed->type == VIBE_TYPE_INTEGER) {
+            config->shader_speed = (float)shader_speed->as_integer;
+        }
+        
+        if (config->shader_speed <= 0.0f) {
+            log_info("Invalid shader_speed value (%.2f), using default 1.0", config->shader_speed);
+            config->shader_speed = 1.0f;
+        }
     }
 
     /* Parse cycle - can be an array of paths OR a single directory path */

@@ -75,6 +75,7 @@ struct wallpaper_config {
     uint32_t duration;                  /* Duration in seconds (for cycling) */
     enum transition_type transition;    /* Transition effect */
     uint32_t transition_duration;       /* Transition duration in ms */
+    float shader_speed;                 /* Shader animation speed multiplier (default 1.0) */
     bool cycle;                         /* Enable wallpaper cycling */
     char **cycle_paths;                 /* Array of paths for cycling */
     size_t cycle_count;                 /* Number of wallpapers to cycle */

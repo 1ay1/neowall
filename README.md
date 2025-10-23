@@ -192,6 +192,7 @@ default {
 ```vibe
 default {
   shader ~/shaders/plasma.glsl        # Use a custom GLSL shader!
+  shader_speed 2.0                    # Run shader at 2x speed (default: 1.0)
 }
 ```
 
@@ -249,9 +250,12 @@ output {
 - Mutually exclusive with `path` - use either `shader` or `path`, not both
 - Takes precedence if both are specified
 - Example: `shader ~/shaders/plasma.glsl`
+- Optional: `shader_speed 2.0` - animation speed multiplier (default: 1.0)
+  - Values > 1.0 speed up animations
+  - Values < 1.0 slow down animations
 - Shader receives these uniforms:
-  - `uniform float time;` - Elapsed time in seconds for animation
-  - `uniform vec2 resolution;` - Screen resolution (width, height)
+  - `uniform float time;` - elapsed time in seconds (for animation)
+  - `uniform vec2 resolution;` - screen dimensions in pixels
 - See `examples/shaders/` for ready-to-use examples (plasma, wave, gradient, matrix)
 - Compatible with Shadertoy-style shaders (with minor modifications)
 - Continuous rendering for smooth animation

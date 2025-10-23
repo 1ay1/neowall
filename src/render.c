@@ -321,6 +321,10 @@ bool render_frame_shader(struct output_state *output) {
     uint64_t current_time = get_time_ms();
     uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : output->last_frame_time;
     float time = (current_time - start_time) / 1000.0f;
+    
+    /* Apply shader speed multiplier */
+    float shader_speed = output->config.shader_speed > 0.0f ? output->config.shader_speed : 1.0f;
+    time *= shader_speed;
 
     /* Set uniforms */
     GLint time_uniform = glGetUniformLocation(output->live_shader_program, "time");
