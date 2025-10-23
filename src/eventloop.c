@@ -162,9 +162,10 @@ static void render_outputs(struct staticwall_state *state) {
                     output->last_frame_time = current_time;
                     state->frames_rendered++;
                     
-                    /* Reset needs_redraw unless we're in a transition */
-                    if (output->transition_start_time == 0 || 
-                        output->config.transition == TRANSITION_NONE) {
+                    /* Reset needs_redraw unless we're in a transition or using a shader wallpaper */
+                    if ((output->transition_start_time == 0 || 
+                         output->config.transition == TRANSITION_NONE) &&
+                        output->config.type != WALLPAPER_SHADER) {
                         output->needs_redraw = false;
                     }
                 }
@@ -311,15 +312,16 @@ void event_loop_run(struct staticwall_state *state) {
             }
         }
 
-        /* Calculate poll timeout - only for transitions, otherwise wait indefinitely */
+        /* Calculate poll timeout - only for transitions/shaders, otherwise wait indefinitely */
         int timeout_ms = -1; /* -1 = infinite, pure event-driven */
         
-        /* Check if any output has active transitions */
+        /* Check if any output has active transitions or shader wallpapers */
         output = state->outputs;
         while (output) {
-            if (output->transition_start_time > 0 && 
-                output->config.transition != TRANSITION_NONE) {
-                timeout_ms = 16; /* ~60 FPS for smooth transitions */
+            if ((output->transition_start_time > 0 && 
+                 output->config.transition != TRANSITION_NONE) ||
+                output->config.type == WALLPAPER_SHADER) {
+                timeout_ms = 16; /* ~60 FPS for smooth transitions/animations */
                 break;
             }
             output = output->next;
@@ -333,7 +335,7 @@ void event_loop_run(struct staticwall_state *state) {
         if (timeout_ms == -1) {
             log_debug("Poll: infinite timeout (pure event-driven mode)");
         } else if (timeout_ms == 16) {
-            log_debug("Poll: 16ms timeout (transition active)");
+            log_debug("Poll: 16ms timeout (transition/shader active)");
         } else if (timeout_ms == 0) {
             log_debug("Poll: immediate (next request pending)");
         }
