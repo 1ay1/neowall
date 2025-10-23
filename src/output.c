@@ -95,6 +95,11 @@ void output_destroy(struct output_state *output) {
     }
 
     /* Destroy EGL surface */
+    if (output->egl_surface != EGL_NO_SURFACE && output->state && output->state->egl_display != EGL_NO_DISPLAY) {
+        eglDestroySurface(output->state->egl_display, output->egl_surface);
+        output->egl_surface = EGL_NO_SURFACE;
+    }
+    
     if (output->egl_window) {
         wl_egl_window_destroy(output->egl_window);
         output->egl_window = NULL;

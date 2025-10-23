@@ -130,15 +130,8 @@ void egl_cleanup(struct staticwall_state *state) {
 
     log_debug("Cleaning up EGL resources");
 
-    /* Clean up output EGL surfaces */
-    struct output_state *output = state->outputs;
-    while (output) {
-        if (output->egl_surface != EGL_NO_SURFACE) {
-            eglDestroySurface(state->egl_display, output->egl_surface);
-            output->egl_surface = EGL_NO_SURFACE;
-        }
-        output = output->next;
-    }
+    /* Note: Output EGL surfaces are cleaned up in output_destroy() 
+     * to avoid accessing freed output pointers during shutdown */
 
     /* Destroy EGL context */
     if (state->egl_context != EGL_NO_CONTEXT) {
