@@ -126,20 +126,8 @@ static void render_outputs(struct staticwall_state *state) {
                 float progress = (float)elapsed / (float)output->config.transition_duration;
 
                 if (progress >= 1.0f) {
-                    /* Transition complete */
+                    /* Clamp progress to 1.0 for final frame */
                     output->transition_progress = 1.0f;
-                    output->transition_start_time = 0;
-
-                    /* Clean up old texture */
-                    if (output->next_texture) {
-                        render_destroy_texture(output->next_texture);
-                        output->next_texture = 0;
-                    }
-
-                    if (output->next_image) {
-                        image_free(output->next_image);
-                        output->next_image = NULL;
-                    }
                 } else {
                     /* Apply easing function */
                     output->transition_progress = ease_in_out_cubic(progress);
@@ -161,6 +149,23 @@ static void render_outputs(struct staticwall_state *state) {
                     wl_surface_commit(output->surface);
                     output->last_frame_time = current_time;
                     state->frames_rendered++;
+                    
+                    /* Clean up transition after final frame is rendered */
+                    if (output->transition_start_time > 0 && 
+                        output->transition_progress >= 1.0f) {
+                        output->transition_start_time = 0;
+                        
+                        /* Clean up old texture */
+                        if (output->next_texture) {
+                            render_destroy_texture(output->next_texture);
+                            output->next_texture = 0;
+                        }
+                        
+                        if (output->next_image) {
+                            image_free(output->next_image);
+                            output->next_image = NULL;
+                        }
+                    }
                     
                     /* Reset needs_redraw unless we're in a transition or using a shader wallpaper */
                     if ((output->transition_start_time == 0 || 
