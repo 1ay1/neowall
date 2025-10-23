@@ -18,7 +18,7 @@
 
 /* Standard vertex shader for live wallpapers */
 static const char *live_vertex_shader =
-    "GLSL_VERSION_STRING\n"
+    "#version 100\n"
     "attribute vec2 position;\n"
     "void main() {\n"
     "    gl_Position = vec4(position, 0.0, 1.0);\n"
