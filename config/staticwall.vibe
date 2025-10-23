@@ -57,6 +57,15 @@ default {
   #
   # NOTE: Use EITHER 'path' OR 'shader', not both!
 
+  # Shader animation speed multiplier (optional, default: 1.0)
+  # Controls how fast shader animations run
+  # shader_speed 1.0   # Normal speed (default)
+  # shader_speed 2.0   # 2x speed - animations run twice as fast
+  # shader_speed 0.5   # 0.5x speed - animations run at half speed
+  # shader_speed 0.25  # Very slow, meditative animations
+  # shader_speed 3.0   # Very fast, energetic animations
+  # Only applies when using shader wallpapers
+
   # Display mode (optional, default: fill)
   # Options:
   #   - fill    : Scale to fill screen, crop if needed (recommended)
@@ -143,6 +152,7 @@ output {
 # --- Example 1b: Live Shader Wallpaper ---
 # default {
 #   shader plasma.glsl
+#   shader_speed 1.5    # Optional: run animations 1.5x faster
 # }
 
 # --- Example 2: Laptop + External Monitor ---
@@ -200,6 +210,7 @@ output {
 # --- Example 6: Live Shader Wallpapers ---
 # default {
 #   shader plasma.glsl     # Animated plasma effect
+#   shader_speed 0.5       # Slow and smooth animations
 # }
 
 # --- Example 7: Mix Shaders and Images ---
@@ -260,6 +271,7 @@ output {
 #     - Installed to ~/.config/staticwall/shaders/ on first run
 #     - Just use the filename: shader plasma.glsl
 #     - Renders at ~60 FPS with minimal CPU usage
+#     - Control animation speed: shader_speed 2.0 (2x faster) or 0.5 (slower)
 #     - Create your own shaders! See shaders/README.md
 #
 # 11. Control the daemon:
