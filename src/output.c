@@ -448,8 +448,50 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         return false;
     }
 
-    /* Copy configuration */
+    /* Free old cycle_paths if they exist */
+    if (output->config.cycle_paths) {
+        for (size_t i = 0; i < output->config.cycle_count; i++) {
+            if (output->config.cycle_paths[i]) {
+                free(output->config.cycle_paths[i]);
+            }
+        }
+        free(output->config.cycle_paths);
+        output->config.cycle_paths = NULL;
+        output->config.cycle_count = 0;
+    }
+
+    /* Copy configuration (shallow copy for now, will handle cycle_paths separately) */
     memcpy(&output->config, config, sizeof(struct wallpaper_config));
+    
+    /* Deep copy cycle_paths array if present */
+    output->config.cycle_paths = NULL;
+    output->config.cycle_count = 0;
+    if (config->cycle && config->cycle_paths && config->cycle_count > 0) {
+        output->config.cycle_paths = calloc(config->cycle_count, sizeof(char *));
+        if (output->config.cycle_paths) {
+            output->config.cycle_count = config->cycle_count;
+            for (size_t i = 0; i < config->cycle_count; i++) {
+                if (config->cycle_paths[i]) {
+                    output->config.cycle_paths[i] = strdup(config->cycle_paths[i]);
+                    if (!output->config.cycle_paths[i]) {
+                        log_error("Failed to duplicate cycle path %zu", i);
+                        /* Clean up already allocated paths */
+                        for (size_t j = 0; j < i; j++) {
+                            free(output->config.cycle_paths[j]);
+                        }
+                        free(output->config.cycle_paths);
+                        output->config.cycle_paths = NULL;
+                        output->config.cycle_count = 0;
+                        output->config.cycle = false;
+                        break;
+                    }
+                }
+            }
+        } else {
+            log_error("Failed to allocate memory for cycle_paths array");
+            output->config.cycle = false;
+        }
+    }
 
     /* Check if path is a directory - if so, auto-enable cycling */
     if (config->path[0] != '\0' && !config->cycle) {
