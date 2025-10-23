@@ -153,38 +153,38 @@ void main() {
         }
     }
 
-    // Age-based brightness (newer = brighter, but still dark)
+    // Age-based brightness (newer = brighter)
     float age = (currentLine - (charID.y + scroll)) / 40.0;
     age = clamp(age, 0.0, 1.0);
-    float brightness = (1.0 - age * 0.85) * 0.4; // Much darker
+    float brightness = (1.0 - age * 0.7) * 0.8; // Brighter
 
-    // Rare bright lines (system alerts)
-    float activeLine = step(0.985, hash(vec2(line, floor(time * 0.5))));
-    brightness += activeLine * 0.3;
+    // Bright lines (system alerts)
+    float activeLine = step(0.97, hash(vec2(line, floor(time * 0.5))));
+    brightness += activeLine * 0.5;
 
     // Combine character and cursor
     float finalChar = max(charPattern * brightness, cursor);
 
-    // Very dark phosphor green
+    // Brighter phosphor green
     vec3 color = vec3(0.0);
 
     if (finalChar > 0.005) {
-        // Main dark green
-        color = vec3(0.0, 0.35, 0.05) * finalChar;
+        // Main bright green
+        color = vec3(0.0, 0.8, 0.15) * finalChar;
 
-        // Cursor is slightly brighter cyan-green
+        // Cursor is brighter cyan-green
         if (cursor > 0.0) {
-            color = mix(color, vec3(0.0, 0.5, 0.2), 0.4);
+            color = mix(color, vec3(0.0, 1.0, 0.5), 0.5);
         }
 
-        // Active lines get slight cyan tint
+        // Active lines get cyan tint
         if (activeLine > 0.0) {
-            color.b += 0.08;
-            color.g += 0.1;
+            color.b += 0.2;
+            color.g += 0.3;
         }
     }
 
-    // Minimal background glow - very subtle
+    // Background glow from text
     float glow = 0.0;
     for (float dy = -1.0; dy <= 1.0; dy += 1.0) {
         for (float dx = -1.0; dx <= 1.0; dx += 1.0) {
@@ -198,42 +198,42 @@ void main() {
                 sampleChar = hexChar(fract(sampleCoord), hash(vec2(sampleID.x, sampleLine)) * 1000.0);
             }
             float dist = length(vec2(dx, dy));
-            glow += sampleChar / (dist * dist) * 0.02;
+            glow += sampleChar / (dist * dist) * 0.08;
         }
     }
-    color += vec3(0.0, glow * 0.1, glow * 0.05);
+    color += vec3(0.0, glow * 0.4, glow * 0.2);
 
-    // Strong CRT scanline
-    float scanline = 0.75 + 0.25 * sin(gl_FragCoord.y * 3.0 - time * 30.0);
+    // Subtle CRT scanline
+    float scanline = 0.9 + 0.1 * sin(gl_FragCoord.y * 3.0 - time * 30.0);
     color *= scanline;
 
-    // Rare horizontal sweep (diagnostic scan)
+    // Horizontal sweep (diagnostic scan)
     float sweepLine = smoothstep(0.0, 0.003, abs(fract(uv.y - time * 0.1) - 0.5));
-    color += vec3(0.0, sweepLine, sweepLine * 0.3) * 0.03;
+    color += vec3(0.0, sweepLine, sweepLine * 0.5) * 0.1;
 
-    // Stronger vignette - very dark edges
-    float vignette = 1.0 - length(uv - 0.5) * 1.2;
-    vignette = pow(vignette, 3.0);
+    // Lighter vignette
+    float vignette = 1.0 - length(uv - 0.5) * 0.7;
+    vignette = pow(vignette, 1.8);
     color *= vignette;
 
     // Screen flicker
-    float flicker = 0.92 + 0.08 * hash(vec2(floor(time * 60.0), 0.0));
+    float flicker = 0.97 + 0.03 * hash(vec2(floor(time * 60.0), 0.0));
     color *= flicker;
 
-    // Rare glitch lines
-    if (hash(vec2(floor(time * 3.0), charID.y)) > 0.99) {
-        color.r += hash(vec2(time * 5.0, charID.x)) * 0.15;
-        color.g *= 1.3;
+    // Glitch lines
+    if (hash(vec2(floor(time * 3.0), charID.y)) > 0.985) {
+        color.r += hash(vec2(time * 5.0, charID.x)) * 0.3;
+        color.g *= 1.5;
     }
 
-    // Very minimal noise
-    color += vec3(hash(gl_FragCoord.xy + time * 0.05) * 0.01);
+    // Minimal noise
+    color += vec3(hash(gl_FragCoord.xy + time * 0.05) * 0.02);
 
     // Phosphor persistence (ghosting)
-    color = pow(color, vec3(0.9));
+    color = pow(color, vec3(0.85));
 
-    // Overall darkness - mostly black screen
-    color *= 0.55;
+    // Overall brightness boost
+    color *= 1.1;
 
     gl_FragColor = vec4(color, 1.0);
 }

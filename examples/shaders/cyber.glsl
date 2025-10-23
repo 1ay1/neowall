@@ -78,13 +78,13 @@ void main() {
     float gridLine = min(grid.x, grid.y);
     float verticalLines = smoothstep(0.0, 0.05, gridLine);
 
-    // Very sparse grid pattern
-    float gridPattern = (1.0 - verticalLines) * 0.15;
+    // More visible grid pattern
+    float gridPattern = (1.0 - verticalLines) * 0.5;
 
-    // Dark monochrome cyber colors
-    vec3 cyan = vec3(0.0, 0.4, 0.5);
-    vec3 green = vec3(0.0, 0.5, 0.2);
-    vec3 blue = vec3(0.1, 0.2, 0.5);
+    // Brighter cyber colors
+    vec3 cyan = vec3(0.0, 0.8, 1.0);
+    vec3 green = vec3(0.0, 1.0, 0.5);
+    vec3 blue = vec3(0.2, 0.5, 1.0);
 
     // Color shifts based on position
     float colorShift = sin(uv.x * 2.0 + time * 0.5) * 0.5 + 0.5;
@@ -94,15 +94,15 @@ void main() {
     // Dark grid base
     vec3 color = gridColor * gridPattern;
 
-    // Sparse moving scan lines
+    // Brighter moving scan lines
     float movingLine1 = abs(sin(uv.y * 8.0 - time * 2.0));
-    movingLine1 = smoothstep(0.95, 1.0, movingLine1);
-    color += cyan * movingLine1 * 0.4;
+    movingLine1 = smoothstep(0.92, 1.0, movingLine1);
+    color += cyan * movingLine1 * 1.2;
 
     // Rare vertical pulses
     if (hash(vec2(floor(uv.x * 10.0), floor(time * 2.0))) > 0.98) {
         float pulse = abs(sin(uv.y * 20.0 + time * 5.0));
-        color += green * smoothstep(0.9, 1.0, pulse) * 0.3;
+        color += green * smoothstep(0.88, 1.0, pulse) * 0.8;
     }
 
     // Memory address display (hex codes)
@@ -113,50 +113,50 @@ void main() {
     if (hash(hexCell) > 0.92 && hash(hexCell + vec2(123.0, 456.0)) > 0.7) {
         float hexValue = hash(hexCell + floor(time * 0.5));
         float hexChar = hexDigit(fract(hexGrid), hexValue);
-        color += green * hexChar * 0.4;
+        color += green * hexChar * 0.9;
     }
 
     // Binary data streams (very rare)
-    float dataStream = step(0.995, hash(vec2(floor(uv.x * 40.0), floor(time * 3.0 - uv.y * 15.0))));
-    color += vec3(0.0, 0.4, 0.3) * dataStream * 0.3;
+    float dataStream = step(0.992, hash(vec2(floor(uv.x * 40.0), floor(time * 3.0 - uv.y * 15.0))));
+    color += vec3(0.0, 0.9, 0.7) * dataStream * 0.7;
 
     // Glitch blocks - rare but visible
     float glitchBlock = step(0.99, hash(vec2(floor(uv.x * 8.0), floor(time * 2.0))));
     if (glitchBlock > 0.5) {
         vec3 glitchColor = vec3(
-            hash(vec2(time * 2.0, uv.y)) * 0.3,
-            hash(vec2(time * 2.0 + 1.0, uv.y)) * 0.5,
-            hash(vec2(time * 2.0 + 2.0, uv.y)) * 0.4
+            hash(vec2(time * 2.0, uv.y)) * 0.8,
+            hash(vec2(time * 2.0 + 1.0, uv.y)) * 1.0,
+            hash(vec2(time * 2.0 + 2.0, uv.y)) * 0.9
         );
-        color = mix(color, glitchColor, glitchBlock * 0.4);
+        color = mix(color, glitchColor, glitchBlock * 0.6);
     }
 
-    // Scan lines - darker
-    float scanline = 0.85 + 0.15 * sin(gl_FragCoord.y * 2.5 - time * 12.0);
+    // Scan lines - subtle
+    float scanline = 0.92 + 0.08 * sin(gl_FragCoord.y * 2.5 - time * 12.0);
     color *= scanline;
 
-    // Strong vignette for darker edges
+    // Lighter vignette
     vec2 vignetteUV = gl_FragCoord.xy / resolution.xy - 0.5;
-    float vignette = 1.0 - dot(vignetteUV, vignetteUV) * 1.2;
-    vignette = pow(vignette, 2.5);
+    float vignette = 1.0 - dot(vignetteUV, vignetteUV) * 0.6;
+    vignette = pow(vignette, 1.5);
     color *= vignette;
 
     // Horizontal scan with technical data
     float horizontalScan = smoothstep(0.0, 0.005, abs(fract(uv.y - time * 0.15) - 0.5));
-    color += vec3(0.0, 0.3, 0.2) * (1.0 - horizontalScan) * 0.05;
+    color += vec3(0.0, 0.6, 0.4) * (1.0 - horizontalScan) * 0.15;
 
     // Screen flicker
-    float flicker = 0.96 + 0.04 * hash(vec2(floor(time * 50.0), 0.0));
+    float flicker = 0.98 + 0.02 * hash(vec2(floor(time * 50.0), 0.0));
     color *= flicker;
 
     // Minimal noise
-    color += vec3(hash(gl_FragCoord.xy + time * 0.1) * 0.015);
+    color += vec3(hash(gl_FragCoord.xy + time * 0.1) * 0.02);
 
-    // Overall darkness - very dark background
-    color *= 0.5;
+    // Brighter overall
+    color *= 1.3;
 
-    // Ensure mostly black with sparse cyan/green details
-    color = pow(color, vec3(1.2));
+    // Better contrast
+    color = pow(color, vec3(0.9));
 
     gl_FragColor = vec4(color, 1.0);
 }
