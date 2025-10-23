@@ -18,6 +18,7 @@ A lightweight, reliable Wayland wallpaper engine written in C. Perfect for tilin
 - ⚡ **Hardware Accelerated**: OpenGL ES rendering via EGL
 - 🔥 **Hot Reload**: Update configuration without restarting (`SIGHUP`)
 - 🎬 **Smooth Transitions**: Fade and slide effects between wallpapers
+- 🌊 **Live Shader Wallpapers**: Write custom GLSL fragment shaders for animated wallpapers (plasma, waves, matrix rain, etc.)
 - 📁 **Directory Support**: Point to a folder and automatically cycle through all images - just set `path` to a directory!
 - 🪶 **Minimal Dependencies**: Pure C with no heavy frameworks (because who needs bloated libraries when you have raw pointers and existential dread?)
 - 💀 **Memory Safety**: We free our allocations. Most of the time. Okay, all of the time, but the joke was funnier before we fixed the bugs.
@@ -187,6 +188,26 @@ default {
 }
 ```
 
+**Example 7: Live shader wallpaper - animated plasma effect**
+```vibe
+default {
+  shader ~/shaders/plasma.glsl        # Use a custom GLSL shader!
+}
+```
+
+**Example 8: Different shader per monitor**
+```vibe
+output {
+  eDP-1 {
+    shader ~/shaders/gradient.glsl    # Laptop: smooth gradient
+  }
+  
+  HDMI-A-1 {
+    shader ~/shaders/matrix.glsl      # External: matrix rain effect
+  }
+}
+```
+
 ### Configuration
 
 Edit `~/.config/staticwall/config.vibe`:
@@ -224,7 +245,19 @@ output {
 
 #### Configuration Options
 
-**`path`** (required) - The most important setting!
+**`shader`** (optional) - Path to a GLSL fragment shader for live animated wallpapers
+- Mutually exclusive with `path` - use either `shader` or `path`, not both
+- Takes precedence if both are specified
+- Example: `shader ~/shaders/plasma.glsl`
+- Shader receives these uniforms:
+  - `uniform float time;` - Elapsed time in seconds for animation
+  - `uniform vec2 resolution;` - Screen resolution (width, height)
+- See `examples/shaders/` for ready-to-use examples (plasma, wave, gradient, matrix)
+- Compatible with Shadertoy-style shaders (with minor modifications)
+- Continuous rendering for smooth animation
+- Zero CPU usage - all processing on GPU
+
+**`path`** (required for image wallpapers) - The most important setting!
 
 **📁 DIRECTORY MODE (Recommended for cycling):**
 - Point to a folder to automatically cycle through ALL images inside
@@ -363,6 +396,98 @@ output {
 - Set longer `duration` for work hours, shorter for leisure
 - Use `transition none` for minimal resource usage
 - Hot-reload config with `killall -HUP staticwall` or `staticwall --watch` to test settings live
+
+## Live Shader Wallpapers
+
+Staticwall supports **custom GLSL fragment shaders** for procedurally animated wallpapers. Write your own shaders or use the included examples!
+
+### Quick Start with Shaders
+
+```vibe
+default {
+  shader ~/shaders/plasma.glsl
+}
+```
+
+### Writing Custom Shaders
+
+Shaders are GLSL ES 1.0 fragment shaders. Here's a minimal example:
+
+```glsl
+#version 100
+precision mediump float;
+
+uniform float time;
+uniform vec2 resolution;
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / resolution.xy;
+    
+    // Animated gradient
+    vec3 color = vec3(
+        sin(time + uv.x * 3.14159) * 0.5 + 0.5,
+        cos(time + uv.y * 3.14159) * 0.5 + 0.5,
+        sin(time * 0.5) * 0.5 + 0.5
+    );
+    
+    gl_FragColor = vec4(color, 1.0);
+}
+```
+
+### Available Uniforms
+
+Your shader automatically receives:
+- `uniform float time;` - Elapsed time in seconds (continuously incrementing)
+- `uniform vec2 resolution;` - Screen resolution in pixels (width, height)
+
+### Example Shaders
+
+Staticwall includes ready-to-use example shaders in `examples/shaders/`:
+
+- **plasma.glsl** - Colorful plasma effect with sine waves
+- **wave.glsl** - Radial wave patterns with color gradients
+- **gradient.glsl** - Smooth animated color gradients
+- **matrix.glsl** - Matrix-style digital rain effect
+
+Copy these to `~/.local/share/staticwall/shaders/` or use them directly:
+
+```bash
+mkdir -p ~/.local/share/staticwall/shaders
+cp examples/shaders/* ~/.local/share/staticwall/shaders/
+```
+
+### Shadertoy Compatibility
+
+Staticwall shaders are compatible with [Shadertoy](https://www.shadertoy.com/) with minor changes:
+
+**Shadertoy:**
+```glsl
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 uv = fragCoord / iResolution.xy;
+    fragColor = vec4(uv, 0.5, 1.0);
+}
+```
+
+**Staticwall:**
+```glsl
+#version 100
+precision mediump float;
+
+uniform float time;       // Instead of iTime
+uniform vec2 resolution;  // Instead of iResolution.xy
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / resolution.xy;
+    gl_FragColor = vec4(uv, 0.5, 1.0);
+}
+```
+
+### Performance
+
+- Shaders run entirely on the GPU (zero CPU overhead)
+- Continuous rendering at display refresh rate
+- Minimal power usage on modern GPUs
+- No external dependencies (no video codecs needed)
 
 ## Documentation
 

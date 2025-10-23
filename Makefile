@@ -107,12 +107,18 @@ install: $(TARGET)
 	install -Dm755 $(TARGET) $(DESTDIR)/usr/local/bin/$(PROJECT)
 	install -Dm644 config/staticwall.vibe $(DESTDIR)/usr/share/$(PROJECT)/config.vibe.example
 	install -Dm644 $(ASSETS_DIR)/default.png $(DESTDIR)/usr/share/$(PROJECT)/default.png
+	@mkdir -p $(DESTDIR)/usr/share/$(PROJECT)/shaders
+	@for shader in examples/shaders/*.glsl; do \
+		install -Dm644 $$shader $(DESTDIR)/usr/share/$(PROJECT)/shaders/$$(basename $$shader); \
+	done
+	install -Dm644 examples/shaders/README.md $(DESTDIR)/usr/share/$(PROJECT)/shaders/README.md
 	@echo "Installed to $(DESTDIR)/usr/local/bin/$(PROJECT)"
 	@echo "Example config: $(DESTDIR)/usr/share/$(PROJECT)/config.vibe.example"
 	@echo "Default wallpaper: $(DESTDIR)/usr/share/$(PROJECT)/default.png"
+	@echo "Example shaders: $(DESTDIR)/usr/share/$(PROJECT)/shaders/"
 	@echo ""
 	@echo "Note: Staticwall runs as normal user. No sudo needed to run!"
-	@echo "On first run, config will be created at ~/.config/staticwall/config.vibe"
+	@echo "On first run, config and example shaders will be copied to your home directory"
 
 # Uninstall
 uninstall:

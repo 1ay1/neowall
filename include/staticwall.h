@@ -60,9 +60,17 @@ struct image_data {
     char path[MAX_PATH_LENGTH];
 };
 
+/* Wallpaper type */
+enum wallpaper_type {
+    WALLPAPER_IMAGE,    /* Static image file */
+    WALLPAPER_SHADER,   /* Live GLSL shader */
+};
+
 /* Wallpaper configuration for a specific output */
 struct wallpaper_config {
+    enum wallpaper_type type;           /* Wallpaper type (image or shader) */
     char path[MAX_PATH_LENGTH];         /* Path to wallpaper image */
+    char shader_path[MAX_PATH_LENGTH];  /* Path to GLSL shader file */
     enum wallpaper_mode mode;           /* Display mode */
     uint32_t duration;                  /* Duration in seconds (for cycling) */
     enum transition_type transition;    /* Transition effect */
@@ -104,6 +112,7 @@ struct output_state {
     GLuint program;
     GLuint glitch_program;              /* Shader program for glitch transition */
     GLuint pixelate_program;            /* Shader program for pixelate transition */
+    GLuint live_shader_program;         /* Shader program for live wallpaper */
     GLuint vbo;
 
     uint64_t last_frame_time;
@@ -184,6 +193,7 @@ void output_destroy(struct output_state *output);
 bool output_configure_layer_surface(struct output_state *output);
 bool output_create_egl_surface(struct output_state *output);
 void output_set_wallpaper(struct output_state *output, const char *path);
+void output_set_shader(struct output_state *output, const char *shader_path);
 bool output_apply_config(struct output_state *output, struct wallpaper_config *config);
 void output_cycle_wallpaper(struct output_state *output);
 bool output_should_cycle(struct output_state *output, uint64_t current_time);
@@ -192,6 +202,7 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time);
 bool render_init_output(struct output_state *output);
 void render_cleanup_output(struct output_state *output);
 bool render_frame(struct output_state *output);
+bool render_frame_shader(struct output_state *output);
 bool render_frame_transition(struct output_state *output, float progress);
 GLuint render_create_texture(struct image_data *img);
 void render_destroy_texture(GLuint texture);

@@ -23,6 +23,14 @@ bool shader_create_program_from_sources(const char *vertex_src,
  */
 void shader_destroy_program(GLuint program);
 
+/**
+ * Creates a live wallpaper shader program from a GLSL file.
+ * @param shader_path Path to the fragment shader file
+ * @param program Pointer to store the created program ID
+ * @return true on success, false on failure
+ */
+bool shader_create_live_program(const char *shader_path, GLuint *program);
+
 /* Transition-specific shader creation functions (defined in transition files) */
 bool shader_create_fade_program(GLuint *program);
 bool shader_create_slide_program(GLuint *program);

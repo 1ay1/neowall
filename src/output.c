@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include "staticwall.h"
+#include "shader.h"
 #include "../protocols/wlr-layer-shell-unstable-v1-client-protocol.h"
 
 
@@ -217,6 +218,69 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     output->needs_redraw = true;
 }
 
+/* Set live shader wallpaper */
+void output_set_shader(struct output_state *output, const char *shader_path) {
+    if (!output || !shader_path) {
+        log_error("Invalid parameters for output_set_shader");
+        return;
+    }
+
+    log_info("Setting shader wallpaper for output %s: %s",
+             output->model[0] ? output->model : "unknown", shader_path);
+
+    /* Make EGL context current before creating shader program */
+    if (output->state && output->egl_surface != EGL_NO_SURFACE) {
+        if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                           output->egl_surface, output->state->egl_context)) {
+            log_error("Failed to make EGL context current: 0x%x", eglGetError());
+            return;
+        }
+    }
+
+    /* Destroy old shader program if exists */
+    if (output->live_shader_program != 0) {
+        shader_destroy_program(output->live_shader_program);
+        output->live_shader_program = 0;
+    }
+
+    /* Load and compile shader from file */
+    if (!shader_create_live_program(shader_path, &output->live_shader_program)) {
+        log_error("Failed to create shader program from: %s", shader_path);
+        return;
+    }
+
+    /* Free any existing image data (shaders don't use images) */
+    if (output->current_image) {
+        image_free(output->current_image);
+        output->current_image = NULL;
+    }
+    if (output->next_image) {
+        image_free(output->next_image);
+        output->next_image = NULL;
+    }
+    if (output->texture) {
+        render_destroy_texture(output->texture);
+        output->texture = 0;
+    }
+    if (output->next_texture) {
+        render_destroy_texture(output->next_texture);
+        output->next_texture = 0;
+    }
+
+    /* Update config */
+    strncpy(output->config.shader_path, shader_path, sizeof(output->config.shader_path) - 1);
+    output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
+    output->config.type = WALLPAPER_SHADER;
+
+    /* Initialize frame time for animation */
+    output->last_frame_time = get_time_ms();
+
+    /* Mark for redraw */
+    output->needs_redraw = true;
+
+    log_info("Live shader wallpaper loaded successfully");
+}
+
 /* Cycle to next wallpaper in the cycle list */
 void output_cycle_wallpaper(struct output_state *output) {
     if (!output || !output->config.cycle || output->config.cycle_count == 0) {
@@ -384,15 +448,23 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         }
     }
 
-    /* Set initial wallpaper */
-    const char *initial_path = config->path;
-    if (output->config.cycle && output->config.cycle_count > 0 && output->config.cycle_paths) {
-        initial_path = output->config.cycle_paths[0];
-        output->config.current_cycle_index = 0;
-    }
+    /* Set initial wallpaper based on type */
+    if (config->type == WALLPAPER_SHADER) {
+        /* Load shader wallpaper */
+        if (config->shader_path[0] != '\0') {
+            output_set_shader(output, config->shader_path);
+        }
+    } else {
+        /* Load image wallpaper */
+        const char *initial_path = config->path;
+        if (output->config.cycle && output->config.cycle_count > 0 && output->config.cycle_paths) {
+            initial_path = output->config.cycle_paths[0];
+            output->config.current_cycle_index = 0;
+        }
 
-    if (initial_path[0] != '\0') {
-        output_set_wallpaper(output, initial_path);
+        if (initial_path[0] != '\0') {
+            output_set_wallpaper(output, initial_path);
+        }
     }
 
     return true;

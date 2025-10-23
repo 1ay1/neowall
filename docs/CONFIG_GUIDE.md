@@ -108,19 +108,24 @@ output {
 
 ## Configuration Options
 
-### Required Options
+### Wallpaper Type
 
-- **path** - Path to wallpaper image
+You must specify **either** `path` (for images) **or** `shader` (for live wallpapers):
+
+- **path** - Path to wallpaper image or directory (for static/cycling wallpapers)
+- **shader** - Path to GLSL fragment shader file (for live animated wallpapers)
+
+**Note:** If both are specified, `shader` takes precedence.
 
 ### Optional Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `mode` | string | `fill` | Display mode (see below) |
-| `duration` | integer | `0` | Seconds between wallpaper changes (0 no cycling) |
-| `transition` | string | `none` | Transition effect when changing wallpapers |
-| `transition_duration` | integer | `300` | Transition duration in milliseconds |
-| `cycle` | array | none | List of wallpapers to cycle through |
+| `mode` | string | `fill` | Display mode (only applies to image wallpapers) |
+| `duration` | integer | `0` | Seconds between wallpaper changes (0 = no cycling, only for images) |
+| `transition` | string | `none` | Transition effect when changing wallpapers (only for images) |
+| `transition_duration` | integer | `300` | Transition duration in milliseconds (only for images) |
+| `cycle` | array | none | List of wallpapers to cycle through (only for images) |
 
 ### Path Format
 
@@ -385,6 +390,134 @@ transition_duration 2000  # Very slow (artistic)
 ```
 
 **Note:** The `glitch` and `pixelate` transitions look best with slightly longer durations (500-800ms) to let the full effect play out.
+
+## Live Shader Wallpapers
+
+Staticwall supports custom **GLSL fragment shaders** for procedurally animated wallpapers.
+
+### Basic Usage
+
+```vibe
+default {
+  shader ~/shaders/plasma.glsl
+}
+```
+
+That's it! The shader will continuously render and animate.
+
+### Writing Shaders
+
+Shaders are GLSL ES 1.0 fragment shaders. Minimal example:
+
+```glsl
+#version 100
+precision mediump float;
+
+uniform float time;
+uniform vec2 resolution;
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / resolution.xy;
+    
+    // Simple animated color
+    vec3 color = vec3(
+        sin(time + uv.x) * 0.5 + 0.5,
+        cos(time + uv.y) * 0.5 + 0.5,
+        sin(time) * 0.5 + 0.5
+    );
+    
+    gl_FragColor = vec4(color, 1.0);
+}
+```
+
+### Available Uniforms
+
+Your shader automatically receives these uniforms:
+
+- `uniform float time;` - Elapsed time in seconds (for animation)
+- `uniform vec2 resolution;` - Screen resolution in pixels (width, height)
+
+### Example Shaders
+
+Staticwall includes example shaders in `examples/shaders/`:
+
+- **plasma.glsl** - Colorful plasma effect with sine waves
+- **wave.glsl** - Radial wave patterns
+- **gradient.glsl** - Smooth animated gradients
+- **matrix.glsl** - Matrix-style digital rain
+
+Copy them to use:
+
+```bash
+mkdir -p ~/.local/share/staticwall/shaders
+cp examples/shaders/* ~/.local/share/staticwall/shaders/
+```
+
+Then reference in config:
+
+```vibe
+default {
+  shader ~/.local/share/staticwall/shaders/plasma.glsl
+}
+```
+
+### Per-Monitor Shaders
+
+Different shaders for each monitor:
+
+```vibe
+output {
+  eDP-1 {
+    shader ~/shaders/gradient.glsl  # Laptop: simple gradient
+  }
+  
+  HDMI-A-1 {
+    shader ~/shaders/matrix.glsl    # External: matrix effect
+  }
+}
+```
+
+### Shadertoy Conversion
+
+Convert [Shadertoy](https://www.shadertoy.com/) shaders easily:
+
+**Shadertoy format:**
+```glsl
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 uv = fragCoord / iResolution.xy;
+    float t = iTime;
+    fragColor = vec4(uv, 0.5 + 0.5 * sin(t), 1.0);
+}
+```
+
+**Staticwall format:**
+```glsl
+#version 100
+precision mediump float;
+
+uniform float time;       // Replaces iTime
+uniform vec2 resolution;  // Replaces iResolution.xy
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / resolution.xy;
+    float t = time;
+    gl_FragColor = vec4(uv, 0.5 + 0.5 * sin(t), 1.0);
+}
+```
+
+### Performance
+
+- Shaders run entirely on GPU (zero CPU usage)
+- Continuous rendering at display refresh rate
+- Minimal power usage on modern GPUs
+- No external dependencies (no video codecs)
+
+### Tips
+
+- Keep shaders simple for better performance
+- Use `mediump` or `lowp` precision when possible
+- Test on your hardware - complex shaders may impact laptop battery
+- Hot-reload works: `staticwall reload` to test shader changes
 
 ## Complete Examples
 

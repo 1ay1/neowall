@@ -221,7 +221,9 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     }
 
     /* Initialize with defaults */
+    config->type = WALLPAPER_IMAGE;
     config->path[0] = '\0';
+    config->shader_path[0] = '\0';
     config->mode = MODE_FILL;
     config->duration = 0;
     config->transition = TRANSITION_NONE;
@@ -231,9 +233,17 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     config->cycle_count = 0;
     config->current_cycle_index = 0;
 
-    /* Parse path */
+    /* Parse shader (takes precedence over path) */
+    VibeValue *shader = vibe_object_get(obj->as_object, "shader");
+    if (shader && shader->type == VIBE_TYPE_STRING) {
+        config->type = WALLPAPER_SHADER;
+        strncpy(config->shader_path, shader->as_string, sizeof(config->shader_path) - 1);
+        config->shader_path[sizeof(config->shader_path) - 1] = '\0';
+    }
+
+    /* Parse path (for image wallpapers) */
     VibeValue *path = vibe_object_get(obj->as_object, "path");
-    if (path && path->type == VIBE_TYPE_STRING) {
+    if (path && path->type == VIBE_TYPE_STRING && config->type == WALLPAPER_IMAGE) {
         strncpy(config->path, path->as_string, sizeof(config->path) - 1);
         config->path[sizeof(config->path) - 1] = '\0';
     }
@@ -487,6 +497,93 @@ static bool config_create_default(const char *config_path) {
         }
     }
     
+    /* Try to copy example shaders from installation if available */
+    const char *shader_install_paths[] = {
+        "/usr/share/staticwall/shaders",
+        "/usr/local/share/staticwall/shaders",
+        NULL
+    };
+    
+    bool copied_shaders = false;
+    for (int i = 0; shader_install_paths[i] != NULL; i++) {
+        if (access(shader_install_paths[i], R_OK) == 0) {
+            /* Create user shader directory */
+            char user_shader_dir[MAX_PATH_LENGTH];
+            snprintf(user_shader_dir, sizeof(user_shader_dir), "%s/.config/staticwall/shaders", home ? home : "");
+            
+            /* Create directory structure */
+            char tmp[MAX_PATH_LENGTH];
+            snprintf(tmp, sizeof(tmp), "%s/.config", home);
+            mkdir(tmp, 0755);
+            snprintf(tmp, sizeof(tmp), "%s/.config/staticwall", home);
+            mkdir(tmp, 0755);
+            mkdir(user_shader_dir, 0755);
+            
+            /* Copy all shader files */
+            DIR *dir = opendir(shader_install_paths[i]);
+            if (dir) {
+                struct dirent *entry;
+                int shader_count = 0;
+                while ((entry = readdir(dir)) != NULL) {
+                    if (entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
+                        /* Check if it's a .glsl or README file */
+                        size_t len = strlen(entry->d_name);
+                        if ((len > 5 && strcmp(entry->d_name + len - 5, ".glsl") == 0) ||
+                            strcmp(entry->d_name, "README.md") == 0) {
+                            
+                            /* Check if paths will fit in buffer */
+                            size_t install_len = strlen(shader_install_paths[i]);
+                            size_t shader_dir_len = strlen(user_shader_dir);
+                            size_t name_len = strlen(entry->d_name);
+                            
+                            if (install_len + name_len + 2 > MAX_PATH_LENGTH ||
+                                shader_dir_len + name_len + 2 > MAX_PATH_LENGTH) {
+                                log_error("Shader path too long: %s", entry->d_name);
+                                continue;
+                            }
+                            
+                            char src_path[MAX_PATH_LENGTH];
+                            char dst_path[MAX_PATH_LENGTH];
+                            int src_len = snprintf(src_path, sizeof(src_path), "%s/%s", shader_install_paths[i], entry->d_name);
+                            int dst_len = snprintf(dst_path, sizeof(dst_path), "%s/%s", user_shader_dir, entry->d_name);
+                            
+                            if (src_len < 0 || src_len >= (int)sizeof(src_path) ||
+                                dst_len < 0 || dst_len >= (int)sizeof(dst_path)) {
+                                log_error("Failed to build shader path: %s", entry->d_name);
+                                continue;
+                            }
+                            
+                            FILE *src = fopen(src_path, "rb");
+                            if (src) {
+                                FILE *dst = fopen(dst_path, "wb");
+                                if (dst) {
+                                    char buffer[4096];
+                                    size_t bytes;
+                                    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+                                        if (fwrite(buffer, 1, bytes, dst) != bytes) {
+                                            log_error("Failed to write shader to %s", dst_path);
+                                            break;
+                                        }
+                                    }
+                                    fclose(dst);
+                                    shader_count++;
+                                }
+                                fclose(src);
+                            }
+                        }
+                    }
+                }
+                closedir(dir);
+                
+                if (shader_count > 0) {
+                    log_info("Copied %d example shader(s) to %s", shader_count, user_shader_dir);
+                    copied_shaders = true;
+                }
+            }
+            break;
+        }
+    }
+    
     /* Create default config content using VIBE syntax */
     const char *default_config =
         "# Staticwall Configuration\n"
@@ -541,6 +638,9 @@ static bool config_create_default(const char *config_path) {
     log_info("Created default configuration file: %s", config_path);
     if (copied_example) {
         log_info("Example config available at ~/.config/staticwall/config.vibe.example");
+    }
+    if (copied_shaders) {
+        log_info("Example shaders available at ~/.config/staticwall/shaders/");
     }
     log_info("Edit the configuration to set your wallpaper path");
 

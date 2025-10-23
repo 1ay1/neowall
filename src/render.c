@@ -106,6 +106,11 @@ void render_cleanup_output(struct output_state *output) {
         shader_destroy_program(output->pixelate_program);
         output->pixelate_program = 0;
     }
+
+    if (output->live_shader_program != 0) {
+        shader_destroy_program(output->live_shader_program);
+        output->live_shader_program = 0;
+    }
 }
 
 /* Create texture from image data */
@@ -267,11 +272,89 @@ static void calculate_vertex_coords(struct output_state *output, float vertices[
     calculate_vertex_coords_for_image(output, output->current_image, vertices);
 }
 
+/* Render a frame with live shader wallpaper */
+bool render_frame_shader(struct output_state *output) {
+    if (!output || output->live_shader_program == 0) {
+        log_error("Invalid output or shader program for render_frame_shader");
+        return false;
+    }
+
+    /* Set viewport */
+    glViewport(0, 0, output->width, output->height);
+
+    /* Clear screen */
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    /* Use live shader program */
+    glUseProgram(output->live_shader_program);
+
+    /* Calculate elapsed time for animation */
+    uint64_t current_time = get_time_ms();
+    float time = (current_time - output->last_frame_time) / 1000.0f;
+
+    /* Set uniforms */
+    GLint time_uniform = glGetUniformLocation(output->live_shader_program, "time");
+    if (time_uniform >= 0) {
+        glUniform1f(time_uniform, time);
+    }
+
+    GLint resolution_uniform = glGetUniformLocation(output->live_shader_program, "resolution");
+    if (resolution_uniform >= 0) {
+        glUniform2f(resolution_uniform, (float)output->width, (float)output->height);
+    }
+
+    /* Get position attribute location */
+    GLint pos_attrib = glGetAttribLocation(output->live_shader_program, "position");
+
+    /* Simple fullscreen quad vertices (position only, no texcoords) */
+    static const float shader_quad[] = {
+        -1.0f,  1.0f,  /* top-left */
+         1.0f,  1.0f,  /* top-right */
+        -1.0f, -1.0f,  /* bottom-left */
+         1.0f, -1.0f   /* bottom-right */
+    };
+
+    /* Bind VBO and upload shader quad */
+    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(shader_quad), shader_quad, GL_DYNAMIC_DRAW);
+
+    /* Set up vertex attributes */
+    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(pos_attrib);
+
+    /* Draw fullscreen quad */
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+    /* Clean up */
+    glDisableVertexAttribArray(pos_attrib);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glUseProgram(0);
+
+    /* Check for errors */
+    GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        log_error("OpenGL error during shader rendering: 0x%x", error);
+        return false;
+    }
+
+    /* Shader wallpapers need continuous redraw for animation */
+    output->needs_redraw = true;
+    output->frames_rendered++;
+
+    return true;
+}
+
 /* Render a frame for an output */
 bool render_frame(struct output_state *output) {
     if (!output) {
         log_error("Invalid output for render_frame");
         return false;
+    }
+
+    /* Check if this is a shader wallpaper */
+    if (output->config.type == WALLPAPER_SHADER) {
+        return render_frame_shader(output);
     }
 
     if (!output->current_image || output->texture == 0) {
