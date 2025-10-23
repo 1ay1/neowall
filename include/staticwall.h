@@ -255,6 +255,7 @@ bool render_frame_transition(struct output_state *output, float progress);
 GLuint render_create_texture(struct image_data *img);
 void render_destroy_texture(GLuint texture);
 bool render_load_channel_textures(struct output_state *output, struct wallpaper_config *config);
+bool render_update_channel_texture(struct output_state *output, size_t channel_index, const char *image_path);
 
 /* GL shader programs */
 bool shader_create_program(GLuint *program);

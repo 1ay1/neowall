@@ -374,21 +374,66 @@ void output_cycle_wallpaper(struct output_state *output) {
 
     const char *next_path = output->config.cycle_paths[output->config.current_cycle_index];
 
-    const char *type_str = (output->config.type == WALLPAPER_SHADER) ? "shader" : "wallpaper";
-    log_info("Cycling %s for output %s: index %zu->%zu (%zu/%zu): %s",
-             type_str,
-             output->model[0] ? output->model : "unknown",
-             old_index,
-             output->config.current_cycle_index,
-             output->config.current_cycle_index + 1,
-             output->config.cycle_count,
-             next_path);
+    /* Detect if we're in "shader + image cycling" mode:
+     * - Type is WALLPAPER_SHADER (we have a shader)
+     * - shader_path is set (the main shader to keep)
+     * - cycle_paths contains images (not shaders)
+     * 
+     * In this mode, we keep the same shader but cycle images through iChannel0
+     */
+    bool is_shader_with_image_cycling = false;
+    if (output->config.type == WALLPAPER_SHADER && 
+        output->config.shader_path[0] != '\0') {
+        /* Check if the first cycle path looks like an image (not a .glsl shader) */
+        const char *ext = strrchr(next_path, '.');
+        if (ext && (strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 || 
+                   strcmp(ext, ".jpeg") == 0 || strcmp(ext, ".PNG") == 0 || 
+                   strcmp(ext, ".JPG") == 0 || strcmp(ext, ".JPEG") == 0)) {
+            is_shader_with_image_cycling = true;
+        }
+    }
 
-    /* Apply the next item based on type */
-    if (output->config.type == WALLPAPER_SHADER) {
-        output_set_shader(output, next_path);
+    if (is_shader_with_image_cycling) {
+        /* Shader + Image Cycling mode: Update iChannel0 with the next image */
+        log_info("Cycling image for shader on output %s: index %zu->%zu (%zu/%zu): %s",
+                 output->model[0] ? output->model : "unknown",
+                 old_index,
+                 output->config.current_cycle_index,
+                 output->config.current_cycle_index + 1,
+                 output->config.cycle_count,
+                 next_path);
+        
+        /* Update iChannel0 with the new image */
+        if (!render_update_channel_texture(output, 0, next_path)) {
+            log_error("Failed to update iChannel0 with: %s", next_path);
+            return;
+        }
+        
+        /* Write state to file */
+        const char *mode_str = wallpaper_mode_to_string(output->config.mode);
+        write_wallpaper_state(output->model, output->config.shader_path, mode_str,
+                             output->config.current_cycle_index,
+                             output->config.cycle_count);
+        
+        log_info("Image cycled through shader successfully");
     } else {
-        output_set_wallpaper(output, next_path);
+        /* Normal cycling mode: change the wallpaper or shader entirely */
+        const char *type_str = (output->config.type == WALLPAPER_SHADER) ? "shader" : "wallpaper";
+        log_info("Cycling %s for output %s: index %zu->%zu (%zu/%zu): %s",
+                 type_str,
+                 output->model[0] ? output->model : "unknown",
+                 old_index,
+                 output->config.current_cycle_index,
+                 output->config.current_cycle_index + 1,
+                 output->config.cycle_count,
+                 next_path);
+
+        /* Apply the next item based on type */
+        if (output->config.type == WALLPAPER_SHADER) {
+            output_set_shader(output, next_path);
+        } else {
+            output_set_wallpaper(output, next_path);
+        }
     }
 }
 
@@ -634,13 +679,38 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     if (config->type == WALLPAPER_SHADER) {
         /* Load shader wallpaper */
         const char *initial_shader = config->shader_path;
+        bool is_shader_with_image_cycling = false;
+        
         if (output->config.cycle && output->config.cycle_count > 0 && output->config.cycle_paths) {
-            /* Use the shader at restored index */
-            initial_shader = output->config.cycle_paths[output->config.current_cycle_index];
+            /* Check if this is shader + image cycling mode */
+            const char *first_cycle_path = output->config.cycle_paths[0];
+            const char *ext = strrchr(first_cycle_path, '.');
+            
+            if (ext && (strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 || 
+                       strcmp(ext, ".jpeg") == 0 || strcmp(ext, ".PNG") == 0 || 
+                       strcmp(ext, ".JPG") == 0 || strcmp(ext, ".JPEG") == 0)) {
+                /* Cycle paths contain images - this is shader + image cycling mode */
+                is_shader_with_image_cycling = true;
+                log_info("Detected shader + image cycling mode: shader='%s', cycling through %zu images",
+                         initial_shader, output->config.cycle_count);
+            } else {
+                /* Cycle paths contain shaders - use the shader at restored index */
+                initial_shader = output->config.cycle_paths[output->config.current_cycle_index];
+            }
         }
         
         if (initial_shader[0] != '\0') {
             output_set_shader(output, initial_shader);
+            
+            /* If shader + image cycling mode, load the first image into iChannel0 */
+            if (is_shader_with_image_cycling) {
+                const char *initial_image = output->config.cycle_paths[output->config.current_cycle_index];
+                log_info("Loading initial image into iChannel0: %s", initial_image);
+                
+                if (!render_update_channel_texture(output, 0, initial_image)) {
+                    log_error("Failed to load initial image into iChannel0: %s", initial_image);
+                }
+            }
         }
     } else {
         /* Load image wallpaper */

@@ -507,6 +507,67 @@ bool render_load_channel_textures(struct output_state *output, struct wallpaper_
     return true;
 }
 
+/**
+ * Update a single iChannel texture with a new image
+ * 
+ * This is used for cycling images through a shader effect - the shader stays
+ * the same but we update iChannel0 with each new image from the cycle.
+ * 
+ * @param output Output state
+ * @param channel_index Index of the channel to update (typically 0)
+ * @param image_path Path to the image file
+ * @return true on success, false on failure
+ */
+bool render_update_channel_texture(struct output_state *output, size_t channel_index, const char *image_path) {
+    if (!output || !image_path) {
+        log_error("Invalid parameters for render_update_channel_texture");
+        return false;
+    }
+    
+    if (channel_index >= output->channel_count) {
+        log_error("Channel index %zu out of bounds (max %zu)", channel_index, output->channel_count);
+        return false;
+    }
+    
+    if (!output->channel_textures) {
+        log_error("Channel textures not initialized");
+        return false;
+    }
+    
+    /* Load the new image */
+    struct image_data *img = image_load(image_path, 0, 0, MODE_FILL);
+    if (!img) {
+        log_error("Failed to load image for iChannel%zu: %s", channel_index, image_path);
+        return false;
+    }
+    
+    /* Delete old texture if it exists */
+    if (output->channel_textures[channel_index] != 0) {
+        glDeleteTextures(1, &output->channel_textures[channel_index]);
+    }
+    
+    /* Create new flipped texture for shader use */
+    GLuint texture = render_create_texture_flipped(img);
+    if (texture == 0) {
+        log_error("Failed to create texture for iChannel%zu from: %s", channel_index, image_path);
+        image_free(img);
+        return false;
+    }
+    
+    /* Update the channel texture */
+    output->channel_textures[channel_index] = texture;
+    
+    log_info("Updated iChannel%zu with image: %s (%ux%u) -> texture ID %u", 
+             channel_index, image_path, img->width, img->height, texture);
+    
+    image_free(img);
+    
+    /* Mark for redraw */
+    output->needs_redraw = true;
+    
+    return true;
+}
+
 
 
 /* Calculate vertex coordinates based on display mode for a specific image

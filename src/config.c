@@ -440,11 +440,15 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         }
     }
 
-    /* Parse path (for image wallpapers) */
+    /* Parse path (for image wallpapers OR shader + image cycling) */
     VibeValue *path = vibe_object_get(obj->as_object, "path");
-    if (path && path->type == VIBE_TYPE_STRING && config->type == WALLPAPER_IMAGE) {
-        strncpy(config->path, path->as_string, sizeof(config->path) - 1);
-        config->path[sizeof(config->path) - 1] = '\0';
+    if (path && path->type == VIBE_TYPE_STRING) {
+        /* For WALLPAPER_IMAGE: This is the wallpaper image
+         * For WALLPAPER_SHADER: If cycling, this is treated as cycle source below */
+        if (config->type == WALLPAPER_IMAGE) {
+            strncpy(config->path, path->as_string, sizeof(config->path) - 1);
+            config->path[sizeof(config->path) - 1] = '\0';
+        }
     }
 
     /* Parse mode */
@@ -534,6 +538,63 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
                 if (config->cycle_paths) {
                     config->cycle_paths[0] = strdup(cycle_path);
                     log_debug("Using single file for cycling: %s", cycle_path);
+                }
+            }
+        }
+    }
+    
+    /* If we have a shader but no cycle was specified, check if 'path' or 'paths' 
+     * should be used for shader + image cycling */
+    if (config->type == WALLPAPER_SHADER && !config->cycle) {
+        /* Check for 'paths' array first */
+        VibeValue *paths = vibe_object_get(obj->as_object, "paths");
+        if (paths && paths->type == VIBE_TYPE_ARRAY) {
+            /* Array of image paths to cycle through with shader */
+            size_t count = paths->as_array->count;
+            if (count > 0) {
+                config->cycle = true;
+                config->cycle_count = count;
+                config->cycle_paths = calloc(count, sizeof(char *));
+
+                if (!config->cycle_paths) {
+                    log_error("Failed to allocate cycle paths array");
+                    return false;
+                }
+
+                for (size_t i = 0; i < count; i++) {
+                    VibeValue *elem = paths->as_array->values[i];
+                    if (elem && elem->type == VIBE_TYPE_STRING) {
+                        config->cycle_paths[i] = strdup(elem->as_string);
+                    } else {
+                        log_error("Path at index %zu is not a string", i);
+                        config->cycle_paths[i] = strdup("");
+                    }
+                }
+
+                log_info("Shader + image cycling mode: loaded %zu images to cycle through shader", count);
+            }
+        } 
+        /* If no 'paths' array, check for 'path' string (directory or single file) */
+        else if (path && path->type == VIBE_TYPE_STRING) {
+            const char *cycle_path = path->as_string;
+            size_t dir_count = 0;
+            char **dir_paths = load_images_from_directory(cycle_path, &dir_count);
+
+            if (dir_paths && dir_count > 0) {
+                /* Successfully loaded from directory */
+                config->cycle = true;
+                config->cycle_count = dir_count;
+                config->cycle_paths = dir_paths;
+                log_info("Shader + image cycling mode: loaded %zu images from directory '%s'", 
+                         dir_count, cycle_path);
+            } else {
+                /* Not a directory, treat as single file */
+                config->cycle = true;
+                config->cycle_count = 1;
+                config->cycle_paths = calloc(1, sizeof(char *));
+                if (config->cycle_paths) {
+                    config->cycle_paths[0] = strdup(cycle_path);
+                    log_info("Shader + image cycling mode: using single image '%s'", cycle_path);
                 }
             }
         }
