@@ -461,35 +461,32 @@ static bool config_create_default(const char *config_path) {
         default_wallpaper_path = "~/Pictures/wallpaper.png";
     }
 
-    /* Try to copy example config from installation if available */
+    /* Try to copy example config from installation as the main config */
     const char *example_config_paths[] = {
         "/usr/share/staticwall/config.vibe.example",
         "/usr/local/share/staticwall/config.vibe.example",
         NULL
     };
     
-    bool copied_example = false;
+    bool copied_config = false;
     for (int i = 0; example_config_paths[i] != NULL; i++) {
         if (access(example_config_paths[i], R_OK) == 0) {
-            /* Copy example config to user config directory as reference */
-            char example_dest[MAX_PATH_LENGTH];
-            snprintf(example_dest, sizeof(example_dest), "%s/.config/staticwall/config.vibe.example", home ? home : "");
-            
+            /* Copy example config as the main config file */
             FILE *src = fopen(example_config_paths[i], "rb");
             if (src) {
-                FILE *dst = fopen(example_dest, "wb");
+                FILE *dst = fopen(config_path, "wb");
                 if (dst) {
                     char buffer[4096];
                     size_t bytes;
                     while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
                         if (fwrite(buffer, 1, bytes, dst) != bytes) {
-                            log_error("Failed to write to %s", example_dest);
+                            log_error("Failed to write to %s", config_path);
                             break;
                         }
                     }
                     fclose(dst);
-                    log_info("Copied example config to %s", example_dest);
-                    copied_example = true;
+                    log_info("Created configuration file from example: %s", config_path);
+                    copied_config = true;
                 }
                 fclose(src);
             }
@@ -584,65 +581,35 @@ static bool config_create_default(const char *config_path) {
         }
     }
     
-    /* Create default config content using VIBE syntax */
-    const char *default_config =
-        "# Staticwall Configuration\n"
-        "# Generated on first run\n"
-        "# Sets wallpapers until it... doesn't.\n\n"
-        "# Default wallpaper for all outputs\n"
-        "default {\n"
-        "  path %s\n"
-        "  mode fill\n"
-        "}\n\n"
-        "# Uncomment to enable wallpaper cycling:\n"
-        "# default {\n"
-        "#   path ~/Pictures/wallpapers/\n"
-        "#   mode fill\n"
-        "#   duration 300  # Change every 5 minutes\n"
-        "#   transition fade\n"
-        "# }\n\n"
-        "# Example: Configure specific monitors\n"
-        "# Find your monitor names with: swaymsg -t get_outputs\n"
-        "# output {\n"
-        "#   eDP-1 {\n"
-        "#     path ~/Pictures/laptop.jpg\n"
-        "#     mode fill\n"
-        "#   }\n"
-        "#   HDMI-A-1 {\n"
-        "#     path ~/Pictures/monitor.png\n"
-        "#     mode fit\n"
-        "#   }\n"
-        "# }\n\n"
-        "# Display modes:\n"
-        "#   fill    - Scale to fill screen, crop if needed (recommended)\n"
-        "#   fit     - Scale to fit inside screen, may have black bars\n"
-        "#   center  - Center image without scaling\n"
-        "#   stretch - Stretch to fill screen, may distort\n"
-        "#   tile    - Tile the image\n\n"
-        "# Transition effects:\n"
-        "#   none        - Instant change\n"
-        "#   fade        - Fade between images\n"
-        "#   slide_left  - Slide from right to left\n"
-        "#   slide_right - Slide from left to right\n";
+    /* If we couldn't copy the example config, create a minimal fallback */
+    if (!copied_config) {
+        log_info("Could not find example config, creating minimal fallback");
+        
+        const char *fallback_config =
+            "# Staticwall Configuration\n"
+            "# Minimal fallback config\n\n"
+            "default {\n"
+            "  path %s\n"
+            "  mode fill\n"
+            "}\n";
 
-    /* Write config file */
-    FILE *fp = fopen(config_path, "w");
-    if (!fp) {
-        log_error("Failed to create default config file: %s", strerror(errno));
-        return false;
-    }
+        FILE *fp = fopen(config_path, "w");
+        if (!fp) {
+            log_error("Failed to create default config file: %s", strerror(errno));
+            return false;
+        }
 
-    fprintf(fp, default_config, default_wallpaper_path);
-    fclose(fp);
-
-    log_info("Created default configuration file: %s", config_path);
-    if (copied_example) {
-        log_info("Example config available at ~/.config/staticwall/config.vibe.example");
+        fprintf(fp, fallback_config, default_wallpaper_path);
+        fclose(fp);
+        
+        log_info("Created minimal configuration file: %s", config_path);
     }
     if (copied_shaders) {
         log_info("Example shaders available at ~/.config/staticwall/shaders/");
     }
-    log_info("Edit the configuration to set your wallpaper path");
+    if (copied_config) {
+        log_info("Edit %s to customize your wallpaper setup", config_path);
+    }
 
     return true;
 }

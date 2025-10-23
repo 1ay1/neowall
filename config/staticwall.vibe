@@ -20,10 +20,11 @@
 # DEFAULT CONFIGURATION
 # ============================================================================
 # This section applies to ALL monitors unless overridden below.
-# At minimum, you need to set a 'path' to your wallpaper image.
+# You can use either static images OR animated shader wallpapers.
 
 default {
-  # Path to wallpaper (required)
+  # Option 1: Static Image Wallpaper
+  # Path to wallpaper image (PNG/JPEG)
   #
   # 📁 DIRECTORY MODE (Recommended!):
   #    Point to a folder to automatically cycle through ALL images
@@ -35,9 +36,26 @@ default {
   #    Path to one specific image file
   #    Example: path ~/Pictures/wallpaper.png
   #
-  # Supported formats: PNG, JPEG/JPG
   # Use ~ for home directory, absolute paths, or relative paths
-  path ~/Pictures/wallpaper.png
+  # Default: Use the shipped wallpaper (copied to ~/.local/share/staticwall/default.png on first run)
+  path ~/.local/share/staticwall/default.png
+
+  # Option 2: Live Shader Wallpaper (NEW!)
+  # Animated, GPU-accelerated shader effects
+  # Just specify the shader filename - no path needed!
+  # shader plasma.glsl
+  #
+  # Available shaders (in ~/.config/staticwall/shaders/):
+  #   - plasma.glsl   : Colorful animated plasma effect
+  #   - wave.glsl     : Rippling wave patterns
+  #   - matrix.glsl   : Matrix-style falling characters
+  #   - gradient.glsl : Smooth color gradients
+  #
+  # You can also use full paths:
+  # shader ~/.config/staticwall/shaders/plasma.glsl
+  # shader /usr/share/staticwall/shaders/wave.glsl
+  #
+  # ⚠️ NOTE: Use EITHER 'path' OR 'shader', not both!
 
   # Display mode (optional, default: fill)
   # Options:
@@ -122,6 +140,11 @@ output {
 #   mode fill
 # }
 
+# --- Example 1b: Live Shader Wallpaper ---
+# default {
+#   shader plasma.glsl
+# }
+
 # --- Example 2: Laptop + External Monitor ---
 # default {
 #   path ~/Pictures/default.png
@@ -174,28 +197,48 @@ output {
 #   }
 # }
 
+# --- Example 6: Live Shader Wallpapers ---
+# default {
+#   shader plasma.glsl     # Animated plasma effect
+# }
+
+# --- Example 7: Mix Shaders and Images ---
+# output {
+#   eDP-1 {
+#     shader matrix.glsl   # Matrix effect on laptop
+#   }
+#   HDMI-A-1 {
+#     path ~/Pictures/wallpaper.png  # Static image on external monitor
+#     mode fill
+#   }
+# }
+
+# --- Example 8: Cycling Through Different Shaders ---
+# Note: Shader cycling is not yet implemented
+# Use a single shader per output for now
+
 # ============================================================================
 # TIPS & TRICKS
 # ============================================================================
 #
 # 1. Hot-reload configuration:
-#    killall -HUP staticwall
+#    staticwall reload
 #
-# 2. Run with auto-reload:
-#    staticwall --watch --daemon
+# 2. Run with auto-reload (watches config file for changes):
+#    staticwall --watch
 #
 # 3. Test configuration before daemonizing:
-#    staticwall -v
+#    staticwall -v -f
 #
 # 4. Use absolute paths if ~ doesn't work:
 #    path /home/username/Pictures/wallpaper.png
 #
 # 5. Organize wallpapers in folders and use directory cycling:
 #    mkdir -p ~/Pictures/Wallpapers/{Nature,Abstract,Space}
-#    cycle ~/Pictures/Wallpapers/Nature
+#    path ~/Pictures/Wallpapers/Nature/
 #
 # 6. Check logs for errors:
-#    journalctl --user -u staticwall.service -f
+#    staticwall -f -v  (run in foreground with verbose logging)
 #
 # 7. Different configs for different scenarios:
 #    staticwall -c ~/.config/staticwall/work.vibe
@@ -212,6 +255,20 @@ output {
 #    path ~/Pictures/Wallpapers/
 #    This automatically loads all PNG and JPEG files
 #    Much easier than listing files manually!
+#
+# 10. Live shader wallpapers:
+#     - Installed to ~/.config/staticwall/shaders/ on first run
+#     - Just use the filename: shader plasma.glsl
+#     - Renders at ~60 FPS with minimal CPU usage
+#     - Create your own shaders! See shaders/README.md
+#
+# 11. Control the daemon:
+#     staticwall kill      # Stop daemon
+#     staticwall reload    # Reload config
+#     staticwall next      # Skip to next wallpaper
+#     staticwall pause     # Pause cycling
+#     staticwall resume    # Resume cycling
+#     staticwall current   # Show current wallpaper
 #
 # ============================================================================
 # TROUBLESHOOTING
@@ -230,17 +287,30 @@ output {
 # Solution: Check exact monitor name with: swaymsg -t get_outputs
 #
 # Problem: Wallpapers not cycling
-# Solution: Ensure duration > 0 and cycle array is populated
+# Solution: Ensure duration > 0 and path points to a directory (with trailing /)
+#
+# Problem: Shader not found
+# Solution: Shaders are in ~/.config/staticwall/shaders/ (copied on first run)
+#          Use just the filename: shader plasma.glsl
+#
+# Problem: Black screen with shader
+# Solution: Check logs with: staticwall -f -v
+#          Ensure your GPU supports OpenGL ES 2.0
+#
+# Problem: Shader performance issues
+# Solution: Shaders run at 60 FPS. If laggy, check GPU drivers
 #
 # ============================================================================
 # MORE INFORMATION
 # ============================================================================
 #
 # Full documentation:     README.md
-# Configuration guide:    CONFIG_GUIDE.md
-# Installation guide:     INSTALL.md
-# Quick start:            QUICKSTART.md
-# Project repository:     https://github.com/yourusername/staticwall
+# Configuration guide:    docs/CONFIG_GUIDE.md
+# Shader documentation:   ~/.config/staticwall/shaders/README.md
+# Project repository:     https://github.com/staticwall/staticwall
+#
+# Example shaders:        ~/.config/staticwall/shaders/
+# System shaders:         /usr/share/staticwall/shaders/
 #
 # Report issues or get help:
 #   https://github.com/yourusername/staticwall/issues
