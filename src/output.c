@@ -272,8 +272,10 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
     output->config.type = WALLPAPER_SHADER;
 
-    /* Initialize frame time for animation */
-    output->last_frame_time = get_time_ms();
+    /* Initialize frame time and shader start time for animation */
+    uint64_t now = get_time_ms();
+    output->last_frame_time = now;
+    output->shader_start_time = now;
 
     /* Mark for redraw */
     output->needs_redraw = true;
