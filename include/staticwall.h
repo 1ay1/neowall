@@ -46,6 +46,7 @@ enum transition_type {
     TRANSITION_FADE,
     TRANSITION_SLIDE_LEFT,
     TRANSITION_SLIDE_RIGHT,
+    TRANSITION_GLITCH,
 };
 
 /* Image data structure */
@@ -100,6 +101,7 @@ struct output_state {
     GLuint texture;
     GLuint next_texture;                /* For transitions */
     GLuint program;
+    GLuint glitch_program;              /* Shader program for glitch transition */
     GLuint vbo;
 
     uint64_t last_frame_time;

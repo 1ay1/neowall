@@ -154,6 +154,26 @@ Common monitor names:
 - **stretch** - Stretch to fill screen (may distort)
 - **tile** - Repeat image to fill screen
 
+## Transition Effects
+
+Add smooth transitions when wallpapers change:
+
+- **none** - Instant change (default)
+- **fade** - Smooth crossfade
+- **slide_left** - Slide from right to left
+- **slide_right** - Slide from left to right
+- **glitch** - Digital glitch effect (cyberpunk!)
+
+Example:
+```vibe
+default {
+  path ~/Pictures/wallpapers/
+  duration 300
+  transition glitch
+  transition_duration 600
+}
+```
+
 ## Common Issues
 
 ### Not seeing wallpaper?

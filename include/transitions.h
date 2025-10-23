@@ -1,0 +1,29 @@
+#ifndef TRANSITIONS_H
+#define TRANSITIONS_H
+
+#include "staticwall.h"
+
+/* Transition rendering function signature */
+typedef bool (*transition_render_func)(struct output_state *output, float progress);
+
+/* Transition interface - each transition implements this */
+struct transition {
+    enum transition_type type;
+    const char *name;
+    transition_render_func render;
+};
+
+/* Transition registry functions */
+void transitions_init(void);
+bool transition_render(struct output_state *output, enum transition_type type, float progress);
+
+/* Individual transition implementations */
+bool transition_fade_render(struct output_state *output, float progress);
+bool transition_slide_left_render(struct output_state *output, float progress);
+bool transition_slide_right_render(struct output_state *output, float progress);
+bool transition_glitch_render(struct output_state *output, float progress);
+
+/* Shader sources for transitions that need custom shaders */
+extern const char *transition_glitch_shader_source;
+
+#endif /* TRANSITIONS_H */

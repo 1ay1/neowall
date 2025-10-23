@@ -97,6 +97,8 @@ static enum transition_type transition_type_from_string(const char *str) {
         return TRANSITION_SLIDE_LEFT;
     } else if (strcasecmp(str, "slide-right") == 0 || strcasecmp(str, "slide_right") == 0) {
         return TRANSITION_SLIDE_RIGHT;
+    } else if (strcasecmp(str, "glitch") == 0) {
+        return TRANSITION_GLITCH;
     }
 
     log_error("Unknown transition type '%s', using 'none'", str);

@@ -4,31 +4,10 @@
 #include <math.h>
 #include <GLES2/gl2.h>
 #include "staticwall.h"
+#include "transitions.h"
+#include "shader.h"
 
-/* Vertex shader source */
-static const char *vertex_shader_source =
-    "#version 100\n"
-    "attribute vec2 position;\n"
-    "attribute vec2 texcoord;\n"
-    "varying vec2 v_texcoord;\n"
-    "void main() {\n"
-    "    gl_Position = vec4(position, 0.0, 1.0);\n"
-    "    v_texcoord = texcoord;\n"
-    "}\n";
-
-/* Fragment shader source */
-static const char *fragment_shader_source =
-    "#version 100\n"
-    "precision mediump float;\n"
-    "varying vec2 v_texcoord;\n"
-    "uniform sampler2D texture0;\n"
-    "uniform float alpha;\n"
-    "void main() {\n"
-    "    vec4 color = texture2D(texture0, v_texcoord);\n"
-    "    gl_FragColor = vec4(color.rgb, color.a * alpha);\n"
-    "}\n";
-
-/* Note: Transitions are implemented using alpha blending instead of a dual-texture shader */
+/* Note: Each transition manages its own shader sources in src/transitions/ */
 
 /* Fullscreen quad vertices (position + texcoord) */
 static const float quad_vertices[] = {
@@ -39,112 +18,6 @@ static const float quad_vertices[] = {
      1.0f, -1.0f,    1.0f, 1.0f   /* bottom-right */
 };
 
-/* Compile a shader */
-static GLuint compile_shader(GLenum type, const char *source) {
-    const char *type_str = (type == GL_VERTEX_SHADER) ? "vertex" : "fragment";
-    GLuint shader = glCreateShader(type);
-    if (shader == 0) {
-        log_error("Failed to create %s shader", type_str);
-        return 0;
-    }
-
-    glShaderSource(shader, 1, &source, NULL);
-    glCompileShader(shader);
-
-    /* Check compilation status */
-    GLint compiled;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-    if (!compiled) {
-        GLint info_len = 0;
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &info_len);
-        if (info_len > 1) {
-            char *info_log = malloc(info_len);
-            if (info_log) {
-                glGetShaderInfoLog(shader, info_len, NULL, info_log);
-                log_error("%s shader compilation failed: %s", type_str, info_log);
-                free(info_log);
-            }
-        } else {
-            log_error("%s shader compilation failed (no log available)", type_str);
-        }
-        glDeleteShader(shader);
-        return 0;
-    }
-
-    log_debug("%s shader compiled successfully", type_str);
-
-    return shader;
-}
-
-/* Create shader program */
-bool shader_create_program(GLuint *program) {
-    if (!program) {
-        log_error("Invalid program pointer");
-        return false;
-    }
-
-    /* Compile shaders */
-    GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, vertex_shader_source);
-    if (vertex_shader == 0) {
-        return false;
-    }
-
-    GLuint fragment_shader = compile_shader(GL_FRAGMENT_SHADER, fragment_shader_source);
-    if (fragment_shader == 0) {
-        glDeleteShader(vertex_shader);
-        return false;
-    }
-
-    /* Create program */
-    GLuint prog = glCreateProgram();
-    if (prog == 0) {
-        log_error("Failed to create shader program");
-        glDeleteShader(vertex_shader);
-        glDeleteShader(fragment_shader);
-        return false;
-    }
-
-    /* Attach shaders */
-    glAttachShader(prog, vertex_shader);
-    glAttachShader(prog, fragment_shader);
-
-    /* Link program */
-    glLinkProgram(prog);
-
-    /* Check link status */
-    GLint linked;
-    glGetProgramiv(prog, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        GLint info_len = 0;
-        glGetProgramiv(prog, GL_INFO_LOG_LENGTH, &info_len);
-        if (info_len > 1) {
-            char *info_log = malloc(info_len);
-            if (info_log) {
-                glGetProgramInfoLog(prog, info_len, NULL, info_log);
-                log_error("Program linking failed: %s", info_log);
-                free(info_log);
-            }
-        }
-        glDeleteProgram(prog);
-        glDeleteShader(vertex_shader);
-        glDeleteShader(fragment_shader);
-        return false;
-    }
-
-    /* Shaders can be deleted now */
-    glDeleteShader(vertex_shader);
-    glDeleteShader(fragment_shader);
-
-    *program = prog;
-    return true;
-}
-
-void shader_destroy_program(GLuint program) {
-    if (program != 0) {
-        glDeleteProgram(program);
-    }
-}
-
 /* Initialize rendering for an output */
 bool render_init_output(struct output_state *output) {
     if (!output) {
@@ -154,9 +27,17 @@ bool render_init_output(struct output_state *output) {
 
     /* Context should already be current when this is called from egl.c */
 
-    /* Create shader program */
-    if (!shader_create_program(&output->program)) {
-        log_error("Failed to create shader program for output %s", output->model);
+    /* Create shader programs for transitions
+     * Note: fade and slide share the same shader, so we use fade's program */
+    if (!shader_create_fade_program(&output->program)) {
+        log_error("Failed to create fade/slide shader program for output %s", output->model);
+        return false;
+    }
+
+    /* Create glitch shader program */
+    if (!shader_create_glitch_program(&output->glitch_program)) {
+        log_error("Failed to create glitch shader program for output %s", output->model);
+        shader_destroy_program(output->program);
         return false;
     }
 
@@ -202,10 +83,15 @@ void render_cleanup_output(struct output_state *output) {
         output->vbo = 0;
     }
 
-    /* Delete program */
+    /* Delete programs */
     if (output->program != 0) {
         shader_destroy_program(output->program);
         output->program = 0;
+    }
+
+    if (output->glitch_program != 0) {
+        shader_destroy_program(output->glitch_program);
+        output->glitch_program = 0;
     }
 }
 
@@ -255,10 +141,11 @@ void render_destroy_texture(GLuint texture) {
 
 
 
-/* Calculate vertex coordinates based on display mode for a specific image */
-static void calculate_vertex_coords_for_image(struct output_state *output, 
-                                               struct image_data *image, 
-                                               float vertices[16]) {
+/* Calculate vertex coordinates based on display mode for a specific image
+ * This function is used by transition modules to properly size images during transitions */
+void calculate_vertex_coords_for_image(struct output_state *output, 
+                                        struct image_data *image, 
+                                        float vertices[16]) {
     /* Default: fullscreen quad */
     memcpy(vertices, quad_vertices, sizeof(quad_vertices));
     
@@ -471,7 +358,8 @@ bool render_frame(struct output_state *output) {
     return true;
 }
 
-/* Render frame with transition effect */
+/* Render frame with transition effect
+ * Dispatches to modular transition implementations */
 bool render_frame_transition(struct output_state *output, float progress) {
     if (!output || !output->current_image || !output->next_image) {
         return render_frame(output);
@@ -481,232 +369,6 @@ bool render_frame_transition(struct output_state *output, float progress) {
         return render_frame(output);
     }
 
-    /* Handle different transition types */
-    if (output->config.transition == TRANSITION_FADE) {
-        /* Fade transition using alpha blending */
-        
-        /* Set viewport */
-        glViewport(0, 0, output->width, output->height);
-
-        /* Clear screen */
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        /* Use shader program */
-        glUseProgram(output->program);
-
-        /* Get attribute locations */
-        GLint pos_attrib = glGetAttribLocation(output->program, "position");
-        GLint tex_attrib = glGetAttribLocation(output->program, "texcoord");
-        GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
-        GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
-
-        /* Bind VBO */
-        glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-
-        /* Set up vertex attributes */
-        glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
-                             4 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(pos_attrib);
-
-        glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
-                             4 * sizeof(float), (void*)(2 * sizeof(float)));
-        glEnableVertexAttribArray(tex_attrib);
-
-        /* Enable blending */
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        /* First, render the old image (next_image) fully opaque with its proper display mode */
-        float old_vertices[16];
-        calculate_vertex_coords_for_image(output, output->next_image, old_vertices);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(old_vertices), old_vertices, GL_DYNAMIC_DRAW);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, output->next_texture);
-        glUniform1i(tex_uniform, 0);
-
-        if (alpha_uniform >= 0) {
-            glUniform1f(alpha_uniform, 1.0f);
-        }
-
-        /* Handle tile mode texture wrapping for old image */
-        if (output->config.mode == MODE_TILE) {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        } else {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        }
-
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-        /* Then, render the new image (current_image) with alpha based on progress and its proper display mode */
-        float new_vertices[16];
-        calculate_vertex_coords_for_image(output, output->current_image, new_vertices);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(new_vertices), new_vertices, GL_DYNAMIC_DRAW);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, output->texture);
-        glUniform1i(tex_uniform, 0);
-
-        if (alpha_uniform >= 0) {
-            glUniform1f(alpha_uniform, progress);
-        }
-
-        /* Handle tile mode texture wrapping for new image */
-        if (output->config.mode == MODE_TILE) {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        } else {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        }
-
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-        /* Clean up */
-        glDisable(GL_BLEND);
-        glDisableVertexAttribArray(pos_attrib);
-        glDisableVertexAttribArray(tex_attrib);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glUseProgram(0);
-
-        /* Check for errors */
-        GLenum error = glGetError();
-        if (error != GL_NO_ERROR) {
-            log_error("OpenGL error during transition rendering: 0x%x", error);
-            return false;
-        }
-
-        output->needs_redraw = true;  /* Keep redrawing during transition */
-        output->frames_rendered++;
-
-        return true;
-        
-    } else if (output->config.transition == TRANSITION_SLIDE_LEFT || 
-               output->config.transition == TRANSITION_SLIDE_RIGHT) {
-        /* Slide transition - slide images while maintaining their display mode */
-        
-        /* Set viewport */
-        glViewport(0, 0, output->width, output->height);
-
-        /* Clear screen */
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        /* Use shader program */
-        glUseProgram(output->program);
-
-        /* Get attribute locations */
-        GLint pos_attrib = glGetAttribLocation(output->program, "position");
-        GLint tex_attrib = glGetAttribLocation(output->program, "texcoord");
-        GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
-        GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
-
-        /* Enable blending */
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        /* Calculate slide offset */
-        float offset = (output->config.transition == TRANSITION_SLIDE_LEFT) ? progress : -progress;
-
-        /* Render old image (sliding out) with proper display mode */
-        float old_vertices[16];
-        calculate_vertex_coords_for_image(output, output->next_image, old_vertices);
-        
-        /* Adjust position based on slide direction */
-        for (int i = 0; i < 4; i++) {
-            old_vertices[i * 4] = old_vertices[i * 4] - (offset * 2.0f);
-        }
-
-        glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(old_vertices), old_vertices, GL_DYNAMIC_DRAW);
-
-        glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
-                             4 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(pos_attrib);
-
-        glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
-                             4 * sizeof(float), (void*)(2 * sizeof(float)));
-        glEnableVertexAttribArray(tex_attrib);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, output->next_texture);
-        
-        /* Handle tile mode texture wrapping */
-        if (output->config.mode == MODE_TILE) {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        } else {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        }
-        
-        glUniform1i(tex_uniform, 0);
-
-        if (alpha_uniform >= 0) {
-            glUniform1f(alpha_uniform, 1.0f);
-        }
-
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-        /* Render new image (sliding in) with proper display mode */
-        float new_vertices[16];
-        calculate_vertex_coords_for_image(output, output->current_image, new_vertices);
-        
-        /* Adjust position to slide in from opposite side */
-        float slide_in_offset = (output->config.transition == TRANSITION_SLIDE_LEFT) ? 
-                                (1.0f - progress) : -(1.0f - progress);
-        
-        for (int i = 0; i < 4; i++) {
-            new_vertices[i * 4] = new_vertices[i * 4] + (slide_in_offset * 2.0f);
-        }
-
-        glBufferData(GL_ARRAY_BUFFER, sizeof(new_vertices), new_vertices, GL_DYNAMIC_DRAW);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, output->texture);
-        
-        /* Handle tile mode texture wrapping */
-        if (output->config.mode == MODE_TILE) {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        } else {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        }
-        
-        glUniform1i(tex_uniform, 0);
-
-        if (alpha_uniform >= 0) {
-            glUniform1f(alpha_uniform, 1.0f);
-        }
-
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-        /* Clean up */
-        glDisable(GL_BLEND);
-        glDisableVertexAttribArray(pos_attrib);
-        glDisableVertexAttribArray(tex_attrib);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glUseProgram(0);
-
-        /* Check for errors */
-        GLenum error = glGetError();
-        if (error != GL_NO_ERROR) {
-            log_error("OpenGL error during slide transition: 0x%x", error);
-            return false;
-        }
-
-        output->needs_redraw = true;  /* Keep redrawing during transition */
-        output->frames_rendered++;
-
-        return true;
-    }
-
-    /* Fallback to regular render */
-    return render_frame(output);
+    /* Dispatch to modular transition renderer */
+    return transition_render(output, output->config.transition, progress);
 }

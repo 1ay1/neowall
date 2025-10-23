@@ -31,8 +31,10 @@ LDFLAGS += $(shell pkg-config --libs $(OPTIONAL_DEPS) 2>/dev/null || echo "-lpng
 
 # Source files
 SOURCES = $(wildcard $(SRC_DIR)/*.c)
+TRANSITION_SOURCES = $(wildcard $(SRC_DIR)/transitions/*.c)
 PROTO_SOURCES = $(wildcard $(PROTO_DIR)/*.c)
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
+TRANSITION_OBJECTS = $(TRANSITION_SOURCES:$(SRC_DIR)/transitions/%.c=$(OBJ_DIR)/transitions_%.o)
 PROTO_OBJECTS = $(PROTO_SOURCES:$(PROTO_DIR)/%.c=$(OBJ_DIR)/proto_%.o)
 
 # Protocol files
@@ -91,9 +93,13 @@ $(OBJ_DIR)/proto_%.o: $(PROTO_DIR)/%.c $(PROTO_HEADERS) | directories
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | directories protocols
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Compile transition files
+$(OBJ_DIR)/transitions_%.o: $(SRC_DIR)/transitions/%.c | directories protocols
+	$(CC) $(CFLAGS) -c $< -o $@
+
 # Link the binary
-$(TARGET): $(OBJECTS) $(PROTO_OBJECTS)
-	$(CC) $(OBJECTS) $(PROTO_OBJECTS) -o $@ $(LDFLAGS)
+$(TARGET): $(OBJECTS) $(TRANSITION_OBJECTS) $(PROTO_OBJECTS)
+	$(CC) $(OBJECTS) $(TRANSITION_OBJECTS) $(PROTO_OBJECTS) -o $@ $(LDFLAGS)
 	@echo "Build complete: $(TARGET)"
 
 # Install

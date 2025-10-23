@@ -165,6 +165,17 @@ default {
 }
 ```
 
+**Example 5: Glitch transition for that cyberpunk vibe**
+```vibe
+default {
+  path ~/Pictures/wallpapers/
+  duration 300
+  transition glitch                   # Digital corruption effect!
+  transition_duration 600             # Slightly longer for full effect
+  mode fill
+}
+```
+
 ### Configuration
 
 Edit `~/.config/staticwall/config.vibe`:
@@ -280,6 +291,7 @@ Assuming a **1920x1080 display**, here's how each mode handles different image s
 - **fade** - Smooth fade/crossfade between images
 - **slide_left** - New wallpaper slides in from right to left
 - **slide_right** - New wallpaper slides in from left to right
+- **glitch** - Digital glitch effect with RGB separation, scan lines, and corruption (cyberpunk aesthetic!)
 
 #### Configuration Sections
 
