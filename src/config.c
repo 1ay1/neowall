@@ -745,8 +745,13 @@ bool config_load(struct staticwall_state *state, const char *config_path) {
             vibe_parser_free(parser);
             return false;
         }
-        log_info("Loaded default configuration: path=%s, mode=%s",
-                 default_config.path, wallpaper_mode_to_string(default_config.mode));
+        if (default_config.type == WALLPAPER_SHADER) {
+            log_info("Loaded default configuration: shader=%s, mode=%s",
+                     default_config.shader_path, wallpaper_mode_to_string(default_config.mode));
+        } else {
+            log_info("Loaded default configuration: path=%s, mode=%s",
+                     default_config.path, wallpaper_mode_to_string(default_config.mode));
+        }
     } else {
         log_debug("No default configuration found");
     }
@@ -754,7 +759,8 @@ bool config_load(struct staticwall_state *state, const char *config_path) {
     /* Apply default config to all outputs */
     struct output_state *output = state->outputs;
     while (output) {
-        if (default_config.path[0] != '\0') {
+        /* Apply config if it has either a path or shader */
+        if (default_config.path[0] != '\0' || default_config.shader_path[0] != '\0') {
             /* Copy default config */
             struct wallpaper_config config_copy;
             memcpy(&config_copy, &default_config, sizeof(struct wallpaper_config));
