@@ -255,17 +255,19 @@ void render_destroy_texture(GLuint texture) {
 
 
 
-/* Calculate vertex coordinates based on display mode */
-static void calculate_vertex_coords(struct output_state *output, float vertices[16]) {
+/* Calculate vertex coordinates based on display mode for a specific image */
+static void calculate_vertex_coords_for_image(struct output_state *output, 
+                                               struct image_data *image, 
+                                               float vertices[16]) {
     /* Default: fullscreen quad */
     memcpy(vertices, quad_vertices, sizeof(quad_vertices));
     
-    if (!output->current_image) {
+    if (!image) {
         return;
     }
     
-    float img_width = (float)output->current_image->width;
-    float img_height = (float)output->current_image->height;
+    float img_width = (float)image->width;
+    float img_height = (float)image->height;
     float disp_width = (float)output->width;
     float disp_height = (float)output->height;
     
@@ -358,6 +360,11 @@ static void calculate_vertex_coords(struct output_state *output, float vertices[
             break;
         }
     }
+}
+
+/* Calculate vertex coordinates based on display mode (uses current_image) */
+static void calculate_vertex_coords(struct output_state *output, float vertices[16]) {
+    calculate_vertex_coords_for_image(output, output->current_image, vertices);
 }
 
 /* Render a frame for an output */
@@ -491,6 +498,8 @@ bool render_frame_transition(struct output_state *output, float progress) {
         /* Get attribute locations */
         GLint pos_attrib = glGetAttribLocation(output->program, "position");
         GLint tex_attrib = glGetAttribLocation(output->program, "texcoord");
+        GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
+        GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
 
         /* Bind VBO */
         glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
@@ -508,28 +517,50 @@ bool render_frame_transition(struct output_state *output, float progress) {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        /* First, render the old image (next_image) fully opaque */
+        /* First, render the old image (next_image) fully opaque with its proper display mode */
+        float old_vertices[16];
+        calculate_vertex_coords_for_image(output, output->next_image, old_vertices);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(old_vertices), old_vertices, GL_DYNAMIC_DRAW);
+
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, output->next_texture);
-
-        GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
         glUniform1i(tex_uniform, 0);
 
-        GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
         if (alpha_uniform >= 0) {
             glUniform1f(alpha_uniform, 1.0f);
         }
 
+        /* Handle tile mode texture wrapping for old image */
+        if (output->config.mode == MODE_TILE) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        } else {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-        /* Then, render the new image (current_image) with alpha based on progress */
+        /* Then, render the new image (current_image) with alpha based on progress and its proper display mode */
+        float new_vertices[16];
+        calculate_vertex_coords_for_image(output, output->current_image, new_vertices);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(new_vertices), new_vertices, GL_DYNAMIC_DRAW);
+
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, output->texture);
-
         glUniform1i(tex_uniform, 0);
 
         if (alpha_uniform >= 0) {
             glUniform1f(alpha_uniform, progress);
+        }
+
+        /* Handle tile mode texture wrapping for new image */
+        if (output->config.mode == MODE_TILE) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        } else {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         }
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -556,7 +587,7 @@ bool render_frame_transition(struct output_state *output, float progress) {
         
     } else if (output->config.transition == TRANSITION_SLIDE_LEFT || 
                output->config.transition == TRANSITION_SLIDE_RIGHT) {
-        /* Slide transition using texture coordinate offset */
+        /* Slide transition - slide images while maintaining their display mode */
         
         /* Set viewport */
         glViewport(0, 0, output->width, output->height);
@@ -571,29 +602,27 @@ bool render_frame_transition(struct output_state *output, float progress) {
         /* Get attribute locations */
         GLint pos_attrib = glGetAttribLocation(output->program, "position");
         GLint tex_attrib = glGetAttribLocation(output->program, "texcoord");
+        GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
+        GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
 
         /* Enable blending */
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
-        GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
-
         /* Calculate slide offset */
         float offset = (output->config.transition == TRANSITION_SLIDE_LEFT) ? progress : -progress;
 
-        /* Create modified quad vertices for sliding */
-        float slide_vertices[16];
-        memcpy(slide_vertices, quad_vertices, sizeof(quad_vertices));
-
-        /* Render old image (sliding out) */
+        /* Render old image (sliding out) with proper display mode */
+        float old_vertices[16];
+        calculate_vertex_coords_for_image(output, output->next_image, old_vertices);
+        
         /* Adjust position based on slide direction */
         for (int i = 0; i < 4; i++) {
-            slide_vertices[i * 4] = quad_vertices[i * 4] - (offset * 2.0f);
+            old_vertices[i * 4] = old_vertices[i * 4] - (offset * 2.0f);
         }
 
         glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(slide_vertices), slide_vertices, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(old_vertices), old_vertices, GL_DYNAMIC_DRAW);
 
         glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
                              4 * sizeof(float), (void*)0);
@@ -605,6 +634,16 @@ bool render_frame_transition(struct output_state *output, float progress) {
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, output->next_texture);
+        
+        /* Handle tile mode texture wrapping */
+        if (output->config.mode == MODE_TILE) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        } else {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+        
         glUniform1i(tex_uniform, 0);
 
         if (alpha_uniform >= 0) {
@@ -613,19 +652,32 @@ bool render_frame_transition(struct output_state *output, float progress) {
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-        /* Render new image (sliding in) */
+        /* Render new image (sliding in) with proper display mode */
+        float new_vertices[16];
+        calculate_vertex_coords_for_image(output, output->current_image, new_vertices);
+        
         /* Adjust position to slide in from opposite side */
         float slide_in_offset = (output->config.transition == TRANSITION_SLIDE_LEFT) ? 
                                 (1.0f - progress) : -(1.0f - progress);
         
         for (int i = 0; i < 4; i++) {
-            slide_vertices[i * 4] = quad_vertices[i * 4] + (slide_in_offset * 2.0f);
+            new_vertices[i * 4] = new_vertices[i * 4] + (slide_in_offset * 2.0f);
         }
 
-        glBufferData(GL_ARRAY_BUFFER, sizeof(slide_vertices), slide_vertices, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(new_vertices), new_vertices, GL_DYNAMIC_DRAW);
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, output->texture);
+        
+        /* Handle tile mode texture wrapping */
+        if (output->config.mode == MODE_TILE) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        } else {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+        
         glUniform1i(tex_uniform, 0);
 
         if (alpha_uniform >= 0) {
@@ -633,9 +685,6 @@ bool render_frame_transition(struct output_state *output, float progress) {
         }
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-        /* Restore original quad data */
-        glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), quad_vertices, GL_STATIC_DRAW);
 
         /* Clean up */
         glDisable(GL_BLEND);
