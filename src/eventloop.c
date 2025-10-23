@@ -119,7 +119,7 @@ static void render_outputs(struct staticwall_state *state) {
             /* Recalculate time for accurate transition timing */
             current_time = get_time_ms();
 
-            /* Handle transitions */
+            /* Handle image transitions */
             if (output->transition_start_time > 0 &&
                 output->config.transition != TRANSITION_NONE) {
                 uint64_t elapsed = current_time - output->transition_start_time;

@@ -50,10 +50,8 @@ struct output_state *output_create(struct staticwall_state *state,
     out->config.cycle_paths = NULL;
     out->config.cycle_count = 0;
     out->config.current_cycle_index = 0;
-    out->prev_shader_program = 0;
-    out->shader_fbo = 0;
-    out->shader_render_texture = 0;
-    out->prev_shader_render_texture = 0;
+    out->shader_fade_start_time = 0;
+    out->pending_shader_path[0] = '\0';
 
     /* Add to linked list */
     out->next = state->outputs;
@@ -80,24 +78,6 @@ void output_destroy(struct output_state *output) {
     if (output->live_shader_program != 0) {
         shader_destroy_program(output->live_shader_program);
         output->live_shader_program = 0;
-    }
-    if (output->prev_shader_program != 0) {
-        shader_destroy_program(output->prev_shader_program);
-        output->prev_shader_program = 0;
-    }
-
-    /* Clean up shader framebuffer and textures */
-    if (output->shader_fbo != 0) {
-        glDeleteFramebuffers(1, &output->shader_fbo);
-        output->shader_fbo = 0;
-    }
-    if (output->shader_render_texture != 0) {
-        glDeleteTextures(1, &output->shader_render_texture);
-        output->shader_render_texture = 0;
-    }
-    if (output->prev_shader_render_texture != 0) {
-        glDeleteTextures(1, &output->prev_shader_render_texture);
-        output->prev_shader_render_texture = 0;
     }
 
     /* Free wallpaper config */
@@ -265,35 +245,41 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         }
     }
 
-    /* Load and compile new shader from file */
+    /* If there's an existing shader, start cross-fade transition */
+    if (output->live_shader_program != 0) {
+        /* Prevent re-entrant cross-fade requests */
+        if (output->shader_fade_start_time > 0 && output->pending_shader_path[0] != '\0') {
+            log_debug("Cross-fade already in progress, ignoring new request for: %s", shader_path);
+            return;
+        }
+        
+        /* Store path to load after fade-out */
+        strncpy(output->pending_shader_path, shader_path, sizeof(output->pending_shader_path) - 1);
+        output->pending_shader_path[sizeof(output->pending_shader_path) - 1] = '\0';
+        
+        /* Start fade-out by marking fade start time */
+        uint64_t now = get_time_ms();
+        output->shader_fade_start_time = now;
+        output->last_cycle_time = now;  /* Update cycle time to prevent immediate re-trigger */
+        output->needs_redraw = true;
+        
+        log_debug("Starting shader cross-fade to: %s", shader_path);
+        
+        /* Don't load new shader yet - it will be loaded during fade */
+        return;
+    }
+    
+    /* First shader load - no fade needed, load and compile immediately */
     GLuint new_shader_program = 0;
     if (!shader_create_live_program(shader_path, &new_shader_program)) {
         log_error("Failed to create shader program from: %s", shader_path);
         return;
     }
-
-    /* Handle transition if we have a previous shader and transitions are enabled */
-    if (output->config.transition != TRANSITION_NONE && output->live_shader_program != 0) {
-        /* Save old shader as previous for transition */
-        if (output->prev_shader_program != 0) {
-            shader_destroy_program(output->prev_shader_program);
-        }
-        output->prev_shader_program = output->live_shader_program;
-        output->live_shader_program = new_shader_program;
-
-        /* Start transition */
-        output->transition_start_time = get_time_ms();
-        output->transition_progress = 0.0f;
-
-        log_debug("Shader transition started: %s (type=%d, duration=%ums)",
-                  shader_path, output->config.transition, output->config.transition_duration);
-    } else {
-        /* No transition, just replace */
-        if (output->live_shader_program != 0) {
-            shader_destroy_program(output->live_shader_program);
-        }
-        output->live_shader_program = new_shader_program;
-    }
+    
+    output->live_shader_program = new_shader_program;
+    output->shader_start_time = get_time_ms();
+    
+    log_debug("Shader loaded (first): %s", shader_path);
 
     /* Free any existing image data (shaders don't use images) */
     if (output->current_image) {
@@ -318,10 +304,9 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
     output->config.type = WALLPAPER_SHADER;
 
-    /* Initialize frame time and shader start time for animation */
+    /* Initialize frame time for animation */
     uint64_t now = get_time_ms();
     output->last_frame_time = now;
-    output->shader_start_time = now;
     output->last_cycle_time = now;
 
     /* Mark for redraw */
@@ -343,6 +328,14 @@ void output_cycle_wallpaper(struct output_state *output) {
                   (void*)output,
                   output ? output->config.cycle : 0,
                   output ? output->config.cycle_count : 0);
+        return;
+    }
+
+    /* Don't cycle if a shader cross-fade is in progress */
+    if (output->config.type == WALLPAPER_SHADER && 
+        output->shader_fade_start_time > 0 && 
+        output->pending_shader_path[0] != '\0') {
+        log_debug("Shader cross-fade in progress, deferring cycle request");
         return;
     }
 

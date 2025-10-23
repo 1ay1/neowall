@@ -113,16 +113,14 @@ struct output_state {
     GLuint glitch_program;              /* Shader program for glitch transition */
     GLuint pixelate_program;            /* Shader program for pixelate transition */
     GLuint live_shader_program;         /* Shader program for live wallpaper */
-    GLuint prev_shader_program;         /* Previous shader program for transitions */
-    GLuint shader_fbo;                  /* Framebuffer for rendering shader to texture */
-    GLuint shader_render_texture;       /* Texture to render current shader to */
-    GLuint prev_shader_render_texture;  /* Texture to render previous shader to */
     GLuint vbo;
 
     uint64_t last_frame_time;
     uint64_t last_cycle_time;           /* Last time wallpaper was changed/cycled */
     uint64_t transition_start_time;
     uint64_t shader_start_time;         /* Time when shader was loaded (for animation) */
+    uint64_t shader_fade_start_time;    /* Time when shader fade started (for cross-fade) */
+    char pending_shader_path[MAX_PATH_LENGTH]; /* Next shader to load after fade-out */
     float transition_progress;
     uint64_t frames_rendered;
 

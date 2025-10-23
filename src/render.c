@@ -9,6 +9,24 @@
 
 /* Note: Each transition manages its own shader sources in src/transitions/ */
 
+/* Simple color shader for overlay effects */
+static const char *color_vertex_shader =
+    "#version 100\n"
+    "attribute vec2 position;\n"
+    "void main() {\n"
+    "    gl_Position = vec4(position, 0.0, 1.0);\n"
+    "}\n";
+
+static const char *color_fragment_shader =
+    "#version 100\n"
+    "precision mediump float;\n"
+    "uniform vec4 color;\n"
+    "void main() {\n"
+    "    gl_FragColor = color;\n"
+    "}\n";
+
+static GLuint color_overlay_program = 0;
+
 /* Fullscreen quad vertices (position + texcoord) */
 static const float quad_vertices[] = {
     /* positions */  /* texcoords */
@@ -27,10 +45,19 @@ bool render_init_output(struct output_state *output) {
 
     /* Context should already be current when this is called from egl.c */
 
+    /* Create simple color shader for overlays (once, shared across outputs) */
+    if (color_overlay_program == 0) {
+        if (!shader_create_program_from_sources(color_vertex_shader, color_fragment_shader, &color_overlay_program)) {
+            log_error("Failed to create color overlay shader program");
+            return false;
+        }
+        log_debug("Created color overlay shader program");
+    }
+
     /* Create shader programs for transitions
      * Note: fade and slide share the same shader, so we use fade's program */
     if (!shader_create_fade_program(&output->program)) {
-        log_error("Failed to create fade/slide shader program for output %s", output->model);
+        log_error("Failed to create fade shader program for output");
         return false;
     }
 
@@ -272,183 +299,7 @@ static void calculate_vertex_coords(struct output_state *output, float vertices[
     calculate_vertex_coords_for_image(output, output->current_image, vertices);
 }
 
-/* Helper to render a shader to a texture using a framebuffer */
-static bool render_shader_to_texture(struct output_state *output, GLuint shader_program, 
-                                     GLuint *texture, GLuint fbo) {
-    if (!output || shader_program == 0 || !texture) {
-        return false;
-    }
 
-    /* Validate shader program is still valid */
-    if (!glIsProgram(shader_program)) {
-        log_error("Shader program %u is not valid", shader_program);
-        return false;
-    }
-
-    /* Create texture if needed */
-    if (*texture == 0) {
-        glGenTextures(1, texture);
-        glBindTexture(GL_TEXTURE_2D, *texture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, output->width, output->height, 
-                     0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    }
-
-    /* Bind framebuffer and attach texture */
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *texture, 0);
-
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        log_error("Framebuffer not complete for shader rendering");
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        return false;
-    }
-
-    /* Render shader to framebuffer */
-    glViewport(0, 0, output->width, output->height);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    glUseProgram(shader_program);
-    
-    float current_time = (float)(get_time_ms() - output->shader_start_time) / 1000.0f;
-    GLint time_loc = glGetUniformLocation(shader_program, "time");
-    GLint res_loc = glGetUniformLocation(shader_program, "resolution");
-    
-    if (time_loc != -1) {
-        glUniform1f(time_loc, current_time);
-    }
-    if (res_loc != -1) {
-        glUniform2f(res_loc, (float)output->width, (float)output->height);
-    }
-
-    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-    GLint pos_attr = glGetAttribLocation(shader_program, "position");
-    if (pos_attr != -1) {
-        glEnableVertexAttribArray(pos_attr);
-        glVertexAttribPointer(pos_attr, 2, GL_FLOAT, GL_FALSE, 0, 0);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        glDisableVertexAttribArray(pos_attr);
-    }
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-    /* Unbind framebuffer and restore viewport */
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, output->width, output->height);
-
-    return true;
-}
-
-/* Render shader transition by rendering both shaders to textures and using transition system */
-bool render_frame_shader_transition(struct output_state *output, float progress) {
-    if (!output || output->live_shader_program == 0 || output->prev_shader_program == 0) {
-        return render_frame_shader(output);
-    }
-
-    /* Make EGL context current before framebuffer operations */
-    if (output->state && output->egl_surface != EGL_NO_SURFACE) {
-        if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                           output->egl_surface, output->state->egl_context)) {
-            log_error("Failed to make EGL context current for shader transition: 0x%x", eglGetError());
-            return render_frame_shader(output);
-        }
-    }
-
-    /* Validate both shader programs are still valid */
-    if (!glIsProgram(output->live_shader_program)) {
-        log_error("Current shader program is invalid during transition");
-        if (output->prev_shader_program != 0) {
-            shader_destroy_program(output->prev_shader_program);
-            output->prev_shader_program = 0;
-        }
-        return render_frame_shader(output);
-    }
-
-    if (!glIsProgram(output->prev_shader_program)) {
-        log_error("Previous shader program is invalid during transition");
-        if (output->prev_shader_program != 0) {
-            shader_destroy_program(output->prev_shader_program);
-            output->prev_shader_program = 0;
-        }
-        return render_frame_shader(output);
-    }
-
-    /* Create framebuffer if needed */
-    if (output->shader_fbo == 0) {
-        glGenFramebuffers(1, &output->shader_fbo);
-        if (output->shader_fbo == 0) {
-            log_error("Failed to create framebuffer for shader transition");
-            return render_frame_shader(output);
-        }
-    }
-
-    /* Render previous shader to texture (this becomes "next_texture" for transition) */
-    if (!render_shader_to_texture(output, output->prev_shader_program, 
-                                   &output->prev_shader_render_texture, output->shader_fbo)) {
-        log_error("Failed to render previous shader to texture");
-        /* Clean up and fall back to regular rendering */
-        if (output->prev_shader_program != 0) {
-            shader_destroy_program(output->prev_shader_program);
-            output->prev_shader_program = 0;
-        }
-        return render_frame_shader(output);
-    }
-
-    /* Render current shader to texture (this becomes "texture" for transition) */
-    if (!render_shader_to_texture(output, output->live_shader_program,
-                                   &output->shader_render_texture, output->shader_fbo)) {
-        log_error("Failed to render current shader to texture");
-        return render_frame_shader(output);
-    }
-
-    /* Now use the existing transition system with these textures */
-    /* Temporarily swap in our shader textures */
-    GLuint saved_texture = output->texture;
-    GLuint saved_next_texture = output->next_texture;
-    
-    output->texture = output->shader_render_texture;
-    output->next_texture = output->prev_shader_render_texture;
-
-    /* Validate textures before calling transition renderer */
-    if (!glIsTexture(output->texture) || !glIsTexture(output->next_texture)) {
-        log_error("Invalid shader textures for transition");
-        output->texture = saved_texture;
-        output->next_texture = saved_next_texture;
-        return render_frame_shader(output);
-    }
-
-    /* Call the existing transition renderer */
-    bool result = transition_render(output, output->config.transition, progress);
-
-    /* Restore original textures */
-    output->texture = saved_texture;
-    output->next_texture = saved_next_texture;
-
-    /* Ensure viewport is correct after framebuffer operations */
-    glViewport(0, 0, output->width, output->height);
-
-    /* Update transition progress */
-    uint64_t current_time_ms = get_time_ms();
-    uint64_t elapsed = current_time_ms - output->transition_start_time;
-    output->transition_progress = (float)elapsed / (float)output->config.transition_duration;
-
-    /* Clean up when transition is complete */
-    if (output->transition_progress >= 1.0f) {
-        if (output->prev_shader_program != 0) {
-            shader_destroy_program(output->prev_shader_program);
-            output->prev_shader_program = 0;
-        }
-        if (output->prev_shader_render_texture != 0) {
-            glDeleteTextures(1, &output->prev_shader_render_texture);
-            output->prev_shader_render_texture = 0;
-        }
-        output->transition_progress = 1.0f;
-    }
-
-    return result;
-}
 
 bool render_frame_shader(struct output_state *output) {
     if (!output || output->live_shader_program == 0) {
@@ -511,6 +362,145 @@ bool render_frame_shader(struct output_state *output) {
     /* Clean up */
     glDisableVertexAttribArray(pos_attrib);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    /* Handle cross-fade transition when switching shaders */
+    const uint64_t FADE_OUT_MS = 400;  /* Fade to black duration */
+    const uint64_t FADE_IN_MS = 600;   /* Fade from black duration */
+    const uint64_t TOTAL_FADE_MS = FADE_OUT_MS + FADE_IN_MS;
+    
+    if (output->shader_fade_start_time > 0) {
+        uint64_t fade_elapsed = current_time - output->shader_fade_start_time;
+        
+        /* Keep redrawing during fade animation */
+        output->needs_redraw = true;
+        
+        if (fade_elapsed < FADE_OUT_MS) {
+            /* Phase 1: Fade out to black (0ms -> 400ms) */
+            float fade_out_progress = (float)fade_elapsed / (float)FADE_OUT_MS;
+            /* Ease-in cubic for smooth acceleration */
+            float eased = fade_out_progress * fade_out_progress * fade_out_progress;
+            float fade_alpha = eased; /* 0.0 -> 1.0 (transparent to black) */
+            
+            log_debug("Cross-fade phase 1: fade_out %.2f, alpha %.2f", fade_out_progress, fade_alpha);
+            
+            /* Draw black overlay */
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glUseProgram(color_overlay_program);
+            
+            GLint color_uniform = glGetUniformLocation(color_overlay_program, "color");
+            if (color_uniform >= 0) {
+                glUniform4f(color_uniform, 0.0f, 0.0f, 0.0f, fade_alpha);
+            }
+            
+            glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(shader_quad), shader_quad, GL_DYNAMIC_DRAW);
+            
+            GLint fade_pos_attrib = glGetAttribLocation(color_overlay_program, "position");
+            if (fade_pos_attrib >= 0) {
+                glVertexAttribPointer(fade_pos_attrib, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+                glEnableVertexAttribArray(fade_pos_attrib);
+                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                glDisableVertexAttribArray(fade_pos_attrib);
+            }
+            
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            glUseProgram(0);
+            glDisable(GL_BLEND);
+        } 
+        else if (fade_elapsed >= FADE_OUT_MS && fade_elapsed < TOTAL_FADE_MS) {
+            /* Phase 2: Switch shader at blackout point, then fade in */
+            if (output->pending_shader_path[0] != '\0') {
+                /* Ensure EGL context is current before compiling shader */
+                if (output->egl_surface != EGL_NO_SURFACE && output->state) {
+                    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                                       output->egl_surface, output->state->egl_context)) {
+                        log_error("Failed to make EGL context current during shader swap: 0x%x", eglGetError());
+                        output->shader_fade_start_time = 0;
+                        output->pending_shader_path[0] = '\0';
+                        /* Continue with current shader */
+                        return true;
+                    }
+                }
+                
+                /* Load the new shader */
+                GLuint new_shader_program = 0;
+                if (shader_create_live_program(output->pending_shader_path, &new_shader_program)) {
+                    /* Validate the new shader program before destroying old one */
+                    if (new_shader_program == 0) {
+                        log_error("Invalid shader program created for: %s", output->pending_shader_path);
+                        output->shader_fade_start_time = 0;
+                        output->pending_shader_path[0] = '\0';
+                        return true;
+                    }
+                    
+                    /* Destroy old shader and switch to new one */
+                    shader_destroy_program(output->live_shader_program);
+                    output->live_shader_program = new_shader_program;
+                    output->shader_start_time = current_time;
+                    
+                    /* Update config with new shader path */
+                    strncpy(output->config.shader_path, output->pending_shader_path, 
+                            sizeof(output->config.shader_path) - 1);
+                    output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
+                    
+                    /* Write state to file */
+                    const char *mode_str = wallpaper_mode_to_string(output->config.mode);
+                    write_wallpaper_state(output->model, output->pending_shader_path, mode_str,
+                                         output->config.current_cycle_index,
+                                         output->config.cycle_count);
+                    
+                    log_info("Shader switched during cross-fade: %s", output->pending_shader_path);
+                    
+                    /* Clear pending path */
+                    output->pending_shader_path[0] = '\0';
+                } else {
+                    log_error("Failed to load pending shader: %s", output->pending_shader_path);
+                    output->shader_fade_start_time = 0;
+                    output->pending_shader_path[0] = '\0';
+                }
+            }
+            
+            /* Fade in from black (400ms -> 1000ms) */
+            float fade_in_progress = (float)(fade_elapsed - FADE_OUT_MS) / (float)FADE_IN_MS;
+            /* Ease-out cubic for smooth deceleration */
+            float eased = 1.0f - powf(1.0f - fade_in_progress, 3.0f);
+            float fade_alpha = 1.0f - eased; /* 1.0 -> 0.0 (black to transparent) */
+            
+            log_debug("Cross-fade phase 3: fade_in %.2f, alpha %.2f", fade_in_progress, fade_alpha);
+            
+            /* Draw black overlay */
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glUseProgram(color_overlay_program);
+            
+            GLint color_uniform = glGetUniformLocation(color_overlay_program, "color");
+            if (color_uniform >= 0) {
+                glUniform4f(color_uniform, 0.0f, 0.0f, 0.0f, fade_alpha);
+            }
+            
+            glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(shader_quad), shader_quad, GL_DYNAMIC_DRAW);
+            
+            GLint fade_pos_attrib = glGetAttribLocation(color_overlay_program, "position");
+            if (fade_pos_attrib >= 0) {
+                glVertexAttribPointer(fade_pos_attrib, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+                glEnableVertexAttribArray(fade_pos_attrib);
+                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                glDisableVertexAttribArray(fade_pos_attrib);
+            }
+            
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            glUseProgram(0);
+            glDisable(GL_BLEND);
+        }
+        else {
+            /* Phase 3: Fade complete, reset fade state */
+            log_info("Cross-fade complete");
+            output->shader_fade_start_time = 0;
+        }
+    }
+
     glUseProgram(0);
 
     /* Check for errors */
@@ -536,13 +526,6 @@ bool render_frame(struct output_state *output) {
 
     /* Check if this is a shader wallpaper */
     if (output->config.type == WALLPAPER_SHADER) {
-        /* Check if we're in a shader transition */
-        if (output->config.transition != TRANSITION_NONE &&
-            output->prev_shader_program != 0 &&
-            output->transition_progress < 1.0f) {
-            /* Render shader transition */
-            return render_frame_shader_transition(output, output->transition_progress);
-        }
         return render_frame_shader(output);
     }
 
