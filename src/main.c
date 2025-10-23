@@ -209,6 +209,8 @@ static void print_usage(const char *program_name) {
     printf("  resume                Resume wallpaper cycling\n");
     printf("  reload                Reload configuration\n");
     printf("  current               Show current wallpaper\n");
+    printf("  shader_speed_up       Increase shader animation speed by 1.0x\n");
+    printf("  shader_speed_down     Decrease shader animation speed by 1.0x\n");
     printf("\n");
     printf("Note: By default, staticwall runs as a daemon. Use -f for foreground.\n");
     printf("If a daemon is already running, subsequent calls act as control commands.\n");
@@ -293,6 +295,40 @@ static void signal_handler(int signum) {
             }
             break;
         default:
+            /* Check for real-time signals for shader speed control */
+            if (signum == SIGRTMIN) {
+                /* Speed up shader animation */
+                if (global_state) {
+                    struct output_state *output = global_state->outputs;
+                    while (output) {
+                        if (output->config.type == WALLPAPER_SHADER) {
+                            output->config.shader_speed += 1.0f;
+                            log_info("Increased shader speed to %.1fx for output %s", 
+                                     output->config.shader_speed,
+                                     output->model[0] ? output->model : "unknown");
+                        }
+                        output = output->next;
+                    }
+                }
+            } else if (signum == SIGRTMIN + 1) {
+                /* Slow down shader animation */
+                if (global_state) {
+                    struct output_state *output = global_state->outputs;
+                    while (output) {
+                        if (output->config.type == WALLPAPER_SHADER) {
+                            output->config.shader_speed -= 1.0f;
+                            /* Don't allow negative or zero speed */
+                            if (output->config.shader_speed < 0.1f) {
+                                output->config.shader_speed = 0.1f;
+                            }
+                            log_info("Decreased shader speed to %.1fx for output %s", 
+                                     output->config.shader_speed,
+                                     output->model[0] ? output->model : "unknown");
+                        }
+                        output = output->next;
+                    }
+                }
+            }
             break;
     }
 }
@@ -309,6 +345,8 @@ static void setup_signal_handlers(void) {
     sigaction(SIGUSR1, &sa, NULL);
     sigaction(SIGUSR2, &sa, NULL);
     sigaction(SIGCONT, &sa, NULL);
+    sigaction(SIGRTMIN, &sa, NULL);      /* Shader speed up */
+    sigaction(SIGRTMIN + 1, &sa, NULL);  /* Shader speed down */
 
     /* SIGHUP (reload) should NOT use SA_RESTART - we want it to interrupt poll() */
     sa.sa_flags = 0;
@@ -429,9 +467,13 @@ int main(int argc, char *argv[]) {
             return send_daemon_signal(SIGHUP, "Reloading configuration...") ? EXIT_SUCCESS : EXIT_FAILURE;
         } else if (strcmp(cmd, "current") == 0 || strcmp(cmd, "status") == 0) {
             return read_wallpaper_state() ? EXIT_SUCCESS : EXIT_FAILURE;
+        } else if (strcmp(cmd, "shader_speed_up") == 0) {
+            return send_daemon_signal(SIGRTMIN, "Increasing shader speed...") ? EXIT_SUCCESS : EXIT_FAILURE;
+        } else if (strcmp(cmd, "shader_speed_down") == 0) {
+            return send_daemon_signal(SIGRTMIN + 1, "Decreasing shader speed...") ? EXIT_SUCCESS : EXIT_FAILURE;
         } else {
             fprintf(stderr, "Unknown command: %s\n", cmd);
-            fprintf(stderr, "Valid commands: kill, next, pause, resume, reload, current\n");
+            fprintf(stderr, "Valid commands: kill, next, pause, resume, reload, current, shader_speed_up, shader_speed_down\n");
             return EXIT_FAILURE;
         }
     }
