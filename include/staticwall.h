@@ -116,6 +116,38 @@ struct output_state {
     GLuint live_shader_program;         /* Shader program for live wallpaper */
     GLuint vbo;
 
+    /* Cached uniform locations for performance */
+    struct {
+        GLint position;
+        GLint texcoord;
+        GLint tex_sampler;
+        GLint u_resolution;
+        GLint u_time;
+        GLint u_speed;
+    } shader_uniforms;
+
+    struct {
+        GLint position;
+        GLint texcoord;
+        GLint tex_sampler;
+    } program_uniforms;
+
+    struct {
+        GLint position;
+        GLint texcoord;
+        GLint tex0;
+        GLint tex1;
+        GLint progress;
+        GLint resolution;
+    } transition_uniforms;
+
+    /* GL state cache to avoid redundant calls */
+    struct {
+        GLuint bound_texture;
+        GLuint active_program;
+        bool blend_enabled;
+    } gl_state;
+
     uint64_t last_frame_time;
     uint64_t last_cycle_time;           /* Last time wallpaper was changed/cycled */
     uint64_t transition_start_time;

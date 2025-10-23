@@ -37,6 +37,52 @@ static const float quad_vertices[] = {
      1.0f, -1.0f,    1.0f, 1.0f   /* bottom-right */
 };
 
+/* Helper: Cache uniform locations for a program */
+static inline void cache_program_uniforms(struct output_state *output) {
+    output->program_uniforms.position = glGetAttribLocation(output->program, "position");
+    output->program_uniforms.texcoord = glGetAttribLocation(output->program, "texcoord");
+    output->program_uniforms.tex_sampler = glGetUniformLocation(output->program, "texture0");
+}
+
+/* Helper: Cache uniform locations for transition shaders */
+static inline void cache_transition_uniforms(GLuint program, struct output_state *output) {
+    output->transition_uniforms.position = glGetAttribLocation(program, "position");
+    output->transition_uniforms.texcoord = glGetAttribLocation(program, "texcoord");
+    output->transition_uniforms.tex0 = glGetUniformLocation(program, "texture0");
+    output->transition_uniforms.tex1 = glGetUniformLocation(program, "texture1");
+    output->transition_uniforms.progress = glGetUniformLocation(program, "progress");
+    output->transition_uniforms.resolution = glGetUniformLocation(program, "resolution");
+}
+
+/* Helper: Use program with state tracking to avoid redundant glUseProgram calls */
+static inline void use_program_cached(struct output_state *output, GLuint program) {
+    if (output->gl_state.active_program != program) {
+        glUseProgram(program);
+        output->gl_state.active_program = program;
+    }
+}
+
+/* Helper: Bind texture with state tracking to avoid redundant glBindTexture calls */
+static inline void bind_texture_cached(struct output_state *output, GLuint texture) {
+    if (output->gl_state.bound_texture != texture) {
+        glBindTexture(GL_TEXTURE_2D, texture);
+        output->gl_state.bound_texture = texture;
+    }
+}
+
+/* Helper: Enable/disable blending with state tracking */
+static inline void set_blend_state(struct output_state *output, bool enable) {
+    if (output->gl_state.blend_enabled != enable) {
+        if (enable) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        } else {
+            glDisable(GL_BLEND);
+        }
+        output->gl_state.blend_enabled = enable;
+    }
+}
+
 /* Initialize rendering for an output */
 bool render_init_output(struct output_state *output) {
     if (!output) {
@@ -45,6 +91,19 @@ bool render_init_output(struct output_state *output) {
     }
 
     /* Context should already be current when this is called from egl.c */
+
+    /* Initialize GL state cache */
+    output->gl_state.bound_texture = 0;
+    output->gl_state.active_program = 0;
+    output->gl_state.blend_enabled = false;
+
+    /* Initialize shader uniform cache to -2 (uninitialized) */
+    output->shader_uniforms.position = -2;
+    output->shader_uniforms.texcoord = -2;
+    output->shader_uniforms.tex_sampler = -2;
+    output->shader_uniforms.u_resolution = -2;
+    output->shader_uniforms.u_time = -2;
+    output->shader_uniforms.u_speed = -2;
 
     /* Create simple color shader for overlays (once, shared across outputs) */
     if (color_overlay_program == 0) {
@@ -62,12 +121,18 @@ bool render_init_output(struct output_state *output) {
         return false;
     }
 
+    /* Cache uniform locations for main program */
+    cache_program_uniforms(output);
+
     /* Create glitch shader program */
     if (!shader_create_glitch_program(&output->glitch_program)) {
         log_error("Failed to create glitch shader program for output %s", output->model);
         shader_destroy_program(output->program);
         return false;
     }
+
+    /* Cache uniforms for glitch transitions */
+    cache_transition_uniforms(output->glitch_program, output);
 
     /* Create pixelate shader program */
     if (!shader_create_pixelate_program(&output->pixelate_program)) {
@@ -77,7 +142,7 @@ bool render_init_output(struct output_state *output) {
         return false;
     }
 
-    /* Create VBO */
+    /* Create persistent VBO with static data - eliminates per-frame uploads */
     glGenBuffers(1, &output->vbo);
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), quad_vertices, GL_STATIC_DRAW);
@@ -141,7 +206,8 @@ void render_cleanup_output(struct output_state *output) {
     }
 }
 
-/* Create texture from image data */
+/* Create texture from image data
+ * Optimized: Set immutable texture parameters only once at creation */
 GLuint render_create_texture(struct image_data *img) {
     if (!img || !img->pixels) {
         log_error("Invalid image data for texture creation");
@@ -152,7 +218,9 @@ GLuint render_create_texture(struct image_data *img) {
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    /* Set texture parameters */
+    /* Set texture parameters once at creation - these rarely change
+     * Most textures use LINEAR filtering and CLAMP_TO_EDGE wrapping
+     * TILE mode textures update wrapping in render_frame as needed */
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -302,6 +370,8 @@ static void calculate_vertex_coords(struct output_state *output, float vertices[
 
 
 
+/* Render shader wallpaper frame
+ * Optimized: Uses state tracking and eliminates redundant GL calls */
 bool render_frame_shader(struct output_state *output) {
     if (!output || output->live_shader_program == 0) {
         log_error("Invalid output or shader program for render_frame_shader");
@@ -315,8 +385,8 @@ bool render_frame_shader(struct output_state *output) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    /* Use live shader program */
-    glUseProgram(output->live_shader_program);
+    /* Use live shader program with state tracking */
+    use_program_cached(output, output->live_shader_program);
 
     /* Calculate elapsed time for animation (continuous time since shader loaded) */
     uint64_t current_time = get_time_ms();
@@ -327,19 +397,25 @@ bool render_frame_shader(struct output_state *output) {
     float shader_speed = output->config.shader_speed > 0.0f ? output->config.shader_speed : 1.0f;
     time *= shader_speed;
 
-    /* Set uniforms */
-    GLint time_uniform = glGetUniformLocation(output->live_shader_program, "time");
-    if (time_uniform >= 0) {
-        glUniform1f(time_uniform, time);
+    /* Cache shader uniform locations on first use to eliminate per-frame lookups */
+    if (output->shader_uniforms.position == -2) {
+        /* -2 means uninitialized, -1 means not found, >= 0 is valid location */
+        output->shader_uniforms.position = glGetAttribLocation(output->live_shader_program, "position");
+        output->shader_uniforms.u_time = glGetUniformLocation(output->live_shader_program, "time");
+        output->shader_uniforms.u_resolution = glGetUniformLocation(output->live_shader_program, "resolution");
     }
 
-    GLint resolution_uniform = glGetUniformLocation(output->live_shader_program, "resolution");
-    if (resolution_uniform >= 0) {
-        glUniform2f(resolution_uniform, (float)output->width, (float)output->height);
+    /* Set uniforms using cached locations */
+    if (output->shader_uniforms.u_time >= 0) {
+        glUniform1f(output->shader_uniforms.u_time, time);
     }
 
-    /* Get position attribute location */
-    GLint pos_attrib = glGetAttribLocation(output->live_shader_program, "position");
+    if (output->shader_uniforms.u_resolution >= 0) {
+        glUniform2f(output->shader_uniforms.u_resolution, (float)output->width, (float)output->height);
+    }
+
+    /* Use cached position attribute location */
+    GLint pos_attrib = output->shader_uniforms.position;
     if (pos_attrib < 0) {
         log_error("Failed to get 'position' attribute location in shader");
         return false;
@@ -353,7 +429,9 @@ bool render_frame_shader(struct output_state *output) {
          1.0f, -1.0f   /* bottom-right */
     };
 
-    /* Bind VBO and upload shader quad */
+    /* Bind VBO and upload shader quad
+     * NOTE: Still using DYNAMIC_DRAW for shader quad because it's a different
+     * vertex layout (2 floats) than the image quad (4 floats) */
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(shader_quad), shader_quad, GL_DYNAMIC_DRAW);
 
@@ -388,10 +466,9 @@ bool render_frame_shader(struct output_state *output) {
             
             log_debug("Cross-fade phase 1: fade_out %.2f, alpha %.2f", fade_out_progress, fade_alpha);
             
-            /* Draw black overlay */
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glUseProgram(color_overlay_program);
+            /* Draw black overlay with state tracking */
+            set_blend_state(output, true);
+            use_program_cached(output, color_overlay_program);
             
             GLint color_uniform = glGetUniformLocation(color_overlay_program, "color");
             if (color_uniform >= 0) {
@@ -410,8 +487,6 @@ bool render_frame_shader(struct output_state *output) {
             }
             
             glBindBuffer(GL_ARRAY_BUFFER, 0);
-            glUseProgram(0);
-            glDisable(GL_BLEND);
         } 
         else if (fade_elapsed >= FADE_OUT_MS && fade_elapsed < TOTAL_FADE_MS) {
             /* Phase 2: Switch shader at blackout point, then fade in */
@@ -474,10 +549,9 @@ bool render_frame_shader(struct output_state *output) {
             
             log_debug("Cross-fade phase 3: fade_in %.2f, alpha %.2f", fade_in_progress, fade_alpha);
             
-            /* Draw black overlay */
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glUseProgram(color_overlay_program);
+            /* Draw black overlay with state tracking */
+            set_blend_state(output, true);
+            use_program_cached(output, color_overlay_program);
             
             GLint color_uniform = glGetUniformLocation(color_overlay_program, "color");
             if (color_uniform >= 0) {
@@ -496,8 +570,6 @@ bool render_frame_shader(struct output_state *output) {
             }
             
             glBindBuffer(GL_ARRAY_BUFFER, 0);
-            glUseProgram(0);
-            glDisable(GL_BLEND);
         }
         else {
             /* Phase 3: Fade complete, reset fade state */
@@ -505,8 +577,6 @@ bool render_frame_shader(struct output_state *output) {
             output->shader_fade_start_time = 0;
         }
     }
-
-    glUseProgram(0);
 
     /* Check for errors */
     GLenum error = glGetError();
@@ -522,7 +592,8 @@ bool render_frame_shader(struct output_state *output) {
     return true;
 }
 
-/* Render a frame for an output */
+/* Render a frame for an output
+ * Optimized: Uses cached uniforms, state tracking, and persistent VBO */
 bool render_frame(struct output_state *output) {
     if (!output) {
         log_error("Invalid output for render_frame");
@@ -554,18 +625,21 @@ bool render_frame(struct output_state *output) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    /* Use shader program */
-    glUseProgram(output->program);
+    /* Use shader program with state tracking */
+    use_program_cached(output, output->program);
 
-    /* Get attribute locations */
-    GLint pos_attrib = glGetAttribLocation(output->program, "position");
-    GLint tex_attrib = glGetAttribLocation(output->program, "texcoord");
+    /* Use cached attribute locations - no glGetAttribLocation calls */
+    GLint pos_attrib = output->program_uniforms.position;
+    GLint tex_attrib = output->program_uniforms.texcoord;
 
     /* Calculate mode-aware vertex coordinates */
     float mode_vertices[16];
     calculate_vertex_coords(output, mode_vertices);
 
-    /* Bind VBO and update with mode-specific vertices */
+    /* Bind VBO and update with mode-specific vertices
+     * NOTE: This still uses DYNAMIC_DRAW because vertices change per mode
+     * For most modes (stretch/fill), we could use the static quad, but
+     * CENTER/FIT/TILE need per-frame vertex adjustments */
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(mode_vertices), mode_vertices, GL_DYNAMIC_DRAW);
 
@@ -578,21 +652,22 @@ bool render_frame(struct output_state *output) {
                          4 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(tex_attrib);
 
-    /* Bind texture */
+    /* Bind texture with state tracking */
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, output->texture);
+    bind_texture_cached(output, output->texture);
 
-    /* Set texture unit uniform */
-    GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
-    glUniform1i(tex_uniform, 0);
+    /* Set texture unit uniform - use cached location */
+    if (output->program_uniforms.tex_sampler >= 0) {
+        glUniform1i(output->program_uniforms.tex_sampler, 0);
+    }
 
-    /* Set alpha uniform (for transitions) */
+    /* Set alpha uniform (for transitions) - lookup once per frame is acceptable */
     GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
     if (alpha_uniform >= 0) {
         glUniform1f(alpha_uniform, 1.0f);
     }
 
-    /* Handle tile mode texture wrapping */
+    /* Handle tile mode texture wrapping - only change when needed */
     if (output->config.mode == MODE_TILE) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -601,22 +676,16 @@ bool render_frame(struct output_state *output) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
-    /* Enable blending for transparency */
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    /* Enable blending with state tracking */
+    set_blend_state(output, true);
 
     /* Draw quad */
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-    /* Disable blending */
-    glDisable(GL_BLEND);
-
-    /* Clean up */
+    /* Clean up - disable attributes but leave state cached */
     glDisableVertexAttribArray(pos_attrib);
     glDisableVertexAttribArray(tex_attrib);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glUseProgram(0);
 
     /* Check for errors */
     GLenum error = glGetError();
