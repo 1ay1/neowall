@@ -2,6 +2,7 @@
 #include <string.h>
 #include <GLES2/gl2.h>
 #include "staticwall.h"
+#include "constants.h"
 #include "transitions.h"
 #include "shader.h"
 
@@ -12,7 +13,7 @@ extern void calculate_vertex_coords_for_image(struct output_state *output,
 
 /* Vertex shader for pixelate transition */
 static const char *pixelate_vertex_shader_source =
-    "#version 100\n"
+    GLSL_VERSION_STRING
     "attribute vec2 position;\n"
     "attribute vec2 texcoord;\n"
     "varying vec2 v_texcoord;\n"
@@ -23,7 +24,7 @@ static const char *pixelate_vertex_shader_source =
 
 /* Pixelate/mosaic fragment shader with dramatic effects */
 static const char *pixelate_fragment_shader_source =
-    "#version 100\n"
+    GLSL_VERSION_STRING
     "precision mediump float;\n"
     "varying vec2 v_texcoord;\n"
     "uniform sampler2D texture0;\n"

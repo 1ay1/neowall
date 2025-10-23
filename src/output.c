@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include "staticwall.h"
+#include "constants.h"
 #include "shader.h"
 #include "../protocols/wlr-layer-shell-unstable-v1-client-protocol.h"
 
@@ -397,7 +398,7 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
     }
 
     uint64_t elapsed_ms = current_time - output->last_cycle_time;
-    uint64_t duration_ms = output->config.duration * 1000;
+    uint64_t duration_ms = output->config.duration  * MS_PER_SECOND;
 
     bool should_cycle = elapsed_ms >= duration_ms;
 

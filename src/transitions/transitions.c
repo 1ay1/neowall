@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include "staticwall.h"
+#include "constants.h"
 #include "transitions.h"
 
 /**

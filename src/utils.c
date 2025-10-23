@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include "staticwall.h"
+#include "constants.h"
 
 /* Current log level */
 static int log_level = LOG_LEVEL_INFO;
@@ -28,7 +29,7 @@ static bool use_colors = true;
 uint64_t get_time_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+    return (uint64_t)ts.tv_sec * MS_PER_SECOND + (uint64_t)ts.tv_nsec / MS_PER_NANOSECOND;
 }
 
 /* Get formatted timestamp */

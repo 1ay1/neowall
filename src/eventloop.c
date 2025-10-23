@@ -8,6 +8,7 @@
 #include <sys/timerfd.h>
 #include <sys/eventfd.h>
 #include "staticwall.h"
+#include "constants.h"
 
 static struct staticwall_state *event_loop_state = NULL;
 
@@ -26,7 +27,7 @@ static void update_cycle_timer(struct staticwall_state *state) {
         if (!state->paused && output->config.cycle && output->config.duration > 0 &&
             output->config.cycle_count > 1 && output->current_image) {
             uint64_t elapsed_ms = now - output->last_cycle_time;
-            uint64_t duration_ms = output->config.duration * 1000;
+            uint64_t duration_ms = output->config.duration * MS_PER_SECOND;
             
             if (elapsed_ms >= duration_ms) {
                 /* Should cycle now */
@@ -52,8 +53,8 @@ static void update_cycle_timer(struct staticwall_state *state) {
         timer_spec.it_value.tv_nsec = 0;
     } else {
         /* Set timer to wake at next cycle time */
-        timer_spec.it_value.tv_sec = next_wake_ms / 1000;
-        timer_spec.it_value.tv_nsec = (next_wake_ms % 1000) * 1000000;
+        timer_spec.it_value.tv_sec = next_wake_ms / MS_PER_SECOND;
+        timer_spec.it_value.tv_nsec = (next_wake_ms % MS_PER_SECOND) * NS_PER_MS;
     }
     
     timer_spec.it_interval.tv_sec = 0;
@@ -318,7 +319,7 @@ void event_loop_run(struct staticwall_state *state) {
         }
 
         /* Calculate poll timeout - only for transitions/shaders, otherwise wait indefinitely */
-        int timeout_ms = -1; /* -1 = infinite, pure event-driven */
+        int timeout_ms = POLL_TIMEOUT_INFINITE; /* Pure event-driven by default */
         
         /* Check if any output has active transitions or shader wallpapers */
         output = state->outputs;
@@ -326,7 +327,7 @@ void event_loop_run(struct staticwall_state *state) {
             if ((output->transition_start_time > 0 && 
                  output->config.transition != TRANSITION_NONE) ||
                 output->config.type == WALLPAPER_SHADER) {
-                timeout_ms = 16; /* ~60 FPS for smooth transitions/animations */
+                timeout_ms = FRAME_TIME_MS; /* ~60 FPS for smooth transitions/animations */
                 break;
             }
             output = output->next;
@@ -398,10 +399,10 @@ void event_loop_run(struct staticwall_state *state) {
         render_outputs(state);
         frame_count++;
 
-        /* Print statistics every 10 seconds */
+        /* Print statistics periodically */
         uint64_t current_time = get_time_ms();
-        if (current_time - last_stats_time >= 10000) {
-            double elapsed_sec = (current_time - last_stats_time) / 1000.0;
+        if (current_time - last_stats_time >= STATS_INTERVAL_MS) {
+            double elapsed_sec = (current_time - last_stats_time) / (double)MS_PER_SECOND;
             double fps = frame_count / elapsed_sec;
 
             log_debug("Stats: %.1f FPS, %lu frames rendered, %lu errors",

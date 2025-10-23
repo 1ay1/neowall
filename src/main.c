@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include "staticwall.h"
+#include "constants.h"
 
 static struct staticwall_state *global_state = NULL;
 
@@ -179,7 +180,7 @@ static bool kill_daemon(void) {
     }
 
     /* Wait a bit for graceful shutdown */
-    struct timespec sleep_time = {0, 100000000};  /* 100ms */
+    struct timespec sleep_time = {0, SLEEP_100MS_NS};  /* 100ms */
     int attempts = 0;
     while (attempts < 50) {  /* Wait up to 5 seconds */
         if (kill(pid, 0) == -1 && errno == ESRCH) {
@@ -334,7 +335,7 @@ static void handle_next_wallpaper(int signum) {
              old_count, new_count);
 
     /* Prevent counter overflow from rapid signals */
-    if (new_count > 100) {
+    if (new_count > MAX_NEXT_REQUESTS) {
         log_error("Too many queued next requests (%d), resetting to 10", new_count);
         atomic_store(&global_state->next_requested, 10);
     }

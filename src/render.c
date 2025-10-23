@@ -4,6 +4,7 @@
 #include <math.h>
 #include <GLES2/gl2.h>
 #include "staticwall.h"
+#include "constants.h"
 #include "transitions.h"
 #include "shader.h"
 
@@ -11,14 +12,14 @@
 
 /* Simple color shader for overlay effects */
 static const char *color_vertex_shader =
-    "#version 100\n"
+    "GLSL_VERSION_STRING\n"
     "attribute vec2 position;\n"
     "void main() {\n"
     "    gl_Position = vec4(position, 0.0, 1.0);\n"
     "}\n";
 
 static const char *color_fragment_shader =
-    "#version 100\n"
+    "GLSL_VERSION_STRING\n"
     "precision mediump float;\n"
     "uniform vec4 color;\n"
     "void main() {\n"
@@ -320,7 +321,7 @@ bool render_frame_shader(struct output_state *output) {
     /* Calculate elapsed time for animation (continuous time since shader loaded) */
     uint64_t current_time = get_time_ms();
     uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : output->last_frame_time;
-    float time = (current_time - start_time) / 1000.0f;
+    float time = (current_time - start_time) / (float)MS_PER_SECOND;
     
     /* Apply shader speed multiplier */
     float shader_speed = output->config.shader_speed > 0.0f ? output->config.shader_speed : 1.0f;
@@ -368,8 +369,8 @@ bool render_frame_shader(struct output_state *output) {
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     /* Handle cross-fade transition when switching shaders */
-    const uint64_t FADE_OUT_MS = 400;  /* Fade to black duration */
-    const uint64_t FADE_IN_MS = 600;   /* Fade from black duration */
+    const uint64_t FADE_OUT_MS = SHADER_FADE_OUT_MS;  /* Fade to black duration */
+    const uint64_t FADE_IN_MS = SHADER_FADE_IN_MS;    /* Fade from black duration */
     const uint64_t TOTAL_FADE_MS = FADE_OUT_MS + FADE_IN_MS;
     
     if (output->shader_fade_start_time > 0) {
@@ -465,7 +466,7 @@ bool render_frame_shader(struct output_state *output) {
                 }
             }
             
-            /* Fade in from black (400ms -> 1000ms) */
+            /* Fade in from black after cross-fade completes */
             float fade_in_progress = (float)(fade_elapsed - FADE_OUT_MS) / (float)FADE_IN_MS;
             /* Ease-out cubic for smooth deceleration */
             float eased = 1.0f - powf(1.0f - fade_in_progress, 3.0f);

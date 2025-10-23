@@ -7,6 +7,7 @@
 #include <png.h>
 #include <jpeglib.h>
 #include "staticwall.h"
+#include "constants.h"
 
 /* Forward declarations */
 static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 
@@ -370,7 +371,7 @@ struct image_data *image_load_jpeg(const char *path) {
             img->pixels[dst_idx + 0] = row_buffer[src_idx + 0]; /* R */
             img->pixels[dst_idx + 1] = row_buffer[src_idx + 1]; /* G */
             img->pixels[dst_idx + 2] = row_buffer[src_idx + 2]; /* B */
-            img->pixels[dst_idx + 3] = 255;                      /* A */
+            img->pixels[dst_idx + 3] = ALPHA_OPAQUE;                      /* A */
         }
 
         row++;
