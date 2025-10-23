@@ -50,91 +50,162 @@ const char *config_get_default_path(void) {
 }
 
 /* Parse wallpaper mode from string */
+/* ============================================================================
+ * Enum String Mapping Tables - DRY Principle & Single Source of Truth
+ * ============================================================================
+ * Adding new modes or transitions:
+ * 1. Add enum value to staticwall.h
+ * 2. Add entry to appropriate table below
+ * 3. Done! No scattered if/else chains to maintain
+ * ============================================================================ */
+
+/* Wallpaper mode mapping table */
+typedef struct {
+    enum wallpaper_mode mode;
+    const char *name;
+} WallpaperModeMapping;
+
+static const WallpaperModeMapping mode_mappings[] = {
+    {MODE_CENTER,  "center"},
+    {MODE_STRETCH, "stretch"},
+    {MODE_FIT,     "fit"},
+    {MODE_FILL,    "fill"},
+    {MODE_TILE,    "tile"},
+};
+
+static const size_t mode_mapping_count = sizeof(mode_mappings) / sizeof(mode_mappings[0]);
+
+/* Transition type mapping table */
+typedef struct {
+    enum transition_type type;
+    const char *name;
+    const char *alias;  /* Alternative name (e.g., "slide_left" vs "slide-left") */
+} TransitionMapping;
+
+static const TransitionMapping transition_mappings[] = {
+    {TRANSITION_NONE,        "none",        NULL},
+    {TRANSITION_FADE,        "fade",        NULL},
+    {TRANSITION_SLIDE_LEFT,  "slide-left",  "slide_left"},
+    {TRANSITION_SLIDE_RIGHT, "slide-right", "slide_right"},
+    {TRANSITION_GLITCH,      "glitch",      NULL},
+    {TRANSITION_PIXELATE,    "pixelate",    NULL},
+};
+
+static const size_t transition_mapping_count = sizeof(transition_mappings) / sizeof(transition_mappings[0]);
+
+/* ============================================================================
+ * String <-> Enum Conversion Functions - Table-driven
+ * ============================================================================ */
+
+/* Parse wallpaper mode from string - Table lookup */
 enum wallpaper_mode wallpaper_mode_from_string(const char *str) {
     if (!str) {
-        return MODE_FILL;
+        return MODE_FILL;  /* Default */
     }
 
-    if (strcasecmp(str, "center") == 0) {
-        return MODE_CENTER;
-    } else if (strcasecmp(str, "stretch") == 0) {
-        return MODE_STRETCH;
-    } else if (strcasecmp(str, "fit") == 0) {
-        return MODE_FIT;
-    } else if (strcasecmp(str, "fill") == 0) {
-        return MODE_FILL;
-    } else if (strcasecmp(str, "tile") == 0) {
-        return MODE_TILE;
+    /* Search mode table */
+    for (size_t i = 0; i < mode_mapping_count; i++) {
+        if (strcasecmp(str, mode_mappings[i].name) == 0) {
+            return mode_mappings[i].mode;
+        }
     }
 
     log_error("Unknown wallpaper mode '%s', using 'fill'", str);
     return MODE_FILL;
 }
 
-/* Convert wallpaper mode to string */
+/* Convert wallpaper mode to string - Table lookup */
 const char *wallpaper_mode_to_string(enum wallpaper_mode mode) {
-    switch (mode) {
-        case MODE_CENTER:  return "center";
-        case MODE_STRETCH: return "stretch";
-        case MODE_FIT:     return "fit";
-        case MODE_FILL:    return "fill";
-        case MODE_TILE:    return "tile";
-        default:           return "unknown";
+    for (size_t i = 0; i < mode_mapping_count; i++) {
+        if (mode_mappings[i].mode == mode) {
+            return mode_mappings[i].name;
+        }
     }
+    return "unknown";
 }
 
-/* Parse transition type from string */
+/* Parse transition type from string - Table lookup with alias support */
 static enum transition_type transition_type_from_string(const char *str) {
     if (!str) {
-        return TRANSITION_NONE;
+        return TRANSITION_NONE;  /* Default */
     }
 
-    if (strcasecmp(str, "none") == 0) {
-        return TRANSITION_NONE;
-    } else if (strcasecmp(str, "fade") == 0) {
-        return TRANSITION_FADE;
-    } else if (strcasecmp(str, "slide-left") == 0 || strcasecmp(str, "slide_left") == 0) {
-        return TRANSITION_SLIDE_LEFT;
-    } else if (strcasecmp(str, "slide-right") == 0 || strcasecmp(str, "slide_right") == 0) {
-        return TRANSITION_SLIDE_RIGHT;
-    } else if (strcasecmp(str, "glitch") == 0) {
-        return TRANSITION_GLITCH;
-    } else if (strcasecmp(str, "pixelate") == 0) {
-        return TRANSITION_PIXELATE;
+    /* Search transition table (check both name and alias) */
+    for (size_t i = 0; i < transition_mapping_count; i++) {
+        if (strcasecmp(str, transition_mappings[i].name) == 0) {
+            return transition_mappings[i].type;
+        }
+        if (transition_mappings[i].alias && 
+            strcasecmp(str, transition_mappings[i].alias) == 0) {
+            return transition_mappings[i].type;
+        }
     }
 
     log_error("Unknown transition type '%s', using 'none'", str);
     return TRANSITION_NONE;
 }
 
-/* Check if a string is a supported image extension */
-static bool is_image_file(const char *filename) {
-    if (!filename) return false;
-
-    const char *ext = strrchr(filename, '.');
-    if (!ext) return false;
-
-    ext++; /* Skip the dot */
-
-    return (strcasecmp(ext, "png") == 0 ||
-            strcasecmp(ext, "jpg") == 0 ||
-            strcasecmp(ext, "jpeg") == 0);
+/* Convert transition type to string - Table lookup */
+__attribute__((unused))
+static const char *transition_type_to_string(enum transition_type type) {
+    for (size_t i = 0; i < transition_mapping_count; i++) {
+        if (transition_mappings[i].type == type) {
+            return transition_mappings[i].name;
+        }
+    }
+    return "unknown";
 }
 
-/* Load all image files from a directory */
-/* Helper to check if a file is a shader */
-static bool is_shader_file(const char *name) {
-    if (!name) {
+/* ============================================================================
+ * File Extension Validation - Table-driven
+ * ============================================================================ */
+
+/* Supported image extensions */
+static const char *supported_image_extensions[] = {
+    "png",
+    "jpg",
+    "jpeg",
+    NULL  /* Sentinel */
+};
+
+/* Supported shader extensions */
+static const char *supported_shader_extensions[] = {
+    "glsl",
+    "frag",
+    NULL  /* Sentinel */
+};
+
+/* Helper: Check if filename has any of the given extensions */
+static bool has_extension(const char *filename, const char **extensions) {
+    if (!filename || !extensions) {
         return false;
     }
 
-    size_t len = strlen(name);
-    if (len < 5) {
+    const char *ext = strrchr(filename, '.');
+    if (!ext) {
         return false;
     }
 
-    /* Check for .glsl extension */
-    return (strcasecmp(name + len - 5, ".glsl") == 0);
+    ext++;  /* Skip the dot */
+
+    /* Check against all valid extensions */
+    for (size_t i = 0; extensions[i] != NULL; i++) {
+        if (strcasecmp(ext, extensions[i]) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/* Check if a string is a supported image extension */
+static bool is_image_file(const char *filename) {
+    return has_extension(filename, supported_image_extensions);
+}
+
+/* Check if a string is a supported shader extension */
+static bool is_shader_file(const char *filename) {
+    return has_extension(filename, supported_shader_extensions);
 }
 
 /* Load shader files from a directory */
