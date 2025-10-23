@@ -211,6 +211,7 @@ char **load_shaders_from_directory(const char *dir_path, size_t *count);
 /* Image loading */
 struct image_data *image_load(const char *path, int32_t display_width, int32_t display_height, enum wallpaper_mode mode);
 void image_free(struct image_data *img);
+void image_free_pixels(struct image_data *img);  /* Free pixel data only (after GPU upload) */
 enum image_format image_detect_format(const char *path);
 
 /* Image loaders for specific formats */

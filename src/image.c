@@ -423,8 +423,8 @@ struct image_data *image_load(const char *path, int32_t display_width,
     return img;
 }
 
-/* Free image data */
-void image_free(struct image_data *img) {
+/* Free only pixel data, keeping metadata (for memory optimization after GPU upload) */
+void image_free_pixels(struct image_data *img) {
     if (!img) {
         return;
     }
@@ -433,7 +433,15 @@ void image_free(struct image_data *img) {
         free(img->pixels);
         img->pixels = NULL;
     }
+}
 
+/* Free image data */
+void image_free(struct image_data *img) {
+    if (!img) {
+        return;
+    }
+
+    image_free_pixels(img);
     free(img);
 }
 

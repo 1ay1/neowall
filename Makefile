@@ -15,7 +15,7 @@ ASSETS_DIR = assets
 
 # Compiler and flags
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -pedantic -std=c11 -g -O0 -D_POSIX_C_SOURCE=200809L
+CFLAGS = -Wall -Wextra -Werror -pedantic -std=c11 -O2 -D_POSIX_C_SOURCE=200809L
 CFLAGS += -I$(INC_DIR) -I$(PROTO_DIR)
 LDFLAGS = -lwayland-client -lwayland-egl -lEGL -lGLESv2 -lpthread -lm
 

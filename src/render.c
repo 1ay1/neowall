@@ -207,7 +207,8 @@ void render_cleanup_output(struct output_state *output) {
 }
 
 /* Create texture from image data
- * Optimized: Set immutable texture parameters only once at creation */
+ * Optimized: Set immutable texture parameters only once at creation
+ * Memory optimization: Frees pixel data after GPU upload to save RAM */
 GLuint render_create_texture(struct image_data *img) {
     if (!img || !img->pixels) {
         log_error("Invalid image data for texture creation");
@@ -243,6 +244,12 @@ GLuint render_create_texture(struct image_data *img) {
 
     log_debug("Created texture %u (%ux%u, %d channels)",
               texture, img->width, img->height, img->channels);
+
+    /* Free pixel data after successful GPU upload - saves massive amounts of RAM!
+     * For 4K display: 3840x2160x4 = 33MB saved per image
+     * We keep the image_data struct for metadata (width, height, etc.) */
+    image_free_pixels(img);
+    log_debug("Freed pixel data for texture %u (memory optimization)", texture);
 
     return texture;
 }
@@ -421,22 +428,13 @@ bool render_frame_shader(struct output_state *output) {
         return false;
     }
 
-    /* Simple fullscreen quad vertices (position only, no texcoords) */
-    static const float shader_quad[] = {
-        -1.0f,  1.0f,  /* top-left */
-         1.0f,  1.0f,  /* top-right */
-        -1.0f, -1.0f,  /* bottom-left */
-         1.0f, -1.0f   /* bottom-right */
-    };
-
-    /* Bind VBO and upload shader quad
-     * NOTE: Still using DYNAMIC_DRAW for shader quad because it's a different
-     * vertex layout (2 floats) than the image quad (4 floats) */
+    /* Bind persistent VBO - no need to upload data every frame!
+     * The fullscreen quad data is already in the VBO from render_init_output.
+     * We just reinterpret it: first 2 floats of each vertex are positions. */
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(shader_quad), shader_quad, GL_DYNAMIC_DRAW);
 
-    /* Set up vertex attributes */
-    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+    /* Set up vertex attributes - stride of 4 floats to skip texcoords */
+    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(pos_attrib);
 
     /* Draw fullscreen quad */
@@ -475,12 +473,12 @@ bool render_frame_shader(struct output_state *output) {
                 glUniform4f(color_uniform, 0.0f, 0.0f, 0.0f, fade_alpha);
             }
             
+            /* Use persistent VBO - no upload needed */
             glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-            glBufferData(GL_ARRAY_BUFFER, sizeof(shader_quad), shader_quad, GL_DYNAMIC_DRAW);
             
             GLint fade_pos_attrib = glGetAttribLocation(color_overlay_program, "position");
             if (fade_pos_attrib >= 0) {
-                glVertexAttribPointer(fade_pos_attrib, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+                glVertexAttribPointer(fade_pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
                 glEnableVertexAttribArray(fade_pos_attrib);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
                 glDisableVertexAttribArray(fade_pos_attrib);
@@ -558,12 +556,12 @@ bool render_frame_shader(struct output_state *output) {
                 glUniform4f(color_uniform, 0.0f, 0.0f, 0.0f, fade_alpha);
             }
             
+            /* Use persistent VBO - no upload needed */
             glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-            glBufferData(GL_ARRAY_BUFFER, sizeof(shader_quad), shader_quad, GL_DYNAMIC_DRAW);
             
             GLint fade_pos_attrib = glGetAttribLocation(color_overlay_program, "position");
             if (fade_pos_attrib >= 0) {
-                glVertexAttribPointer(fade_pos_attrib, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+                glVertexAttribPointer(fade_pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
                 glEnableVertexAttribArray(fade_pos_attrib);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
                 glDisableVertexAttribArray(fade_pos_attrib);
