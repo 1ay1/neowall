@@ -118,6 +118,7 @@ struct output_state {
     uint64_t last_frame_time;
     uint64_t last_cycle_time;           /* Last time wallpaper was changed/cycled */
     uint64_t transition_start_time;
+    uint64_t shader_start_time;         /* Time when shader was loaded (for animation) */
     float transition_progress;
     uint64_t frames_rendered;
 

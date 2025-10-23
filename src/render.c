@@ -289,9 +289,10 @@ bool render_frame_shader(struct output_state *output) {
     /* Use live shader program */
     glUseProgram(output->live_shader_program);
 
-    /* Calculate elapsed time for animation */
+    /* Calculate elapsed time for animation (continuous time since shader loaded) */
     uint64_t current_time = get_time_ms();
-    float time = (current_time - output->last_frame_time) / 1000.0f;
+    uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : output->last_frame_time;
+    float time = (current_time - start_time) / 1000.0f;
 
     /* Set uniforms */
     GLint time_uniform = glGetUniformLocation(output->live_shader_program, "time");
