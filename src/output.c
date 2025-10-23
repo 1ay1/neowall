@@ -51,6 +51,9 @@ struct output_state *output_create(struct staticwall_state *state,
     out->config.cycle_count = 0;
     out->config.current_cycle_index = 0;
     out->prev_shader_program = 0;
+    out->shader_fbo = 0;
+    out->shader_render_texture = 0;
+    out->prev_shader_render_texture = 0;
 
     /* Add to linked list */
     out->next = state->outputs;
@@ -81,6 +84,20 @@ void output_destroy(struct output_state *output) {
     if (output->prev_shader_program != 0) {
         shader_destroy_program(output->prev_shader_program);
         output->prev_shader_program = 0;
+    }
+
+    /* Clean up shader framebuffer and textures */
+    if (output->shader_fbo != 0) {
+        glDeleteFramebuffers(1, &output->shader_fbo);
+        output->shader_fbo = 0;
+    }
+    if (output->shader_render_texture != 0) {
+        glDeleteTextures(1, &output->shader_render_texture);
+        output->shader_render_texture = 0;
+    }
+    if (output->prev_shader_render_texture != 0) {
+        glDeleteTextures(1, &output->prev_shader_render_texture);
+        output->prev_shader_render_texture = 0;
     }
 
     /* Free wallpaper config */

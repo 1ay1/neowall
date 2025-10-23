@@ -114,6 +114,9 @@ struct output_state {
     GLuint pixelate_program;            /* Shader program for pixelate transition */
     GLuint live_shader_program;         /* Shader program for live wallpaper */
     GLuint prev_shader_program;         /* Previous shader program for transitions */
+    GLuint shader_fbo;                  /* Framebuffer for rendering shader to texture */
+    GLuint shader_render_texture;       /* Texture to render current shader to */
+    GLuint prev_shader_render_texture;  /* Texture to render previous shader to */
     GLuint vbo;
 
     uint64_t last_frame_time;

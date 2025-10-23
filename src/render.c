@@ -272,95 +272,125 @@ static void calculate_vertex_coords(struct output_state *output, float vertices[
     calculate_vertex_coords_for_image(output, output->current_image, vertices);
 }
 
-/* Render a frame with live shader wallpaper */
-/* Render shader transition by blending between two shaders */
+/* Helper to render a shader to a texture using a framebuffer */
+static bool render_shader_to_texture(struct output_state *output, GLuint shader_program, 
+                                     GLuint *texture, GLuint fbo) {
+    if (!output || shader_program == 0 || !texture) {
+        return false;
+    }
+
+    /* Create texture if needed */
+    if (*texture == 0) {
+        glGenTextures(1, texture);
+        glBindTexture(GL_TEXTURE_2D, *texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, output->width, output->height, 
+                     0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+
+    /* Bind framebuffer and attach texture */
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *texture, 0);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        log_error("Framebuffer not complete for shader rendering");
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return false;
+    }
+
+    /* Render shader to framebuffer */
+    glViewport(0, 0, output->width, output->height);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glUseProgram(shader_program);
+    
+    float current_time = (float)(get_time_ms() - output->shader_start_time) / 1000.0f;
+    GLint time_loc = glGetUniformLocation(shader_program, "time");
+    GLint res_loc = glGetUniformLocation(shader_program, "resolution");
+    
+    if (time_loc != -1) {
+        glUniform1f(time_loc, current_time);
+    }
+    if (res_loc != -1) {
+        glUniform2f(res_loc, (float)output->width, (float)output->height);
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
+    GLint pos_attr = glGetAttribLocation(shader_program, "position");
+    if (pos_attr != -1) {
+        glEnableVertexAttribArray(pos_attr);
+        glVertexAttribPointer(pos_attr, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glDisableVertexAttribArray(pos_attr);
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    /* Unbind framebuffer */
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    return true;
+}
+
+/* Render shader transition by rendering both shaders to textures and using transition system */
 bool render_frame_shader_transition(struct output_state *output, float progress) {
     if (!output || output->live_shader_program == 0 || output->prev_shader_program == 0) {
         return render_frame_shader(output);
     }
 
-    glViewport(0, 0, output->width, output->height);
-    glClear(GL_COLOR_BUFFER_BIT);
+    /* Create framebuffer if needed */
+    if (output->shader_fbo == 0) {
+        glGenFramebuffers(1, &output->shader_fbo);
+    }
 
-    float current_time = (float)(get_time_ms() - output->shader_start_time) / 1000.0f;
+    /* Render previous shader to texture (this becomes "next_texture" for transition) */
+    if (!render_shader_to_texture(output, output->prev_shader_program, 
+                                   &output->prev_shader_render_texture, output->shader_fbo)) {
+        return render_frame_shader(output);
+    }
 
-    /* Render previous shader to a temporary texture would be complex,
-     * so we'll just do a simple cross-fade by rendering both and blending */
+    /* Render current shader to texture (this becomes "texture" for transition) */
+    if (!render_shader_to_texture(output, output->live_shader_program,
+                                   &output->shader_render_texture, output->shader_fbo)) {
+        return render_frame_shader(output);
+    }
+
+    /* Now use the existing transition system with these textures */
+    /* Temporarily swap in our shader textures */
+    GLuint saved_texture = output->texture;
+    GLuint saved_next_texture = output->next_texture;
     
-    /* First render the old shader with reduced alpha */
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    output->texture = output->shader_render_texture;
+    output->next_texture = output->prev_shader_render_texture;
 
-    /* Render old shader */
-    glUseProgram(output->prev_shader_program);
-    GLint time_loc = glGetUniformLocation(output->prev_shader_program, "time");
-    GLint res_loc = glGetUniformLocation(output->prev_shader_program, "resolution");
-    
-    if (time_loc != -1) {
-        glUniform1f(time_loc, current_time);
-    }
-    if (res_loc != -1) {
-        glUniform2f(res_loc, (float)output->width, (float)output->height);
-    }
+    /* Call the existing transition renderer */
+    bool result = transition_render(output, output->config.transition, progress);
 
-    /* Draw with fading out alpha */
-    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-    GLint pos_attr = glGetAttribLocation(output->prev_shader_program, "position");
-    if (pos_attr != -1) {
-        glEnableVertexAttribArray(pos_attr);
-        glVertexAttribPointer(pos_attr, 2, GL_FLOAT, GL_FALSE, 0, 0);
-        
-        /* Modulate alpha - fade out the old shader */
-        glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
-        glBlendColor(1.0f, 1.0f, 1.0f, 1.0f - progress);
-        
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        glDisableVertexAttribArray(pos_attr);
-    }
-
-    /* Now render new shader on top with fading in alpha */
-    glUseProgram(output->live_shader_program);
-    time_loc = glGetUniformLocation(output->live_shader_program, "time");
-    res_loc = glGetUniformLocation(output->live_shader_program, "resolution");
-    
-    if (time_loc != -1) {
-        glUniform1f(time_loc, current_time);
-    }
-    if (res_loc != -1) {
-        glUniform2f(res_loc, (float)output->width, (float)output->height);
-    }
-
-    pos_attr = glGetAttribLocation(output->live_shader_program, "position");
-    if (pos_attr != -1) {
-        glEnableVertexAttribArray(pos_attr);
-        glVertexAttribPointer(pos_attr, 2, GL_FLOAT, GL_FALSE, 0, 0);
-        
-        /* Fade in the new shader */
-        glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
-        glBlendColor(1.0f, 1.0f, 1.0f, progress);
-        
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        glDisableVertexAttribArray(pos_attr);
-    }
-
-    glDisable(GL_BLEND);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    /* Restore original textures */
+    output->texture = saved_texture;
+    output->next_texture = saved_next_texture;
 
     /* Update transition progress */
     uint64_t current_time_ms = get_time_ms();
     uint64_t elapsed = current_time_ms - output->transition_start_time;
     output->transition_progress = (float)elapsed / (float)output->config.transition_duration;
 
-    /* Clean up old shader when transition is complete */
+    /* Clean up when transition is complete */
     if (output->transition_progress >= 1.0f) {
         if (output->prev_shader_program != 0) {
             shader_destroy_program(output->prev_shader_program);
             output->prev_shader_program = 0;
         }
+        if (output->prev_shader_render_texture != 0) {
+            glDeleteTextures(1, &output->prev_shader_render_texture);
+            output->prev_shader_render_texture = 0;
+        }
         output->transition_progress = 1.0f;
     }
 
-    return true;
+    return result;
 }
 
 bool render_frame_shader(struct output_state *output) {
