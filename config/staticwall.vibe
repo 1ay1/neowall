@@ -26,13 +26,13 @@ default {
   # Option 1: Static Image Wallpaper
   # Path to wallpaper image (PNG/JPEG)
   #
-  # 📁 DIRECTORY MODE (Recommended!):
+  # DIRECTORY MODE (Recommended!):
   #    Point to a folder to automatically cycle through ALL images
   #    Example: path ~/Pictures/wallpapers/
   #    IMPORTANT: Must end with / for directories!
   #    Loads all PNG/JPEG files in alphabetical order
   #
-  # 📄 SINGLE FILE MODE:
+  # SINGLE FILE MODE:
   #    Path to one specific image file
   #    Example: path ~/Pictures/wallpaper.png
   #
@@ -55,7 +55,7 @@ default {
   # shader ~/.config/staticwall/shaders/plasma.glsl
   # shader /usr/share/staticwall/shaders/wave.glsl
   #
-  # ⚠️ NOTE: Use EITHER 'path' OR 'shader', not both!
+  # NOTE: Use EITHER 'path' OR 'shader', not both!
 
   # Display mode (optional, default: fill)
   # Options:
@@ -79,7 +79,7 @@ default {
   # Examples: 100 (fast), 300 (default), 500 (smooth), 1000 (slow)
   transition_duration 300
 
-  # ⚠️ NOTE: You don't need a 'cycle' option anymore!
+  # NOTE: You don't need a 'cycle' option anymore!
   # Just set path to a directory (with trailing /) and set duration > 0
   # Staticwall automatically cycles through all images in the directory
 }
