@@ -412,6 +412,8 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     config->cycle_paths = NULL;
     config->cycle_count = 0;
     config->current_cycle_index = 0;
+    config->channel_paths = NULL;
+    config->channel_count = 0;
 
     /* Parse shader (takes precedence over path) */
     VibeValue *shader = vibe_object_get(obj->as_object, "shader");
@@ -537,6 +539,37 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         }
     }
 
+    /* Parse channels - array of texture paths/names for iChannels */
+    VibeValue *channels = vibe_object_get(obj->as_object, "channels");
+    if (channels && channels->type == VIBE_TYPE_ARRAY) {
+        size_t count = channels->as_array->count;
+        if (count > 0) {
+            config->channel_count = count;
+            config->channel_paths = calloc(count, sizeof(char *));
+
+            if (!config->channel_paths) {
+                log_error("Failed to allocate channel paths array");
+                return false;
+            }
+
+            for (size_t i = 0; i < count; i++) {
+                VibeValue *elem = channels->as_array->values[i];
+                if (elem && elem->type == VIBE_TYPE_STRING) {
+                    config->channel_paths[i] = strdup(elem->as_string);
+                    log_debug("iChannel%zu: %s", i, elem->as_string);
+                } else {
+                    log_error("Channel path at index %zu is not a string", i);
+                    config->channel_paths[i] = strdup("_");
+                }
+            }
+
+            log_info("Loaded %zu iChannel texture assignments from config", count);
+            for (size_t j = 0; j < count; j++) {
+                log_debug("Parsed channel[%zu] = '%s'", j, config->channel_paths[j] ? config->channel_paths[j] : "(null)");
+            }
+        }
+    }
+
     return true;
 }
 
@@ -556,7 +589,18 @@ void config_free_wallpaper(struct wallpaper_config *config) {
         config->cycle_paths = NULL;
     }
 
+    if (config->channel_paths) {
+        for (size_t i = 0; i < config->channel_count; i++) {
+            if (config->channel_paths[i]) {
+                free(config->channel_paths[i]);
+            }
+        }
+        free(config->channel_paths);
+        config->channel_paths = NULL;
+    }
+
     config->cycle_count = 0;
+    config->channel_count = 0;
 }
 
 /* Create default configuration file */

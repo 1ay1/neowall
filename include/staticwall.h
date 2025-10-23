@@ -80,6 +80,10 @@ struct wallpaper_config {
     char **cycle_paths;                 /* Array of paths for cycling */
     size_t cycle_count;                 /* Number of wallpapers to cycle */
     size_t current_cycle_index;         /* Current index in cycle */
+    
+    /* iChannel texture configuration */
+    char **channel_paths;               /* Array of texture paths/names for iChannels */
+    size_t channel_count;               /* Number of configured channels */
 };
 
 /* Output (monitor) state */
@@ -110,6 +114,11 @@ struct output_state {
 
     GLuint texture;
     GLuint next_texture;                /* For transitions */
+    
+    /* iChannel textures for shader inputs (dynamic count) */
+    GLuint *channel_textures;           /* Dynamic array of channel textures */
+    size_t channel_count;               /* Number of allocated channels */
+    
     GLuint program;
     GLuint glitch_program;              /* Shader program for glitch transition */
     GLuint pixelate_program;            /* Shader program for pixelate transition */
@@ -124,6 +133,7 @@ struct output_state {
         GLint u_resolution;
         GLint u_time;
         GLint u_speed;
+        GLint *iChannel;    /* Dynamic array of iChannel sampler locations */
     } shader_uniforms;
 
     struct {
@@ -244,6 +254,7 @@ bool render_frame_shader(struct output_state *output);
 bool render_frame_transition(struct output_state *output, float progress);
 GLuint render_create_texture(struct image_data *img);
 void render_destroy_texture(GLuint texture);
+bool render_load_channel_textures(struct output_state *output, struct wallpaper_config *config);
 
 /* GL shader programs */
 bool shader_create_program(GLuint *program);

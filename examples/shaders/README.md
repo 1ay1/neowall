@@ -117,7 +117,9 @@ staticwall reload
 
 ## Creating Your Own Shaders
 
-All shaders use GLSL ES 2.0 (OpenGL ES Shading Language). The basic template:
+Staticwall supports **two shader formats**:
+
+### Format 1: Native Staticwall Format
 
 ```glsl
 #version 100
@@ -136,19 +138,56 @@ void main() {
 }
 ```
 
+### Format 2: Shadertoy Format (NEW! 🎉)
+
+**Copy shaders directly from Shadertoy.com** - they just work!
+
+```glsl
+void mainImage(out vec4 fragColor, in vec2 fragCoord)
+{
+    // Normalize pixel coordinates (from 0 to 1)
+    vec2 uv = fragCoord/iResolution.xy;
+    
+    // Time varying pixel color
+    vec3 color = 0.5 + 0.5 * cos(iTime + uv.xyx + vec3(0,2,4));
+    
+    // Output to screen
+    fragColor = vec4(color, 1.0);
+}
+```
+
+Staticwall **automatically detects** which format you're using and wraps Shadertoy shaders with a compatibility layer. This means you can:
+- Copy shaders directly from [Shadertoy.com](https://www.shadertoy.com)
+- Use the same shader on both platforms
+- Learn from thousands of existing Shadertoy examples!
+
 ### Available Uniforms
 
+#### Native Format:
 - `time` - Continuous time since shader loaded (in seconds, as float)
 - `resolution` - Screen resolution as vec2(width, height)
 
+#### Shadertoy Format:
+- `iTime` - Current time in seconds
+- `iResolution` - Viewport resolution as vec3(width, height, aspect_ratio)
+- `fragCoord` - Pixel coordinates (passed as function parameter)
+- `fragColor` - Output color (passed as function parameter)
+
+**Note:** Other Shadertoy uniforms like `iMouse`, `iChannel0-3`, `iFrame`, etc. are not yet supported but are planned for future releases.
+
 ### Tips for Great Shaders
 
-1. **Use `time` for animation** - Multiply by different values for varied speeds
-2. **Normalize coordinates** - `uv = gl_FragCoord.xy / resolution.xy` gives 0-1 coords
-3. **Aspect ratio** - Multiply `uv.x` by `resolution.x / resolution.y` for square patterns
-4. **Performance** - Avoid expensive operations in tight loops
+1. **Use time for animation** - Use `time` (native) or `iTime` (Shadertoy) and multiply by different values for varied speeds
+2. **Normalize coordinates** - 
+   - Native: `uv = gl_FragCoord.xy / resolution.xy`
+   - Shadertoy: `uv = fragCoord / iResolution.xy`
+3. **Aspect ratio** - Multiply `uv.x` by width/height ratio for square patterns
+   - Native: `uv.x *= resolution.x / resolution.y`
+   - Shadertoy: `uv.x *= iResolution.x / iResolution.y`
+4. **Performance** - Avoid expensive operations in tight loops; modern GPUs are fast but not infinite!
 5. **Smooth animations** - Use `sin()`, `cos()`, and `smoothstep()` for smooth motion
 6. **Hash functions** - For randomness, use deterministic hash functions (see existing shaders)
+7. **Test on Shadertoy first** - If using Shadertoy format, you can test and iterate quickly on [Shadertoy.com](https://www.shadertoy.com), then copy the final shader to staticwall
 
 ### Debugging
 
@@ -178,6 +217,21 @@ Shaders are loaded from (in order):
 
 On first run, example shaders are automatically copied to `~/.config/staticwall/shaders/`.
 
+## Shadertoy Examples
+
+Check out these example Shadertoy-format shaders included with staticwall:
+- `shadertoy_test.glsl` - Simple animated circles to test compatibility
+- `aurora_shadertoy.glsl` - Beautiful aurora borealis effect
+- `fractal_julia.glsl` - Animated Julia set fractal with rainbow colors
+
+You can find thousands more on [Shadertoy.com](https://www.shadertoy.com) - just copy and paste!
+
+### Popular Shadertoy Shaders to Try:
+- Search for "seascape" - beautiful ocean waves
+- Search for "star nest" - amazing space tunnel
+- Search for "elevated" - stunning 3D terrain
+- Browse "Popular" or "Top" sections for inspiration
+
 ## Contributing
 
 Want to create an awesome shader? Fork the repo and submit a PR! We'd love to see:
@@ -186,6 +240,9 @@ Want to create an awesome shader? Fork the repo and submit a PR! We'd love to se
 - Abstract mathematical visualizations
 - Retro computer/game console effects
 - Audio-reactive shaders (coming soon!)
+- Your favorite Shadertoy conversions!
+
+**Pro tip:** If you're converting a Shadertoy shader, you usually don't need to change anything - just copy it directly!
 
 ## License
 

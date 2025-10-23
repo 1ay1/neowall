@@ -276,14 +276,36 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     }
     
     /* First shader load - no fade needed, load and compile immediately */
+    
+    /* Load iChannel textures based on config */
+    if (!render_load_channel_textures(output, &output->config)) {
+        log_error("Failed to load iChannel textures for shader: %s", shader_path);
+        /* Continue anyway - shader may work without textures */
+    }
+    
     GLuint new_shader_program = 0;
-    if (!shader_create_live_program(shader_path, &new_shader_program)) {
+    if (!shader_create_live_program(shader_path, &new_shader_program, output->channel_count)) {
         log_error("Failed to create shader program from: %s", shader_path);
         return;
     }
     
     output->live_shader_program = new_shader_program;
     output->shader_start_time = get_time_ms();
+    
+    /* Reset shader uniform cache for new program */
+    output->shader_uniforms.position = -2;
+    output->shader_uniforms.texcoord = -2;
+    output->shader_uniforms.tex_sampler = -2;
+    output->shader_uniforms.u_resolution = -2;
+    output->shader_uniforms.u_time = -2;
+    output->shader_uniforms.u_speed = -2;
+    
+    /* Reset iChannel uniform locations to uninitialized */
+    if (output->shader_uniforms.iChannel && output->channel_count > 0) {
+        for (size_t i = 0; i < output->channel_count; i++) {
+            output->shader_uniforms.iChannel[i] = -2;
+        }
+    }
     
     log_debug("Shader loaded (first): %s", shader_path);
 
@@ -454,6 +476,18 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         return false;
     }
 
+    /* Free old channel_paths if they exist */
+    if (output->config.channel_paths) {
+        for (size_t i = 0; i < output->config.channel_count; i++) {
+            if (output->config.channel_paths[i]) {
+                free(output->config.channel_paths[i]);
+            }
+        }
+        free(output->config.channel_paths);
+        output->config.channel_paths = NULL;
+        output->config.channel_count = 0;
+    }
+    
     /* Free old cycle_paths if they exist */
     if (output->config.cycle_paths) {
         for (size_t i = 0; i < output->config.cycle_count; i++) {
@@ -466,8 +500,36 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         output->config.cycle_count = 0;
     }
 
-    /* Copy configuration (shallow copy for now, will handle cycle_paths separately) */
+    /* Copy configuration (shallow copy for now, will handle cycle_paths and channel_paths separately) */
     memcpy(&output->config, config, sizeof(struct wallpaper_config));
+    
+    /* Deep copy channel_paths array if present */
+    output->config.channel_paths = NULL;
+    output->config.channel_count = 0;
+    if (config->channel_paths && config->channel_count > 0) {
+        output->config.channel_paths = calloc(config->channel_count, sizeof(char *));
+        if (output->config.channel_paths) {
+            output->config.channel_count = config->channel_count;
+            for (size_t i = 0; i < config->channel_count; i++) {
+                if (config->channel_paths[i]) {
+                    output->config.channel_paths[i] = strdup(config->channel_paths[i]);
+                    if (!output->config.channel_paths[i]) {
+                        log_error("Failed to duplicate channel path %zu", i);
+                        /* Clean up already allocated paths */
+                        for (size_t j = 0; j < i; j++) {
+                            free(output->config.channel_paths[j]);
+                        }
+                        free(output->config.channel_paths);
+                        output->config.channel_paths = NULL;
+                        output->config.channel_count = 0;
+                        break;
+                    }
+                }
+            }
+        } else {
+            log_error("Failed to allocate memory for channel_paths array");
+        }
+    }
     
     /* Deep copy cycle_paths array if present */
     output->config.cycle_paths = NULL;

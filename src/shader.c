@@ -4,9 +4,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <GLES2/gl2.h>
+#include <ctype.h>
 #include "staticwall.h"
 #include "constants.h"
 #include "shader.h"
+#include "shadertoy_compat.h"
 
 /**
  * Shader Compilation Utilities
@@ -22,6 +24,59 @@ static const char *live_vertex_shader =
     "attribute vec2 position;\n"
     "void main() {\n"
     "    gl_Position = vec4(position, 0.0, 1.0);\n"
+    "}\n";
+
+/* Shadertoy compatibility wrapper prefix - static part */
+static const char *shadertoy_wrapper_prefix_static =
+    "#version 100\n"
+    "precision highp float;\n"
+    "\n"
+    "// Shadertoy compatibility uniforms\n"
+    "uniform float time;          // Maps to iTime\n"
+    "uniform vec2 resolution;     // Maps to iResolution.xy\n"
+    "\n"
+    "// Shadertoy uniforms - defined with default behavior\n"
+    "#define iTime time\n"
+    "#define iResolution vec3(resolution, resolution.x/resolution.y)\n"
+    "#define iTimeDelta 0.016667\n"
+    "#define iFrame 0\n"
+    "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
+    "#define iDate vec4(2024.0, 1.0, 1.0, 0.0)\n"
+    "#define iSampleRate 44100.0\n"
+    "#define iChannelTime vec4(0.0)\n"
+    "#define iChannelResolution vec4(0.0)\n"
+    "\n";
+
+/* Build dynamic iChannel declarations based on channel count */
+static char *build_ichannel_declarations(size_t channel_count) {
+    if (channel_count == 0) {
+        channel_count = 5; // Default to 5 channels
+    }
+    
+    size_t buffer_size = channel_count * 64 + 128; // ~64 bytes per channel + header
+    char *declarations = malloc(buffer_size);
+    if (!declarations) {
+        return NULL;
+    }
+    
+    strcpy(declarations, "// Texture samplers for image inputs\n");
+    
+    for (size_t i = 0; i < channel_count; i++) {
+        char line[64];
+        snprintf(line, sizeof(line), "uniform sampler2D iChannel%zu;\n", i);
+        strcat(declarations, line);
+    }
+    
+    strcat(declarations, "\n");
+    
+    return declarations;
+}
+
+/* Shadertoy compatibility wrapper suffix */
+static const char *shadertoy_wrapper_suffix =
+    "\n"
+    "void main() {\n"
+    "    mainImage(gl_FragColor, gl_FragCoord.xy);\n"
     "}\n";
 
 /**
@@ -298,13 +353,141 @@ char *shader_load_file(const char *path) {
 }
 
 /**
+ * Check if shader source uses Shadertoy format (mainImage function)
+ * 
+ * @param source Shader source code
+ * @return true if Shadertoy format detected, false otherwise
+ */
+static bool is_shadertoy_format(const char *source) {
+    if (!source) {
+        return false;
+    }
+    
+    /* Look for mainImage function signature */
+    /* Common patterns:
+     * - void mainImage(out vec4 fragColor, in vec2 fragCoord)
+     * - void mainImage( out vec4 fragColor, in vec2 fragCoord )
+     * We'll search for "mainImage" followed by "fragColor" and "fragCoord"
+     */
+    const char *mainImage = strstr(source, "mainImage");
+    if (!mainImage) {
+        return false;
+    }
+    
+    /* Check if fragColor and fragCoord appear after mainImage */
+    const char *fragColor = strstr(mainImage, "fragColor");
+    const char *fragCoord = strstr(mainImage, "fragCoord");
+    
+    if (fragColor && fragCoord) {
+        /* Make sure they appear reasonably close (within 100 chars of mainImage) */
+        if ((fragColor - mainImage < 100) && (fragCoord - mainImage < 100)) {
+            log_debug("Detected Shadertoy format shader (mainImage function found)");
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Strip #version directive from shader source
+ * 
+ * @param source Shader source code
+ * @return Pointer to source after #version line, or original source if not found
+ */
+static const char *strip_version_directive(const char *source) {
+    if (!source) {
+        return source;
+    }
+    
+    /* Skip whitespace at start */
+    while (*source && isspace(*source)) {
+        source++;
+    }
+    
+    /* Check if starts with #version */
+    if (strncmp(source, "#version", 8) == 0) {
+        /* Find end of line */
+        const char *newline = strchr(source, '\n');
+        if (newline) {
+            return newline + 1;
+        }
+    }
+    
+    return source;
+}
+
+/**
+ * Wrap Shadertoy format shader with compatibility layer
+ * 
+ * @param shadertoy_source Original Shadertoy shader source
+ * @param channel_count Number of iChannels to declare (0 = default 5)
+ * @return Wrapped shader source (must be freed by caller), or NULL on error
+ */
+static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_count) {
+    if (!shadertoy_source) {
+        return NULL;
+    }
+    
+    /* Strip #version directive from original source if present */
+    const char *source_body = strip_version_directive(shadertoy_source);
+    
+    /* Build dynamic iChannel declarations */
+    char *channel_decls = build_ichannel_declarations(channel_count);
+    if (!channel_decls) {
+        log_error("Failed to build iChannel declarations");
+        return NULL;
+    }
+    
+    /* Calculate total size needed */
+    size_t prefix_len = strlen(shadertoy_wrapper_prefix_static);
+    size_t channel_len = strlen(channel_decls);
+    size_t body_len = strlen(source_body);
+    size_t suffix_len = strlen(shadertoy_wrapper_suffix);
+    size_t total_len = prefix_len + channel_len + body_len + suffix_len + 1;
+    
+    /* Allocate buffer */
+    char *wrapped = malloc(total_len);
+    if (!wrapped) {
+        log_error("Failed to allocate memory for wrapped Shadertoy shader");
+        free(channel_decls);
+        return NULL;
+    }
+    
+    /* Concatenate parts */
+    strcpy(wrapped, shadertoy_wrapper_prefix_static);
+    strcat(wrapped, channel_decls);
+    strcat(wrapped, source_body);
+    strcat(wrapped, shadertoy_wrapper_suffix);
+    
+    free(channel_decls);
+    
+    /* Use shadertoy_compat to intelligently convert GLSL 3.0 texture calls
+     * to GLSL ES 1.0 texture2D calls for iChannel samplers */
+    char *converted = shadertoy_convert_texture_calls(wrapped);
+    free(wrapped);
+    
+    if (!converted) {
+        log_error("Failed to convert texture calls in Shadertoy shader");
+        return NULL;
+    }
+    
+    wrapped = converted;
+    
+    log_info("Wrapped Shadertoy format shader with compatibility layer (%zu channels)", 
+             channel_count == 0 ? 5 : channel_count);
+    return wrapped;
+}
+
+/**
  * Create live wallpaper shader program from file
  * 
  * @param shader_path Path to fragment shader file
  * @param program Pointer to store the created program ID
+ * @param channel_count Number of iChannels to declare (0 = default 5)
  * @return true on success, false on failure
  */
-bool shader_create_live_program(const char *shader_path, GLuint *program) {
+bool shader_create_live_program(const char *shader_path, GLuint *program, size_t channel_count) {
     if (!shader_path || !program) {
         log_error("Invalid parameters for live shader creation");
         return false;
@@ -316,17 +499,76 @@ bool shader_create_live_program(const char *shader_path, GLuint *program) {
         return false;
     }
 
+    log_info("Loaded shader source: %zu bytes", strlen(fragment_src));
+
+    /* Check if shader is in Shadertoy format and wrap if needed */
+    char *final_fragment_src = fragment_src;
+    bool is_shadertoy = is_shadertoy_format(fragment_src);
+    
+    if (is_shadertoy) {
+        log_info("Detected Shadertoy format shader");
+        
+        /* Analyze shader complexity and features */
+        shadertoy_analyze_shader(fragment_src);
+        
+        /* DISABLED: Preprocessing interferes with real iChannel textures
+         * The preprocessor was replacing texture() calls with noise fallbacks
+         * Now that we have real texture support, we don't need fallbacks */
+        /*
+        char *preprocessed = shadertoy_preprocess(fragment_src);
+        if (preprocessed) {
+            log_info("Shader preprocessed: %zu bytes -> %zu bytes", 
+                     strlen(fragment_src), strlen(preprocessed));
+            free(fragment_src);
+            fragment_src = preprocessed;
+        } else {
+            log_info("Shader preprocessing skipped or failed, using original");
+        }
+        */
+        log_info("Using original shader source (preprocessing disabled to support real iChannel textures)");
+        
+        /* Wrap with Shadertoy compatibility layer */
+        final_fragment_src = wrap_shadertoy_shader(fragment_src, channel_count);
+        log_debug("Final wrapped shader source:");
+        log_debug("========================");
+        log_debug("%s", final_fragment_src);
+        log_debug("========================");
+        if (!final_fragment_src) {
+            log_error("Failed to wrap Shadertoy shader");
+            free(fragment_src);
+            return false;
+        }
+        
+        log_info("Wrapped shader: %zu bytes final", strlen(final_fragment_src));
+        
+        /* Save first 500 chars for debugging */
+        char preview[501];
+        size_t preview_len = strlen(final_fragment_src);
+        if (preview_len > 500) preview_len = 500;
+        memcpy(preview, final_fragment_src, preview_len);
+        preview[preview_len] = '\0';
+        log_debug("Shader preview:\n%s\n...", preview);
+    }
+
     /* Create program with standard vertex shader and loaded fragment shader */
+    log_info("Compiling shader program...");
     bool success = shader_create_program_from_sources(
         live_vertex_shader,
-        fragment_src,
+        final_fragment_src,
         program
     );
 
+    /* Free allocated memory */
+    if (is_shadertoy) {
+        free(final_fragment_src);
+    }
     free(fragment_src);
 
     if (success) {
-        log_info("Created live wallpaper shader program from: %s", shader_path);
+        log_info("Successfully created live wallpaper shader program from: %s%s", 
+                 shader_path, is_shadertoy ? " (Shadertoy format)" : "");
+    } else {
+        log_error("Failed to create shader program from: %s", shader_path);
     }
 
     return success;

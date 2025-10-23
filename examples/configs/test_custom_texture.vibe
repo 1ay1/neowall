@@ -1,0 +1,7 @@
+# Test Custom Texture Loading
+
+[outputs.eDP-1]
+shader = "examples/shaders/heartfelt.glsl"
+# Try loading a custom image
+channels = ["~/Pictures/wallpaper.png"]
+shader_speed = 1.0

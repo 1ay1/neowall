@@ -1,0 +1,12 @@
+# Simple iChannel Configuration Example
+
+outputs {
+  eDP-1 {
+    shader examples/shaders/heartfelt.glsl
+    # Use the default rgba_noise texture for iChannel0
+    channels [
+      rgba_noise
+    ]
+    shader_speed 1.0
+  }
+}

@@ -1,0 +1,47 @@
+# Test configuration for dynamic iChannels
+# This config demonstrates the dynamic iChannel system
+
+# Test 1: Only 3 channels (not the default 5)
+default {
+  shader test_dynamic_ichannels.glsl
+  channels ["rgba_noise", "gray_noise", "blue_noise"]
+  mode fill
+}
+
+# Test 2: Using placeholder "_" to skip channels
+# output {
+#   eDP-1 {
+#     shader test_dynamic_ichannels.glsl
+#     channels ["_", "wood", "abstract"]
+#     # iChannel0 is skipped, iChannel1=wood, iChannel2=abstract
+#   }
+# }
+
+# Test 3: Mix of named textures and image files
+# output {
+#   HDMI-A-1 {
+#     shader test_dynamic_ichannels.glsl
+#     channels [
+#       "rgba_noise",
+#       "~/Pictures/test_texture.png",
+#       "blue_noise"
+#     ]
+#   }
+# }
+
+# Test 4: More than 5 channels
+# output {
+#   DP-1 {
+#     shader test_dynamic_ichannels.glsl
+#     channels [
+#       "rgba_noise",
+#       "gray_noise",
+#       "blue_noise",
+#       "wood",
+#       "abstract",
+#       "rgba_noise",
+#       "gray_noise"
+#     ]
+#     # 7 channels total
+#   }
+# }

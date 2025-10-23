@@ -462,29 +462,125 @@ cp examples/shaders/* ~/.local/share/staticwall/shaders/
 
 ### Shadertoy Compatibility
 
-Staticwall shaders are compatible with [Shadertoy](https://www.shadertoy.com/) with minor changes:
+Staticwall provides **full Shadertoy format support** with automatic conversion! Simply paste Shadertoy shaders and they work:
 
-**Shadertoy:**
+**Shadertoy format (works directly):**
 ```glsl
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
+    
+    // Access texture inputs
+    vec4 noise = texture(iChannel0, uv);
+    
     fragColor = vec4(uv, 0.5, 1.0);
 }
 ```
 
-**Staticwall:**
+**Automatic uniforms available:**
+- `iTime` - Elapsed time
+- `iResolution` - Screen resolution (vec3)
+- `iMouse` - Mouse coordinates (vec4)
+- `iFrame` - Frame counter
+- `iChannel0` to `iChannel4` - Texture inputs (see below)
+
+### iChannel Texture System
+
+Staticwall provides **5 default procedural textures** for shader inputs, matching Shadertoy's iChannel system:
+
+- **iChannel0** - RGBA Noise (most common)
+- **iChannel1** - Grayscale Noise
+- **iChannel2** - Blue Noise (for dithering)
+- **iChannel3** - Wood Grain texture
+- **iChannel4** - Abstract colorful pattern
+
+These textures are automatically available in all shaders:
+
 ```glsl
-#version 100
-precision mediump float;
-
-uniform float time;       // Instead of iTime
-uniform vec2 resolution;  // Instead of iResolution.xy
-
-void main() {
-    vec2 uv = gl_FragCoord.xy / resolution.xy;
-    gl_FragColor = vec4(uv, 0.5, 1.0);
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 uv = fragCoord / iResolution.xy;
+    
+    // Use default noise texture
+    vec4 noise = texture(iChannel0, uv * 10.0);
+    
+    // Combine multiple channels
+    float gray = texture(iChannel1, uv).r;
+    float dither = texture(iChannel2, fragCoord.xy / 256.0).r;
+    
+    fragColor = vec4(noise.rgb * gray, 1.0);
 }
 ```
+
+**See [docs/ICHANNELS.md](docs/ICHANNELS.md) for complete texture documentation.**
+
+#### Configuring iChannel Textures
+
+You can override the default textures by specifying a `channels` array in your configuration:
+
+```vibe
+outputs {
+  eDP-1 {
+    shader examples/shaders/heartfelt.glsl
+    # Array index maps to iChannelN (0=iChannel0, 1=iChannel1, etc.)
+    channels [
+      rgba_noise
+      gray_noise
+      blue_noise
+    ]
+  }
+}
+```
+
+**Available default textures:**
+- `rgba_noise` - Multi-octave RGBA noise (default for iChannel0)
+- `gray_noise` - Grayscale fractal noise (default for iChannel1)
+- `blue_noise` - Blue noise pattern (default for iChannel2)
+- `wood` - Procedural wood grain (default for iChannel3)
+- `abstract` - Colorful Voronoi pattern (default for iChannel4)
+
+**Using custom image files:**
+
+```vibe
+outputs {
+  HDMI-A-1 {
+    shader examples/shaders/my_shader.glsl
+    channels [
+      /path/to/texture.png
+      gray_noise
+      _
+    ]
+    # "_" means skip/empty channel (no texture bound)
+  }
+}
+```
+
+**Examples:**
+
+```vibe
+# Mix of defaults and custom images
+channels [
+  rgba_noise
+  ~/Pictures/bg.jpg
+  wood
+]
+
+# Skip channels with underscore
+channels [
+  _
+  gray_noise
+  _
+  wood
+  _
+]
+
+# Minimal - only set iChannel0, rest use defaults
+channels [
+  blue_noise
+]
+```
+
+See [examples/configs/shadertoy_ichannels.vibe](examples/configs/shadertoy_ichannels.vibe) for more examples.
+
+
 
 ### Performance
 

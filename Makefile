@@ -32,10 +32,13 @@ LDFLAGS += $(shell pkg-config --libs $(OPTIONAL_DEPS) 2>/dev/null || echo "-lpng
 # Source files
 SOURCES = $(wildcard $(SRC_DIR)/*.c)
 TRANSITION_SOURCES = $(wildcard $(SRC_DIR)/transitions/*.c)
+TEXTURE_SOURCES = $(wildcard $(SRC_DIR)/textures/*.c)
 PROTO_SOURCES = $(wildcard $(PROTO_DIR)/*.c)
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 TRANSITION_OBJECTS = $(TRANSITION_SOURCES:$(SRC_DIR)/transitions/%.c=$(OBJ_DIR)/transitions_%.o)
+TEXTURE_OBJECTS = $(TEXTURE_SOURCES:$(SRC_DIR)/textures/%.c=$(OBJ_DIR)/textures_%.o)
 PROTO_OBJECTS = $(PROTO_SOURCES:$(PROTO_DIR)/%.c=$(OBJ_DIR)/proto_%.o)
+ALL_OBJECTS = $(OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJECTS) $(PROTO_OBJECTS)
 
 # Protocol files
 WLR_LAYER_SHELL_XML = /usr/share/wayland-protocols/wlr-unstable/wlr-layer-shell-unstable-v1.xml
@@ -97,9 +100,13 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | directories protocols
 $(OBJ_DIR)/transitions_%.o: $(SRC_DIR)/transitions/%.c | directories protocols
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Compile texture files
+$(OBJ_DIR)/textures_%.o: $(SRC_DIR)/textures/%.c | directories protocols
+	$(CC) $(CFLAGS) -c $< -o $@
+
 # Link the binary
-$(TARGET): $(OBJECTS) $(TRANSITION_OBJECTS) $(PROTO_OBJECTS)
-	$(CC) $(OBJECTS) $(TRANSITION_OBJECTS) $(PROTO_OBJECTS) -o $@ $(LDFLAGS)
+$(TARGET): $(OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJECTS) $(PROTO_OBJECTS)
+	$(CC) $(OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJECTS) $(PROTO_OBJECTS) -o $@ $(LDFLAGS)
 	@echo "Build complete: $(TARGET)"
 
 # Install
