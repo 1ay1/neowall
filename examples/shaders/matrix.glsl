@@ -20,7 +20,7 @@ void main() {
     float cellRandom = random(gridCell);
 
     // Falling effect - use time and random offset
-    float fall = fract(time * (0.5 + cellRandom * 0.5) + cellRandom);
+    float fall = fract(time * (1.5 + cellRandom * 1.0) + cellRandom);
 
     // Brightness based on fall position
     float brightness = 0.0;

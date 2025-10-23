@@ -12,7 +12,7 @@ void main() {
 
     // Create waves based on distance from center
     float dist = length(center);
-    float wave = sin(dist * 20.0 - time * 3.0) * 0.5 + 0.5;
+    float wave = sin(dist * 20.0 - time * 5.0) * 0.5 + 0.5;
 
     // Add color gradient based on position and time
     vec3 color1 = vec3(0.2, 0.4, 0.8); // Blue
@@ -22,7 +22,7 @@ void main() {
     // Mix colors based on wave and angle
     float angle = atan(center.y, center.x);
     vec3 color = mix(color1, color2, wave);
-    color = mix(color, color3, sin(angle * 3.0 + time) * 0.5 + 0.5);
+    color = mix(color, color3, sin(angle * 3.0 + time * 2.0) * 0.5 + 0.5);
 
     // Add brightness variation
     color *= wave * 0.5 + 0.5;

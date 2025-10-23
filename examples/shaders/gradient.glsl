@@ -9,19 +9,19 @@ void main() {
 
     // Animated gradient colors
     vec3 color1 = vec3(
-        sin(time * 0.3) * 0.5 + 0.5,
-        cos(time * 0.2) * 0.5 + 0.5,
-        sin(time * 0.4) * 0.5 + 0.5
+        sin(time * 1.2) * 0.5 + 0.5,
+        cos(time * 0.8) * 0.5 + 0.5,
+        sin(time * 1.6) * 0.5 + 0.5
     );
 
     vec3 color2 = vec3(
-        cos(time * 0.25) * 0.5 + 0.5,
-        sin(time * 0.35) * 0.5 + 0.5,
-        cos(time * 0.3) * 0.5 + 0.5
+        cos(time * 1.0) * 0.5 + 0.5,
+        sin(time * 1.4) * 0.5 + 0.5,
+        cos(time * 1.2) * 0.5 + 0.5
     );
 
     // Create diagonal gradient that shifts over time
-    float gradientAngle = time * 0.1;
+    float gradientAngle = time * 0.5;
     float gradient = uv.x * cos(gradientAngle) + uv.y * sin(gradientAngle);
 
     // Mix colors
