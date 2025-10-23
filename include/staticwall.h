@@ -113,6 +113,7 @@ struct output_state {
     GLuint glitch_program;              /* Shader program for glitch transition */
     GLuint pixelate_program;            /* Shader program for pixelate transition */
     GLuint live_shader_program;         /* Shader program for live wallpaper */
+    GLuint prev_shader_program;         /* Previous shader program for transitions */
     GLuint vbo;
 
     uint64_t last_frame_time;
@@ -171,6 +172,7 @@ bool config_parse_wallpaper(struct wallpaper_config *config, const char *output_
 void config_free_wallpaper(struct wallpaper_config *config);
 const char *config_get_default_path(void);
 char **load_images_from_directory(const char *dir_path, size_t *count);
+char **load_shaders_from_directory(const char *dir_path, size_t *count);
 
 /* Image loading */
 struct image_data *image_load(const char *path, int32_t display_width, int32_t display_height, enum wallpaper_mode mode);
@@ -242,6 +244,7 @@ const char *get_state_file_path(void);
 bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
                            const char *mode, int cycle_index, int cycle_total);
 bool read_wallpaper_state(void);
+int restore_cycle_index_from_state(const char *output_name);
 
 /* Signal handling */
 void signal_handler_init(struct staticwall_state *state);

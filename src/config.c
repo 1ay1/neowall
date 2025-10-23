@@ -122,6 +122,114 @@ static bool is_image_file(const char *filename) {
 }
 
 /* Load all image files from a directory */
+/* Helper to check if a file is a shader */
+static bool is_shader_file(const char *name) {
+    if (!name) {
+        return false;
+    }
+
+    size_t len = strlen(name);
+    if (len < 5) {
+        return false;
+    }
+
+    /* Check for .glsl extension */
+    return (strcasecmp(name + len - 5, ".glsl") == 0);
+}
+
+/* Load shader files from a directory */
+char **load_shaders_from_directory(const char *dir_path, size_t *count) {
+    *count = 0;
+
+    /* Expand path if needed */
+    char expanded_path[MAX_PATH_LENGTH];
+    if (dir_path[0] == '~') {
+        const char *home = getenv("HOME");
+        if (!home) {
+            log_error("Cannot expand ~: HOME not set");
+            return NULL;
+        }
+        snprintf(expanded_path, sizeof(expanded_path), "%s%s", home, dir_path + 1);
+    } else {
+        strncpy(expanded_path, dir_path, sizeof(expanded_path) - 1);
+        expanded_path[sizeof(expanded_path) - 1] = '\0';
+    }
+    
+    /* Remove trailing slash to prevent double slashes in paths */
+    size_t len = strlen(expanded_path);
+    if (len > 1 && expanded_path[len - 1] == '/') {
+        expanded_path[len - 1] = '\0';
+    }
+
+    /* Check if it's a directory */
+    struct stat st;
+    if (stat(expanded_path, &st) != 0) {
+        log_error("Cannot access path %s: %s", expanded_path, strerror(errno));
+        return NULL;
+    }
+
+    if (!S_ISDIR(st.st_mode)) {
+        /* Not a directory, return NULL to use as single file */
+        return NULL;
+    }
+
+    /* Open directory */
+    DIR *dir = opendir(expanded_path);
+    if (!dir) {
+        log_error("Cannot open directory %s: %s", expanded_path, strerror(errno));
+        return NULL;
+    }
+
+    /* First pass: count shader files */
+    size_t shader_count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_type == DT_REG || entry->d_type == DT_LNK) {
+            if (is_shader_file(entry->d_name)) {
+                shader_count++;
+            }
+        }
+    }
+
+    if (shader_count == 0) {
+        log_error("No shader files found in directory %s", expanded_path);
+        closedir(dir);
+        return NULL;
+    }
+
+    /* Allocate array for paths */
+    char **paths = calloc(shader_count, sizeof(char *));
+    if (!paths) {
+        log_error("Failed to allocate memory for shader paths");
+        closedir(dir);
+        return NULL;
+    }
+
+    /* Second pass: collect shader paths */
+    rewinddir(dir);
+    size_t idx = 0;
+    while ((entry = readdir(dir)) != NULL && idx < shader_count) {
+        if (entry->d_type == DT_REG || entry->d_type == DT_LNK) {
+            if (is_shader_file(entry->d_name)) {
+                /* Build full path */
+                size_t path_len = strlen(expanded_path) + strlen(entry->d_name) + 2;
+                paths[idx] = malloc(path_len);
+                if (paths[idx]) {
+                    snprintf(paths[idx], path_len, "%s/%s", expanded_path, entry->d_name);
+                    idx++;
+                }
+            }
+        }
+    }
+
+    closedir(dir);
+
+    *count = idx;
+    log_info("Loaded %zu shaders from directory %s", idx, expanded_path);
+
+    return paths;
+}
+
 char **load_images_from_directory(const char *dir_path, size_t *count) {
     *count = 0;
 
@@ -237,8 +345,25 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     VibeValue *shader = vibe_object_get(obj->as_object, "shader");
     if (shader && shader->type == VIBE_TYPE_STRING) {
         config->type = WALLPAPER_SHADER;
-        strncpy(config->shader_path, shader->as_string, sizeof(config->shader_path) - 1);
-        config->shader_path[sizeof(config->shader_path) - 1] = '\0';
+        
+        /* Check if shader path is a directory */
+        size_t shader_count = 0;
+        char **shader_paths = load_shaders_from_directory(shader->as_string, &shader_count);
+        
+        if (shader_paths && shader_count > 0) {
+            /* Directory with shaders - enable cycling */
+            config->cycle = true;
+            config->cycle_count = shader_count;
+            config->cycle_paths = shader_paths;
+            /* Use first shader as initial shader_path */
+            strncpy(config->shader_path, shader_paths[0], sizeof(config->shader_path) - 1);
+            config->shader_path[sizeof(config->shader_path) - 1] = '\0';
+            log_info("Loaded %zu shaders from directory for cycling", shader_count);
+        } else {
+            /* Single shader file */
+            strncpy(config->shader_path, shader->as_string, sizeof(config->shader_path) - 1);
+            config->shader_path[sizeof(config->shader_path) - 1] = '\0';
+        }
     }
 
     /* Parse path (for image wallpapers) */

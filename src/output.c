@@ -50,6 +50,7 @@ struct output_state *output_create(struct staticwall_state *state,
     out->config.cycle_paths = NULL;
     out->config.cycle_count = 0;
     out->config.current_cycle_index = 0;
+    out->prev_shader_program = 0;
 
     /* Add to linked list */
     out->next = state->outputs;
@@ -71,6 +72,16 @@ void output_destroy(struct output_state *output) {
 
     /* Clean up rendering resources */
     render_cleanup_output(output);
+
+    /* Clean up shader programs */
+    if (output->live_shader_program != 0) {
+        shader_destroy_program(output->live_shader_program);
+        output->live_shader_program = 0;
+    }
+    if (output->prev_shader_program != 0) {
+        shader_destroy_program(output->prev_shader_program);
+        output->prev_shader_program = 0;
+    }
 
     /* Free wallpaper config */
     config_free_wallpaper(&output->config);
@@ -237,16 +248,34 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         }
     }
 
-    /* Destroy old shader program if exists */
-    if (output->live_shader_program != 0) {
-        shader_destroy_program(output->live_shader_program);
-        output->live_shader_program = 0;
-    }
-
-    /* Load and compile shader from file */
-    if (!shader_create_live_program(shader_path, &output->live_shader_program)) {
+    /* Load and compile new shader from file */
+    GLuint new_shader_program = 0;
+    if (!shader_create_live_program(shader_path, &new_shader_program)) {
         log_error("Failed to create shader program from: %s", shader_path);
         return;
+    }
+
+    /* Handle transition if we have a previous shader and transitions are enabled */
+    if (output->config.transition != TRANSITION_NONE && output->live_shader_program != 0) {
+        /* Save old shader as previous for transition */
+        if (output->prev_shader_program != 0) {
+            shader_destroy_program(output->prev_shader_program);
+        }
+        output->prev_shader_program = output->live_shader_program;
+        output->live_shader_program = new_shader_program;
+
+        /* Start transition */
+        output->transition_start_time = get_time_ms();
+        output->transition_progress = 0.0f;
+
+        log_debug("Shader transition started: %s (type=%d, duration=%ums)",
+                  shader_path, output->config.transition, output->config.transition_duration);
+    } else {
+        /* No transition, just replace */
+        if (output->live_shader_program != 0) {
+            shader_destroy_program(output->live_shader_program);
+        }
+        output->live_shader_program = new_shader_program;
     }
 
     /* Free any existing image data (shaders don't use images) */
@@ -276,9 +305,16 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     uint64_t now = get_time_ms();
     output->last_frame_time = now;
     output->shader_start_time = now;
+    output->last_cycle_time = now;
 
     /* Mark for redraw */
     output->needs_redraw = true;
+
+    /* Write current state to file */
+    const char *mode_str = wallpaper_mode_to_string(output->config.mode);
+    write_wallpaper_state(output->model, shader_path, mode_str, 
+                         output->config.current_cycle_index,
+                         output->config.cycle_count);
 
     log_info("Live shader wallpaper loaded successfully");
 }
@@ -293,14 +329,16 @@ void output_cycle_wallpaper(struct output_state *output) {
         return;
     }
 
-    /* Move to next wallpaper */
+    /* Move to next wallpaper/shader */
     size_t old_index = output->config.current_cycle_index;
     output->config.current_cycle_index =
         (output->config.current_cycle_index + 1) % output->config.cycle_count;
 
     const char *next_path = output->config.cycle_paths[output->config.current_cycle_index];
 
-    log_info("Cycling wallpaper for output %s: index %zu->%zu (%zu/%zu): %s",
+    const char *type_str = (output->config.type == WALLPAPER_SHADER) ? "shader" : "wallpaper";
+    log_info("Cycling %s for output %s: index %zu->%zu (%zu/%zu): %s",
+             type_str,
              output->model[0] ? output->model : "unknown",
              old_index,
              output->config.current_cycle_index,
@@ -308,7 +346,12 @@ void output_cycle_wallpaper(struct output_state *output) {
              output->config.cycle_count,
              next_path);
 
-    output_set_wallpaper(output, next_path);
+    /* Apply the next item based on type */
+    if (output->config.type == WALLPAPER_SHADER) {
+        output_set_shader(output, next_path);
+    } else {
+        output_set_wallpaper(output, next_path);
+    }
 }
 
 /* Check if output needs to cycle wallpaper based on duration */
@@ -325,7 +368,12 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
         return false;
     }
 
-    if (!output->current_image) {
+    /* For images, check if current_image exists. For shaders, check if shader program exists */
+    if (output->config.type == WALLPAPER_IMAGE && !output->current_image) {
+        return false;
+    }
+    
+    if (output->config.type == WALLPAPER_SHADER && output->live_shader_program == 0) {
         return false;
     }
 
@@ -450,18 +498,36 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         }
     }
 
-    /* Set initial wallpaper based on type */
+    /* Restore cycle index from previous state if cycling */
+    if (output->config.cycle && output->config.cycle_count > 0) {
+        int restored_index = restore_cycle_index_from_state(output->model[0] ? output->model : "unknown");
+        if (restored_index >= 0 && restored_index < (int)output->config.cycle_count) {
+            output->config.current_cycle_index = (size_t)restored_index;
+            log_info("Restored cycle index %d for output %s", restored_index, 
+                     output->model[0] ? output->model : "unknown");
+        } else {
+            output->config.current_cycle_index = 0;
+        }
+    }
+
+    /* Set initial wallpaper/shader based on type */
     if (config->type == WALLPAPER_SHADER) {
         /* Load shader wallpaper */
-        if (config->shader_path[0] != '\0') {
-            output_set_shader(output, config->shader_path);
+        const char *initial_shader = config->shader_path;
+        if (output->config.cycle && output->config.cycle_count > 0 && output->config.cycle_paths) {
+            /* Use the shader at restored index */
+            initial_shader = output->config.cycle_paths[output->config.current_cycle_index];
+        }
+        
+        if (initial_shader[0] != '\0') {
+            output_set_shader(output, initial_shader);
         }
     } else {
         /* Load image wallpaper */
         const char *initial_path = config->path;
         if (output->config.cycle && output->config.cycle_count > 0 && output->config.cycle_paths) {
-            initial_path = output->config.cycle_paths[0];
-            output->config.current_cycle_index = 0;
+            /* Use the image at restored index */
+            initial_path = output->config.cycle_paths[output->config.current_cycle_index];
         }
 
         if (initial_path[0] != '\0') {

@@ -255,6 +255,47 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
     return true;
 }
 
+/* Restore cycle index from state file for the given output */
+int restore_cycle_index_from_state(const char *output_name) {
+    const char *state_path = get_state_file_path();
+    FILE *fp = fopen(state_path, "r");
+    
+    if (!fp) {
+        log_debug("No state file found, starting from index 0");
+        return 0;
+    }
+    
+    char line[MAX_PATH_LENGTH];
+    char saved_output[256] = "";
+    int cycle_index = 0;
+    
+    while (fgets(line, sizeof(line), fp)) {
+        /* Remove newline */
+        line[strcspn(line, "\n")] = 0;
+        
+        if (strncmp(line, "output=", 7) == 0) {
+            size_t len = strlen(line + 7);
+            if (len >= sizeof(saved_output)) {
+                len = sizeof(saved_output) - 1;
+            }
+            memcpy(saved_output, line + 7, len);
+            saved_output[len] = '\0';
+        } else if (strncmp(line, "cycle_index=", 12) == 0) {
+            cycle_index = atoi(line + 12);
+        }
+    }
+    
+    fclose(fp);
+    
+    /* Only restore index if output matches */
+    if (output_name && saved_output[0] != '\0' && strcmp(output_name, saved_output) == 0) {
+        log_info("Restored cycle index %d for output %s from state", cycle_index, output_name);
+        return cycle_index;
+    }
+    
+    return 0;
+}
+
 /* Read and display current wallpaper state */
 bool read_wallpaper_state(void) {
     const char *state_path = get_state_file_path();

@@ -273,6 +273,96 @@ static void calculate_vertex_coords(struct output_state *output, float vertices[
 }
 
 /* Render a frame with live shader wallpaper */
+/* Render shader transition by blending between two shaders */
+bool render_frame_shader_transition(struct output_state *output, float progress) {
+    if (!output || output->live_shader_program == 0 || output->prev_shader_program == 0) {
+        return render_frame_shader(output);
+    }
+
+    glViewport(0, 0, output->width, output->height);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    float current_time = (float)(get_time_ms() - output->shader_start_time) / 1000.0f;
+
+    /* Render previous shader to a temporary texture would be complex,
+     * so we'll just do a simple cross-fade by rendering both and blending */
+    
+    /* First render the old shader with reduced alpha */
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    /* Render old shader */
+    glUseProgram(output->prev_shader_program);
+    GLint time_loc = glGetUniformLocation(output->prev_shader_program, "time");
+    GLint res_loc = glGetUniformLocation(output->prev_shader_program, "resolution");
+    
+    if (time_loc != -1) {
+        glUniform1f(time_loc, current_time);
+    }
+    if (res_loc != -1) {
+        glUniform2f(res_loc, (float)output->width, (float)output->height);
+    }
+
+    /* Draw with fading out alpha */
+    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
+    GLint pos_attr = glGetAttribLocation(output->prev_shader_program, "position");
+    if (pos_attr != -1) {
+        glEnableVertexAttribArray(pos_attr);
+        glVertexAttribPointer(pos_attr, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        
+        /* Modulate alpha - fade out the old shader */
+        glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
+        glBlendColor(1.0f, 1.0f, 1.0f, 1.0f - progress);
+        
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glDisableVertexAttribArray(pos_attr);
+    }
+
+    /* Now render new shader on top with fading in alpha */
+    glUseProgram(output->live_shader_program);
+    time_loc = glGetUniformLocation(output->live_shader_program, "time");
+    res_loc = glGetUniformLocation(output->live_shader_program, "resolution");
+    
+    if (time_loc != -1) {
+        glUniform1f(time_loc, current_time);
+    }
+    if (res_loc != -1) {
+        glUniform2f(res_loc, (float)output->width, (float)output->height);
+    }
+
+    pos_attr = glGetAttribLocation(output->live_shader_program, "position");
+    if (pos_attr != -1) {
+        glEnableVertexAttribArray(pos_attr);
+        glVertexAttribPointer(pos_attr, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        
+        /* Fade in the new shader */
+        glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
+        glBlendColor(1.0f, 1.0f, 1.0f, progress);
+        
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glDisableVertexAttribArray(pos_attr);
+    }
+
+    glDisable(GL_BLEND);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    /* Update transition progress */
+    uint64_t current_time_ms = get_time_ms();
+    uint64_t elapsed = current_time_ms - output->transition_start_time;
+    output->transition_progress = (float)elapsed / (float)output->config.transition_duration;
+
+    /* Clean up old shader when transition is complete */
+    if (output->transition_progress >= 1.0f) {
+        if (output->prev_shader_program != 0) {
+            shader_destroy_program(output->prev_shader_program);
+            output->prev_shader_program = 0;
+        }
+        output->transition_progress = 1.0f;
+    }
+
+    return true;
+}
+
 bool render_frame_shader(struct output_state *output) {
     if (!output || output->live_shader_program == 0) {
         log_error("Invalid output or shader program for render_frame_shader");
@@ -359,6 +449,13 @@ bool render_frame(struct output_state *output) {
 
     /* Check if this is a shader wallpaper */
     if (output->config.type == WALLPAPER_SHADER) {
+        /* Check if we're in a shader transition */
+        if (output->config.transition != TRANSITION_NONE &&
+            output->prev_shader_program != 0 &&
+            output->transition_progress < 1.0f) {
+            /* Render shader transition */
+            return render_frame_shader_transition(output, output->transition_progress);
+        }
         return render_frame_shader(output);
     }
 
