@@ -279,6 +279,12 @@ static bool render_shader_to_texture(struct output_state *output, GLuint shader_
         return false;
     }
 
+    /* Validate shader program is still valid */
+    if (!glIsProgram(shader_program)) {
+        log_error("Shader program %u is not valid", shader_program);
+        return false;
+    }
+
     /* Create texture if needed */
     if (*texture == 0) {
         glGenTextures(1, texture);
@@ -328,8 +334,9 @@ static bool render_shader_to_texture(struct output_state *output, GLuint shader_
     }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    /* Unbind framebuffer */
+    /* Unbind framebuffer and restore viewport */
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, output->width, output->height);
 
     return true;
 }
@@ -340,20 +347,59 @@ bool render_frame_shader_transition(struct output_state *output, float progress)
         return render_frame_shader(output);
     }
 
+    /* Make EGL context current before framebuffer operations */
+    if (output->state && output->egl_surface != EGL_NO_SURFACE) {
+        if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                           output->egl_surface, output->state->egl_context)) {
+            log_error("Failed to make EGL context current for shader transition: 0x%x", eglGetError());
+            return render_frame_shader(output);
+        }
+    }
+
+    /* Validate both shader programs are still valid */
+    if (!glIsProgram(output->live_shader_program)) {
+        log_error("Current shader program is invalid during transition");
+        if (output->prev_shader_program != 0) {
+            shader_destroy_program(output->prev_shader_program);
+            output->prev_shader_program = 0;
+        }
+        return render_frame_shader(output);
+    }
+
+    if (!glIsProgram(output->prev_shader_program)) {
+        log_error("Previous shader program is invalid during transition");
+        if (output->prev_shader_program != 0) {
+            shader_destroy_program(output->prev_shader_program);
+            output->prev_shader_program = 0;
+        }
+        return render_frame_shader(output);
+    }
+
     /* Create framebuffer if needed */
     if (output->shader_fbo == 0) {
         glGenFramebuffers(1, &output->shader_fbo);
+        if (output->shader_fbo == 0) {
+            log_error("Failed to create framebuffer for shader transition");
+            return render_frame_shader(output);
+        }
     }
 
     /* Render previous shader to texture (this becomes "next_texture" for transition) */
     if (!render_shader_to_texture(output, output->prev_shader_program, 
                                    &output->prev_shader_render_texture, output->shader_fbo)) {
+        log_error("Failed to render previous shader to texture");
+        /* Clean up and fall back to regular rendering */
+        if (output->prev_shader_program != 0) {
+            shader_destroy_program(output->prev_shader_program);
+            output->prev_shader_program = 0;
+        }
         return render_frame_shader(output);
     }
 
     /* Render current shader to texture (this becomes "texture" for transition) */
     if (!render_shader_to_texture(output, output->live_shader_program,
                                    &output->shader_render_texture, output->shader_fbo)) {
+        log_error("Failed to render current shader to texture");
         return render_frame_shader(output);
     }
 
@@ -365,12 +411,23 @@ bool render_frame_shader_transition(struct output_state *output, float progress)
     output->texture = output->shader_render_texture;
     output->next_texture = output->prev_shader_render_texture;
 
+    /* Validate textures before calling transition renderer */
+    if (!glIsTexture(output->texture) || !glIsTexture(output->next_texture)) {
+        log_error("Invalid shader textures for transition");
+        output->texture = saved_texture;
+        output->next_texture = saved_next_texture;
+        return render_frame_shader(output);
+    }
+
     /* Call the existing transition renderer */
     bool result = transition_render(output, output->config.transition, progress);
 
     /* Restore original textures */
     output->texture = saved_texture;
     output->next_texture = saved_next_texture;
+
+    /* Ensure viewport is correct after framebuffer operations */
+    glViewport(0, 0, output->width, output->height);
 
     /* Update transition progress */
     uint64_t current_time_ms = get_time_ms();
