@@ -307,6 +307,10 @@ bool render_frame_shader(struct output_state *output) {
 
     /* Get position attribute location */
     GLint pos_attrib = glGetAttribLocation(output->live_shader_program, "position");
+    if (pos_attrib < 0) {
+        log_error("Failed to get 'position' attribute location in shader");
+        return false;
+    }
 
     /* Simple fullscreen quad vertices (position only, no texcoords) */
     static const float shader_quad[] = {
