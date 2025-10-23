@@ -73,10 +73,10 @@ void main() {
     gridUV.x += time * 0.2;
     gridUV.y -= time * 0.15;
 
-    // Thin grid lines - mostly black space
-    vec2 grid = abs(fract(gridUV - 0.5) - 0.5) / fwidth(gridUV);
+    // Thin grid lines - mostly black space (manual grid without fwidth)
+    vec2 grid = abs(fract(gridUV - 0.5) - 0.5);
     float gridLine = min(grid.x, grid.y);
-    float verticalLines = smoothstep(0.0, 1.0, gridLine);
+    float verticalLines = smoothstep(0.0, 0.05, gridLine);
 
     // Very sparse grid pattern
     float gridPattern = (1.0 - verticalLines) * 0.15;
