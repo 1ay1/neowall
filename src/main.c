@@ -13,11 +13,61 @@
 
 static struct staticwall_state *global_state = NULL;
 
+/* Forward declarations for signal handlers */
+static void handle_shutdown(int signum);
+static void handle_reload(int signum);
+static void handle_next_wallpaper(int signum);
+static void handle_pause(int signum);
+static void handle_resume(int signum);
+static void handle_shader_speed_adjust(int signum);
+
+/* Command descriptor structure */
+typedef struct {
+    const char *name;           /* Command name (e.g., "next") */
+    int signal;                 /* Signal to send */
+    const char *description;    /* Help text */
+    const char *action_message; /* Message shown when executed */
+    void (*handler)(int);       /* Signal handler function */
+    bool needs_state_check;     /* Whether to check wallpaper state instead of signaling */
+} DaemonCommand;
+
+/* Special signal numbers for shader speed control (runtime-initialized) */
+static int SHADER_SPEED_UP_SIGNAL = 0;
+static int SHADER_SPEED_DOWN_SIGNAL = 0;
+
+/* Centralized command registry - Single source of truth */
+static DaemonCommand daemon_commands[] = {
+    {"next",              SIGUSR1,      "Skip to next wallpaper",                  "Skipping to next wallpaper...",      handle_next_wallpaper,       false},
+    {"pause",             SIGUSR2,      "Pause wallpaper cycling",                 "Pausing wallpaper cycling...",       handle_pause,                false},
+    {"resume",            SIGCONT,      "Resume wallpaper cycling",                "Resuming wallpaper cycling...",      handle_resume,               false},
+    {"reload",            SIGHUP,       "Reload configuration",                    "Reloading configuration...",         handle_reload,               false},
+    {"shader_speed_up",   0,            "Increase shader animation speed by 1.0x", "Increasing shader speed...",         handle_shader_speed_adjust,  false},  /* Initialized at runtime */
+    {"shader_speed_down", 0,            "Decrease shader animation speed by 1.0x", "Decreasing shader speed...",         handle_shader_speed_adjust,  false},  /* Initialized at runtime */
+    {"current",           0,            "Show current wallpaper",                  NULL,                                 NULL,                        true},
+    {"status",            0,            "Show current wallpaper",                  NULL,                                 NULL,                        true},
+    {NULL, 0, NULL, NULL, NULL, false}  /* Sentinel */
+};
+
+/* Initialize runtime signal values */
+static void init_command_signals(void) {
+    SHADER_SPEED_UP_SIGNAL = SIGRTMIN;
+    SHADER_SPEED_DOWN_SIGNAL = SIGRTMIN + 1;
+
+    /* Update command table with runtime values */
+    for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
+        if (strcmp(daemon_commands[i].name, "shader_speed_up") == 0) {
+            daemon_commands[i].signal = SHADER_SPEED_UP_SIGNAL;
+        } else if (strcmp(daemon_commands[i].name, "shader_speed_down") == 0) {
+            daemon_commands[i].signal = SHADER_SPEED_DOWN_SIGNAL;
+        }
+    }
+}
+
 /* Get PID file path */
 static const char *get_pid_file_path(void) {
     static char pid_path[MAX_PATH_LENGTH];
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-    
+
     if (runtime_dir) {
         snprintf(pid_path, sizeof(pid_path), "%s/staticwall.pid", runtime_dir);
     } else {
@@ -28,7 +78,7 @@ static const char *get_pid_file_path(void) {
             snprintf(pid_path, sizeof(pid_path), "/tmp/staticwall-%d.pid", getuid());
         }
     }
-    
+
     return pid_path;
 }
 
@@ -36,15 +86,15 @@ static const char *get_pid_file_path(void) {
 static bool write_pid_file(void) {
     const char *pid_path = get_pid_file_path();
     FILE *fp = fopen(pid_path, "w");
-    
+
     if (!fp) {
         log_error("Failed to create PID file %s: %s", pid_path, strerror(errno));
         return false;
     }
-    
+
     fprintf(fp, "%d\n", getpid());
     fclose(fp);
-    
+
     log_debug("Created PID file: %s", pid_path);
     return true;
 }
@@ -61,12 +111,12 @@ static void remove_pid_file(void) {
 static bool is_daemon_running(void) {
     const char *pid_path = get_pid_file_path();
     FILE *fp = fopen(pid_path, "r");
-    
+
     if (!fp) {
         /* No PID file, daemon not running */
         return false;
     }
-    
+
     pid_t pid;
     if (fscanf(fp, "%d", &pid) != 1) {
         fclose(fp);
@@ -76,20 +126,20 @@ static bool is_daemon_running(void) {
         return false;
     }
     fclose(fp);
-    
+
     /* Check if process exists */
     if (kill(pid, 0) == 0) {
         /* Process exists and we can signal it */
         return true;
     }
-    
+
     if (errno == ESRCH) {
         /* Process doesn't exist, stale PID file */
         log_debug("Stale PID file found (PID %d not running), removing", pid);
         remove_pid_file();
         return false;
     }
-    
+
     /* Other error (EPERM, etc.) - assume process exists */
     return true;
 }
@@ -98,12 +148,12 @@ static bool is_daemon_running(void) {
 static bool kill_daemon(void) {
     const char *pid_path = get_pid_file_path();
     FILE *fp = fopen(pid_path, "r");
-    
+
     if (!fp) {
         printf("No running staticwall daemon found (no PID file at %s)\n", pid_path);
         return false;
     }
-    
+
     pid_t pid;
     if (fscanf(fp, "%d", &pid) != 1) {
         fclose(fp);
@@ -111,7 +161,7 @@ static bool kill_daemon(void) {
         return false;
     }
     fclose(fp);
-    
+
     /* Check if process exists */
     if (kill(pid, 0) == -1) {
         if (errno == ESRCH) {
@@ -120,14 +170,14 @@ static bool kill_daemon(void) {
             return false;
         }
     }
-    
+
     /* Send SIGTERM */
     printf("Stopping staticwall daemon (PID %d)...\n", pid);
     if (kill(pid, SIGTERM) == -1) {
         log_error("Failed to kill process %d: %s", pid, strerror(errno));
         return false;
     }
-    
+
     /* Wait a bit for graceful shutdown */
     struct timespec sleep_time = {0, 100000000};  /* 100ms */
     int attempts = 0;
@@ -140,7 +190,7 @@ static bool kill_daemon(void) {
         nanosleep(&sleep_time, NULL);
         attempts++;
     }
-    
+
     /* Force kill if still running */
     printf("Daemon didn't stop gracefully, forcing...\n");
     if (kill(pid, SIGKILL) == 0) {
@@ -148,7 +198,7 @@ static bool kill_daemon(void) {
         remove_pid_file();
         return true;
     }
-    
+
     log_error("Failed to kill daemon process");
     return false;
 }
@@ -157,13 +207,13 @@ static bool kill_daemon(void) {
 static bool send_daemon_signal(int signal, const char *action) {
     const char *pid_path = get_pid_file_path();
     FILE *fp = fopen(pid_path, "r");
-    
+
     if (!fp) {
         printf("No running staticwall daemon found.\n");
         printf("Start the daemon first with: staticwall\n");
         return false;
     }
-    
+
     pid_t pid;
     if (fscanf(fp, "%d", &pid) != 1) {
         fclose(fp);
@@ -171,7 +221,7 @@ static bool send_daemon_signal(int signal, const char *action) {
         return false;
     }
     fclose(fp);
-    
+
     /* Check if process exists */
     if (kill(pid, 0) == -1) {
         if (errno == ESRCH) {
@@ -180,13 +230,13 @@ static bool send_daemon_signal(int signal, const char *action) {
             return false;
         }
     }
-    
+
     /* Send signal */
     if (kill(pid, signal) == -1) {
         log_error("Failed to send signal to daemon: %s", strerror(errno));
         return false;
     }
-    
+
     printf("%s\n", action);
     return true;
 }
@@ -204,13 +254,15 @@ static void print_usage(const char *program_name) {
     printf("\n");
     printf("Daemon Control Commands (when daemon is running):\n");
     printf("  kill                  Stop running daemon\n");
-    printf("  next                  Skip to next wallpaper\n");
-    printf("  pause                 Pause wallpaper cycling\n");
-    printf("  resume                Resume wallpaper cycling\n");
-    printf("  reload                Reload configuration\n");
-    printf("  current               Show current wallpaper\n");
-    printf("  shader_speed_up       Increase shader animation speed by 1.0x\n");
-    printf("  shader_speed_down     Decrease shader animation speed by 1.0x\n");
+
+    /* Auto-generate command list from table - DRY principle */
+    for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
+        /* Skip duplicate "status" command (alias for "current") */
+        if (strcmp(daemon_commands[i].name, "status") == 0) {
+            continue;
+        }
+        printf("  %-21s %s\n", daemon_commands[i].name, daemon_commands[i].description);
+    }
     printf("\n");
     printf("Note: By default, staticwall runs as a daemon. Use -f for foreground.\n");
     printf("If a daemon is already running, subsequent calls act as control commands.\n");
@@ -250,88 +302,122 @@ static void print_version(void) {
     printf("  - JPEG/JPG\n");
 }
 
-static void signal_handler(int signum) {
-    switch (signum) {
-        case SIGINT:
-        case SIGTERM:
-            log_info("Received signal %d, shutting down gracefully...", signum);
-            if (global_state) {
-                global_state->running = false;
-            }
-            break;
-        case SIGHUP:
-            log_info("Received SIGHUP, reloading configuration...");
-            if (global_state) {
-                global_state->reload_requested = true;
-            }
-            break;
-        case SIGUSR1:
-            if (global_state) {
-                int old_count = atomic_fetch_add(&global_state->next_requested, 1);
-                int new_count = old_count + 1;
-                log_info("Received SIGUSR1, skipping to next wallpaper (queue: %d -> %d)", 
-                         old_count, new_count);
-                /* Prevent counter overflow from rapid signals */
-                if (new_count > 100) {
-                    log_error("Too many queued next requests (%d), resetting to 10", new_count);
-                    atomic_store(&global_state->next_requested, 10);
-                }
-            } else {
-                log_error("Received SIGUSR1 but global_state is NULL");
-            }
-            break;
-        case SIGUSR2:
-            log_info("Received SIGUSR2, pausing wallpaper cycling...");
-            if (global_state) {
-                global_state->paused = true;
-                log_info("Wallpaper cycling paused");
-            }
-            break;
-        case SIGCONT:
-            log_info("Received SIGCONT, resuming wallpaper cycling...");
-            if (global_state) {
-                global_state->paused = false;
-                log_info("Wallpaper cycling resumed");
-            }
-            break;
-        default:
-            /* Check for real-time signals for shader speed control */
-            if (signum == SIGRTMIN) {
-                /* Speed up shader animation */
-                if (global_state) {
-                    struct output_state *output = global_state->outputs;
-                    while (output) {
-                        if (output->config.type == WALLPAPER_SHADER) {
-                            output->config.shader_speed += 1.0f;
-                            log_info("Increased shader speed to %.1fx for output %s", 
-                                     output->config.shader_speed,
-                                     output->model[0] ? output->model : "unknown");
-                        }
-                        output = output->next;
-                    }
-                }
-            } else if (signum == SIGRTMIN + 1) {
-                /* Slow down shader animation */
-                if (global_state) {
-                    struct output_state *output = global_state->outputs;
-                    while (output) {
-                        if (output->config.type == WALLPAPER_SHADER) {
-                            output->config.shader_speed -= 1.0f;
-                            /* Don't allow negative or zero speed */
-                            if (output->config.shader_speed < 0.1f) {
-                                output->config.shader_speed = 0.1f;
-                            }
-                            log_info("Decreased shader speed to %.1fx for output %s", 
-                                     output->config.shader_speed,
-                                     output->model[0] ? output->model : "unknown");
-                        }
-                        output = output->next;
-                    }
-                }
-            }
-            break;
+/* ============================================================================
+ * Signal Handler Implementations - Each handler has single responsibility
+ * ============================================================================ */
+
+static void handle_shutdown(int signum) {
+    log_info("Received signal %d, shutting down gracefully...", signum);
+    if (global_state) {
+        global_state->running = false;
     }
 }
+
+static void handle_reload(int signum) {
+    (void)signum;  /* Unused */
+    log_info("Received SIGHUP, reloading configuration...");
+    if (global_state) {
+        global_state->reload_requested = true;
+    }
+}
+
+static void handle_next_wallpaper(int signum) {
+    (void)signum;  /* Unused */
+    if (!global_state) {
+        log_error("Received SIGUSR1 but global_state is NULL");
+        return;
+    }
+
+    int old_count = atomic_fetch_add(&global_state->next_requested, 1);
+    int new_count = old_count + 1;
+    log_info("Received SIGUSR1, skipping to next wallpaper (queue: %d -> %d)",
+             old_count, new_count);
+
+    /* Prevent counter overflow from rapid signals */
+    if (new_count > 100) {
+        log_error("Too many queued next requests (%d), resetting to 10", new_count);
+        atomic_store(&global_state->next_requested, 10);
+    }
+}
+
+static void handle_pause(int signum) {
+    (void)signum;  /* Unused */
+    log_info("Received SIGUSR2, pausing wallpaper cycling...");
+    if (global_state) {
+        global_state->paused = true;
+        log_info("Wallpaper cycling paused");
+    }
+}
+
+static void handle_resume(int signum) {
+    (void)signum;  /* Unused */
+    log_info("Received SIGCONT, resuming wallpaper cycling...");
+    if (global_state) {
+        global_state->paused = false;
+        log_info("Wallpaper cycling resumed");
+    }
+}
+
+/* Helper function to adjust shader speed - DRY principle */
+static void adjust_shader_speed_for_all_outputs(float delta) {
+    if (!global_state) {
+        return;
+    }
+
+    struct output_state *output = global_state->outputs;
+    while (output) {
+        if (output->config.type == WALLPAPER_SHADER) {
+            output->config.shader_speed += delta;
+
+            /* Enforce minimum speed limit */
+            if (output->config.shader_speed < 0.1f) {
+                output->config.shader_speed = 0.1f;
+            }
+
+            const char *direction = (delta > 0) ? "Increased" : "Decreased";
+            log_info("%s shader speed to %.1fx for output %s",
+                     direction,
+                     output->config.shader_speed,
+                     output->model[0] ? output->model : "unknown");
+        }
+        output = output->next;
+    }
+}
+
+static void handle_shader_speed_adjust(int signum) {
+    if (signum == SHADER_SPEED_UP_SIGNAL) {
+        adjust_shader_speed_for_all_outputs(1.0f);   /* Speed up */
+    } else if (signum == SHADER_SPEED_DOWN_SIGNAL) {
+        adjust_shader_speed_for_all_outputs(-1.0f);  /* Slow down */
+    }
+}
+
+/* ============================================================================
+ * Unified Signal Handler - Dispatcher using table lookup
+ * ============================================================================ */
+
+static void signal_handler(int signum) {
+    /* Handle shutdown signals directly */
+    if (signum == SIGINT || signum == SIGTERM) {
+        handle_shutdown(signum);
+        return;
+    }
+
+    /* Dispatch to appropriate handler via command table */
+    for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
+        if (daemon_commands[i].signal == signum && daemon_commands[i].handler) {
+            daemon_commands[i].handler(signum);
+            return;
+        }
+    }
+
+    /* Unknown signal - log it */
+    log_debug("Received unknown signal: %d", signum);
+}
+
+/* ============================================================================
+ * Signal Handler Registration - Table-driven, automatically covers all commands
+ * ============================================================================ */
 
 static void setup_signal_handlers(void) {
     struct sigaction sa;
@@ -340,17 +426,26 @@ static void setup_signal_handlers(void) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;  /* Restart interrupted system calls */
 
+    /* Register shutdown signals */
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
-    sigaction(SIGUSR1, &sa, NULL);
-    sigaction(SIGUSR2, &sa, NULL);
-    sigaction(SIGCONT, &sa, NULL);
-    sigaction(SIGRTMIN, &sa, NULL);      /* Shader speed up */
-    sigaction(SIGRTMIN + 1, &sa, NULL);  /* Shader speed down */
 
-    /* SIGHUP (reload) should NOT use SA_RESTART - we want it to interrupt poll() */
-    sa.sa_flags = 0;
-    sigaction(SIGHUP, &sa, NULL);
+    /* Register all command signals from the table - DRY principle */
+    for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
+        if (daemon_commands[i].signal > 0) {
+            /* SIGHUP (reload) should NOT use SA_RESTART - we want it to interrupt poll() */
+            if (daemon_commands[i].signal == SIGHUP) {
+                sa.sa_flags = 0;
+            }
+
+            sigaction(daemon_commands[i].signal, &sa, NULL);
+
+            /* Restore SA_RESTART for other signals */
+            if (daemon_commands[i].signal == SIGHUP) {
+                sa.sa_flags = SA_RESTART;
+            }
+        }
+    }
 
     /* Ignore SIGPIPE */
     signal(SIGPIPE, SIG_IGN);
@@ -445,6 +540,9 @@ static bool create_config_directory(void) {
 }
 
 int main(int argc, char *argv[]) {
+    /* Initialize runtime signal values for command table */
+    init_command_signals();
+
     struct staticwall_state state = {0};
     char config_path[MAX_PATH_LENGTH] = {0};
     bool daemon_mode = true;  /* Default to daemon mode */
@@ -452,30 +550,42 @@ int main(int argc, char *argv[]) {
     bool verbose = false;
     int opt;
 
-    /* Check for non-option arguments (control commands) */
+    /* ========================================================================
+     * Command Dispatch - Table-driven lookup (Command Pattern)
+     * ======================================================================== */
     if (argc >= 2 && argv[1][0] != '-') {
         const char *cmd = argv[1];
+
+        /* Special case: kill command */
         if (strcmp(cmd, "kill") == 0) {
             return kill_daemon() ? EXIT_SUCCESS : EXIT_FAILURE;
-        } else if (strcmp(cmd, "next") == 0) {
-            return send_daemon_signal(SIGUSR1, "Skipping to next wallpaper...") ? EXIT_SUCCESS : EXIT_FAILURE;
-        } else if (strcmp(cmd, "pause") == 0) {
-            return send_daemon_signal(SIGUSR2, "Pausing wallpaper cycling...") ? EXIT_SUCCESS : EXIT_FAILURE;
-        } else if (strcmp(cmd, "resume") == 0) {
-            return send_daemon_signal(SIGCONT, "Resuming wallpaper cycling...") ? EXIT_SUCCESS : EXIT_FAILURE;
-        } else if (strcmp(cmd, "reload") == 0) {
-            return send_daemon_signal(SIGHUP, "Reloading configuration...") ? EXIT_SUCCESS : EXIT_FAILURE;
-        } else if (strcmp(cmd, "current") == 0 || strcmp(cmd, "status") == 0) {
-            return read_wallpaper_state() ? EXIT_SUCCESS : EXIT_FAILURE;
-        } else if (strcmp(cmd, "shader_speed_up") == 0) {
-            return send_daemon_signal(SIGRTMIN, "Increasing shader speed...") ? EXIT_SUCCESS : EXIT_FAILURE;
-        } else if (strcmp(cmd, "shader_speed_down") == 0) {
-            return send_daemon_signal(SIGRTMIN + 1, "Decreasing shader speed...") ? EXIT_SUCCESS : EXIT_FAILURE;
-        } else {
-            fprintf(stderr, "Unknown command: %s\n", cmd);
-            fprintf(stderr, "Valid commands: kill, next, pause, resume, reload, current, shader_speed_up, shader_speed_down\n");
-            return EXIT_FAILURE;
         }
+
+        /* Lookup command in table and dispatch */
+        for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
+            if (strcmp(cmd, daemon_commands[i].name) == 0) {
+                /* Command found - execute it */
+                if (daemon_commands[i].needs_state_check) {
+                    /* Commands like "current" that read state */
+                    return read_wallpaper_state() ? EXIT_SUCCESS : EXIT_FAILURE;
+                } else {
+                    /* Commands that send signals to daemon */
+                    return send_daemon_signal(daemon_commands[i].signal,
+                                            daemon_commands[i].action_message)
+                           ? EXIT_SUCCESS : EXIT_FAILURE;
+                }
+            }
+        }
+
+        /* Command not found - print error with available commands */
+        fprintf(stderr, "Unknown command: %s\n\n", cmd);
+        fprintf(stderr, "Available commands:\n");
+        fprintf(stderr, "  kill");
+        for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
+            fprintf(stderr, ", %s", daemon_commands[i].name);
+        }
+        fprintf(stderr, "\n\nRun '%s --help' for more information.\n", argv[0]);
+        return EXIT_FAILURE;
     }
 
     static struct option long_options[] = {
