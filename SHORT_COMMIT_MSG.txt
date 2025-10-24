@@ -1,0 +1,11 @@
+feat: multi-version EGL/OpenGL ES support (2.0-3.2)
+
+- Auto-detect GL ES versions with runtime fallback
+- Fix SIGSEGV crashes (surface initialization, shader versioning)
+- Add shader adaptation layer (ES 2.0 ↔ ES 3.0)
+- Dynamic Shadertoy wrapper based on GL context
+- Add eglinfo integration scripts and docs
+- Comprehensive documentation (6 guides)
+
+Tested: NVIDIA RTX 4060, OpenGL ES 3.2
+Version: 0.2.0-dev

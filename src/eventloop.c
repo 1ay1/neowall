@@ -284,8 +284,11 @@ void event_loop_run(struct staticwall_state *state) {
 
     log_info("Entering main event loop");
     
+    /* Track shader state to avoid log spam */
+    static bool shader_mode_logged = false;
+    uint64_t log_throttle_counter = 0;
+    
     while (state->running) {
-        log_debug("Event loop iteration start, running=%d", state->running);
         
         /* Handle new outputs that need initialization (reconnected displays) */
         if (state->outputs_need_init) {
@@ -339,7 +342,12 @@ void event_loop_run(struct staticwall_state *state) {
             if (output->config.type == WALLPAPER_SHADER) {
                 shader_count++;
                 timeout_ms = FRAME_TIME_MS; /* ~60 FPS for smooth transitions/animations */
-                log_info("Shader detected on %s, setting poll timeout to %dms", output->model, FRAME_TIME_MS);
+                /* Only log shader detection once, not every frame */
+                if (!shader_mode_logged) {
+                    log_info("Shader detected on %s, setting poll timeout to %dms for continuous animation", 
+                             output->model, FRAME_TIME_MS);
+                    shader_mode_logged = true;
+                }
             }
             if ((output->transition_start_time > 0 && 
                  output->config.transition != TRANSITION_NONE) ||
@@ -349,8 +357,9 @@ void event_loop_run(struct staticwall_state *state) {
             }
             output = output->next;
         }
-        if (shader_count == 0) {
-            log_debug("No shaders active, using infinite timeout");
+        if (shader_count == 0 && shader_mode_logged) {
+            log_info("No active shaders, reverting to event-driven mode");
+            shader_mode_logged = false;
         }
         
         /* If next requests pending, wake immediately */
@@ -358,11 +367,8 @@ void event_loop_run(struct staticwall_state *state) {
             timeout_ms = 0;
         }
         
-        /* Poll debug messages removed to reduce log spam during shader rendering */
-        
-        log_debug("Polling with timeout=%dms, running=%d", timeout_ms, state->running);
+        /* Poll for events */
         int ret = poll(fds, 3, timeout_ms);
-        log_debug("Poll returned: %d (errno=%d)", ret, errno);
 
         if (ret < 0) {
             if (errno == EINTR) {
@@ -440,7 +446,6 @@ void event_loop_run(struct staticwall_state *state) {
 
         /* Keep redrawing during active transitions and for shader wallpapers */
         output = state->outputs;
-        int shaders_marked = 0;
         while (output) {
             /* Keep redrawing during transitions */
             if (output->transition_start_time > 0 && 
@@ -450,14 +455,15 @@ void event_loop_run(struct staticwall_state *state) {
             /* Keep redrawing for shader wallpapers (continuous animation) */
             if (output->config.type == WALLPAPER_SHADER) {
                 output->needs_redraw = true;
-                shaders_marked++;
-                log_debug("Marked shader on %s for continuous redraw (live_program=%u)", 
-                         output->model, output->live_shader_program);
             }
             output = output->next;
         }
-        if (shaders_marked > 0) {
-            log_debug("Marked %d shader outputs for continuous animation", shaders_marked);
+        
+        /* Throttle debug logging - only every 300 frames (~5 seconds at 60fps) */
+        log_throttle_counter++;
+        if (log_throttle_counter >= 300 && shader_count > 0) {
+            log_debug("Shader animation active: %d outputs rendering at ~60 FPS", shader_count);
+            log_throttle_counter = 0;
         }
     }
 

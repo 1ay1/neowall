@@ -208,6 +208,13 @@ static bool is_shader_file(const char *filename) {
     return has_extension(filename, supported_shader_extensions);
 }
 
+/* Comparison function for qsort - alphabetical order */
+static int compare_strings(const void *a, const void *b) {
+    const char *str_a = *(const char **)a;
+    const char *str_b = *(const char **)b;
+    return strcmp(str_a, str_b);
+}
+
 /* Load shader files from a directory */
 char **load_shaders_from_directory(const char *dir_path, size_t *count) {
     *count = 0;
@@ -296,7 +303,13 @@ char **load_shaders_from_directory(const char *dir_path, size_t *count) {
     closedir(dir);
 
     *count = idx;
-    log_info("Loaded %zu shaders from directory %s", idx, expanded_path);
+    
+    /* Sort paths alphabetically for predictable cycling order */
+    if (idx > 1) {
+        qsort(paths, idx, sizeof(char *), compare_strings);
+    }
+    
+    log_info("Loaded %zu shaders from directory %s (sorted alphabetically)", idx, expanded_path);
 
     return paths;
 }
@@ -388,7 +401,13 @@ char **load_images_from_directory(const char *dir_path, size_t *count) {
     closedir(dir);
 
     *count = idx;
-    log_info("Loaded %zu images from directory %s", idx, expanded_path);
+    
+    /* Sort paths alphabetically for predictable cycling order */
+    if (idx > 1) {
+        qsort(paths, idx, sizeof(char *), compare_strings);
+    }
+    
+    log_info("Loaded %zu images from directory %s (sorted alphabetically)", idx, expanded_path);
 
     return paths;
 }
