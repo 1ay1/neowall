@@ -3,49 +3,28 @@ build/
 *.o
 *.a
 *.so
-*.dylib
-
-# Generated protocol files are now committed for portability
-# protocols/*.c
-# protocols/*.h
-
-# Binary
+*.so.*
 staticwall
-staticwall.exe
 
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-vgcore.*
-core
+# Backup files
+*.old
+*.bak
+*~
+.*.swp
+.*.swo
 
-# Editor/IDE files
+# IDE files
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
+*.sublime-*
 .DS_Store
 
-# Compilation database
-compile_commands.json
-
-# Dependency files
-*.d
-
 # Temporary files
+COMMIT_MSG.txt
 *.tmp
-*.bak
 *.log
 
-# Package files
-*.tar.gz
-*.zip
-*.deb
-*.rpm
-
-# Distribution files
-dist/
-pkg/
+# Core dumps
+core
+core.*
+vgcore.*

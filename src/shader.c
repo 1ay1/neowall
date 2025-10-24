@@ -18,16 +18,24 @@
  * and creation functions in their respective files.
  */
 
-/* Standard vertex shader for live wallpapers */
-static const char *live_vertex_shader =
+/* Standard vertex shader for live wallpapers - ES 2.0 */
+static const char *live_vertex_shader_es2 =
     "#version 100\n"
     "attribute vec2 position;\n"
     "void main() {\n"
     "    gl_Position = vec4(position, 0.0, 1.0);\n"
     "}\n";
 
-/* Shadertoy compatibility wrapper prefix - static part */
-static const char *shadertoy_wrapper_prefix_static =
+/* Standard vertex shader for live wallpapers - ES 3.0 */
+static const char *live_vertex_shader_es3 =
+    "#version 300 es\n"
+    "in vec2 position;\n"
+    "void main() {\n"
+    "    gl_Position = vec4(position, 0.0, 1.0);\n"
+    "}\n";
+
+/* Shadertoy compatibility wrapper prefix - ES 2.0 version */
+static const char *shadertoy_wrapper_prefix_es2 =
     "#version 100\n"
     "precision highp float;\n"
     "\n"
@@ -45,6 +53,29 @@ static const char *shadertoy_wrapper_prefix_static =
     "#define iSampleRate 44100.0\n"
     "#define iChannelTime vec4(0.0)\n"
     "#define iChannelResolution vec4(0.0)\n"
+    "\n";
+
+/* Shadertoy compatibility wrapper prefix - ES 3.0 version */
+static const char *shadertoy_wrapper_prefix_es3 =
+    "#version 300 es\n"
+    "precision highp float;\n"
+    "\n"
+    "// Shadertoy compatibility uniforms\n"
+    "uniform float time;          // Maps to iTime\n"
+    "uniform vec2 resolution;     // Maps to iResolution.xy\n"
+    "\n"
+    "// Shadertoy uniforms - defined with default behavior\n"
+    "#define iTime time\n"
+    "#define iResolution vec3(resolution, resolution.x/resolution.y)\n"
+    "#define iTimeDelta 0.016667\n"
+    "#define iFrame 0\n"
+    "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
+    "#define iDate vec4(2024.0, 1.0, 1.0, 0.0)\n"
+    "#define iSampleRate 44100.0\n"
+    "#define iChannelTime vec4(0.0)\n"
+    "#define iChannelResolution vec4(0.0)\n"
+    "\n"
+    "out vec4 fragColor;\n"
     "\n";
 
 /* Build dynamic iChannel declarations based on channel count */
@@ -72,11 +103,20 @@ static char *build_ichannel_declarations(size_t channel_count) {
     return declarations;
 }
 
-/* Shadertoy compatibility wrapper suffix */
-static const char *shadertoy_wrapper_suffix =
+/* Shadertoy compatibility wrapper suffix - ES 2.0 version */
+static const char *shadertoy_wrapper_suffix_es2 =
     "\n"
     "void main() {\n"
     "    mainImage(gl_FragColor, gl_FragCoord.xy);\n"
+    "}\n";
+
+/* Shadertoy compatibility wrapper suffix - ES 3.0 version */
+static const char *shadertoy_wrapper_suffix_es3 =
+    "\n"
+    "void main() {\n"
+    "    vec4 color;\n"
+    "    mainImage(color, gl_FragCoord.xy);\n"
+    "    fragColor = color;\n"
     "}\n";
 
 /**
@@ -439,11 +479,31 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
         return NULL;
     }
     
+    /* Detect GL version at runtime to choose appropriate wrapper */
+    const GLubyte *version_string = glGetString(GL_VERSION);
+    bool use_es3 = false;
+    
+    if (version_string) {
+        /* Check for ES 3.x in version string */
+        if (strstr((const char*)version_string, "ES 3.") != NULL) {
+            use_es3 = true;
+            log_debug("Using ES 3.0 Shadertoy wrapper");
+        } else {
+            log_debug("Using ES 2.0 Shadertoy wrapper");
+        }
+    } else {
+        log_debug("Could not detect GL version, defaulting to ES 2.0 wrapper");
+    }
+    
+    /* Select appropriate wrapper strings */
+    const char *prefix = use_es3 ? shadertoy_wrapper_prefix_es3 : shadertoy_wrapper_prefix_es2;
+    const char *suffix = use_es3 ? shadertoy_wrapper_suffix_es3 : shadertoy_wrapper_suffix_es2;
+    
     /* Calculate total size needed */
-    size_t prefix_len = strlen(shadertoy_wrapper_prefix_static);
+    size_t prefix_len = strlen(prefix);
     size_t channel_len = strlen(channel_decls);
     size_t body_len = strlen(source_body);
-    size_t suffix_len = strlen(shadertoy_wrapper_suffix);
+    size_t suffix_len = strlen(suffix);
     size_t total_len = prefix_len + channel_len + body_len + suffix_len + 1;
     
     /* Allocate buffer */
@@ -455,24 +515,27 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
     }
     
     /* Concatenate parts */
-    strcpy(wrapped, shadertoy_wrapper_prefix_static);
+    strcpy(wrapped, prefix);
     strcat(wrapped, channel_decls);
     strcat(wrapped, source_body);
-    strcat(wrapped, shadertoy_wrapper_suffix);
+    strcat(wrapped, suffix);
     
     free(channel_decls);
     
-    /* Use shadertoy_compat to intelligently convert GLSL 3.0 texture calls
-     * to GLSL ES 1.0 texture2D calls for iChannel samplers */
-    char *converted = shadertoy_convert_texture_calls(wrapped);
-    free(wrapped);
-    
-    if (!converted) {
-        log_error("Failed to convert texture calls in Shadertoy shader");
-        return NULL;
+    /* Only convert texture calls if we're using ES 2.0 wrapper */
+    if (!use_es3) {
+        /* Use shadertoy_compat to intelligently convert GLSL 3.0 texture calls
+         * to GLSL ES 1.0 texture2D calls for iChannel samplers */
+        char *converted = shadertoy_convert_texture_calls(wrapped);
+        free(wrapped);
+        
+        if (!converted) {
+            log_error("Failed to convert texture calls in Shadertoy shader");
+            return NULL;
+        }
+        
+        wrapped = converted;
     }
-    
-    wrapped = converted;
     
     log_info("Wrapped Shadertoy format shader with compatibility layer (%zu channels)", 
              channel_count == 0 ? 5 : channel_count);
@@ -550,10 +613,21 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
         log_debug("Shader preview:\n%s\n...", preview);
     }
 
+    /* Detect GL version to select appropriate vertex shader */
+    const GLubyte *version_string = glGetString(GL_VERSION);
+    const char *vertex_shader = live_vertex_shader_es2; // Default to ES 2.0
+    
+    if (version_string && strstr((const char*)version_string, "ES 3.") != NULL) {
+        vertex_shader = live_vertex_shader_es3;
+        log_debug("Using ES 3.0 vertex shader");
+    } else {
+        log_debug("Using ES 2.0 vertex shader");
+    }
+    
     /* Create program with standard vertex shader and loaded fragment shader */
     log_info("Compiling shader program...");
     bool success = shader_create_program_from_sources(
-        live_vertex_shader,
+        vertex_shader,
         final_fragment_src,
         program
     );

@@ -124,28 +124,48 @@ void output_destroy(struct output_state *output) {
 }
 
 bool output_create_egl_surface(struct output_state *output) {
-    if (!output || !output->surface) {
-        log_error("Invalid output or surface for EGL surface creation");
+    if (!output) {
+        log_error("Invalid output for EGL surface creation (NULL)");
+        return false;
+    }
+
+    if (!output->surface) {
+        log_error("Invalid Wayland surface for output %s (NULL)",
+                  output->model[0] ? output->model : "unknown");
         return false;
     }
 
     if (output->width <= 0 || output->height <= 0) {
-        log_error("Invalid output dimensions: %dx%d", output->width, output->height);
+        log_debug("Output %s dimensions not ready yet: %dx%d (deferring surface creation)",
+                  output->model[0] ? output->model : "unknown",
+                  output->width, output->height);
         return false;
     }
+
+    /* Check if EGL window already exists */
+    if (output->egl_window) {
+        log_debug("EGL window already exists for output %s, skipping creation",
+                  output->model[0] ? output->model : "unknown");
+        return true;
+    }
+
+    log_debug("Creating EGL window for output %s: %dx%d",
+              output->model[0] ? output->model : "unknown",
+              output->width, output->height);
 
     /* Create EGL window */
     output->egl_window = wl_egl_window_create(output->surface,
                                               output->width,
                                               output->height);
     if (!output->egl_window) {
-        log_error("Failed to create EGL window");
+        log_error("Failed to create EGL window for output %s",
+                  output->model[0] ? output->model : "unknown");
         return false;
     }
 
-    log_debug("Created EGL surface for output %s: %dx%d",
-              output->model[0] ? output->model : "unknown",
-              output->width, output->height);
+    log_info("Created EGL surface for output %s: %dx%d",
+             output->model[0] ? output->model : "unknown",
+             output->width, output->height);
 
     return true;
 }
@@ -166,15 +186,43 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         return;
     }
 
-    /* Make EGL context current before creating textures */
-    if (output->state && output->egl_surface != EGL_NO_SURFACE) {
-        if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                           output->egl_surface, output->state->egl_context)) {
-            log_error("Failed to make EGL context current: 0x%x", eglGetError());
-            image_free(new_image);
-            return;
-        }
+    /* Defensive checks before any EGL/GL operations */
+    if (!output->state) {
+        log_error("Output state is NULL, cannot set wallpaper");
+        image_free(new_image);
+        return;
     }
+
+    if (output->state->egl_display == EGL_NO_DISPLAY) {
+        log_error("EGL display not initialized, cannot set wallpaper");
+        image_free(new_image);
+        return;
+    }
+
+    if (output->state->egl_context == EGL_NO_CONTEXT) {
+        log_error("EGL context not initialized, cannot set wallpaper");
+        image_free(new_image);
+        return;
+    }
+
+    if (output->egl_surface == EGL_NO_SURFACE) {
+        log_debug("EGL surface not ready for output %s, deferring wallpaper load",
+                  output->model[0] ? output->model : "unknown");
+        image_free(new_image);
+        return;
+    }
+
+    /* Make EGL context current before creating textures */
+    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                       output->egl_surface, output->state->egl_context)) {
+        log_error("Failed to make EGL context current for output %s: 0x%x",
+                  output->model[0] ? output->model : "unknown", eglGetError());
+        image_free(new_image);
+        return;
+    }
+
+    log_debug("EGL context made current for wallpaper load on output %s",
+              output->model[0] ? output->model : "unknown");
 
     /* Handle transition */
     if (output->config.transition != TRANSITION_NONE && output->current_image && output->texture) {
@@ -242,14 +290,48 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     log_info("Setting shader wallpaper for output %s: %s",
              output->model[0] ? output->model : "unknown", shader_path);
 
-    /* Make EGL context current before creating shader program */
-    if (output->state && output->egl_surface != EGL_NO_SURFACE) {
-        if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                           output->egl_surface, output->state->egl_context)) {
-            log_error("Failed to make EGL context current: 0x%x", eglGetError());
-            return;
-        }
+    /* Defensive checks before any EGL/GL operations */
+    if (!output->state) {
+        log_error("Output state is NULL, cannot set shader");
+        return;
     }
+
+    if (output->state->egl_display == EGL_NO_DISPLAY) {
+        log_error("EGL display not initialized, cannot set shader");
+        return;
+    }
+
+    if (output->state->egl_context == EGL_NO_CONTEXT) {
+        log_error("EGL context not initialized, cannot set shader");
+        return;
+    }
+
+    if (output->egl_surface == EGL_NO_SURFACE) {
+        log_debug("EGL surface not ready for output %s, deferring shader load: %s",
+                  output->model[0] ? output->model : "unknown", shader_path);
+        /* Store shader path in config for later application when surface is ready */
+        strncpy(output->config.shader_path, shader_path, sizeof(output->config.shader_path) - 1);
+        output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
+        output->config.type = WALLPAPER_SHADER;
+        return;
+    }
+
+    if (!output->egl_window) {
+        log_error("EGL window not created for output %s, cannot set shader",
+                  output->model[0] ? output->model : "unknown");
+        return;
+    }
+
+    /* Make EGL context current before creating shader program */
+    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                       output->egl_surface, output->state->egl_context)) {
+        log_error("Failed to make EGL context current for output %s: 0x%x",
+                  output->model[0] ? output->model : "unknown", eglGetError());
+        return;
+    }
+
+    log_debug("EGL context made current for output %s",
+              output->model[0] ? output->model : "unknown");
 
     /* If there's an existing shader, start cross-fade transition */
     if (output->live_shader_program != 0) {
@@ -521,6 +603,12 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         return false;
     }
 
+    log_debug("Applying config to output %s (egl_surface=%p, egl_window=%p, configured=%d)",
+              output->model[0] ? output->model : "unknown",
+              (void*)output->egl_surface,
+              (void*)output->egl_window,
+              output->configured);
+
     /* Free old channel_paths if they exist */
     if (output->config.channel_paths) {
         for (size_t i = 0; i < output->config.channel_count; i++) {
@@ -700,16 +788,23 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         }
         
         if (initial_shader[0] != '\0') {
-            output_set_shader(output, initial_shader);
-            
-            /* If shader + image cycling mode, load the first image into iChannel0 */
-            if (is_shader_with_image_cycling) {
-                const char *initial_image = output->config.cycle_paths[output->config.current_cycle_index];
-                log_info("Loading initial image into iChannel0: %s", initial_image);
+            /* Check if output is ready for shader loading */
+            if (output->egl_surface != EGL_NO_SURFACE && output->egl_window) {
+                output_set_shader(output, initial_shader);
                 
-                if (!render_update_channel_texture(output, 0, initial_image)) {
-                    log_error("Failed to load initial image into iChannel0: %s", initial_image);
+                /* If shader + image cycling mode, load the first image into iChannel0 */
+                if (is_shader_with_image_cycling) {
+                    const char *initial_image = output->config.cycle_paths[output->config.current_cycle_index];
+                    log_info("Loading initial image into iChannel0: %s", initial_image);
+                    
+                    if (!render_update_channel_texture(output, 0, initial_image)) {
+                        log_error("Failed to load initial image into iChannel0: %s", initial_image);
+                    }
                 }
+            } else {
+                log_debug("Output %s not ready for shader load, storing config for later",
+                          output->model[0] ? output->model : "unknown");
+                /* Config is already stored in output->config, will be applied when surface is ready */
             }
         }
     } else {
@@ -721,11 +816,67 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         }
 
         if (initial_path[0] != '\0') {
-            output_set_wallpaper(output, initial_path);
+            /* Check if output is ready for wallpaper loading */
+            if (output->egl_surface != EGL_NO_SURFACE && output->egl_window) {
+                output_set_wallpaper(output, initial_path);
+            } else {
+                log_debug("Output %s not ready for wallpaper load, storing config for later",
+                          output->model[0] ? output->model : "unknown");
+                /* Config is already stored in output->config, will be applied when surface is ready */
+            }
         }
     }
 
     return true;
+}
+
+/* Apply deferred configuration to output when surface becomes ready */
+void output_apply_deferred_config(struct output_state *output) {
+    if (!output) {
+        return;
+    }
+
+    /* Check if output is ready for rendering */
+    if (output->egl_surface == EGL_NO_SURFACE || !output->egl_window) {
+        log_debug("Output %s not ready for deferred config application",
+                  output->model[0] ? output->model : "unknown");
+        return;
+    }
+
+    /* Check if there's a deferred config to apply */
+    if (output->config.type == WALLPAPER_SHADER && output->config.shader_path[0] != '\0') {
+        /* Check if shader is not yet loaded */
+        if (output->live_shader_program == 0) {
+            log_info("Applying deferred shader config to output %s: %s",
+                     output->model[0] ? output->model : "unknown",
+                     output->config.shader_path);
+            output_set_shader(output, output->config.shader_path);
+        }
+    } else if (output->config.type == WALLPAPER_IMAGE && output->config.path[0] != '\0') {
+        /* Check if wallpaper is not yet loaded */
+        if (!output->current_image && output->texture == 0) {
+            log_info("Applying deferred wallpaper config to output %s: %s",
+                     output->model[0] ? output->model : "unknown",
+                     output->config.path);
+            output_set_wallpaper(output, output->config.path);
+        }
+    } else if (output->config.cycle && output->config.cycle_count > 0 && output->config.cycle_paths) {
+        /* Handle cycling mode */
+        if (!output->current_image && output->texture == 0 && output->live_shader_program == 0) {
+            const char *initial_path = output->config.cycle_paths[output->config.current_cycle_index];
+            log_info("Applying deferred cycle config to output %s: %s",
+                     output->model[0] ? output->model : "unknown",
+                     initial_path);
+            
+            /* Determine if it's a shader or image */
+            const char *ext = strrchr(initial_path, '.');
+            if (ext && (strcmp(ext, ".glsl") == 0 || strcmp(ext, ".frag") == 0)) {
+                output_set_shader(output, initial_path);
+            } else {
+                output_set_wallpaper(output, initial_path);
+            }
+        }
+    }
 }
 
 /* Get output count */

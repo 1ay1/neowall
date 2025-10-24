@@ -11,6 +11,7 @@
 #include <time.h>
 #include "staticwall.h"
 #include "constants.h"
+#include "egl/egl_core.h"
 
 static struct staticwall_state *global_state = NULL;
 
@@ -706,7 +707,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* Initialize EGL/OpenGL */
-    if (!egl_init(&state)) {
+    if (!egl_core_init(&state)) {
         log_error("Failed to initialize EGL");
         wayland_cleanup(&state);
         return EXIT_FAILURE;
@@ -715,7 +716,7 @@ int main(int argc, char *argv[]) {
     /* Load configuration and apply to outputs */
     if (!config_load(&state, config_path)) {
         log_error("Failed to load configuration");
-        egl_cleanup(&state);
+        egl_core_cleanup(&state);
         wayland_cleanup(&state);
         return EXIT_FAILURE;
     }
@@ -739,7 +740,7 @@ int main(int argc, char *argv[]) {
         pthread_join(state.watch_thread, NULL);
     }
 
-    egl_cleanup(&state);
+    egl_core_cleanup(&state);
     wayland_cleanup(&state);
     pthread_mutex_destroy(&state.state_mutex);
 

@@ -10,12 +10,15 @@
 #include <wayland-egl.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+#include "egl/capability.h"
 
 #define STATICWALL_VERSION "0.1.0"
 #define MAX_PATH_LENGTH 4096
 #define MAX_OUTPUTS 16
 #define MAX_WALLPAPERS 256
 #define CONFIG_WATCH_INTERVAL 2
+
+
 
 /* Forward declarations */
 struct staticwall_state;
@@ -183,6 +186,9 @@ struct staticwall_state {
     EGLDisplay egl_display;
     EGLContext egl_context;
     EGLConfig egl_config;
+    
+    /* OpenGL ES capabilities */
+    egl_capabilities_t gl_caps;
 
     /* Outputs */
     struct output_state *outputs;
@@ -233,6 +239,7 @@ bool wayland_init(struct staticwall_state *state);
 void wayland_cleanup(struct staticwall_state *state);
 bool egl_init(struct staticwall_state *state);
 void egl_cleanup(struct staticwall_state *state);
+void detect_gl_capabilities(struct staticwall_state *state);
 
 /* Output management */
 struct output_state *output_create(struct staticwall_state *state,
@@ -243,6 +250,7 @@ bool output_create_egl_surface(struct output_state *output);
 void output_set_wallpaper(struct output_state *output, const char *path);
 void output_set_shader(struct output_state *output, const char *shader_path);
 bool output_apply_config(struct output_state *output, struct wallpaper_config *config);
+void output_apply_deferred_config(struct output_state *output);
 void output_cycle_wallpaper(struct output_state *output);
 bool output_should_cycle(struct output_state *output, uint64_t current_time);
 
@@ -260,6 +268,10 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
 /* GL shader programs */
 bool shader_create_program(GLuint *program);
 void shader_destroy_program(GLuint program);
+const char *get_glsl_version_string(struct staticwall_state *state);
+char *adapt_shader_for_version(struct staticwall_state *state, const char *shader_code, bool is_fragment_shader);
+char *adapt_vertex_shader(struct staticwall_state *state, const char *shader_code);
+char *adapt_fragment_shader(struct staticwall_state *state, const char *shader_code);
 
 /* Main loop */
 void event_loop_run(struct staticwall_state *state);

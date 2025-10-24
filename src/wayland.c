@@ -88,10 +88,12 @@ static void layer_surface_configure(void *data,
 
     zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
 
+    bool dimensions_changed = false;
     if (output->width != (int32_t)width || output->height != (int32_t)height) {
         output->width = width;
         output->height = height;
         output->needs_redraw = true;
+        dimensions_changed = true;
 
         log_debug("Layer surface configured: %dx%d", width, height);
 
@@ -99,6 +101,13 @@ static void layer_surface_configure(void *data,
         if (output->egl_window) {
             wl_egl_window_resize(output->egl_window, width, height, 0, 0);
         }
+    }
+
+    /* Apply deferred configuration if surface just became ready */
+    if (dimensions_changed && output->egl_surface != EGL_NO_SURFACE && output->egl_window) {
+        log_debug("Surface ready after configuration, applying deferred config for output %s",
+                  output->model[0] ? output->model : "unknown");
+        output_apply_deferred_config(output);
     }
 }
 
