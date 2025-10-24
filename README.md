@@ -47,7 +47,21 @@ $EDITOR ~/.config/staticwall/config.vibe
 
 ## Configuration
 
-Staticwall uses **VIBE** config format (like TOML but simpler). No quotes needed, just vibes. ✌️
+Staticwall uses **VIBE** config format. No quotes needed, just vibes. ✌️
+
+> **"But why VIBE? Why not TOML/YAML/JSON?"**
+> 
+> Look, we're not asking you to use VIBE for your Kubernetes manifests or your enterprise backend config. This is for setting wallpapers. You point it at a picture. Maybe a folder of pictures. Sometimes a shader if you're feeling spicy.
+>
+> VIBE is an **axiom** here. Like "water is wet" or "tabs > spaces" (fight me). It's simple, human-readable, and doesn't make you count brackets at 2 AM. You literally just write:
+>
+> ```vibe
+> path ~/Pictures/cool-mountain.jpg
+> ```
+>
+> No quotes. No colons. No trauma. Just vibes.
+>
+> If you want YAML, go configure Ansible. If you want JSON, go configure literally anything else. Here, we vibe. 🌊✨
 
 ### Static Image Wallpaper
 
