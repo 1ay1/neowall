@@ -212,11 +212,27 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         return;
     }
 
+    /* Validate EGL display and surface before operations */
+    if (!output->state || output->state->egl_display == EGL_NO_DISPLAY) {
+        log_error("EGL display not available for output %s (display may be disconnected)",
+                  output->model[0] ? output->model : "unknown");
+        image_free(new_image);
+        return;
+    }
+    
+    if (output->egl_surface == EGL_NO_SURFACE) {
+        log_error("EGL surface not available for output %s (display may be disconnected)",
+                  output->model[0] ? output->model : "unknown");
+        image_free(new_image);
+        return;
+    }
+
     /* Make EGL context current before creating textures */
     if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
                        output->egl_surface, output->state->egl_context)) {
-        log_error("Failed to make EGL context current for output %s: 0x%x",
-                  output->model[0] ? output->model : "unknown", eglGetError());
+        EGLint egl_error = eglGetError();
+        log_error("Failed to make EGL context current for output %s: 0x%x (display may be disconnected)",
+                  output->model[0] ? output->model : "unknown", egl_error);
         image_free(new_image);
         return;
     }
@@ -322,11 +338,25 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         return;
     }
 
+    /* Validate EGL display and surface before operations */
+    if (!output->state || output->state->egl_display == EGL_NO_DISPLAY) {
+        log_error("EGL display not available for output %s (display may be disconnected)",
+                  output->model[0] ? output->model : "unknown");
+        return;
+    }
+    
+    if (output->egl_surface == EGL_NO_SURFACE) {
+        log_error("EGL surface not available for output %s (display may be disconnected)",
+                  output->model[0] ? output->model : "unknown");
+        return;
+    }
+
     /* Make EGL context current before creating shader program */
     if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
                        output->egl_surface, output->state->egl_context)) {
-        log_error("Failed to make EGL context current for output %s: 0x%x",
-                  output->model[0] ? output->model : "unknown", eglGetError());
+        EGLint egl_error = eglGetError();
+        log_error("Failed to make EGL context current for output %s: 0x%x (display may be disconnected)",
+                  output->model[0] ? output->model : "unknown", egl_error);
         return;
     }
 
@@ -368,6 +398,24 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     GLuint new_shader_program = 0;
     if (!shader_create_live_program(shader_path, &new_shader_program, output->channel_count)) {
         log_error("Failed to create shader program from: %s", shader_path);
+        
+        /* Clean up iChannel textures that were loaded but can't be used */
+        if (output->channel_textures) {
+            for (size_t i = 0; i < output->channel_count; i++) {
+                if (output->channel_textures[i] != 0) {
+                    render_destroy_texture(output->channel_textures[i]);
+                    output->channel_textures[i] = 0;
+                }
+            }
+            free(output->channel_textures);
+            output->channel_textures = NULL;
+        }
+        if (output->shader_uniforms.iChannel) {
+            free(output->shader_uniforms.iChannel);
+            output->shader_uniforms.iChannel = NULL;
+        }
+        output->channel_count = 0;
+        
         return;
     }
     

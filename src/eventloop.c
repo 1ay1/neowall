@@ -282,7 +282,19 @@ void event_loop_run(struct staticwall_state *state) {
     /* Set initial timer for cycling */
     update_cycle_timer(state);
 
+    log_info("Entering main event loop");
+    
     while (state->running) {
+        log_debug("Event loop iteration start, running=%d", state->running);
+        
+        /* Handle new outputs that need initialization (reconnected displays) */
+        if (state->outputs_need_init) {
+            log_info("New outputs detected, will be initialized by normal config load");
+            state->outputs_need_init = false;
+            /* Don't call config_reload here - it causes deadlock on startup */
+            /* Outputs will be initialized through the normal config_load path */
+        }
+        
         /* Handle configuration reload if requested */
         if (state->reload_requested) {
             log_info("Config reload requested, reloading...");
@@ -298,7 +310,7 @@ void event_loop_run(struct staticwall_state *state) {
         while (wl_display_prepare_read(state->display) != 0) {
             if (wl_display_dispatch_pending(state->display) < 0) {
                 log_error("Failed to dispatch Wayland events during prepare");
-                state->running = false;
+                wl_display_cancel_read(state->display);
                 break;
             }
         }
@@ -313,7 +325,6 @@ void event_loop_run(struct staticwall_state *state) {
             if (errno != EAGAIN) {
                 log_error("Failed to flush Wayland display: %s", strerror(errno));
                 wl_display_cancel_read(state->display);
-                state->running = false;
                 break;
             }
         }
@@ -323,14 +334,23 @@ void event_loop_run(struct staticwall_state *state) {
         
         /* Check if any output has active transitions or shader wallpapers */
         output = state->outputs;
+        int shader_count = 0;
         while (output) {
+            if (output->config.type == WALLPAPER_SHADER) {
+                shader_count++;
+                timeout_ms = FRAME_TIME_MS; /* ~60 FPS for smooth transitions/animations */
+                log_info("Shader detected on %s, setting poll timeout to %dms", output->model, FRAME_TIME_MS);
+            }
             if ((output->transition_start_time > 0 && 
                  output->config.transition != TRANSITION_NONE) ||
                 output->config.type == WALLPAPER_SHADER) {
-                timeout_ms = FRAME_TIME_MS; /* ~60 FPS for smooth transitions/animations */
+                timeout_ms = FRAME_TIME_MS;
                 break;
             }
             output = output->next;
+        }
+        if (shader_count == 0) {
+            log_debug("No shaders active, using infinite timeout");
         }
         
         /* If next requests pending, wake immediately */
@@ -340,11 +360,18 @@ void event_loop_run(struct staticwall_state *state) {
         
         /* Poll debug messages removed to reduce log spam during shader rendering */
         
+        log_debug("Polling with timeout=%dms, running=%d", timeout_ms, state->running);
         int ret = poll(fds, 3, timeout_ms);
+        log_debug("Poll returned: %d (errno=%d)", ret, errno);
 
         if (ret < 0) {
             if (errno == EINTR) {
+                log_info("Poll interrupted by signal (EINTR), checking running flag");
                 wl_display_cancel_read(state->display);
+                if (!state->running) {
+                    log_info("Running flag is false, exiting event loop");
+                    break;
+                }
                 continue;
             }
             log_error("Poll failed: %s", strerror(errno));
@@ -371,20 +398,15 @@ void event_loop_run(struct staticwall_state *state) {
             /* Check timerfd - time to cycle wallpaper */
             if (fds[1].revents & POLLIN) {
                 uint64_t expirations;
-                ssize_t s = read(state->timer_fd, &expirations, sizeof(expirations));
-                if (s == sizeof(expirations)) {
-                    log_debug("Cycle timer expired (%lu expirations), checking outputs", expirations);
-                    /* Timer expired, render_outputs will check which output needs cycling */
-                }
+                read(state->timer_fd, &expirations, sizeof(expirations));
+                log_debug("Cycle timer expired, checking outputs");
             }
             
             /* Check eventfd - internal wakeup (config reload, etc) */
             if (fds[2].revents & POLLIN) {
                 uint64_t value;
-                ssize_t s = read(state->wakeup_fd, &value, sizeof(value));
-                if (s == sizeof(value)) {
-                    log_debug("Wakeup event received (value=%lu)", value);
-                }
+                read(state->wakeup_fd, &value, sizeof(value));
+                log_debug("Wakeup event received");
             }
         }
 
@@ -412,19 +434,26 @@ void event_loop_run(struct staticwall_state *state) {
             frame_count = 0;
         }
 
-        /* Only keep redrawing during active transitions */
+        /* Keep redrawing during active transitions and for shader wallpapers */
         output = state->outputs;
+        int shaders_marked = 0;
         while (output) {
             /* Keep redrawing during transitions */
             if (output->transition_start_time > 0 && 
                 output->config.transition != TRANSITION_NONE) {
                 output->needs_redraw = true;
             }
-            /* needs_redraw is set to true by:
-             * - output_set_wallpaper() when wallpaper changes
-             * - Wayland events (output mode changes, etc.)
-             * No need to force redraw every frame for static wallpapers */
+            /* Keep redrawing for shader wallpapers (continuous animation) */
+            if (output->config.type == WALLPAPER_SHADER) {
+                output->needs_redraw = true;
+                shaders_marked++;
+                log_debug("Marked shader on %s for continuous redraw (live_program=%u)", 
+                         output->model, output->live_shader_program);
+            }
             output = output->next;
+        }
+        if (shaders_marked > 0) {
+            log_debug("Marked %d shader outputs for continuous animation", shaders_marked);
         }
     }
 

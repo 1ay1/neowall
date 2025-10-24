@@ -80,9 +80,11 @@ default {
   # Examples: 60 (1 min), 300 (5 min), 1800 (30 min), 3600 (1 hour)
   duration 0
 
-  # Transition effect when changing wallpapers (optional, default: none)
-  # Options: none, fade, slide-left, slide-right
-  transition none
+  # Transition effect when changing wallpapers (optional, default: fade)
+  # Options: none, fade, slide-left, slide-right, glitch, pixelate
+  # If not specified, defaults to 'fade' for smooth transitions
+  # Set to 'none' to disable transitions
+  # transition fade
 
   # Transition duration in milliseconds (optional, default: 300)
   # Examples: 100 (fast), 300 (default), 500 (smooth), 1000 (slow)
@@ -124,12 +126,11 @@ output {
 
   # Example: DisplayPort monitor with cycling wallpapers from directory
   # DP-1 {
-  #   path ~/Pictures/Nature/forest.jpg
+  #   path ~/Pictures/Nature/  # Trailing slash = directory mode (cycles all images)
   #   mode fill
-  #   duration 300
-  #   transition fade
-  #   transition_duration 500
-  #   cycle ~/Pictures/Nature  # Loads all PNG/JPG files from this directory
+  #   duration 300              # Change wallpaper every 5 minutes
+  #   # transition fade        # Optional: defaults to 'fade' if not specified
+  #   transition_duration 500   # Optional: smooth 500ms transitions
   # }
 
   # Example: Vertical/portrait monitor
@@ -174,8 +175,8 @@ output {
 #   path ~/Pictures/Wallpapers/       # ← Trailing slash = directory mode!
 #   mode fill
 #   duration 600                      # Change every 10 minutes
-#   transition fade
-#   transition_duration 1000
+#   # transition fade                 # Optional: already defaults to 'fade'
+#   transition_duration 1000          # Optional: smooth 1 second transitions
 #   # That's it! Staticwall auto-loads ALL PNG/JPEG files from the directory
 # }
 
@@ -255,26 +256,35 @@ output {
 #    staticwall -c ~/.config/staticwall/work.vibe
 #    staticwall -c ~/.config/staticwall/home.vibe
 #
-# 8. Recommended cycling durations:
+# 8. Transition effects:
+#    - fade:       Smooth crossfade (DEFAULT)
+#    - slide-left:  Slide old image left
+#    - slide-right: Slide old image right
+#    - glitch:     Digital glitch effect
+#    - pixelate:   Pixelated mosaic transition
+#    - none:       Instant switch (no transition)
+#    If not specified, 'fade' is used automatically
+#
+# 9. Recommended cycling durations:
 #    - Quick:    300 (5 minutes)
 #    - Moderate: 900 (15 minutes)
 #    - Slow:    1800 (30 minutes)
 #    - Hourly:  3600 (1 hour)
 #
-# 9. Directory cycling:
+# 10. Directory cycling:
 #    Just set path to a directory with trailing slash:
 #    path ~/Pictures/Wallpapers/
 #    This automatically loads all PNG and JPEG files
 #    Much easier than listing files manually!
 #
-# 10. Live shader wallpapers:
+# 11. Live shader wallpapers:
 #     - Installed to ~/.config/staticwall/shaders/ on first run
 #     - Just use the filename: shader plasma.glsl
 #     - Renders at ~60 FPS with minimal CPU usage
 #     - Control animation speed: shader_speed 2.0 (2x faster) or 0.5 (slower)
 #     - Create your own shaders! See shaders/README.md
 #
-# 11. Control the daemon:
+# 12. Control the daemon:
 #     staticwall kill      # Stop daemon
 #     staticwall reload    # Reload config
 #     staticwall next      # Skip to next wallpaper

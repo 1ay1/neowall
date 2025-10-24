@@ -57,7 +57,7 @@ static void output_handle_done(void *data, struct wl_output *wl_output) {
     (void)wl_output;
 
     output->configured = true;
-    log_debug("Output %s: configuration done",
+    log_info("Output %s: configuration done (reconnect recovery enabled)",
               output->model[0] ? output->model : "unknown");
 }
 
@@ -95,11 +95,15 @@ static void layer_surface_configure(void *data,
         output->needs_redraw = true;
         dimensions_changed = true;
 
-        log_debug("Layer surface configured: %dx%d", width, height);
+        log_info("Layer surface configured for output %s: %dx%d (reconnection detected)",
+                 output->model[0] ? output->model : "unknown", width, height);
 
         /* Recreate EGL surface with new dimensions */
         if (output->egl_window) {
             wl_egl_window_resize(output->egl_window, width, height, 0, 0);
+            log_debug("Resized EGL window for output %s", output->model);
+        } else {
+            log_debug("No EGL window to resize for output %s, will be created later", output->model);
         }
     }
 
@@ -148,7 +152,11 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 
         if (output) {
             wl_output_add_listener(output_obj, &output_listener, output);
-            log_info("New output detected (name=%u)", name);
+            log_info("New output detected (name=%u, model=%s) - will initialize on configuration", 
+                     name, output->model[0] ? output->model : "pending");
+            /* Set flag to trigger initialization in event loop */
+            state->outputs_need_init = true;
+            log_debug("Set outputs_need_init flag, will initialize after Wayland events are processed");
         } else {
             log_error("Failed to create output state");
             wl_output_destroy(output_obj);

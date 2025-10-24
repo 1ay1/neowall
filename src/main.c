@@ -22,6 +22,7 @@ static void handle_next_wallpaper(int signum);
 static void handle_pause(int signum);
 static void handle_resume(int signum);
 static void handle_shader_speed_adjust(int signum);
+static void handle_crash(int signum);
 
 /* Command descriptor structure */
 typedef struct {
@@ -315,6 +316,37 @@ static void handle_shutdown(int signum) {
     }
 }
 
+/* Handle crash signals (SIGSEGV, SIGBUS, etc.) */
+static void handle_crash(int signum) {
+    const char *signame = "UNKNOWN";
+    switch (signum) {
+        case SIGSEGV: signame = "SIGSEGV (Segmentation fault)"; break;
+        case SIGBUS: signame = "SIGBUS (Bus error)"; break;
+        case SIGILL: signame = "SIGILL (Illegal instruction)"; break;
+        case SIGFPE: signame = "SIGFPE (Floating point exception)"; break;
+        case SIGABRT: signame = "SIGABRT (Abort)"; break;
+    }
+    
+    log_error("CRASH: Received %s (signal %d)", signame, signum);
+    log_error("This likely occurred due to GPU/display disconnection or driver issue");
+    log_error("Error count: %lu, Frames rendered: %lu", 
+              global_state ? global_state->errors_count : 0,
+              global_state ? global_state->frames_rendered : 0);
+    
+    /* Log backtrace hint */
+    log_error("To get a backtrace, run: gdb -p %d", getpid());
+    log_error("Then use 'bt' command in gdb");
+    
+    /* Try to cleanup gracefully */
+    if (global_state) {
+        log_error("Attempting graceful shutdown...");
+        global_state->running = false;
+    }
+    
+    /* Exit with error code */
+    exit(EXIT_FAILURE);
+}
+
 static void handle_reload(int signum) {
     (void)signum;  /* Unused */
     log_info("Received SIGHUP, reloading configuration...");
@@ -431,6 +463,19 @@ static void setup_signal_handlers(void) {
     /* Register shutdown signals */
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+    
+    /* Register crash handlers with separate handler */
+    struct sigaction crash_sa;
+    memset(&crash_sa, 0, sizeof(crash_sa));
+    crash_sa.sa_handler = handle_crash;
+    sigemptyset(&crash_sa.sa_mask);
+    crash_sa.sa_flags = SA_RESETHAND;  /* Reset to default after first crash */
+    
+    sigaction(SIGSEGV, &crash_sa, NULL);
+    sigaction(SIGBUS, &crash_sa, NULL);
+    sigaction(SIGILL, &crash_sa, NULL);
+    sigaction(SIGFPE, &crash_sa, NULL);
+    sigaction(SIGABRT, &crash_sa, NULL);
 
     /* Register all command signals from the table - DRY principle */
     for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
@@ -692,6 +737,7 @@ int main(int argc, char *argv[]) {
     state.running = true;
     state.reload_requested = false;
     state.paused = false;
+    state.outputs_need_init = false;
     atomic_init(&state.next_requested, 0);
     state.watch_config = watch_config;
     state.timer_fd = -1;

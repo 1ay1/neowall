@@ -405,7 +405,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     config->shader_path[0] = '\0';
     config->mode = MODE_FILL;
     config->duration = 0;
-    config->transition = TRANSITION_NONE;
+    config->transition = TRANSITION_FADE;  /* Default to fade for smooth transitions */
     config->transition_duration = 300;
     config->shader_speed = 1.0f;
     config->cycle = false;
@@ -468,6 +468,8 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     if (transition && transition->type == VIBE_TYPE_STRING) {
         config->transition = transition_type_from_string(transition->as_string);
     }
+    /* If transition not specified but we have cycling enabled, keep fade as default */
+    /* If transition is explicitly set to "none", it will override the default */
 
     /* Parse transition_duration */
     VibeValue *transition_duration = vibe_object_get(obj->as_object, "transition_duration");

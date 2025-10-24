@@ -692,6 +692,17 @@ bool render_frame_shader(struct output_state *output) {
         log_error("Invalid output or shader program for render_frame_shader");
         return false;
     }
+    
+    /* Validate EGL context is still valid */
+    if (!output->state || output->state->egl_display == EGL_NO_DISPLAY) {
+        log_error("EGL display not available for shader rendering (display may be disconnected)");
+        return false;
+    }
+    
+    if (output->egl_surface == EGL_NO_SURFACE) {
+        log_error("EGL surface not available for shader rendering (display may be disconnected)");
+        return false;
+    }
 
     /* Set viewport */
     glViewport(0, 0, output->width, output->height);
@@ -716,8 +727,8 @@ bool render_frame_shader(struct output_state *output) {
     if (output->shader_uniforms.position == -2) {
         /* -2 means uninitialized, -1 means not found, >= 0 is valid location */
         output->shader_uniforms.position = glGetAttribLocation(output->live_shader_program, "position");
-        output->shader_uniforms.u_time = glGetUniformLocation(output->live_shader_program, "time");
-        output->shader_uniforms.u_resolution = glGetUniformLocation(output->live_shader_program, "resolution");
+        output->shader_uniforms.u_time = glGetUniformLocation(output->live_shader_program, "_staticwall_time");
+        output->shader_uniforms.u_resolution = glGetUniformLocation(output->live_shader_program, "_staticwall_resolution");
         
         /* Also get iResolution uniform location (Shadertoy vec3) */
         GLint iResolution_loc = glGetUniformLocation(output->live_shader_program, "iResolution");
@@ -791,6 +802,13 @@ bool render_frame_shader(struct output_state *output) {
 
     /* Draw fullscreen quad */
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    /* Check for GL errors */
+    GLenum gl_error = glGetError();
+    if (gl_error != GL_NO_ERROR) {
+        log_error("OpenGL error after shader draw: 0x%x (display may be disconnected)", gl_error);
+        return false;
+    }
 
     /* Clean up */
     glDisableVertexAttribArray(pos_attrib);
@@ -907,6 +925,24 @@ bool render_frame_shader(struct output_state *output) {
                     output->pending_shader_path[0] = '\0';
                 } else {
                     log_error("Failed to load pending shader: %s", output->pending_shader_path);
+                    
+                    /* Clean up iChannel textures that were loaded but can't be used */
+                    if (output->channel_textures) {
+                        for (size_t i = 0; i < output->channel_count; i++) {
+                            if (output->channel_textures[i] != 0) {
+                                render_destroy_texture(output->channel_textures[i]);
+                                output->channel_textures[i] = 0;
+                            }
+                        }
+                        free(output->channel_textures);
+                        output->channel_textures = NULL;
+                    }
+                    if (output->shader_uniforms.iChannel) {
+                        free(output->shader_uniforms.iChannel);
+                        output->shader_uniforms.iChannel = NULL;
+                    }
+                    output->channel_count = 0;
+                    
                     output->shader_fade_start_time = 0;
                     output->pending_shader_path[0] = '\0';
                 }
@@ -968,6 +1004,17 @@ bool render_frame_shader(struct output_state *output) {
 bool render_frame(struct output_state *output) {
     if (!output) {
         log_error("Invalid output for render_frame");
+        return false;
+    }
+    
+    /* Validate EGL context is still valid */
+    if (!output->state || output->state->egl_display == EGL_NO_DISPLAY) {
+        log_error("EGL display not available for rendering (display may be disconnected)");
+        return false;
+    }
+    
+    if (output->egl_surface == EGL_NO_SURFACE) {
+        log_error("EGL surface not available for rendering (display may be disconnected)");
         return false;
     }
 
@@ -1052,6 +1099,13 @@ bool render_frame(struct output_state *output) {
 
     /* Draw quad */
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    /* Check for GL errors */
+    GLenum gl_error = glGetError();
+    if (gl_error != GL_NO_ERROR) {
+        log_error("OpenGL error after draw: 0x%x (display may be disconnected)", gl_error);
+        return false;
+    }
 
     /* Clean up - disable attributes but leave state cached */
     glDisableVertexAttribArray(pos_attrib);

@@ -40,9 +40,9 @@ static const char *shadertoy_wrapper_prefix_es2 =
     "precision highp float;\n"
     "precision highp int;\n"
     "\n"
-    "// Shadertoy compatibility uniforms\n"
-    "uniform float time;          // Maps to iTime\n"
-    "uniform vec2 resolution;     // Maps to iResolution.xy\n"
+    "// Shadertoy compatibility uniforms (prefixed to avoid conflicts)\n"
+    "uniform float _staticwall_time;          // Maps to iTime\n"
+    "uniform vec2 _staticwall_resolution;     // Maps to iResolution.xy\n"
     "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
     "\n"
     "// Shadertoy uniform arrays (must come after precision specifier)\n"
@@ -50,7 +50,7 @@ static const char *shadertoy_wrapper_prefix_es2 =
     "uniform vec3 iChannelResolution[4];\n"
     "\n"
     "// Shadertoy uniforms - defined with default behavior\n"
-    "#define iTime time\n"
+    "#define iTime _staticwall_time\n"
     "#define iTimeDelta 0.016667\n"
     "#define iFrame 0\n"
     "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
@@ -64,9 +64,9 @@ static const char *shadertoy_wrapper_prefix_es3 =
     "precision highp float;\n"
     "precision highp int;\n"
     "\n"
-    "// Shadertoy compatibility uniforms\n"
-    "uniform float time;          // Maps to iTime\n"
-    "uniform vec2 resolution;     // Maps to iResolution.xy\n"
+    "// Shadertoy compatibility uniforms (prefixed to avoid conflicts)\n"
+    "uniform float _staticwall_time;          // Maps to iTime\n"
+    "uniform vec2 _staticwall_resolution;     // Maps to iResolution.xy\n"
     "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
     "\n"
     "// Shadertoy uniform arrays (must come after precision specifier)\n"
@@ -74,7 +74,7 @@ static const char *shadertoy_wrapper_prefix_es3 =
     "uniform vec3 iChannelResolution[4];\n"
     "\n"
     "// Shadertoy uniforms - defined with default behavior\n"
-    "#define iTime time\n"
+    "#define iTime _staticwall_time\n"
     "#define iTimeDelta 0.016667\n"
     "#define iFrame 0\n"
     "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
@@ -126,6 +126,35 @@ static const char *shadertoy_wrapper_suffix_es3 =
     "}\n";
 
 /**
+ * Print shader source with line numbers for debugging
+ */
+static void print_shader_with_line_numbers(const char *source, const char *type) {
+    if (!source) return;
+    
+    log_debug("========== %s SHADER SOURCE (with line numbers) ==========", type);
+    
+    const char *line_start = source;
+    const char *line_end;
+    int line_num = 1;
+    
+    while (*line_start) {
+        line_end = strchr(line_start, '\n');
+        if (line_end) {
+            // Print line with number
+            log_debug("%4d: %.*s", line_num, (int)(line_end - line_start), line_start);
+            line_start = line_end + 1;
+        } else {
+            // Last line without newline
+            log_debug("%4d: %s", line_num, line_start);
+            break;
+        }
+        line_num++;
+    }
+    
+    log_debug("========== END %s SHADER SOURCE ==========", type);
+}
+
+/**
  * Compile a shader
  * 
  * @param type Shader type (GL_VERTEX_SHADER or GL_FRAGMENT_SHADER)
@@ -134,6 +163,10 @@ static const char *shadertoy_wrapper_suffix_es3 =
  */
 static GLuint compile_shader(GLenum type, const char *source) {
     const char *type_str = (type == GL_VERTEX_SHADER) ? "vertex" : "fragment";
+    
+    // Debug: print shader source with line numbers
+    print_shader_with_line_numbers(source, type_str);
+    
     GLuint shader = glCreateShader(type);
     if (shader == 0) {
         log_error("Failed to create %s shader", type_str);
@@ -410,23 +443,29 @@ static bool is_shadertoy_format(const char *source) {
     }
     
     /* Look for mainImage function signature */
-    /* Common patterns:
-     * - void mainImage(out vec4 fragColor, in vec2 fragCoord)
-     * - void mainImage( out vec4 fragColor, in vec2 fragCoord )
-     * We'll search for "mainImage" followed by "fragColor" and "fragCoord"
+    /* Shadertoy shaders define a mainImage function with signature:
+     *   void mainImage(out vec4 <name>, in vec2 <name>)
+     * Parameter names can be anything (fragColor/fragCoord, o/u, col/uv, etc.)
+     * We'll just check for "void mainImage(" or "void mainImage (" patterns
      */
     const char *mainImage = strstr(source, "mainImage");
     if (!mainImage) {
         return false;
     }
     
-    /* Check if fragColor and fragCoord appear after mainImage */
-    const char *fragColor = strstr(mainImage, "fragColor");
-    const char *fragCoord = strstr(mainImage, "fragCoord");
+    /* Check if it's a function definition (has opening parenthesis after mainImage) */
+    const char *openParen = mainImage + strlen("mainImage");
+    while (*openParen && isspace(*openParen)) {
+        openParen++;
+    }
     
-    if (fragColor && fragCoord) {
-        /* Make sure they appear reasonably close (within 100 chars of mainImage) */
-        if ((fragColor - mainImage < 100) && (fragCoord - mainImage < 100)) {
+    if (*openParen == '(') {
+        /* Also check for 'void' keyword before mainImage (within reasonable distance) */
+        const char *checkStart = (mainImage - source) > 20 ? (mainImage - 20) : source;
+        const char *voidKeyword = strstr(checkStart, "void");
+        
+        /* Check if 'void' appears before 'mainImage' in the search window */
+        if (voidKeyword && voidKeyword < mainImage) {
             log_debug("Detected Shadertoy format shader (mainImage function found)");
             return true;
         }
