@@ -1,5 +1,0 @@
-# Test configuration for debugging shader compilation
-default {
-  shader test_shader.glsl
-  shader_speed 1.0
-}
