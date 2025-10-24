@@ -719,6 +719,14 @@ bool render_frame_shader(struct output_state *output) {
         output->shader_uniforms.u_time = glGetUniformLocation(output->live_shader_program, "time");
         output->shader_uniforms.u_resolution = glGetUniformLocation(output->live_shader_program, "resolution");
         
+        /* Also get iResolution uniform location (Shadertoy vec3) */
+        GLint iResolution_loc = glGetUniformLocation(output->live_shader_program, "iResolution");
+        if (iResolution_loc >= 0) {
+            /* Set iResolution as vec3(width, height, aspect_ratio) */
+            float aspect = (float)output->width / (float)output->height;
+            glUniform3f(iResolution_loc, (float)output->width, (float)output->height, aspect);
+        }
+        
         /* Cache iChannel sampler locations */
         if (output->shader_uniforms.iChannel && output->channel_count > 0) {
             for (size_t i = 0; i < output->channel_count; i++) {
@@ -737,6 +745,13 @@ bool render_frame_shader(struct output_state *output) {
 
     if (output->shader_uniforms.u_resolution >= 0) {
         glUniform2f(output->shader_uniforms.u_resolution, (float)output->width, (float)output->height);
+    }
+    
+    /* Update iResolution uniform (Shadertoy vec3) every frame in case resolution changes */
+    GLint iResolution_loc = glGetUniformLocation(output->live_shader_program, "iResolution");
+    if (iResolution_loc >= 0) {
+        float aspect = (float)output->width / (float)output->height;
+        glUniform3f(iResolution_loc, (float)output->width, (float)output->height, aspect);
     }
 
     /* Bind iChannel textures if they exist */
