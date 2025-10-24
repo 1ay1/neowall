@@ -38,11 +38,16 @@ static const char *live_vertex_shader_es3 =
 static const char *shadertoy_wrapper_prefix_es2 =
     "#version 100\n"
     "precision highp float;\n"
+    "precision highp int;\n"
     "\n"
     "// Shadertoy compatibility uniforms\n"
     "uniform float time;          // Maps to iTime\n"
     "uniform vec2 resolution;     // Maps to iResolution.xy\n"
     "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
+    "\n"
+    "// Shadertoy uniform arrays (must come after precision specifier)\n"
+    "uniform vec4 iChannelTime[4];\n"
+    "uniform vec3 iChannelResolution[4];\n"
     "\n"
     "// Shadertoy uniforms - defined with default behavior\n"
     "#define iTime time\n"
@@ -51,19 +56,22 @@ static const char *shadertoy_wrapper_prefix_es2 =
     "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
     "#define iDate vec4(2024.0, 1.0, 1.0, 0.0)\n"
     "#define iSampleRate 44100.0\n"
-    "vec4 iChannelTime[4];\n"
-    "vec3 iChannelResolution[4];\n"
     "\n";
 
 /* Shadertoy compatibility wrapper prefix - ES 3.0 version */
 static const char *shadertoy_wrapper_prefix_es3 =
     "#version 300 es\n"
     "precision highp float;\n"
+    "precision highp int;\n"
     "\n"
     "// Shadertoy compatibility uniforms\n"
     "uniform float time;          // Maps to iTime\n"
     "uniform vec2 resolution;     // Maps to iResolution.xy\n"
     "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
+    "\n"
+    "// Shadertoy uniform arrays (must come after precision specifier)\n"
+    "uniform vec4 iChannelTime[4];\n"
+    "uniform vec3 iChannelResolution[4];\n"
     "\n"
     "// Shadertoy uniforms - defined with default behavior\n"
     "#define iTime time\n"
@@ -72,8 +80,6 @@ static const char *shadertoy_wrapper_prefix_es3 =
     "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
     "#define iDate vec4(2024.0, 1.0, 1.0, 0.0)\n"
     "#define iSampleRate 44100.0\n"
-    "vec4 iChannelTime[4];\n"
-    "vec3 iChannelResolution[4];\n"
     "\n"
     "out vec4 fragColor;\n"
     "\n";
@@ -594,7 +600,28 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
         final_fragment_src = wrap_shadertoy_shader(fragment_src, channel_count);
         log_debug("Final wrapped shader source:");
         log_debug("========================");
-        log_debug("%s", final_fragment_src);
+        
+        /* Print shader with line numbers for easier debugging */
+        if (final_fragment_src) {
+            char *line_start = final_fragment_src;
+            char *line_end;
+            int line_num = 1;
+            
+            while (line_start && *line_start) {
+                line_end = strchr(line_start, '\n');
+                if (line_end) {
+                    *line_end = '\0';
+                    log_debug("%3d: %s", line_num, line_start);
+                    *line_end = '\n';
+                    line_start = line_end + 1;
+                } else {
+                    log_debug("%3d: %s", line_num, line_start);
+                    break;
+                }
+                line_num++;
+            }
+        }
+        
         log_debug("========================");
         if (!final_fragment_src) {
             log_error("Failed to wrap Shadertoy shader");
