@@ -363,27 +363,68 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     log_debug("EGL context made current for output %s",
               output->model[0] ? output->model : "unknown");
 
-    /* If there's an existing shader, start cross-fade transition */
+    /* If there's an existing shader, compile new shader and switch immediately */
     if (output->live_shader_program != 0) {
-        /* Prevent re-entrant cross-fade requests */
+        /* Prevent re-entrant shader changes */
         if (output->shader_fade_start_time > 0 && output->pending_shader_path[0] != '\0') {
-            log_debug("Cross-fade already in progress, ignoring new request for: %s", shader_path);
+            log_debug("Shader change already in progress, ignoring new request for: %s", shader_path);
             return;
         }
         
-        /* Store path to load after fade-out */
-        strncpy(output->pending_shader_path, shader_path, sizeof(output->pending_shader_path) - 1);
-        output->pending_shader_path[sizeof(output->pending_shader_path) - 1] = '\0';
+        log_info("Compiling new shader: %s", shader_path);
         
-        /* Start fade-out by marking fade start time */
-        uint64_t now = get_time_ms();
-        output->shader_fade_start_time = now;
-        output->last_cycle_time = now;  /* Update cycle time to prevent immediate re-trigger */
+        /* Compile new shader immediately (before switching) to avoid stutter */
+        GLuint new_shader_program = 0;
+        if (!shader_create_live_program(shader_path, &new_shader_program, output->channel_count)) {
+            log_error("Failed to create shader program from: %s", shader_path);
+            return;
+        }
+        
+        if (new_shader_program == 0) {
+            log_error("Invalid shader program created for: %s", shader_path);
+            return;
+        }
+        
+        /* Successfully compiled - now switch immediately */
+        log_info("Switching to new shader: %s", shader_path);
+        
+        /* Destroy old shader */
+        shader_destroy_program(output->live_shader_program);
+        
+        /* Switch to new shader */
+        output->live_shader_program = new_shader_program;
+        output->shader_start_time = get_time_ms();
+        
+        /* Reset shader uniform cache for new program */
+        output->shader_uniforms.position = -2;
+        output->shader_uniforms.texcoord = -2;
+        output->shader_uniforms.tex_sampler = -2;
+        output->shader_uniforms.u_resolution = -2;
+        output->shader_uniforms.u_time = -2;
+        output->shader_uniforms.u_speed = -2;
+        
+        /* Reset iChannel uniform locations */
+        if (output->shader_uniforms.iChannel && output->channel_count > 0) {
+            for (size_t i = 0; i < output->channel_count; i++) {
+                output->shader_uniforms.iChannel[i] = -2;
+            }
+        }
+        
+        /* Update config with new shader path */
+        strncpy(output->config.shader_path, shader_path, sizeof(output->config.shader_path) - 1);
+        output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
+        
+        /* Write state to file */
+        const char *mode_str = wallpaper_mode_to_string(output->config.mode);
+        write_wallpaper_state(output->model, shader_path, mode_str,
+                             output->config.current_cycle_index,
+                             output->config.cycle_count);
+        
+        /* Mark for immediate redraw with new shader */
         output->needs_redraw = true;
+        output->last_cycle_time = get_time_ms();
         
-        log_debug("Starting shader cross-fade to: %s", shader_path);
-        
-        /* Don't load new shader yet - it will be loaded during fade */
+        log_info("Shader switched successfully: %s", shader_path);
         return;
     }
     
