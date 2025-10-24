@@ -146,6 +146,9 @@ static void render_outputs(struct staticwall_state *state) {
                              output->model, eglGetError());
                     state->errors_count++;
                 } else {
+                    /* Damage the entire surface to tell compositor it needs repainting */
+                    wl_surface_damage_buffer(output->surface, 0, 0, output->width, output->height);
+                    
                     /* Commit Wayland surface */
                     wl_surface_commit(output->surface);
                     output->last_frame_time = current_time;
