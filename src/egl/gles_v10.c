@@ -27,7 +27,7 @@ bool gles10_init_rendering(struct output_state *output) {
     }
     
     log_debug("Initializing OpenGL ES 1.0 rendering for output %s", output->model);
-    log_warning("OpenGL ES 1.0 is legacy - falling back to ES 2.0+ for actual rendering");
+    log_info("OpenGL ES 1.0 is legacy - falling back to ES 2.0+ for actual rendering");
     
     /* Set viewport */
     glViewport(0, 0, output->width, output->height);
@@ -130,7 +130,7 @@ void gles10_apply_optimizations(struct output_state *output) {
 /* Stub implementations when GLES 1.0 is not available */
 bool gles10_init_rendering(struct output_state *output) {
     (void)output;
-    log_warning("OpenGL ES 1.0 not available - compiled without GLES1 support");
+    log_info("OpenGL ES 1.0 not available - compiled without GLES1 support");
     return false;
 }
 
