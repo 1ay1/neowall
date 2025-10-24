@@ -4,8 +4,8 @@
 
 A blazingly fast Wayland wallpaper daemon that's **statically** compiled but **dynamically** cycles wallpapers. We contain multitudes. 🎭
 
-![Demo](docs/demo.gif)
-*Coming soon: Actual proof this works*
+[![Watch on YouTube](https://img.youtube.com/vi/04mU7Mfvgrw/maxresdefault.jpg)](https://www.youtube.com/watch?v=04mU7Mfvgrw)
+
 
 ## Why "Staticwall" if wallpapers can be animated?
 
