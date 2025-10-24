@@ -2,7 +2,7 @@
 # Copyright (C) 2024
 
 PROJECT = staticwall
-VERSION = 0.2.0
+VERSION = 0.2.1
 
 # Directories
 SRC_DIR = src

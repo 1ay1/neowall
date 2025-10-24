@@ -12,7 +12,7 @@
 #include <GLES2/gl2.h>
 #include "egl/capability.h"
 
-#define STATICWALL_VERSION "0.1.0"
+#define STATICWALL_VERSION "0.2.1"
 #define MAX_PATH_LENGTH 4096
 #define MAX_OUTPUTS 16
 #define MAX_WALLPAPERS 256
