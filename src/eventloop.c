@@ -147,7 +147,7 @@ static void render_outputs(struct staticwall_state *state) {
                     state->errors_count++;
                 } else {
                     /* Damage the entire surface to tell compositor it needs repainting */
-                    wl_surface_damage_buffer(output->surface, 0, 0, output->width, output->height);
+                    wl_surface_damage(output->surface, 0, 0, INT32_MAX, INT32_MAX);
                     
                     /* Commit Wayland surface */
                     wl_surface_commit(output->surface);

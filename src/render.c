@@ -758,6 +758,17 @@ bool render_frame_shader(struct output_state *output) {
         glUniform2f(output->shader_uniforms.u_resolution, (float)output->width, (float)output->height);
     }
     
+    /* Also try direct uniform names for non-Shadertoy shaders */
+    GLint time_loc = glGetUniformLocation(output->live_shader_program, "time");
+    if (time_loc >= 0) {
+        glUniform1f(time_loc, time);
+    }
+    
+    GLint resolution_loc = glGetUniformLocation(output->live_shader_program, "resolution");
+    if (resolution_loc >= 0) {
+        glUniform2f(resolution_loc, (float)output->width, (float)output->height);
+    }
+    
     /* Update iResolution uniform (Shadertoy vec3) every frame in case resolution changes */
     GLint iResolution_loc = glGetUniformLocation(output->live_shader_program, "iResolution");
     if (iResolution_loc >= 0) {
