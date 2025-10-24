@@ -51,15 +51,28 @@ Staticwall uses **VIBE** config format. No quotes needed, just vibes. ✌️
 
 > **"But why VIBE? Why not TOML/YAML/JSON?"**
 > 
-> Look, we're not asking you to use VIBE for your Kubernetes manifests or your enterprise backend config. This is for setting wallpapers. You point it at a picture. Maybe a folder of pictures. Sometimes a shader if you're feeling spicy.
+> Look, I know VIBE isn't perfect. It probably has bugs. It's not battle-tested across a billion production servers. But here's the thing: I **really** didn't want colons (`:`) and quotes (`""`) cluttering my config. And I wanted to **see the hierarchy visually** without counting indentation levels or hunting for closing brackets.
 >
-> VIBE is an **axiom** here. Like "water is wet" or "tabs > spaces" (fight me). It's simple, human-readable, and doesn't make you count brackets at 2 AM. You literally just write:
+> This is for setting wallpapers, not deploying microservices. You point it at a picture. Maybe a folder of pictures. Sometimes a shader if you're feeling spicy.
+>
+> VIBE is an **axiom** here. Like "water is wet" or "tabs > spaces" (fight me). You literally just write:
 >
 > ```vibe
-> path ~/Pictures/cool-mountain.jpg
+> default {
+>   path ~/Pictures/cool-mountain.jpg
+>   mode fill
+> }
+> 
+> output {
+>   HDMI-A-1 {
+>     shader plasma.glsl
+>   }
+> }
 > ```
 >
-> No quotes. No colons. No trauma. Just vibes.
+> See? The braces show you the structure at a glance. No quotes, no colons, no syntax noise. Just pure hierarchy.
+>
+> Is it perfect? No. Will it parse your edge cases? Maybe not. But it parses wallpaper configs beautifully, and that's all we need here.
 >
 > If you want YAML, go configure Ansible. If you want JSON, go configure literally anything else. Here, we vibe. 🌊✨
 
