@@ -368,7 +368,9 @@ install: $(TARGET)
 	@for shader in examples/shaders/*.glsl; do \
 		install -Dm644 $$shader $(DESTDIR)$(PREFIX)/share/$(PROJECT)/shaders/$$(basename $$shader); \
 	done
-	install -Dm644 examples/shaders/README.md $(DESTDIR)$(PREFIX)/share/$(PROJECT)/shaders/README.md
+	@if [ -f examples/shaders/README.md ]; then \
+		install -Dm644 examples/shaders/README.md $(DESTDIR)$(PREFIX)/share/$(PROJECT)/shaders/README.md; \
+	fi
 	@echo ""
 	@echo "$(COLOR_GREEN)Installation complete!$(COLOR_RESET)"
 	@echo "$(COLOR_BLUE)Installed to:$(COLOR_RESET) $(DESTDIR)$(PREFIX)/bin/$(PROJECT)"
