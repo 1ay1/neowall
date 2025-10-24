@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #ifdef HAVE_GLES1
@@ -399,18 +400,28 @@ bool egl_detect_capabilities(EGLDisplay display, egl_capabilities_t *caps) {
         detect_egl_v15_caps(display, &caps->egl_v15);
     }
     
-    /* Detect EGL extensions */
-    caps->has_egl_khr_image_base = egl_has_extension(display, "EGL_KHR_image_base");
-    caps->has_egl_khr_gl_texture_2d_image = egl_has_extension(display, "EGL_KHR_gl_texture_2d_image");
-    caps->has_egl_khr_gl_texture_cubemap_image = egl_has_extension(display, "EGL_KHR_gl_texture_cubemap_image");
-    caps->has_egl_khr_gl_texture_3d_image = egl_has_extension(display, "EGL_KHR_gl_texture_3D_image");
-    caps->has_egl_khr_gl_renderbuffer_image = egl_has_extension(display, "EGL_KHR_gl_renderbuffer_image");
-    caps->has_egl_khr_fence_sync = egl_has_extension(display, "EGL_KHR_fence_sync");
-    caps->has_egl_khr_wait_sync = egl_has_extension(display, "EGL_KHR_wait_sync");
-    caps->has_egl_khr_stream = egl_has_extension(display, "EGL_KHR_stream");
-    caps->has_egl_khr_platform_x11 = egl_has_extension(display, "EGL_KHR_platform_x11");
-    caps->has_egl_khr_platform_wayland = egl_has_extension(display, "EGL_KHR_platform_wayland");
-    caps->has_egl_ext_platform_base = egl_has_extension(display, "EGL_EXT_platform_base");
+    /* Detect EGL extensions - Table-driven approach */
+    static const struct {
+        const char *name;
+        size_t offset;
+    } egl_extension_table[] = {
+        {"EGL_KHR_image_base", offsetof(egl_capabilities_t, has_egl_khr_image_base)},
+        {"EGL_KHR_gl_texture_2d_image", offsetof(egl_capabilities_t, has_egl_khr_gl_texture_2d_image)},
+        {"EGL_KHR_gl_texture_cubemap_image", offsetof(egl_capabilities_t, has_egl_khr_gl_texture_cubemap_image)},
+        {"EGL_KHR_gl_texture_3D_image", offsetof(egl_capabilities_t, has_egl_khr_gl_texture_3d_image)},
+        {"EGL_KHR_gl_renderbuffer_image", offsetof(egl_capabilities_t, has_egl_khr_gl_renderbuffer_image)},
+        {"EGL_KHR_fence_sync", offsetof(egl_capabilities_t, has_egl_khr_fence_sync)},
+        {"EGL_KHR_wait_sync", offsetof(egl_capabilities_t, has_egl_khr_wait_sync)},
+        {"EGL_KHR_stream", offsetof(egl_capabilities_t, has_egl_khr_stream)},
+        {"EGL_KHR_platform_x11", offsetof(egl_capabilities_t, has_egl_khr_platform_x11)},
+        {"EGL_KHR_platform_wayland", offsetof(egl_capabilities_t, has_egl_khr_platform_wayland)},
+        {"EGL_EXT_platform_base", offsetof(egl_capabilities_t, has_egl_ext_platform_base)},
+    };
+    
+    for (size_t i = 0; i < sizeof(egl_extension_table) / sizeof(egl_extension_table[0]); i++) {
+        bool *flag = (bool*)((char*)caps + egl_extension_table[i].offset);
+        *flag = egl_has_extension(display, egl_extension_table[i].name);
+    }
     
     /* Note: OpenGL ES capabilities must be detected after a context is current */
     caps->gles_version = GLES_VERSION_NONE;
@@ -460,37 +471,55 @@ bool gles_detect_capabilities_for_context(EGLDisplay display, EGLContext context
         detect_gles_v32_caps(&caps->gles_v32);
     }
     
-    /* Detect OpenGL ES extensions */
-    caps->has_oes_texture_3d = gles_has_extension("GL_OES_texture_3D");
-    caps->has_oes_packed_depth_stencil = gles_has_extension("GL_OES_packed_depth_stencil");
-    caps->has_oes_depth_texture = gles_has_extension("GL_OES_depth_texture");
-    caps->has_oes_standard_derivatives = gles_has_extension("GL_OES_standard_derivatives");
-    caps->has_oes_vertex_array_object = gles_has_extension("GL_OES_vertex_array_object");
-    caps->has_oes_mapbuffer = gles_has_extension("GL_OES_mapbuffer");
-    caps->has_oes_texture_npot = gles_has_extension("GL_OES_texture_npot");
-    caps->has_oes_texture_float = gles_has_extension("GL_OES_texture_float");
-    caps->has_oes_texture_half_float = gles_has_extension("GL_OES_texture_half_float");
-    caps->has_oes_element_index_uint = gles_has_extension("GL_OES_element_index_uint");
-    caps->has_ext_texture_format_bgra8888 = gles_has_extension("GL_EXT_texture_format_BGRA8888");
-    caps->has_ext_color_buffer_float = gles_has_extension("GL_EXT_color_buffer_float");
-    caps->has_ext_color_buffer_half_float = gles_has_extension("GL_EXT_color_buffer_half_float");
+    /* Detect OpenGL ES extensions - Table-driven approach */
+    static const struct {
+        const char *name;
+        size_t offset;
+    } gles_extension_table[] = {
+        {"GL_OES_texture_3D", offsetof(egl_capabilities_t, has_oes_texture_3d)},
+        {"GL_OES_packed_depth_stencil", offsetof(egl_capabilities_t, has_oes_packed_depth_stencil)},
+        {"GL_OES_depth_texture", offsetof(egl_capabilities_t, has_oes_depth_texture)},
+        {"GL_OES_standard_derivatives", offsetof(egl_capabilities_t, has_oes_standard_derivatives)},
+        {"GL_OES_vertex_array_object", offsetof(egl_capabilities_t, has_oes_vertex_array_object)},
+        {"GL_OES_mapbuffer", offsetof(egl_capabilities_t, has_oes_mapbuffer)},
+        {"GL_OES_texture_npot", offsetof(egl_capabilities_t, has_oes_texture_npot)},
+        {"GL_OES_texture_float", offsetof(egl_capabilities_t, has_oes_texture_float)},
+        {"GL_OES_texture_half_float", offsetof(egl_capabilities_t, has_oes_texture_half_float)},
+        {"GL_OES_element_index_uint", offsetof(egl_capabilities_t, has_oes_element_index_uint)},
+        {"GL_EXT_texture_format_BGRA8888", offsetof(egl_capabilities_t, has_ext_texture_format_bgra8888)},
+        {"GL_EXT_color_buffer_float", offsetof(egl_capabilities_t, has_ext_color_buffer_float)},
+        {"GL_EXT_color_buffer_half_float", offsetof(egl_capabilities_t, has_ext_color_buffer_half_float)},
+    };
+    
+    for (size_t i = 0; i < sizeof(gles_extension_table) / sizeof(gles_extension_table[0]); i++) {
+        bool *flag = (bool*)((char*)caps + gles_extension_table[i].offset);
+        *flag = gles_has_extension(gles_extension_table[i].name);
+    }
     
     return true;
 }
 
-/* Get version strings */
+/* Get version strings - Table lookup */
 const char *egl_version_string(egl_version_t version) {
-    if (version == STATICWALL_EGL_VERSION_1_0) return "1.0";
-    if (version == STATICWALL_EGL_VERSION_1_1) return "1.1";
-    if (version == STATICWALL_EGL_VERSION_1_2) return "1.2";
-    if (version == STATICWALL_EGL_VERSION_1_3) return "1.3";
-    if (version == STATICWALL_EGL_VERSION_1_4) return "1.4";
-    if (version == STATICWALL_EGL_VERSION_1_5) return "1.5";
+    static const char *version_strings[] = {
+        [STATICWALL_EGL_VERSION_UNKNOWN] = "Unknown",
+        [STATICWALL_EGL_VERSION_1_0] = "1.0",
+        [STATICWALL_EGL_VERSION_1_1] = "1.1",
+        [STATICWALL_EGL_VERSION_1_2] = "1.2",
+        [STATICWALL_EGL_VERSION_1_3] = "1.3",
+        [STATICWALL_EGL_VERSION_1_4] = "1.4",
+        [STATICWALL_EGL_VERSION_1_5] = "1.5",
+    };
+    
+    if (version >= 0 && version < (int)(sizeof(version_strings) / sizeof(version_strings[0]))) {
+        return version_strings[version] ? version_strings[version] : "Unknown";
+    }
     return "Unknown";
 }
 
 const char *gles_version_string(gles_version_t version) {
     switch (version) {
+        case GLES_VERSION_NONE: return "None";
         case GLES_VERSION_1_0: return "1.0";
         case GLES_VERSION_1_1: return "1.1";
         case GLES_VERSION_2_0: return "2.0";
