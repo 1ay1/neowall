@@ -398,15 +398,19 @@ void event_loop_run(struct staticwall_state *state) {
             /* Check timerfd - time to cycle wallpaper */
             if (fds[1].revents & POLLIN) {
                 uint64_t expirations;
-                read(state->timer_fd, &expirations, sizeof(expirations));
-                log_debug("Cycle timer expired, checking outputs");
+                ssize_t s = read(state->timer_fd, &expirations, sizeof(expirations));
+                if (s == sizeof(expirations)) {
+                    log_debug("Cycle timer expired (%lu expirations), checking outputs", expirations);
+                }
             }
             
             /* Check eventfd - internal wakeup (config reload, etc) */
             if (fds[2].revents & POLLIN) {
                 uint64_t value;
-                read(state->wakeup_fd, &value, sizeof(value));
-                log_debug("Wakeup event received");
+                ssize_t s = read(state->wakeup_fd, &value, sizeof(value));
+                if (s == sizeof(value)) {
+                    log_debug("Wakeup event received (value=%lu)", value);
+                }
             }
         }
 
