@@ -42,17 +42,17 @@ static const char *shadertoy_wrapper_prefix_es2 =
     "// Shadertoy compatibility uniforms\n"
     "uniform float time;          // Maps to iTime\n"
     "uniform vec2 resolution;     // Maps to iResolution.xy\n"
+    "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
     "\n"
     "// Shadertoy uniforms - defined with default behavior\n"
     "#define iTime time\n"
-    "#define iResolution vec3(resolution, resolution.x/resolution.y)\n"
     "#define iTimeDelta 0.016667\n"
     "#define iFrame 0\n"
     "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
     "#define iDate vec4(2024.0, 1.0, 1.0, 0.0)\n"
     "#define iSampleRate 44100.0\n"
-    "#define iChannelTime vec4(0.0)\n"
-    "#define iChannelResolution vec4(0.0)\n"
+    "vec4 iChannelTime[4];\n"
+    "vec3 iChannelResolution[4];\n"
     "\n";
 
 /* Shadertoy compatibility wrapper prefix - ES 3.0 version */
@@ -63,17 +63,17 @@ static const char *shadertoy_wrapper_prefix_es3 =
     "// Shadertoy compatibility uniforms\n"
     "uniform float time;          // Maps to iTime\n"
     "uniform vec2 resolution;     // Maps to iResolution.xy\n"
+    "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
     "\n"
     "// Shadertoy uniforms - defined with default behavior\n"
     "#define iTime time\n"
-    "#define iResolution vec3(resolution, resolution.x/resolution.y)\n"
     "#define iTimeDelta 0.016667\n"
     "#define iFrame 0\n"
     "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
     "#define iDate vec4(2024.0, 1.0, 1.0, 0.0)\n"
     "#define iSampleRate 44100.0\n"
-    "#define iChannelTime vec4(0.0)\n"
-    "#define iChannelResolution vec4(0.0)\n"
+    "vec4 iChannelTime[4];\n"
+    "vec3 iChannelResolution[4];\n"
     "\n"
     "out vec4 fragColor;\n"
     "\n";
@@ -622,6 +622,14 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
         log_debug("Using ES 3.0 vertex shader");
     } else {
         log_debug("Using ES 2.0 vertex shader");
+    }
+    
+    /* Save wrapped shader for debugging on failure */
+    FILE *debug_fp = fopen("/tmp/staticwall_shader_debug.glsl", "w");
+    if (debug_fp) {
+        fprintf(debug_fp, "%s", final_fragment_src);
+        fclose(debug_fp);
+        log_debug("Saved wrapped shader to /tmp/staticwall_shader_debug.glsl for debugging");
     }
     
     /* Create program with standard vertex shader and loaded fragment shader */
