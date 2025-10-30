@@ -968,10 +968,10 @@ static bool config_create_default(const char *config_path) {
         default_wallpaper_path = "~/Pictures/wallpaper.png";
     }
 
-    /* Try to copy example config from installation as the main config */
+    /* Try to copy config from installation as the main config */
     const char *example_config_paths[] = {
-        "/usr/share/neowall/config.vibe.example",
-        "/usr/local/share/neowall/config.vibe.example",
+        "/usr/share/neowall/config.vibe",
+        "/usr/local/share/neowall/config.vibe",
         NULL
     };
     
@@ -998,6 +998,39 @@ static bool config_create_default(const char *config_path) {
                 fclose(src);
             }
             break;
+        }
+    }
+    
+    /* Copy detailed example config (neowall.vibe) if available */
+    if (home) {
+        const char *detailed_config_paths[] = {
+            "/usr/share/neowall/neowall.vibe",
+            "/usr/local/share/neowall/neowall.vibe",
+            NULL
+        };
+        
+        char detailed_config_path[MAX_PATH_LENGTH];
+        snprintf(detailed_config_path, sizeof(detailed_config_path), 
+                "%s/.config/neowall/neowall.vibe", home);
+        
+        for (int i = 0; detailed_config_paths[i] != NULL; i++) {
+            if (access(detailed_config_paths[i], R_OK) == 0) {
+                FILE *src = fopen(detailed_config_paths[i], "rb");
+                if (src) {
+                    FILE *dst = fopen(detailed_config_path, "wb");
+                    if (dst) {
+                        char buffer[4096];
+                        size_t bytes;
+                        while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+                            fwrite(buffer, 1, bytes, dst);
+                        }
+                        fclose(dst);
+                        log_info("Copied detailed example config to %s", detailed_config_path);
+                    }
+                    fclose(src);
+                }
+                break;
+            }
         }
     }
     

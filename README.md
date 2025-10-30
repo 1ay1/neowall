@@ -50,6 +50,7 @@ For detailed configuration guide, see [docs/CONFIG.md](docs/CONFIG.md)
 # Single shader
 default {
   shader matrix_real.glsl
+  shader_speed 1.0
 }
 
 # Single wallpaper
@@ -67,6 +68,7 @@ default {
 default {
   shader ~/.config/neowall/shaders/
   duration 300
+  shader_speed 1.0
 }
 ```
 
