@@ -1,88 +1,69 @@
 # NeoWall
 
-> "The Matrix, but make it wallpaper."
+> GPU shaders as wallpapers. Because why not.
 
-**NeoWall** brings GPU-powered animated wallpapers to Wayland. Run Shadertoy shaders at 60 FPS with only 2% CPU usage. 10,000+ shaders work out of the box.
+Run Shadertoy shaders on your desktop at 60 FPS. Works with most of the 10,000+ shaders on shadertoy.com.
 
-**Take the red pill.** 🔴💊
+Wayland only. Tested on Hyprland, Sway, and River.
 
 https://github.com/user-attachments/assets/386243d0-53ca-4287-9ab6-873265d3d53a
 
-## Why NeoWall?
+## What
 
-Named after Neo from The Matrix - because your wallpaper can now run The Matrix. Also fits the "neo" family of modern Linux tools (neovim, neofetch). Plus, GPU shaders are the next evolution of wallpapers. 🎬
+A Wayland wallpaper daemon that renders GLSL shaders on your desktop. Also handles static images with transitions.
 
 ## Features
 
-- 🚀 **Insanely Efficient** - 2% CPU at 60 FPS (lighter than video wallpapers)
-- ✨ **10,000+ Shaders Ready** - Full Shadertoy compatibility out of the box
-- 🎬 **Live GPU Animation** - Matrix rain, plasma, fractals, and more
-- 🖼️ **Smooth Transitions** - Fade, slide, glitch, pixelate between wallpapers
-- 🔄 **Auto Cycling** - Point at a folder, automatically switch on interval
-- 🖥️ **Multi-Monitor** - Different wallpaper per screen
-- 🔥 **Hot-Reload** - Edit config, see changes instantly (no restart)
-- ⚡ **Just Works** - Hyprland, Sway, River, and other Wayland compositors
+- Shadertoy-compatible fragment shaders
+- ~2% CPU at 60 FPS (GPU does the work)
+- Static images with transitions (fade, slide, glitch, pixelate)
+- Directory cycling for images and shaders
+- Multi-monitor with per-output configs
+- Hot-reload config on save
+- wlr-layer-shell protocol
 
-## Why NeoWall?
 
-| Feature | NeoWall | swaybg | hyprpaper | wpaperd |
-|---------|------------|--------|-----------|---------|
-| Live GPU Shaders | ✅ | ❌ | ❌ | ❌ |
-| Shadertoy Compatible | ✅ | ❌ | ❌ | ❌ |
-| Smooth Transitions | ✅ | ❌ | ❌ | ✅ |
-| Hot Config Reload | ✅ | ❌ | ❌ | ✅ |
-| Auto Directory Cycling | ✅ | ❌ | ❌ | ✅ |
-| Multi-Monitor | ✅ | ✅ | ✅ | ✅ |
-| Performance | 2% CPU @ 60fps | N/A | N/A | Low |
 
-## Quick Start (30 seconds)
+## Install
 
 ```bash
-# Arch Linux
+# Arch
 yay -S neowall-git
-neowall  # Matrix rain starts automatically 🟢
 
-# Build from source (other distros)
+# From source
 git clone https://github.com/1ay1/neowall
 cd neowall && make -j$(nproc)
 sudo make install
-neowall
-
-# That's it. Your wallpaper is now alive. 🎬
 ```
 
-**Pro tip:** Edit `~/.config/neowall/config.vibe` and see changes instantly. No restart needed.
+Run: `neowall`
+
+Config: `~/.config/neowall/config.vibe` (auto-reloads on save)
 
 ## Configuration
 
-Edit `~/.config/neowall/config.vibe` - clean syntax, no quotes needed:
+`~/.config/neowall/config.vibe`:
 
 ```vibe
-# Run Matrix rain (the featured shader!)
+# Shader
 default {
   shader matrix_real.glsl
   shader_speed 1.0
 }
-```
 
-That's it. Matrix rain on your desktop. 🟢
-
-**Want more?**
-
-```vibe
 # Static image
 default {
   path ~/Pictures/wallpaper.png
 }
 
-# Cycle through images every 5 minutes
+# Cycle images
 default {
   path ~/Pictures/Wallpapers/
   duration 300
   transition fade
 }
 
-# Different wallpaper per monitor
+# Per-monitor
 output {
   eDP-1 {
     shader matrix_real.glsl
@@ -91,19 +72,17 @@ output {
     path ~/Pictures/Nature/
   }
 }
-```
 
-**13+ included shaders:** matrix_real.glsl, matrix_rain.glsl, plasma.glsl, aurora.glsl, 2d_clouds.glsl, fractal_land.glsl, and more in `~/.config/neowall/shaders/`
-
-**Find monitor names:** `hyprctl monitors` (Hyprland) • `swaymsg -t get_outputs` (Sway) • `wlr-randr` (generic)
-
-**Cycle through shaders:** Point at a directory with trailing slash
-```vibe
+# Cycle shaders (directory with trailing slash)
 default {
   shader ~/.config/neowall/shaders/
   duration 300
 }
 ```
+
+Get monitor names: `hyprctl monitors` or `swaymsg -t get_outputs` or `wlr-randr`
+
+Included shaders: matrix_real.glsl, matrix_rain.glsl, plasma.glsl, aurora.glsl, 2d_clouds.glsl, fractal_land.glsl, and more
 
 ## Display Modes
 
@@ -181,20 +160,15 @@ default {
 }
 ```
 
-**Shadertoy Compatible!** Browse [Shadertoy.com](https://www.shadertoy.com/) - 10,000+ shaders work with minimal tweaks. We provide `iTime`, `iResolution`, `iChannel0-4` uniforms automatically.
+Most Shadertoy shaders work with minimal changes. We provide `iTime`, `iResolution`, `iChannel0-4` uniforms. Browse [shadertoy.com](https://www.shadertoy.com/) for more.
 
-## Why NeoWall is Better
+## Technical
 
-**GPU shaders vs everything else:**
-- **vs Static Images:** Boring. It's 2025, not 1995.
-- **vs Video Wallpapers:** Battery killer. 10-20% CPU for a looping MP4.
-- **vs NeoWall:** 2% CPU, infinite variety, 60 FPS. The future.
-
-**What you get:**
-- Single binary, no dependency hell
-- Tested on Hyprland, Sway, River
-- One config file, sensible defaults
-- 13+ included shaders, 10,000+ more available
+- Single binary, statically linked (except glibc, wayland, EGL)
+- Multi-version EGL/GLES support (1.0 through 3.2)
+- wlr-layer-shell protocol for Wayland
+- Shader compilation at runtime
+- ~2% CPU utilization at 60 FPS (GPU-accelerated)
 
 ## Troubleshooting
 
@@ -233,27 +207,17 @@ neowall
 
 ## Contributing
 
-Found a bug? Made a cool shader? Want to add a feature? **PRs welcome!**
-
-Requirements:
-- Write clean, maintainable code
-- Test on at least one compositor (Hyprland, Sway, or River)
-- Share your cool setups with the community
-
-**Made something cool?** Post it on r/unixporn and tag NeoWall!
+PRs welcome. Test on at least one compositor before submitting.
 
 ## License
 
-MIT - Do whatever you want, just don't sue us if your wallpaper becomes sentient. (Looking at you, Matrix rain.) 🟢
+MIT
 
 ## Credits
 
-- VIBE parser by [1ay1/vibe](https://github.com/1ay1/vibe)
-- Inspired by wpaperd, swaybg, and every wallpaper daemon that came before
 - Shader examples adapted from Shadertoy (various authors)
+- Built for the Wayland and r/unixporn communities
 
 ---
 
-**NeoWall** - Your desktop's red pill. 💊✨
-
-*"I know kung fu... and GLSL shaders."* - Neo (probably)
+**NeoWall** - Shaders as wallpapers.
