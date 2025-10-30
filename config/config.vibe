@@ -1,0 +1,46 @@
+# ============================================================================
+# Staticwall Default Configuration
+# ============================================================================
+#
+# Minimal shader configuration - cycles through shader directory
+# Location: ~/.config/staticwall/config.vibe (copy this file there)
+#
+# ============================================================================
+
+default {
+  # Shader directory - cycles through all .glsl files
+  shader ~/.config/staticwall/shaders/
+
+  # Change shader every 5 minutes (300 seconds)
+  duration 300
+
+  # Animation speed (1.0 = normal, 0.5 = slower, 2.0 = faster)
+  shader_speed 1.0
+}
+
+# ============================================================================
+# QUICK TIPS
+# ============================================================================
+#
+# To use images instead:
+#   path ~/Pictures/Wallpapers/
+#   mode fill
+#   transition fade
+#
+# For single static shader:
+#   shader ~/.config/staticwall/shaders/plasma.glsl
+#
+# Add shader inputs (iChannel textures):
+#   channels [
+#     rgba_noise
+#     gray_noise
+#   ]
+#
+# Commands:
+#   staticwall next    - Skip to next shader
+#   staticwall reload  - Reload this config
+#   staticwall -fv     - Debug mode
+#
+# See examples/configs/full_example.vibe for complete documentation
+#
+# ============================================================================

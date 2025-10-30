@@ -1,0 +1,344 @@
+# ============================================================================
+# Staticwall Full Configuration Example
+# ============================================================================
+#
+# This file demonstrates ALL available configuration options with extensive
+# documentation. Use this as a reference for building your own config.
+#
+# Format: VIBE (clean, quote-free configuration language)
+# Location: ~/.config/staticwall/config.vibe
+#
+# ============================================================================
+
+# ============================================================================
+# FUNDAMENTAL RULES
+# ============================================================================
+#
+# 1. MUTUAL EXCLUSIVITY: path XOR shader
+#    ✓ Use 'path' for images (PNG, JPEG, etc.)
+#    ✓ Use 'shader' for GLSL shaders
+#    ✗ NEVER use both in the same block
+#
+# 2. DIRECTORY LOADING
+#    - End paths with '/' to load entire directory
+#    - Files are sorted alphabetically
+#    - Works for both images and shaders
+#
+# 3. VALIDATION
+#    - All values are validated with clear error messages
+#    - Invalid configs fall back to safe defaults
+#    - Hot-reload applies changes automatically (2s delay)
+#
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# DEFAULT CONFIGURATION
+# ----------------------------------------------------------------------------
+# Applied to all outputs unless overridden in outputs {} section
+# Choose ONE mode: either path (images) OR shader (GLSL)
+# ----------------------------------------------------------------------------
+
+default {
+  # ==========================================
+  # OPTION 1: IMAGE MODE
+  # ==========================================
+
+  # Single static image
+  path ~/Pictures/wallpaper.png
+
+  # OR: Cycle through directory of images
+  # path ~/Pictures/Wallpapers/
+  # duration 300                    # Seconds between changes (5 minutes)
+
+  # Display mode - how image fits the screen
+  # Options:
+  #   fill    - Scale to cover screen, crop if needed (recommended)
+  #   fit     - Scale to fit inside, show borders if needed
+  #   center  - No scaling, center as-is
+  #   stretch - Fill screen, ignore aspect ratio
+  #   tile    - Repeat image to fill screen
+  mode fill
+
+  # Transition effect when cycling images
+  # Options: fade, slide_left, slide_right, glitch, pixelate, none
+  transition fade
+
+  # Transition duration in seconds (0.0 - 10.0)
+  # Supports decimals: 0.3, 0.5, 1.2, etc.
+  transition_duration 0.3
+
+  # ==========================================
+  # OPTION 2: SHADER MODE (comment out 'path' above)
+  # ==========================================
+
+  # Single GLSL shader
+  # shader ~/.config/staticwall/shaders/plasma.glsl
+
+  # OR: Cycle through directory of shaders
+  # shader ~/.config/staticwall/shaders/
+  # duration 600                    # Switch shader every 10 minutes
+
+  # Animation speed multiplier (0.1 - 100.0)
+  # 1.0 = normal, 0.5 = half speed, 2.0 = double speed
+  # shader_speed 1.0
+
+  # ==========================================
+  # SHADER INPUTS: iChannel textures
+  # ==========================================
+  # Pass textures to your shaders (like Shadertoy)
+  # Works with both single shaders and shader cycling
+
+  # Built-in procedural textures:
+  #   - rgba_noise  : Colorful noise texture
+  #   - gray_noise  : Grayscale noise
+  #   - blue_noise  : Blue noise distribution
+  #   - wood        : Wood grain pattern
+  #   - abstract    : Abstract geometric pattern
+
+  # OR use custom image files:
+  #   - ~/Pictures/texture.png
+  #   - /usr/share/backgrounds/noise.jpg
+
+  # channels [
+  #   rgba_noise
+  #   gray_noise
+  # ]
+
+  # ==========================================
+  # CYCLING OPTIONS (both image and shader)
+  # ==========================================
+
+  # duration <seconds>
+  #   - Valid range: 0.1 - 86400 (24 hours)
+  #   - Default: 0 (no cycling)
+  #   - Supports decimals: 2.5, 30.0, 600.0
+  #   - Only applies when using directory paths
+}
+
+# ----------------------------------------------------------------------------
+# OUTPUT-SPECIFIC CONFIGURATION
+# ----------------------------------------------------------------------------
+# Override defaults for specific monitors
+# Find output names with: hyprctl monitors / swaymsg -t get_outputs / wlr-randr
+# ----------------------------------------------------------------------------
+
+outputs {
+  # ==========================================
+  # LAPTOP SCREEN: Animated shader wallpaper
+  # ==========================================
+  eDP-1 {
+    # Beautiful aurora shader with custom textures
+    shader ~/.config/staticwall/shaders/aurora.glsl
+
+    # Speed up the animation for more dynamic effect
+    shader_speed 1.5
+
+    # Feed noise textures to the shader
+    channels [
+      rgba_noise
+      gray_noise
+    ]
+  }
+
+  # ==========================================
+  # PRIMARY MONITOR: Cycling nature photos
+  # ==========================================
+  HDMI-A-1 {
+    # Directory of wallpapers (note the trailing /)
+    path ~/Pictures/Nature/
+
+    # Change wallpaper every 10 minutes
+    duration 600
+
+    # Smooth fade between images
+    transition fade
+    transition_duration 0.5
+
+    # Fill entire screen
+    mode fill
+  }
+
+  # ==========================================
+  # SECONDARY MONITOR: Abstract shader cycle
+  # ==========================================
+  DP-1 {
+    # Cycle through abstract shaders
+    shader ~/.config/staticwall/shaders/abstract/
+
+    # Switch every 15 minutes
+    duration 900
+
+    # Slower animation for calmer atmosphere
+    shader_speed 0.7
+
+    # Optional: provide textures for all shaders in directory
+    channels [
+      blue_noise
+    ]
+  }
+
+  # ==========================================
+  # VERTICAL MONITOR: Static portrait image
+  # ==========================================
+  DP-2 {
+    # Single portrait-oriented image
+    path ~/Pictures/vertical-wallpaper.png
+
+    # Fit entire image without cropping
+    mode fit
+  }
+
+  # ==========================================
+  # 4K MONITOR: Tiled pattern
+  # ==========================================
+  DP-3 {
+    # Small repeating pattern
+    path ~/Pictures/patterns/seamless-tile.png
+
+    # Tile mode for repeating pattern
+    mode tile
+  }
+
+  # ==========================================
+  # ULTRAWIDE: Cycling shaders with inputs
+  # ==========================================
+  HDMI-A-2 {
+    # Directory of compatible shaders
+    shader ~/Pictures/ShaderBank/
+
+    # Change every 5 minutes
+    duration 300
+
+    # Provide textures that all shaders can use
+    channels [
+      rgba_noise
+      ~/Pictures/textures/marble.png
+      blue_noise
+    ]
+
+    # Normal animation speed
+    shader_speed 1.0
+  }
+}
+
+# ============================================================================
+# ADVANCED TIPS & TRICKS
+# ============================================================================
+#
+# DIRECTORY ORGANIZATION:
+# ----------------------
+# Name files with numeric prefixes for ordered cycling:
+#   01-sunrise.jpg
+#   02-midday.jpg
+#   03-sunset.jpg
+#   04-night.jpg
+#
+# SHADER COMPATIBILITY:
+# --------------------
+# Most Shadertoy shaders work with minimal changes:
+# - mainImage() is automatically wrapped
+# - iTime, iResolution, iChannel0-3 are supported
+# - Mouse inputs (iMouse) are set to 0
+# - Use channels [] to provide iChannel textures
+#
+# PERFORMANCE TUNING:
+# ------------------
+# - Shaders use GPU, minimal CPU impact
+# - Lower shader_speed to reduce power consumption
+# - Image transitions are brief, no continuous overhead
+# - Static images use virtually no resources
+#
+# TESTING YOUR CONFIG:
+# -------------------
+# 1. Run in foreground: staticwall -f
+# 2. Enable verbose logging: staticwall -fv
+# 3. Check current status: staticwall current
+# 4. Watch logs for validation errors
+#
+# HOT-RELOAD:
+# ----------
+# - Save this file → changes apply automatically (2s delay)
+# - Or force: staticwall reload
+# - No daemon restart needed
+# - Invalid configs fall back to safe defaults
+#
+# COMMON ERRORS TO AVOID:
+# ----------------------
+# ✗ Using both 'path' and 'shader' in same block
+# ✗ Missing trailing / for directory paths
+# ✗ Using 'mode' with shaders (shaders always fullscreen)
+# ✗ Using 'transition' with shaders (no shader transitions)
+# ✗ Using 'shader_speed' with images (only for shaders)
+# ✗ Using 'channels' with images (only for shaders)
+# ✗ Duration too large (max 86400 seconds)
+# ✗ Duration negative or zero with cycling enabled
+#
+# VALIDATION FEATURES:
+# -------------------
+# ✓ All paths are validated (exist, readable)
+# ✓ Duration range checked (0.1 - 86400s)
+# ✓ Shader speed range checked (0.1 - 100.0)
+# ✓ Transition duration range checked (0.0 - 10.0)
+# ✓ Mode-specific field validation (mode only for images, etc.)
+# ✓ Clear error messages with hints
+# ✓ Graceful fallback to built-in defaults
+#
+# ============================================================================
+# STATICWALL COMMANDS
+# ============================================================================
+#
+# Wallpaper Control:
+#   staticwall next      - Skip to next wallpaper/shader
+#   staticwall pause     - Pause automatic cycling
+#   staticwall resume    - Resume cycling
+#   staticwall current   - Show current wallpaper info
+#
+# Configuration:
+#   staticwall reload    - Reload configuration file
+#   staticwall -f        - Run in foreground (debugging)
+#   staticwall -fv       - Foreground with verbose logging
+#
+# Daemon Management:
+#   staticwall           - Start daemon
+#   staticwall kill      - Stop daemon
+#   staticwall status    - Check if daemon is running
+#
+# ============================================================================
+# EXAMPLE CONFIGURATIONS
+# ============================================================================
+#
+# MINIMAL (single image):
+# ----------------------
+# default {
+#   path ~/Pictures/wallpaper.png
+#   mode fill
+# }
+#
+# SIMPLE CYCLING (images):
+# ------------------------
+# default {
+#   path ~/Pictures/Wallpapers/
+#   duration 600
+#   transition fade
+#   mode fill
+# }
+#
+# LIVE SHADER:
+# -----------
+# default {
+#   shader ~/.config/staticwall/shaders/plasma.glsl
+#   shader_speed 1.0
+# }
+#
+# SHADER WITH TEXTURES:
+# --------------------
+# default {
+#   shader ~/.config/staticwall/shaders/aurora.glsl
+#   shader_speed 1.5
+#   channels [
+#     rgba_noise
+#     gray_noise
+#   ]
+# }
+#
+# ============================================================================
