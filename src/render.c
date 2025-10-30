@@ -950,6 +950,24 @@ bool render_frame(struct output_state *output) {
 
     /* Check if this is a shader wallpaper */
     if (output->config.type == WALLPAPER_SHADER) {
+        /* Defensive check: ensure shader program is actually loaded */
+        if (output->live_shader_program == 0) {
+            log_error("Config type is SHADER but shader program not loaded for output %s", 
+                     output->model[0] ? output->model : "unknown");
+            log_error("This may happen after config reload. Attempting to reload shader...");
+            
+            /* Try to load the shader if we have a path */
+            if (output->config.shader_path[0] != '\0') {
+                output_set_shader(output, output->config.shader_path);
+                if (output->live_shader_program == 0) {
+                    log_error("Failed to reload shader, skipping frame");
+                    return false;
+                }
+            } else {
+                log_error("No shader path configured, skipping frame");
+                return false;
+            }
+        }
         return render_frame_shader(output);
     }
 

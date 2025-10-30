@@ -1163,7 +1163,12 @@ static bool apply_builtin_default_config(struct staticwall_state *state) {
             "~/.local/share/staticwall/default.png",
             "~/Pictures/wallpaper.png",
             "~/Pictures/wallpapers/wallpaper.png",
+            "~/Pictures/WallpaperBank/",
+            "~/Pictures/Wallpapers/",
+            "~/Pictures/",
             "/usr/share/backgrounds/default.png",
+            "/usr/share/backgrounds/",
+            "/usr/share/pixmaps/",
             NULL
         };
         
@@ -1175,26 +1180,54 @@ static bool apply_builtin_default_config(struct staticwall_state *state) {
                 strncpy(expanded, try_paths[i], sizeof(expanded) - 1);
             }
             
-            if (access(expanded, R_OK) == 0) {
+            /* Check if it's a file */
+            struct stat st;
+            if (stat(expanded, &st) == 0 && S_ISREG(st.st_mode) && access(expanded, R_OK) == 0) {
                 strncpy(default_config.path, expanded, sizeof(default_config.path) - 1);
                 default_config.path[sizeof(default_config.path) - 1] = '\0';
                 log_info("Using default wallpaper: %s", expanded);
                 break;
             }
+            
+            /* Check if it's a directory with images */
+            if (stat(expanded, &st) == 0 && S_ISDIR(st.st_mode)) {
+                size_t count = 0;
+                char **images = load_images_from_directory(expanded, &count);
+                if (images && count > 0) {
+                    strncpy(default_config.path, images[0], sizeof(default_config.path) - 1);
+                    default_config.path[sizeof(default_config.path) - 1] = '\0';
+                    log_info("Using default wallpaper from directory: %s", default_config.path);
+                    /* Free the list */
+                    for (size_t j = 0; j < count; j++) {
+                        free(images[j]);
+                    }
+                    free(images);
+                    break;
+                }
+                if (images) {
+                    free(images);
+                }
+            }
         }
     }
     
     if (default_config.path[0] == '\0') {
-        log_error("No default wallpaper found. Please create a config file.");
-        return false;
+        log_error("No default wallpaper found in common locations.");
+        log_error("Please create a config file with a valid 'path' or 'shader' setting.");
+        log_info("Continuing without wallpaper - outputs will show black screen.");
+        /* Don't return false - we'll just have black screens which is acceptable */
     }
     
-    /* Apply to all outputs */
+    /* Apply to all outputs - even if no image found, outputs need valid config
+     * If no image was found, the config will have an empty path and outputs
+     * will render black (which is better than crashing or having invalid state) */
     struct output_state *output = state->outputs;
     while (output) {
         struct wallpaper_config config_copy;
         memcpy(&config_copy, &default_config, sizeof(struct wallpaper_config));
         output_apply_config(output, &config_copy);
+        log_debug("Applied default config to output %s", 
+                 output->model[0] ? output->model : "unknown");
         output = output->next;
     }
     
@@ -1453,27 +1486,27 @@ void config_reload(struct staticwall_state *state) {
 
     log_info("Reloading configuration...");
 
-    /* Free existing wallpaper configs from all outputs */
+    /* Don't free old config yet - we need it as fallback if reload fails */
+    
+    /* Try to load new configuration
+     * Note: config_load will either apply the new config successfully,
+     * or call apply_builtin_default_config if the config is invalid.
+     * Either way, the outputs will have a valid config after this call. */
+    bool reload_success = config_load(state, state->config_path);
+    
+    if (reload_success) {
+        log_info("Configuration reloaded successfully");
+    } else {
+        log_info("Configuration reload failed, built-in defaults applied");
+    }
+    
+    /* Mark all outputs for redraw to apply new configuration */
     struct output_state *output = state->outputs;
     while (output) {
-        config_free_wallpaper(&output->config);
+        output->needs_redraw = true;
+        log_debug("Marked output %s for redraw after config reload", 
+                 output->model[0] ? output->model : "unknown");
         output = output->next;
-    }
-
-    /* Load new configuration */
-    if (config_load(state, state->config_path)) {
-        log_info("Configuration reloaded successfully");
-        
-        /* Mark all outputs for redraw to apply new configuration */
-        output = state->outputs;
-        while (output) {
-            output->needs_redraw = true;
-            log_debug("Marked output %s for redraw after config reload", 
-                     output->model[0] ? output->model : "unknown");
-            output = output->next;
-        }
-    } else {
-        log_error("Failed to reload configuration, keeping current settings");
     }
 }
 
