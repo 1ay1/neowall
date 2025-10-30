@@ -55,92 +55,55 @@ neowall
 
 ## Configuration
 
-NeoWall uses **VIBE** config format - no quotes, no colons, just clean hierarchy. Visual structure at a glance.
+Edit `~/.config/neowall/config.vibe` - clean syntax, no quotes needed:
 
 ```vibe
+# Run Matrix rain (the featured shader!)
 default {
-  path ~/Pictures/cool-mountain.jpg
-  mode fill
-}
-
-output {
-  HDMI-A-1 {
-    shader plasma.glsl
-  }
+  shader matrix_real.glsl
+  shader_speed 1.0
 }
 ```
 
-Simple, readable, and perfect for wallpaper configs. YAML is for Kubernetes, this is for wallpapers. 🌊
+That's it. Matrix rain on your desktop. 🟢
 
-### Static Image Wallpaper
+**Want more?**
 
 ```vibe
+# Static image
 default {
   path ~/Pictures/wallpaper.png
-  mode fill
 }
-```
 
-### Cycle Through Images
-
-```vibe
+# Cycle through images every 5 minutes
 default {
-  path ~/Pictures/Wallpapers/    # Trailing slash = directory mode
-  duration 300                    # Change every 5 minutes
-  mode fill
-  transition fade                 # Smooth transitions
+  path ~/Pictures/Wallpapers/
+  duration 300
+  transition fade
 }
-```
 
-### Live Shader Wallpaper 🔥
-
-```vibe
-default {
-  shader aurora.glsl              # Just the filename!
-  shader_speed 1.0                # Animation speed (0.5 = slower, 2.0 = faster)
-}
-```
-
-Shaders are installed to `~/.config/neowall/shaders/` on first run. Includes:
-- `matrix_rain.glsl` - **The Matrix green code (featured!)** ⚡
-- `aurora.glsl` - Northern lights effect
-- `plasma.glsl` - Colorful plasma waves
-- `2d_clouds.glsl` - Procedural clouds
-- And 10+ more!
-
-### Multi-Monitor Setup
-
-```vibe
-# Laptop screen gets a shader
+# Different wallpaper per monitor
 output {
   eDP-1 {
-    shader plasma.glsl
+    shader matrix_real.glsl
   }
-  
-  # External monitor cycles through photos
   HDMI-A-1 {
     path ~/Pictures/Nature/
-    duration 600
-    transition fade
   }
 }
 ```
 
-Find your monitor names:
-- **Sway**: `swaymsg -t get_outputs`
-- **Hyprland**: `hyprctl monitors`
-- **Generic**: `wlr-randr`
+**13+ included shaders:** matrix_real.glsl, matrix_rain.glsl, plasma.glsl, aurora.glsl, 2d_clouds.glsl, fractal_land.glsl, and more in `~/.config/neowall/shaders/`
 
-### Cycle Through Shaders
+**Find monitor names:** `hyprctl monitors` (Hyprland) • `swaymsg -t get_outputs` (Sway) • `wlr-randr` (generic)
 
+**Cycle through shaders:** Point at a directory with trailing slash
 ```vibe
 default {
-  shader ~/.config/neowall/shaders/    # Point at directory
-  duration 300                          # Change shader every 5 minutes
+  shader ~/.config/neowall/shaders/
+  duration 300
 }
 ```
-
-All shaders in the directory cycle alphabetically. Name them `01-aurora.glsl`, `02-plasma.glsl`, etc. for control.
 
 ## Display Modes
 
