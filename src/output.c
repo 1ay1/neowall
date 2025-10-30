@@ -1011,6 +1011,10 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
                           output->model[0] ? output->model : "unknown");
                 /* Config is already stored in output->config, will be applied when surface is ready */
             }
+        } else {
+            log_error("No wallpaper path configured for output %s - cannot load image",
+                     output->model[0] ? output->model : "unknown");
+            log_error("Built-in defaults failed to find a wallpaper. Output will show black screen.");
         }
     }
 

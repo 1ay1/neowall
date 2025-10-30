@@ -1485,13 +1485,62 @@ void config_reload(struct staticwall_state *state) {
     if (!state) return;
 
     log_info("Reloading configuration...");
+    log_info("Performing full cleanup and reset of all outputs...");
 
-    /* Don't free old config yet - we need it as fallback if reload fails */
+    /* Complete cleanup of all output resources - treat reload as fresh start */
+    struct output_state *output = state->outputs;
+    while (output) {
+        /* Free wallpaper config data */
+        config_free_wallpaper(&output->config);
+        
+        /* Clean up image resources */
+        if (output->current_image) {
+            image_free(output->current_image);
+            output->current_image = NULL;
+        }
+        if (output->next_image) {
+            image_free(output->next_image);
+            output->next_image = NULL;
+        }
+        if (output->texture) {
+            render_destroy_texture(output->texture);
+            output->texture = 0;
+        }
+        if (output->next_texture) {
+            render_destroy_texture(output->next_texture);
+            output->next_texture = 0;
+        }
+        
+        /* Clean up shader resources */
+        if (output->live_shader_program) {
+            shader_destroy_program(output->live_shader_program);
+            output->live_shader_program = 0;
+        }
+        if (output->channel_textures) {
+            for (size_t i = 0; i < output->channel_count; i++) {
+                if (output->channel_textures[i]) {
+                    render_destroy_texture(output->channel_textures[i]);
+                }
+            }
+            free(output->channel_textures);
+            output->channel_textures = NULL;
+            output->channel_count = 0;
+        }
+        
+        /* Reset all state */
+        output->transition_start_time = 0;
+        output->transition_progress = 0.0f;
+        output->shader_start_time = 0;
+        output->shader_fade_start_time = 0;
+        output->pending_shader_path[0] = '\0';
+        
+        log_debug("Cleaned up all resources for output %s", 
+                 output->model[0] ? output->model : "unknown");
+        
+        output = output->next;
+    }
     
-    /* Try to load new configuration
-     * Note: config_load will either apply the new config successfully,
-     * or call apply_builtin_default_config if the config is invalid.
-     * Either way, the outputs will have a valid config after this call. */
+    /* Now load new configuration - outputs are clean slate */
     bool reload_success = config_load(state, state->config_path);
     
     if (reload_success) {
@@ -1501,7 +1550,7 @@ void config_reload(struct staticwall_state *state) {
     }
     
     /* Mark all outputs for redraw to apply new configuration */
-    struct output_state *output = state->outputs;
+    output = state->outputs;
     while (output) {
         output->needs_redraw = true;
         log_debug("Marked output %s for redraw after config reload", 
