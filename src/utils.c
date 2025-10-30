@@ -236,7 +236,8 @@ const char *get_state_file_path(void) {
 
 /* Write current wallpaper state */
 bool write_wallpaper_state(const char *output_name, const char *wallpaper_path, 
-                           const char *mode, int cycle_index, int cycle_total) {
+                           const char *mode, int cycle_index, int cycle_total,
+                           const char *status) {
     const char *state_path = get_state_file_path();
     FILE *fp = fopen(state_path, "w");
     
@@ -250,6 +251,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
     fprintf(fp, "mode=%s\n", mode ? mode : "unknown");
     fprintf(fp, "cycle_index=%d\n", cycle_index);
     fprintf(fp, "cycle_total=%d\n", cycle_total);
+    fprintf(fp, "status=%s\n", status ? status : "active");
     fprintf(fp, "timestamp=%ld\n", (long)time(NULL));
     
     fclose(fp);
@@ -312,6 +314,7 @@ bool read_wallpaper_state(void) {
     char output[256] = "unknown";
     char wallpaper[MAX_PATH_LENGTH] = "none";
     char mode[64] = "unknown";
+    char status[256] = "unknown";
     int cycle_index = 0;
     int cycle_total = 0;
     long timestamp = 0;
@@ -333,6 +336,9 @@ bool read_wallpaper_state(void) {
             cycle_index = atoi(line + 12);
         } else if (strncmp(line, "cycle_total=", 12) == 0) {
             cycle_total = atoi(line + 12);
+        } else if (strncmp(line, "status=", 7) == 0) {
+            strncpy(status, line + 7, sizeof(status) - 1);
+            status[sizeof(status) - 1] = '\0';
         } else if (strncmp(line, "timestamp=", 10) == 0) {
             timestamp = atol(line + 10);
         }
@@ -340,20 +346,25 @@ bool read_wallpaper_state(void) {
     
     fclose(fp);
     
-    /* Display the state */
-    printf("Current Wallpaper Status:\n");
+    /* Display state */
+    printf("Staticwall Status:\n");
     printf("  Output: %s\n", output);
     printf("  Wallpaper: %s\n", wallpaper);
     printf("  Mode: %s\n", mode);
-    
     if (cycle_total > 0) {
-        printf("  Cycle: %d/%d\n", cycle_index + 1, cycle_total);
+        printf("  Cycling: %d/%d (%s)\n", cycle_index + 1, cycle_total, status);
+    } else {
+        printf("  Cycling: disabled (single wallpaper)\n");
+        if (strcmp(status, "active") != 0 && strcmp(status, "unknown") != 0) {
+            printf("  Note: %s\n", status);
+        }
     }
-    
     if (timestamp > 0) {
-        time_t now = time(NULL);
-        long elapsed = now - timestamp;
-        printf("  Last changed: %ld seconds ago\n", elapsed);
+        time_t ts = (time_t)timestamp;
+        char time_str[64];
+        struct tm *tm_info = localtime(&ts);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+        printf("  Last updated: %s\n", time_str);
     }
     
     return true;

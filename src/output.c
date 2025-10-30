@@ -260,9 +260,11 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         output->next_texture = output->texture;
         output->texture = render_create_texture(new_image);
         
-        log_debug("Transition started: %s -> %s (type=%d, duration=%ums)",
+        log_info("Transition started: %s -> %s (type=%d '%s', duration=%.2fs)",
                   output->config.path, path,
-                  output->config.transition, output->config.transition_duration);
+                  output->config.transition, 
+                  transition_type_to_string(output->config.transition),
+                  output->config.transition_duration);
     } else {
         /* No transition, just replace */
         if (output->current_image) {
@@ -290,7 +292,8 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     const char *mode_str = wallpaper_mode_to_string(output->config.mode);
     write_wallpaper_state(output->model, path, mode_str, 
                          output->config.current_cycle_index,
-                         output->config.cycle_count);
+                         output->config.cycle_count,
+                         "active");
 
     /* Mark for redraw */
     output->needs_redraw = true;
@@ -418,7 +421,8 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         const char *mode_str = wallpaper_mode_to_string(output->config.mode);
         write_wallpaper_state(output->model, shader_path, mode_str,
                              output->config.current_cycle_index,
-                             output->config.cycle_count);
+                             output->config.cycle_count,
+                             "active");
         
         /* Mark for immediate redraw with new shader */
         output->needs_redraw = true;
@@ -515,18 +519,42 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     const char *mode_str = wallpaper_mode_to_string(output->config.mode);
     write_wallpaper_state(output->model, shader_path, mode_str, 
                          output->config.current_cycle_index,
-                         output->config.cycle_count);
+                         output->config.cycle_count,
+                         "active");
 
     log_info("Live shader wallpaper loaded successfully");
 }
 
 /* Cycle to next wallpaper in the cycle list */
 void output_cycle_wallpaper(struct output_state *output) {
-    if (!output || !output->config.cycle || output->config.cycle_count == 0) {
-        log_error("Cannot cycle: output=%p, cycle=%d, count=%zu",
-                  (void*)output,
-                  output ? output->config.cycle : 0,
-                  output ? output->config.cycle_count : 0);
+    if (!output) {
+        log_error("Cannot cycle wallpaper: output is NULL");
+        return;
+    }
+    
+    if (!output->config.cycle || output->config.cycle_count == 0) {
+        /* Provide clear feedback about why cycling is not possible */
+        const char *output_name = output->model[0] ? output->model : "unknown";
+        
+        if (output->config.cycle_count == 0) {
+            log_info("Cannot cycle wallpaper on output '%s': No wallpapers configured for cycling", 
+                     output_name);
+            log_info("Hint: Configure multiple wallpapers using a directory path or duration setting");
+        } else if (!output->config.cycle) {
+            log_info("Cannot cycle wallpaper on output '%s': Cycling is disabled", 
+                     output_name);
+            log_info("Current wallpaper: %s", 
+                     output->config.type == WALLPAPER_SHADER ? 
+                     output->config.shader_path : output->config.path);
+        }
+        
+        /* Write state file to indicate cycling is not available */
+        const char *current_path = output->config.type == WALLPAPER_SHADER ? 
+                                   output->config.shader_path : output->config.path;
+        const char *mode_str = wallpaper_mode_to_string(output->config.mode);
+        write_wallpaper_state(output->model, current_path, mode_str, 0, 0,
+                             "cycling not enabled");
+        
         return;
     }
 
@@ -534,7 +562,9 @@ void output_cycle_wallpaper(struct output_state *output) {
     if (output->config.type == WALLPAPER_SHADER && 
         output->shader_fade_start_time > 0 && 
         output->pending_shader_path[0] != '\0') {
-        log_debug("Shader cross-fade in progress, deferring cycle request");
+        const char *output_name = output->model[0] ? output->model : "unknown";
+        log_info("Shader transition in progress on output '%s', deferring cycle request", 
+                 output_name);
         return;
     }
 
@@ -584,7 +614,8 @@ void output_cycle_wallpaper(struct output_state *output) {
         const char *mode_str = wallpaper_mode_to_string(output->config.mode);
         write_wallpaper_state(output->model, output->config.shader_path, mode_str,
                              output->config.current_cycle_index,
-                             output->config.cycle_count);
+                             output->config.cycle_count,
+                             "active");
         
         log_info("Image cycled through shader successfully");
     } else {
@@ -605,7 +636,12 @@ void output_cycle_wallpaper(struct output_state *output) {
         } else {
             output_set_wallpaper(output, next_path);
         }
+        
+        /* Mark the output for redraw to ensure change is visible */
+        output->needs_redraw = true;
     }
+    
+    log_info("Wallpaper cycle completed successfully");
 }
 
 /* Check if output needs to cycle wallpaper based on duration */
@@ -618,7 +654,7 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
         return false;
     }
 
-    if (output->config.duration == 0) {
+    if (output->config.duration == 0.0f) {
         return false;
     }
 
@@ -636,7 +672,7 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
     }
 
     uint64_t elapsed_ms = current_time - output->last_cycle_time;
-    uint64_t duration_ms = output->config.duration  * MS_PER_SECOND;
+    uint64_t duration_ms = (uint64_t)(output->config.duration * 1000.0f);  /* Convert seconds to milliseconds */
 
     bool should_cycle = elapsed_ms >= duration_ms;
 
@@ -697,6 +733,13 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
               (void*)output->egl_surface,
               (void*)output->egl_window,
               output->configured);
+    
+    log_info("Config for output %s: type=%s, mode=%s, transition=%d, duration=%.2fs",
+             output->model[0] ? output->model : "unknown",
+             config->type == WALLPAPER_SHADER ? "shader" : "image",
+             wallpaper_mode_to_string(config->mode),
+             config->transition,
+             config->duration);
 
     /* Free old channel_paths if they exist */
     if (output->config.channel_paths) {
@@ -724,6 +767,9 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
 
     /* Copy configuration (shallow copy for now, will handle cycle_paths and channel_paths separately) */
     memcpy(&output->config, config, sizeof(struct wallpaper_config));
+    
+    log_debug("After memcpy - output->config.transition=%d, output->config.transition_duration=%u",
+              output->config.transition, output->config.transition_duration);
     
     /* Deep copy channel_paths array if present */
     output->config.channel_paths = NULL;

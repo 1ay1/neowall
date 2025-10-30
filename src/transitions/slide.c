@@ -86,36 +86,26 @@ static bool render_slide_transition(struct output_state *output, float progress,
     /* Calculate slide offset */
     float offset = slide_left ? progress : -progress;
 
-    /* Render old image (sliding out) with proper display mode */
-    float old_vertices[16];
-    calculate_vertex_coords_for_image(output, output->next_image, old_vertices);
+    /* Setup fullscreen quad using DRY helper */
+    float vertices[16];
+    transition_setup_fullscreen_quad(output->vbo, vertices);
     
-    /* Adjust position based on slide direction */
+    /* Adjust position based on slide direction for old image (sliding out) */
     for (int i = 0; i < 4; i++) {
-        old_vertices[i * 4] = old_vertices[i * 4] - (offset * 2.0f);
+        vertices[i * 4] = vertices[i * 4] - (offset * 2.0f);
     }
-
-    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(old_vertices), old_vertices, GL_DYNAMIC_DRAW);
-
-    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
-                         4 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(pos_attrib);
-
-    glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
-                         4 * sizeof(float), (void*)(2 * sizeof(float)));
-    glEnableVertexAttribArray(tex_attrib);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, output->next_texture);
     
-    /* Handle tile mode texture wrapping */
-    if (output->config.mode == MODE_TILE) {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    } else {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    /* Upload modified vertices */
+    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+
+    /* Setup vertex attributes using DRY helper */
+    transition_setup_common_attributes(output->program, output->vbo);
+
+    /* Bind old texture using DRY helper */
+    transition_bind_texture_for_transition(output->next_texture, GL_TEXTURE0);
+    if (tex_uniform >= 0) {
+        glUniform1i(tex_uniform, 0);
     }
     
     glUniform1i(tex_uniform, 0);
@@ -126,29 +116,23 @@ static bool render_slide_transition(struct output_state *output, float progress,
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-    /* Render new image (sliding in) with proper display mode */
-    float new_vertices[16];
-    calculate_vertex_coords_for_image(output, output->current_image, new_vertices);
+    /* Reset to fullscreen quad for new image (sliding in) */
+    transition_setup_fullscreen_quad(output->vbo, vertices);
     
     /* Adjust position to slide in from opposite side */
     float slide_in_offset = slide_left ? (1.0f - progress) : -(1.0f - progress);
     
     for (int i = 0; i < 4; i++) {
-        new_vertices[i * 4] = new_vertices[i * 4] + (slide_in_offset * 2.0f);
+        vertices[i * 4] = vertices[i * 4] + (slide_in_offset * 2.0f);
     }
 
-    glBufferData(GL_ARRAY_BUFFER, sizeof(new_vertices), new_vertices, GL_DYNAMIC_DRAW);
+    /* Upload modified vertices */
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, output->texture);
-    
-    /* Handle tile mode texture wrapping */
-    if (output->config.mode == MODE_TILE) {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    } else {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    /* Bind new texture using DRY helper */
+    transition_bind_texture_for_transition(output->texture, GL_TEXTURE0);
+    if (tex_uniform >= 0) {
+        glUniform1i(tex_uniform, 0);
     }
     
     glUniform1i(tex_uniform, 0);
@@ -160,9 +144,12 @@ static bool render_slide_transition(struct output_state *output, float progress,
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     /* Clean up */
-    glDisable(GL_BLEND);
-    glDisableVertexAttribArray(pos_attrib);
-    glDisableVertexAttribArray(tex_attrib);
+    if (pos_attrib >= 0) {
+        glDisableVertexAttribArray(pos_attrib);
+    }
+    if (tex_attrib >= 0) {
+        glDisableVertexAttribArray(tex_attrib);
+    }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);

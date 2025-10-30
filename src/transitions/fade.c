@@ -59,12 +59,23 @@ bool shader_create_fade_program(GLuint *program) {
  */
 bool transition_fade_render(struct output_state *output, float progress) {
     if (!output || !output->current_image || !output->next_image) {
+        log_error("Fade transition: invalid parameters (output=%p)", (void*)output);
         return false;
     }
 
     if (output->texture == 0 || output->next_texture == 0) {
+        log_error("Fade transition: missing textures (texture=%u, next_texture=%u)",
+                 output->texture, output->next_texture);
         return false;
     }
+
+    if (output->program == 0) {
+        log_error("Fade transition: program not initialized");
+        return false;
+    }
+
+    log_debug("Fade transition rendering: progress=%.2f, program=%u", 
+             progress, output->program);
 
     /* Set viewport */
     glViewport(0, 0, output->width, output->height);
@@ -76,80 +87,61 @@ bool transition_fade_render(struct output_state *output, float progress) {
     /* Use shader program */
     glUseProgram(output->program);
 
-    /* Get attribute locations */
-    GLint pos_attrib = glGetAttribLocation(output->program, "position");
-    GLint tex_attrib = glGetAttribLocation(output->program, "texcoord");
+    /* Get uniform locations */
     GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
     GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
-
-    /* Bind VBO */
-    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-
-    /* Set up vertex attributes */
-    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
-                         4 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(pos_attrib);
-
-    glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
-                         4 * sizeof(float), (void*)(2 * sizeof(float)));
-    glEnableVertexAttribArray(tex_attrib);
 
     /* Enable blending */
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    /* First, render the old image (next_image) fully opaque with its proper display mode */
-    float old_vertices[16];
-    calculate_vertex_coords_for_image(output, output->next_image, old_vertices);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(old_vertices), old_vertices, GL_DYNAMIC_DRAW);
+    /* Setup fullscreen quad using DRY helper */
+    float vertices[16];
+    transition_setup_fullscreen_quad(output->vbo, vertices);
+    
+    /* Setup vertex attributes using DRY helper */
+    transition_setup_common_attributes(output->program, output->vbo);
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, output->next_texture);
-    glUniform1i(tex_uniform, 0);
+    /* Bind old texture (transitioning from) using DRY helper */
+    transition_bind_texture_for_transition(output->next_texture, GL_TEXTURE0);
+    if (tex_uniform >= 0) {
+        glUniform1i(tex_uniform, 0);
+    }
 
+    /* Set old image to full opacity */
     if (alpha_uniform >= 0) {
         glUniform1f(alpha_uniform, 1.0f);
     }
 
-    /* Handle tile mode texture wrapping for old image */
-    if (output->config.mode == MODE_TILE) {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    } else {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    }
-
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-    /* Then, render the new image (current_image) with alpha based on progress and its proper display mode */
-    float new_vertices[16];
-    calculate_vertex_coords_for_image(output, output->current_image, new_vertices);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(new_vertices), new_vertices, GL_DYNAMIC_DRAW);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, output->texture);
-    glUniform1i(tex_uniform, 0);
-
-    if (alpha_uniform >= 0) {
-        glUniform1f(alpha_uniform, progress);
+    /* Bind new texture (transitioning to) using DRY helper */
+    transition_bind_texture_for_transition(output->texture, GL_TEXTURE0);
+    
+    if (tex_uniform >= 0) {
+        glUniform1i(tex_uniform, 0);
     }
 
-    /* Handle tile mode texture wrapping for new image */
-    if (output->config.mode == MODE_TILE) {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    } else {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    /* Set new image alpha based on transition progress */
+    if (alpha_uniform >= 0) {
+        glUniform1f(alpha_uniform, progress);
     }
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     /* Clean up */
     glDisable(GL_BLEND);
-    glDisableVertexAttribArray(pos_attrib);
-    glDisableVertexAttribArray(tex_attrib);
+    
+    /* Disable vertex attributes */
+    GLint pos_attrib_cleanup = glGetAttribLocation(output->program, "position");
+    GLint tex_attrib_cleanup = glGetAttribLocation(output->program, "texcoord");
+    
+    if (pos_attrib_cleanup >= 0) {
+        glDisableVertexAttribArray(pos_attrib_cleanup);
+    }
+    if (tex_attrib_cleanup >= 0) {
+        glDisableVertexAttribArray(tex_attrib_cleanup);
+    }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
@@ -161,6 +153,7 @@ bool transition_fade_render(struct output_state *output, float progress) {
         return false;
     }
 
+    log_debug("Fade transition frame rendered successfully");
     output->needs_redraw = true;
     output->frames_rendered++;
 

@@ -24,10 +24,10 @@ static void update_cycle_timer(struct staticwall_state *state) {
     /* Find the earliest cycle time across all outputs */
     struct output_state *output = state->outputs;
     while (output) {
-        if (!state->paused && output->config.cycle && output->config.duration > 0 &&
+        if (!state->paused && output->config.cycle && output->config.duration > 0.0f &&
             output->config.cycle_count > 1 && output->current_image) {
             uint64_t elapsed_ms = now - output->last_cycle_time;
-            uint64_t duration_ms = output->config.duration * MS_PER_SECOND;
+            uint64_t duration_ms = (uint64_t)(output->config.duration * 1000.0f);  /* Convert seconds to milliseconds */
             
             if (elapsed_ms >= duration_ms) {
                 /* Should cycle now */
@@ -79,9 +79,21 @@ static void render_outputs(struct staticwall_state *state) {
     /* Check if there are any pending next requests - process ONE globally per frame to ensure rendering */
     int next_count = atomic_load(&state->next_requested);
     bool processed_next = false;
+    bool has_cycleable_output = false;
+    int total_outputs = 0;
     
     if (next_count > 0) {
         log_debug("Processing next request: %d pending in queue", next_count);
+        
+        /* First pass: check if any output can actually cycle */
+        struct output_state *check_output = state->outputs;
+        while (check_output) {
+            total_outputs++;
+            if (check_output->config.cycle && check_output->config.cycle_count > 0) {
+                has_cycleable_output = true;
+            }
+            check_output = check_output->next;
+        }
     }
 
     while (output) {
@@ -97,7 +109,7 @@ static void render_outputs(struct staticwall_state *state) {
         }
         
         /* Check if we should cycle wallpaper (timer-driven) */
-        if (!state->paused && output->config.cycle && output->config.duration > 0) {
+        if (!state->paused && output->config.cycle && output->config.duration > 0.0f) {
             if (output_should_cycle(output, current_time)) {
                 output_cycle_wallpaper(output);
                 current_time = get_time_ms();
@@ -124,7 +136,8 @@ static void render_outputs(struct staticwall_state *state) {
             if (output->transition_start_time > 0 &&
                 output->config.transition != TRANSITION_NONE) {
                 uint64_t elapsed = current_time - output->transition_start_time;
-                float progress = (float)elapsed / (float)output->config.transition_duration;
+                uint64_t transition_duration_ms = (uint64_t)(output->config.transition_duration * 1000.0f);
+                float progress = (float)elapsed / (float)transition_duration_ms;
 
                 if (progress >= 1.0f) {
                     /* Clamp progress to 1.0 for final frame */
@@ -182,6 +195,27 @@ static void render_outputs(struct staticwall_state *state) {
         }
 
         output = output->next;
+    }
+    
+    /* If we had a next request but couldn't process it, inform the user */
+    if (next_count > 0 && !processed_next) {
+        if (!has_cycleable_output) {
+            if (total_outputs == 0) {
+                log_info("Cannot cycle wallpaper: No outputs are configured");
+            } else if (total_outputs == 1) {
+                log_info("Cannot cycle wallpaper: Current configuration has only a single wallpaper (no cycling enabled)");
+                log_info("To enable cycling:");
+                log_info("  - Use a directory path ending with '/' (e.g., path ~/Pictures/Wallpapers/)");
+                log_info("  - Or configure a 'duration' to cycle through multiple wallpapers");
+                log_info("  - Or specify multiple 'shader' files in a directory");
+            } else {
+                log_info("Cannot cycle wallpaper: None of the %d outputs have cycling enabled", total_outputs);
+                log_info("Hint: Configure cycling with directory paths or duration settings");
+            }
+        }
+        
+        /* Decrement the counter since we can't fulfill the request */
+        atomic_fetch_sub(&state->next_requested, 1);
     }
     
     /* Update timer after rendering changes */
@@ -242,8 +276,8 @@ void event_loop_run(struct staticwall_state *state) {
     /* Log initial cycling configuration for debugging */
     struct output_state *output = state->outputs;
     while (output) {
-        if (output->config.cycle && output->config.duration > 0) {
-            log_info("Output %s: cycling enabled with %zu images, duration %us",
+        if (output->config.cycle && output->config.duration > 0.0f) {
+            log_info("Output %s: cycling enabled with %zu images, duration %.2fs",
                      output->model[0] ? output->model : "unknown",
                      output->config.cycle_count,
                      output->config.duration);
