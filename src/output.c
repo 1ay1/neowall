@@ -277,6 +277,8 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
             render_destroy_texture(output->texture);
         }
         output->texture = render_create_texture(new_image);
+        log_info("Wallpaper texture created successfully (texture=%u) for output %s", 
+                 output->texture, output->model[0] ? output->model : "unknown");
     }
 
     /* Update config path */
@@ -1005,10 +1007,16 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         if (initial_path[0] != '\0') {
             /* Check if output is ready for wallpaper loading */
             if (output->egl_surface != EGL_NO_SURFACE && output->egl_window) {
+                log_info("Loading wallpaper for output %s: %s", 
+                         output->model[0] ? output->model : "unknown", initial_path);
                 output_set_wallpaper(output, initial_path);
+                log_info("Wallpaper load completed for output %s", 
+                         output->model[0] ? output->model : "unknown");
             } else {
-                log_debug("Output %s not ready for wallpaper load, storing config for later",
-                          output->model[0] ? output->model : "unknown");
+                log_error("Output %s not ready for wallpaper load (surface=%p, window=%p)",
+                          output->model[0] ? output->model : "unknown",
+                          (void*)output->egl_surface, (void*)output->egl_window);
+                log_error("This may indicate a problem after config reload cleanup");
                 /* Config is already stored in output->config, will be applied when surface is ready */
             }
         } else {
