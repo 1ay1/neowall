@@ -619,9 +619,17 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             log_error("[%s] 'mode' must be a string", context_name);
             return false;
         }
+        
+        if (config->type == WALLPAPER_SHADER) {
+            log_error("[%s] INVALID CONFIG: 'mode' specified in SHADER mode. "
+                     "Display modes (fill, fit, center, etc.) only apply to image wallpapers. "
+                     "Shaders always render fullscreen.", context_name);
+            return false;
+        }
+        
         config->mode = wallpaper_mode_from_string(mode_val->as_string);
     }
-    
+        
     /* Parse duration (for cycling) */
     VibeValue *duration_val = vibe_object_get(obj->as_object, "duration");
     if (duration_val) {
@@ -660,11 +668,19 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             log_error("[%s] 'transition' must be a string", context_name);
             return false;
         }
+        
         config->transition = transition_type_from_string(transition_val->as_string);
+        
+        if (config->type == WALLPAPER_SHADER) {
+            log_error("[%s] INVALID CONFIG: 'transition' specified in SHADER mode. "
+                     "Transitions only apply to image wallpapers. This setting is invalid for shaders.", 
+                     context_name);
+            return false;
+        }
+        
         log_info("[%s] Transition set to: %s (type=%d)", context_name, 
                  transition_val->as_string, config->transition);
     }
-    
     /* Parse transition_duration */
     VibeValue *trans_dur_val = vibe_object_get(obj->as_object, "transition_duration");
     if (trans_dur_val) {
@@ -689,6 +705,13 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         }
         
         config->transition_duration = (float)trans_duration_value;
+        
+        if (config->type == WALLPAPER_SHADER) {
+            log_error("[%s] INVALID CONFIG: 'transition_duration' specified in SHADER mode. "
+                     "Transitions only apply to image wallpapers. This setting is invalid for shaders.", 
+                     context_name);
+            return false;
+        }
         
         log_info("[%s] Transition duration set to: %.2f seconds", context_name, config->transition_duration);
     }
@@ -717,8 +740,10 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         config->shader_speed = (float)speed;
         
         if (config->type != WALLPAPER_SHADER) {
-            log_info("[%s] 'shader_speed' specified but not in shader mode. "
-                    "This setting will have no effect.", context_name);
+            log_error("[%s] INVALID CONFIG: 'shader_speed' specified in IMAGE mode. "
+                     "Shader speed only applies to GLSL shaders. This setting is invalid for images.", 
+                     context_name);
+            return false;
         }
     }
     
@@ -733,8 +758,10 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         size_t count = channels_val->as_array->count;
         if (count > 0) {
             if (config->type != WALLPAPER_SHADER) {
-                log_info("[%s] 'channels' specified but not in shader mode. "
-                        "This setting will have no effect.", context_name);
+                log_error("[%s] INVALID CONFIG: 'channels' specified in IMAGE mode. "
+                         "Channels (iChannel textures) only apply to GLSL shaders. This setting is invalid for images.", 
+                         context_name);
+                return false;
             }
             
             config->channel_count = count;
@@ -1201,8 +1228,8 @@ bool config_load(struct staticwall_state *state, const char *config_path) {
         }
     }
 
-    /* Store modification time for watching */
-    state->config_mtime = st.st_mtime;
+    /* Store modification time temporarily for comparison */
+    time_t new_mtime = st.st_mtime;
 
     /* Read file content */
     FILE *fp = fopen(config_path, "r");
@@ -1382,10 +1409,13 @@ bool config_load(struct staticwall_state *state, const char *config_path) {
     vibe_parser_free(parser);
 
     if (config_applied) {
+        /* Only update mtime if config was successfully loaded */
+        state->config_mtime = new_mtime;
         log_info("Configuration loaded successfully");
         return true;
     } else {
         log_error("No valid configuration found in file, using built-in defaults");
+        /* Don't update mtime so we can detect when config is fixed */
         return apply_builtin_default_config(state);
     }
 }

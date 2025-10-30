@@ -741,6 +741,58 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
              config->transition,
              config->duration);
 
+    /* Clean up old resources when switching modes */
+    if (output->config.type != config->type) {
+        log_info("Switching mode from %s to %s, cleaning up old resources",
+                 output->config.type == WALLPAPER_SHADER ? "shader" : "image",
+                 config->type == WALLPAPER_SHADER ? "shader" : "image");
+        
+        if (output->config.type == WALLPAPER_IMAGE) {
+            /* Switching from IMAGE to SHADER - clean up image resources */
+            if (output->current_image) {
+                image_free(output->current_image);
+                output->current_image = NULL;
+            }
+            if (output->next_image) {
+                image_free(output->next_image);
+                output->next_image = NULL;
+            }
+            if (output->texture) {
+                render_destroy_texture(output->texture);
+                output->texture = 0;
+            }
+            if (output->next_texture) {
+                render_destroy_texture(output->next_texture);
+                output->next_texture = 0;
+            }
+            /* Reset transition state */
+            output->transition_start_time = 0;
+            output->transition_progress = 0.0f;
+            
+        } else if (output->config.type == WALLPAPER_SHADER) {
+            /* Switching from SHADER to IMAGE - clean up shader resources */
+            if (output->live_shader_program) {
+                shader_destroy_program(output->live_shader_program);
+                output->live_shader_program = 0;
+            }
+            /* Clean up channel textures */
+            if (output->channel_textures) {
+                for (size_t i = 0; i < output->channel_count; i++) {
+                    if (output->channel_textures[i]) {
+                        render_destroy_texture(output->channel_textures[i]);
+                    }
+                }
+                free(output->channel_textures);
+                output->channel_textures = NULL;
+                output->channel_count = 0;
+            }
+            /* Reset shader state */
+            output->shader_start_time = 0;
+            output->shader_fade_start_time = 0;
+            output->pending_shader_path[0] = '\0';
+        }
+    }
+
     /* Free old channel_paths if they exist */
     if (output->config.channel_paths) {
         for (size_t i = 0; i < output->config.channel_count; i++) {
