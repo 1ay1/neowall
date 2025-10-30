@@ -1,10 +1,10 @@
 # Maintainer: Your Name <your.email@example.com>
-pkgname=staticwall-git
-pkgver=0.2.0.r0.gcf99dac
+pkgname=neowall-git
+pkgver=0.3.0.r0.gcf99dac
 pkgrel=1
-pkgdesc="Dynamic Wayland wallpaper manager with live shader support"
+pkgdesc="GPU shader wallpapers for Wayland"
 arch=('x86_64' 'aarch64')
-url="https://github.com/1ay1/staticwall"
+url="https://github.com/1ay1/neowall"
 license=('MIT')
 depends=(
     'wayland'
@@ -19,42 +19,36 @@ makedepends=(
     'wayland-protocols'
     'pkgconf'
 )
-provides=('staticwall')
-conflicts=('staticwall')
-source=("git+https://github.com/1ay1/staticwall.git")
+provides=('neowall')
+conflicts=('neowall')
+install=neowall.install
+source=("git+https://github.com/1ay1/neowall.git")
 sha256sums=('SKIP')
 
 pkgver() {
-    cd "$srcdir/staticwall"
-    # Get version from git tags, with format: TAG.rREVISIONS.gHASH
-    # Example: 0.2.0.r12.gabc1234
+    cd "$srcdir/neowall"
     git describe --long --tags 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' || \
     printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
-    cd "$srcdir/staticwall"
+    cd "$srcdir/neowall"
     make
 }
 
 package() {
-    cd "$srcdir/staticwall"
+    cd "$srcdir/neowall"
 
     # Install binary
-    install -Dm755 build/bin/staticwall "$pkgdir/usr/bin/staticwall"
+    install -Dm755 build/bin/neowall "$pkgdir/usr/bin/neowall"
 
-    # Install example config
-    install -Dm644 config/staticwall.vibe "$pkgdir/usr/share/staticwall/config.vibe.example"
+    # Install configs
+    install -Dm644 config/config.vibe "$pkgdir/usr/share/neowall/config.vibe"
+    install -Dm644 config/neowall.vibe "$pkgdir/usr/share/neowall/neowall.vibe"
 
-    # Install default wallpaper
-    install -Dm644 assets/default.png "$pkgdir/usr/share/staticwall/default.png"
-
-    # Install example shaders
-    install -dm755 "$pkgdir/usr/share/staticwall/shaders"
-    install -m644 examples/shaders/*.glsl "$pkgdir/usr/share/staticwall/shaders/"
-
-    # Install shader README
-    install -Dm644 examples/shaders/README.md "$pkgdir/usr/share/staticwall/shaders/README.md"
+    # Install shaders
+    install -dm755 "$pkgdir/usr/share/neowall/shaders"
+    install -m644 examples/shaders/*.glsl "$pkgdir/usr/share/neowall/shaders/"
 
     # Install license
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
