@@ -40,6 +40,8 @@ Run: `neowall`
 
 Config: `~/.config/neowall/config.vibe` (auto-reloads on save)
 
+For detailed configuration guide, see [docs/CONFIG.md](docs/CONFIG.md)
+
 ## Configuration
 
 `~/.config/neowall/config.vibe`:
