@@ -338,6 +338,7 @@ void event_loop_run(struct staticwall_state *state) {
         /* Handle configuration reload if requested */
         if (state->reload_requested) {
             log_info("Config reload requested, reloading...");
+            state->reload_requested = false;  /* Reset flag before reload */
             config_reload(state);
             /* Update cycle timer with new configuration */
             update_cycle_timer(state);

@@ -1448,7 +1448,8 @@ bool config_load(struct staticwall_state *state, const char *config_path) {
         return true;
     } else {
         log_error("No valid configuration found in file, using built-in defaults");
-        /* Don't update mtime so we can detect when config is fixed */
+        /* Update mtime to prevent repeated reloading of the same invalid config */
+        state->config_mtime = new_mtime;
         return apply_builtin_default_config(state);
     }
 }
@@ -1574,21 +1575,23 @@ void *config_watch_thread(void *arg) {
         if (!state->running) break;
 
         if (config_has_changed(state)) {
-            log_info("Configuration file changed, reloading...");
+            log_info("Configuration file changed, signaling main thread to reload...");
             
+            /* Signal main thread to handle reload (config_reload does EGL operations
+             * which must happen on the main thread, not the watcher thread) */
             pthread_mutex_lock(&state->state_mutex);
-            config_reload(state);
+            state->reload_requested = true;
             pthread_mutex_unlock(&state->state_mutex);
             
-            /* Wake up the event loop to process changes immediately */
+            /* Wake up the event loop to process reload immediately */
             if (state->wakeup_fd >= 0) {
                 uint64_t value = 1;
                 ssize_t s = write(state->wakeup_fd, &value, sizeof(value));
                 if (s != sizeof(value)) {
-                    log_error("Failed to wake event loop after config reload: %s", 
+                    log_error("Failed to wake event loop after config change: %s", 
                              strerror(errno));
                 } else {
-                    log_debug("Event loop woken for config reload");
+                    log_debug("Event loop woken to handle config reload");
                 }
             }
         }
