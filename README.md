@@ -47,44 +47,32 @@ For detailed configuration guide, see [docs/CONFIG.md](docs/CONFIG.md)
 `~/.config/neowall/config.vibe`:
 
 ```vibe
-# Shader
+# Single shader
 default {
   shader matrix_real.glsl
-  shader_speed 1.0
 }
 
-# Static image
+# Single wallpaper
 default {
   path ~/Pictures/wallpaper.png
 }
 
-# Cycle images
+# Cycle through wallpapers (add trailing slash + duration)
 default {
   path ~/Pictures/Wallpapers/
   duration 300
-  transition fade
 }
 
-# Per-monitor
-output {
-  eDP-1 {
-    shader matrix_real.glsl
-  }
-  HDMI-A-1 {
-    path ~/Pictures/Nature/
-  }
-}
-
-# Cycle shaders (directory with trailing slash)
+# Cycle through shaders (add trailing slash + duration)
 default {
   shader ~/.config/neowall/shaders/
   duration 300
 }
 ```
 
-Get monitor names: `hyprctl monitors` or `swaymsg -t get_outputs` or `wlr-randr`
+See [docs/CONFIG.md](docs/CONFIG.md) for per-monitor config and all options.
 
-Included shaders: matrix_real.glsl, matrix_rain.glsl, plasma.glsl, aurora.glsl, 2d_clouds.glsl, fractal_land.glsl, and more
+Included shaders: matrix_real.glsl, matrix_rain.glsl, plasma.glsl, aurora.glsl, 2d_clouds.glsl, and more
 
 ## Display Modes
 
