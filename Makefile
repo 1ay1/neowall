@@ -22,12 +22,7 @@ CFLAGS = -Wall -Wextra -Werror -pedantic -std=c11 -O2 -D_POSIX_C_SOURCE=200809L
 CFLAGS += -I$(INC_DIR) -I$(PROTO_DIR)
 LDFLAGS = -lwayland-client -lwayland-egl -lpthread -lm
 
-# Color output for pretty printing
-COLOR_BLUE = \033[1;34m
-COLOR_GREEN = \033[1;32m
-COLOR_YELLOW = \033[1;33m
-COLOR_RED = \033[1;31m
-COLOR_RESET = \033[0m
+
 
 # ============================================================================
 # Automatic EGL and OpenGL ES Version Detection
@@ -82,9 +77,9 @@ HAS_EGL_KHR_FENCE := $(shell grep -q "EGL_KHR_fence_sync" /usr/include/EGL/eglex
 ifeq ($(HAS_EGL),yes)
     CFLAGS += -DHAVE_EGL
     LDFLAGS += -lEGL
-    $(info $(COLOR_GREEN)✓ EGL detected: $(EGL_VERSION)$(COLOR_RESET))
+    $(info EGL detected: $(EGL_VERSION))
 else
-    $(error $(COLOR_RED)✗ EGL not found - required for NeoWall$(COLOR_RESET))
+    $(error EGL not found - required for NeoWall)
 endif
 
 # OpenGL ES 1.x support (optional, for legacy compatibility)
@@ -92,10 +87,10 @@ ifeq ($(HAS_GLES1_CM),yes)
     CFLAGS += -DHAVE_GLES1
     LDFLAGS += -lGLESv1_CM
     GLES1_SUPPORT := yes
-    $(info $(COLOR_YELLOW)✓ OpenGL ES 1.x detected (legacy support)$(COLOR_RESET))
+    $(info OpenGL ES 1.x detected (legacy support))
 else
     GLES1_SUPPORT := no
-    $(info $(COLOR_BLUE)○ OpenGL ES 1.x not found (optional)$(COLOR_RESET))
+    $(info OpenGL ES 1.x not found (optional))
 endif
 
 # OpenGL ES 2.0 support (required minimum)
@@ -103,50 +98,50 @@ ifeq ($(HAS_GLES2),yes)
     CFLAGS += -DHAVE_GLES2
     LDFLAGS += -lGLESv2
     GLES2_SUPPORT := yes
-    $(info $(COLOR_GREEN)✓ OpenGL ES 2.0 detected$(COLOR_RESET))
+    $(info OpenGL ES 2.0 detected)
 else
-    $(error $(COLOR_RED)✗ OpenGL ES 2.0 not found - minimum requirement$(COLOR_RESET))
+    $(error x OpenGL ES 2.0 not found - minimum requirement$(COLOR_RESET))
 endif
 
 # OpenGL ES 3.0 support
 ifeq ($(HAS_GLES30),yes)
     CFLAGS += -DHAVE_GLES3 -DHAVE_GLES30
     GLES30_SUPPORT := yes
-    $(info $(COLOR_GREEN)✓ OpenGL ES 3.0 detected (enhanced Shadertoy support)$(COLOR_RESET))
+    $(info OpenGL ES 3.0 detected (enhanced Shadertoy support))
 else
     GLES30_SUPPORT := no
-    $(info $(COLOR_YELLOW)○ OpenGL ES 3.0 not found (Shadertoy compatibility limited)$(COLOR_RESET))
+    $(info o OpenGL ES 3.0 not found (Shadertoy compatibility limited)$(COLOR_RESET))
 endif
 
 # OpenGL ES 3.1 support
 ifeq ($(HAS_GLES31),yes)
     CFLAGS += -DHAVE_GLES31
     GLES31_SUPPORT := yes
-    $(info $(COLOR_GREEN)✓ OpenGL ES 3.1 detected (compute shader support)$(COLOR_RESET))
+    $(info OpenGL ES 3.1 detected (compute shader support))
 else
     GLES31_SUPPORT := no
-    $(info $(COLOR_BLUE)○ OpenGL ES 3.1 not found (optional)$(COLOR_RESET))
+    $(info o OpenGL ES 3.1 not found (optional)$(COLOR_RESET))
 endif
 
 # OpenGL ES 3.2 support
 ifeq ($(HAS_GLES32),yes)
     CFLAGS += -DHAVE_GLES32
     GLES32_SUPPORT := yes
-    $(info $(COLOR_GREEN)✓ OpenGL ES 3.2 detected (geometry/tessellation shaders)$(COLOR_RESET))
+    $(info OpenGL ES 3.2 detected (geometry/tessellation shaders))
 else
     GLES32_SUPPORT := no
-    $(info $(COLOR_BLUE)○ OpenGL ES 3.2 not found (optional)$(COLOR_RESET))
+    $(info o OpenGL ES 3.2 not found (optional)$(COLOR_RESET))
 endif
 
 # EGL extensions
 ifeq ($(HAS_EGL_KHR_IMAGE),yes)
     CFLAGS += -DHAVE_EGL_KHR_IMAGE
-    $(info $(COLOR_GREEN)✓ EGL_KHR_image extension available$(COLOR_RESET))
+    $(info EGL_KHR_image extension available)
 endif
 
 ifeq ($(HAS_EGL_KHR_FENCE),yes)
     CFLAGS += -DHAVE_EGL_KHR_FENCE_SYNC
-    $(info $(COLOR_GREEN)✓ EGL_KHR_fence_sync extension available$(COLOR_RESET))
+    $(info EGL_KHR_fence_sync extension available)
 endif
 
 # ============================================================================
@@ -251,40 +246,40 @@ all: banner directories protocols $(TARGET) success
 
 # Banner
 banner:
-	@echo "$(COLOR_BLUE)"
-	@echo "╔════════════════════════════════════════════════════════════════╗"
-	@echo "║           NeoWall - Multi-Version EGL/OpenGL ES             ║"
-	@echo "║                    Version $(VERSION)                              ║"
-	@echo "╚════════════════════════════════════════════════════════════════╝"
-	@echo "$(COLOR_RESET)"
+	@echo ""
+	@echo ""
+	@echo ""
+	@echo ""
+	@echo ""
+	@echo ""
 
 # Success message
 success:
 	@echo ""
-	@echo "$(COLOR_GREEN)╔════════════════════════════════════════════════════════════════╗$(COLOR_RESET)"
-	@echo "$(COLOR_GREEN)║                  BUILD SUCCESSFUL!                             ║$(COLOR_RESET)"
-	@echo "$(COLOR_GREEN)╚════════════════════════════════════════════════════════════════╝$(COLOR_RESET)"
+	@echo "$(COLOR_RESET)"
+	@echo "$(COLOR_RESET)"
+	@echo "$(COLOR_RESET)"
 	@echo ""
-	@echo "$(COLOR_BLUE)Binary:$(COLOR_RESET) $(TARGET)"
-	@echo "$(COLOR_BLUE)Supported versions:$(COLOR_RESET)"
+	@echo "Binary:$(COLOR_RESET) $(TARGET)"
+	@echo "Supported versions:$(COLOR_RESET)"
 ifeq ($(GLES32_SUPPORT),yes)
-	@echo "  $(COLOR_GREEN)✓$(COLOR_RESET) OpenGL ES 3.2 (geometry/tessellation shaders)"
+	@echo "  +$(COLOR_RESET) OpenGL ES 3.2 (geometry/tessellation shaders)"
 endif
 ifeq ($(GLES31_SUPPORT),yes)
-	@echo "  $(COLOR_GREEN)✓$(COLOR_RESET) OpenGL ES 3.1 (compute shaders)"
+	@echo "  +$(COLOR_RESET) OpenGL ES 3.1 (compute shaders)"
 endif
 ifeq ($(GLES30_SUPPORT),yes)
-	@echo "  $(COLOR_GREEN)✓$(COLOR_RESET) OpenGL ES 3.0 (enhanced Shadertoy)"
+	@echo "  +$(COLOR_RESET) OpenGL ES 3.0 (enhanced Shadertoy)"
 endif
 ifeq ($(GLES2_SUPPORT),yes)
-	@echo "  $(COLOR_GREEN)✓$(COLOR_RESET) OpenGL ES 2.0 (baseline)"
+	@echo "  +$(COLOR_RESET) OpenGL ES 2.0 (baseline)"
 endif
 ifeq ($(GLES1_SUPPORT),yes)
-	@echo "  $(COLOR_YELLOW)✓$(COLOR_RESET) OpenGL ES 1.x (legacy)"
+	@echo "  +$(COLOR_RESET) OpenGL ES 1.x (legacy)"
 endif
 	@echo ""
-	@echo "$(COLOR_BLUE)Run:$(COLOR_RESET) ./$(TARGET)"
-	@echo "$(COLOR_BLUE)Install:$(COLOR_RESET) sudo make install"
+	@echo "Run:$(COLOR_RESET) ./$(TARGET)"
+	@echo "Install:$(COLOR_RESET) sudo make install"
 	@echo ""
 
 # Create necessary directories
@@ -296,60 +291,60 @@ protocols: $(PROTO_HEADERS) $(PROTO_SRCS)
 
 $(PROTO_DIR)/%-client-protocol.h: | directories
 	@if [ -f "$(WLR_LAYER_SHELL_XML)" ]; then \
-		echo "$(COLOR_BLUE)Generating wlr-layer-shell header...$(COLOR_RESET)"; \
-		wayland-scanner client-header $(WLR_LAYER_SHELL_XML) $@ 2>/dev/null || echo "$(COLOR_YELLOW)Warning: Could not generate wlr-layer-shell header$(COLOR_RESET)"; \
+		echo "Generating wlr-layer-shell header...$(COLOR_RESET)"; \
+		wayland-scanner client-header $(WLR_LAYER_SHELL_XML) $@ 2>/dev/null || echo "Warning: Could not generate wlr-layer-shell header$(COLOR_RESET)"; \
 	fi
 	@if [ -f "$(XDG_SHELL_XML)" ]; then \
-		echo "$(COLOR_BLUE)Generating xdg-shell header...$(COLOR_RESET)"; \
-		wayland-scanner client-header $(XDG_SHELL_XML) $(PROTO_DIR)/xdg-shell-client-protocol.h 2>/dev/null || echo "$(COLOR_YELLOW)Warning: Could not generate xdg-shell header$(COLOR_RESET)"; \
+		echo "Generating xdg-shell header...$(COLOR_RESET)"; \
+		wayland-scanner client-header $(XDG_SHELL_XML) $(PROTO_DIR)/xdg-shell-client-protocol.h 2>/dev/null || echo "Warning: Could not generate xdg-shell header$(COLOR_RESET)"; \
 	fi
 	@if [ -f "$(VIEWPORTER_XML)" ]; then \
-		echo "$(COLOR_BLUE)Generating viewporter header...$(COLOR_RESET)"; \
-		wayland-scanner client-header $(VIEWPORTER_XML) $(PROTO_DIR)/viewporter-client-protocol.h 2>/dev/null || echo "$(COLOR_YELLOW)Warning: Could not generate viewporter header$(COLOR_RESET)"; \
+		echo "Generating viewporter header...$(COLOR_RESET)"; \
+		wayland-scanner client-header $(VIEWPORTER_XML) $(PROTO_DIR)/viewporter-client-protocol.h 2>/dev/null || echo "Warning: Could not generate viewporter header$(COLOR_RESET)"; \
 	fi
 
 $(PROTO_DIR)/%-client-protocol.c: | directories
 	@if [ -f "$(WLR_LAYER_SHELL_XML)" ]; then \
-		echo "$(COLOR_BLUE)Generating wlr-layer-shell code...$(COLOR_RESET)"; \
-		wayland-scanner private-code $(WLR_LAYER_SHELL_XML) $(PROTO_DIR)/wlr-layer-shell-unstable-v1-client-protocol.c 2>/dev/null || echo "$(COLOR_YELLOW)Warning: Could not generate wlr-layer-shell code$(COLOR_RESET)"; \
+		echo "Generating wlr-layer-shell code...$(COLOR_RESET)"; \
+		wayland-scanner private-code $(WLR_LAYER_SHELL_XML) $(PROTO_DIR)/wlr-layer-shell-unstable-v1-client-protocol.c 2>/dev/null || echo "Warning: Could not generate wlr-layer-shell code$(COLOR_RESET)"; \
 	fi
 	@if [ -f "$(XDG_SHELL_XML)" ]; then \
-		echo "$(COLOR_BLUE)Generating xdg-shell code...$(COLOR_RESET)"; \
-		wayland-scanner private-code $(XDG_SHELL_XML) $(PROTO_DIR)/xdg-shell-client-protocol.c 2>/dev/null || echo "$(COLOR_YELLOW)Warning: Could not generate xdg-shell code$(COLOR_RESET)"; \
+		echo "Generating xdg-shell code...$(COLOR_RESET)"; \
+		wayland-scanner private-code $(XDG_SHELL_XML) $(PROTO_DIR)/xdg-shell-client-protocol.c 2>/dev/null || echo "Warning: Could not generate xdg-shell code$(COLOR_RESET)"; \
 	fi
 	@if [ -f "$(VIEWPORTER_XML)" ]; then \
-		echo "$(COLOR_BLUE)Generating viewporter code...$(COLOR_RESET)"; \
-		wayland-scanner private-code $(VIEWPORTER_XML) $(PROTO_DIR)/viewporter-client-protocol.c 2>/dev/null || echo "$(COLOR_YELLOW)Warning: Could not generate viewporter code$(COLOR_RESET)"; \
+		echo "Generating viewporter code...$(COLOR_RESET)"; \
+		wayland-scanner private-code $(VIEWPORTER_XML) $(PROTO_DIR)/viewporter-client-protocol.c 2>/dev/null || echo "Warning: Could not generate viewporter code$(COLOR_RESET)"; \
 	fi
 
 # Compile protocol objects
 $(OBJ_DIR)/proto_%.o: $(PROTO_DIR)/%.c $(PROTO_HEADERS) | directories
-	@echo "$(COLOR_BLUE)Compiling protocol:$(COLOR_RESET) $<"
+	@echo "Compiling protocol: $<"
 	@$(CC) $(CFLAGS) -Wno-unused-parameter -c $< -o $@
 
 # Compile core source files
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | directories protocols
-	@echo "$(COLOR_BLUE)Compiling:$(COLOR_RESET) $<"
+	@echo "Compiling: $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 # Compile EGL source files
 $(EGL_OBJ_DIR)/%.o: $(EGL_DIR)/%.c | directories protocols
-	@echo "$(COLOR_BLUE)Compiling EGL:$(COLOR_RESET) $<"
+	@echo "Compiling EGL: $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 # Compile transition files
 $(OBJ_DIR)/transitions_%.o: $(SRC_DIR)/transitions/%.c | directories protocols
-	@echo "$(COLOR_BLUE)Compiling transition:$(COLOR_RESET) $<"
+	@echo "Compiling transition: $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 # Compile texture files
 $(OBJ_DIR)/textures_%.o: $(SRC_DIR)/textures/%.c | directories protocols
-	@echo "$(COLOR_BLUE)Compiling texture:$(COLOR_RESET) $<"
+	@echo "Compiling texture: $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 # Link the binary
 $(TARGET): $(ALL_OBJECTS)
-	@echo "$(COLOR_GREEN)Linking:$(COLOR_RESET) $(TARGET)"
+	@echo "Linking: $(TARGET)"
 	@$(CC) $(ALL_OBJECTS) -o $@ $(LDFLAGS)
 
 # ============================================================================
@@ -360,47 +355,40 @@ PREFIX ?= /usr/local
 DESTDIR ?=
 
 install: $(TARGET)
-	@echo "$(COLOR_GREEN)Installing NeoWall...$(COLOR_RESET)"
+	@echo "Installing NeoWall..."
 	install -Dm755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/$(PROJECT)
-	install -Dm644 config/neowall.vibe $(DESTDIR)$(PREFIX)/share/$(PROJECT)/config.vibe.example
-	install -Dm644 $(ASSETS_DIR)/default.png $(DESTDIR)$(PREFIX)/share/$(PROJECT)/default.png
-	@mkdir -p $(DESTDIR)$(PREFIX)/share/$(PROJECT)/shaders
+	install -Dm644 config/config.vibe $(DESTDIR)/usr/share/$(PROJECT)/config.vibe
+	install -Dm644 config/neowall.vibe $(DESTDIR)/usr/share/$(PROJECT)/neowall.vibe
+	@mkdir -p $(DESTDIR)/usr/share/$(PROJECT)/shaders
 	@for shader in examples/shaders/*.glsl; do \
-		install -Dm644 $$shader $(DESTDIR)$(PREFIX)/share/$(PROJECT)/shaders/$$(basename $$shader); \
+		install -Dm644 $$shader $(DESTDIR)/usr/share/$(PROJECT)/shaders/$$(basename $$shader); \
 	done
-	@if [ -f examples/shaders/README.md ]; then \
-		install -Dm644 examples/shaders/README.md $(DESTDIR)$(PREFIX)/share/$(PROJECT)/shaders/README.md; \
-	fi
-	@echo ""
-	@echo "$(COLOR_GREEN)Installation complete!$(COLOR_RESET)"
-	@echo "$(COLOR_BLUE)Installed to:$(COLOR_RESET) $(DESTDIR)$(PREFIX)/bin/$(PROJECT)"
-	@echo "$(COLOR_BLUE)Example config:$(COLOR_RESET) $(DESTDIR)$(PREFIX)/share/$(PROJECT)/config.vibe.example"
-	@echo "$(COLOR_BLUE)Example shaders:$(COLOR_RESET) $(DESTDIR)$(PREFIX)/share/$(PROJECT)/shaders/"
-	@echo ""
-	@echo "$(COLOR_YELLOW)Note:$(COLOR_RESET) NeoWall runs as normal user. No sudo needed to run!"
-	@echo "$(COLOR_YELLOW)On first run, config will be copied to ~/.config/neowall/$(COLOR_RESET)"
-	@echo ""
+	@echo "Installation complete"
+	@echo "Installed to: $(DESTDIR)$(PREFIX)/bin/$(PROJECT)"
+	@echo "Config files: /usr/share/$(PROJECT)/"
+	@echo "Shaders: /usr/share/$(PROJECT)/shaders/"
+	@echo "On first run, files will be copied to ~/.config/neowall/"
 
 # Uninstall
 uninstall:
-	@echo "$(COLOR_RED)Uninstalling NeoWall...$(COLOR_RESET)"
+	@echo "Uninstalling NeoWall..."
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(PROJECT)
-	rm -rf $(DESTDIR)$(PREFIX)/share/$(PROJECT)
-	@echo "$(COLOR_GREEN)Uninstalled$(COLOR_RESET)"
+	rm -rf /usr/share/$(PROJECT)
+	@echo "Uninstalled"
 
 # ============================================================================
 # Cleaning
 # ============================================================================
 
 clean:
-	@echo "$(COLOR_YELLOW)Cleaning build directory...$(COLOR_RESET)"
+	@echo "Cleaning build directory..."
 	rm -rf $(BUILD_DIR)
-	@echo "$(COLOR_GREEN)Cleaned$(COLOR_RESET)"
+	@echo "Cleaned"
 
 distclean: clean
-	@echo "$(COLOR_YELLOW)Cleaning generated protocol files...$(COLOR_RESET)"
+	@echo "Cleaning generated protocol files..."
 	rm -rf $(PROTO_DIR)/*.c $(PROTO_DIR)/*.h
-	@echo "$(COLOR_GREEN)All generated files cleaned$(COLOR_RESET)"
+	@echo "All generated files cleaned"
 
 # ============================================================================
 # Development Targets
@@ -417,7 +405,7 @@ run-verbose: $(TARGET)
 # Debug build
 debug: CFLAGS += -g -DDEBUG -O0
 debug: clean $(TARGET)
-	@echo "$(COLOR_GREEN)Debug build complete$(COLOR_RESET)"
+	@echo "Debug build complete"
 
 # Run with capability detection debugging
 run-capabilities: $(TARGET)
@@ -425,32 +413,32 @@ run-capabilities: $(TARGET)
 
 # Print detected capabilities
 print-caps:
-	@echo "$(COLOR_BLUE)Detected Capabilities:$(COLOR_RESET)"
-	@echo "  EGL: $(if $(HAS_EGL),$(COLOR_GREEN)Yes$(COLOR_RESET) ($(EGL_VERSION)),$(COLOR_RED)No$(COLOR_RESET))"
-	@echo "  OpenGL ES 1.x: $(if $(filter yes,$(GLES1_SUPPORT)),$(COLOR_GREEN)Yes$(COLOR_RESET),$(COLOR_YELLOW)No$(COLOR_RESET))"
-	@echo "  OpenGL ES 2.0: $(if $(filter yes,$(GLES2_SUPPORT)),$(COLOR_GREEN)Yes$(COLOR_RESET),$(COLOR_RED)No$(COLOR_RESET))"
-	@echo "  OpenGL ES 3.0: $(if $(filter yes,$(GLES30_SUPPORT)),$(COLOR_GREEN)Yes$(COLOR_RESET),$(COLOR_YELLOW)No$(COLOR_RESET))"
-	@echo "  OpenGL ES 3.1: $(if $(filter yes,$(GLES31_SUPPORT)),$(COLOR_GREEN)Yes$(COLOR_RESET),$(COLOR_YELLOW)No$(COLOR_RESET))"
-	@echo "  OpenGL ES 3.2: $(if $(filter yes,$(GLES32_SUPPORT)),$(COLOR_GREEN)Yes$(COLOR_RESET),$(COLOR_YELLOW)No$(COLOR_RESET))"
+	@echo "Detected Capabilities:"
+	@echo "  EGL: $(if $(HAS_EGL),Yes ($(EGL_VERSION)),No)"
+	@echo "  OpenGL ES 1.x: $(if $(filter yes,$(GLES1_SUPPORT)),Yes,No)"
+	@echo "  OpenGL ES 2.0: $(if $(filter yes,$(GLES2_SUPPORT)),Yes,No)"
+	@echo "  OpenGL ES 3.0: $(if $(filter yes,$(GLES30_SUPPORT)),Yes,No)"
+	@echo "  OpenGL ES 3.1: $(if $(filter yes,$(GLES31_SUPPORT)),Yes,No)"
+	@echo "  OpenGL ES 3.2: $(if $(filter yes,$(GLES32_SUPPORT)),Yes,No)"
 
 # Code formatting (if clang-format is available)
 format:
 	@if command -v clang-format >/dev/null 2>&1; then \
-		echo "$(COLOR_BLUE)Formatting code...$(COLOR_RESET)"; \
+		echo "Formatting code..."; \
 		find $(SRC_DIR) $(INC_DIR) -name '*.c' -o -name '*.h' | xargs clang-format -i; \
-		echo "$(COLOR_GREEN)Code formatted$(COLOR_RESET)"; \
+		echo "Code formatted"; \
 	else \
-		echo "$(COLOR_YELLOW)clang-format not found, skipping$(COLOR_RESET)"; \
+		echo "clang-format not found, skipping"; \
 	fi
 
 # Static analysis (if cppcheck is available)
 analyze:
 	@if command -v cppcheck >/dev/null 2>&1; then \
-		echo "$(COLOR_BLUE)Running static analysis...$(COLOR_RESET)"; \
+		echo "Running static analysis..."; \
 		cppcheck --enable=all --suppress=missingIncludeSystem $(SRC_DIR) 2>&1; \
-		echo "$(COLOR_GREEN)Analysis complete$(COLOR_RESET)"; \
+		echo "Analysis complete"; \
 	else \
-		echo "$(COLOR_YELLOW)cppcheck not found, skipping$(COLOR_RESET)"; \
+		echo "cppcheck not found, skipping"; \
 	fi
 
 # ============================================================================
@@ -458,38 +446,33 @@ analyze:
 # ============================================================================
 
 help:
-	@echo "$(COLOR_BLUE)╔════════════════════════════════════════════════════════════════╗$(COLOR_RESET)"
-	@echo "$(COLOR_BLUE)║           NeoWall Multi-Version Build System                ║$(COLOR_RESET)"
-	@echo "$(COLOR_BLUE)╚════════════════════════════════════════════════════════════════╝$(COLOR_RESET)"
+	@echo "NeoWall Build System"
 	@echo ""
-	@echo "$(COLOR_GREEN)Build Targets:$(COLOR_RESET)"
-	@echo "  $(COLOR_BLUE)all$(COLOR_RESET)              - Build the project (default)"
-	@echo "  $(COLOR_BLUE)debug$(COLOR_RESET)            - Build with debug symbols and no optimization"
-	@echo "  $(COLOR_BLUE)clean$(COLOR_RESET)            - Remove build artifacts"
-	@echo "  $(COLOR_BLUE)distclean$(COLOR_RESET)        - Remove all generated files"
+	@echo "Build Targets:"
+	@echo "  all              - Build the project (default)"
+	@echo "  debug            - Build with debug symbols and no optimization"
+	@echo "  clean            - Remove build artifacts"
+	@echo "  distclean        - Remove all generated files"
 	@echo ""
-	@echo "$(COLOR_GREEN)Installation:$(COLOR_RESET)"
-	@echo "  $(COLOR_BLUE)install$(COLOR_RESET)          - Install to system (requires sudo)"
-	@echo "  $(COLOR_BLUE)uninstall$(COLOR_RESET)        - Remove from system (requires sudo)"
+	@echo "Installation:"
+	@echo "  install          - Install to system (requires sudo)"
+	@echo "  uninstall        - Remove from system (requires sudo)"
 	@echo ""
-	@echo "$(COLOR_GREEN)Running:$(COLOR_RESET)"
-	@echo "  $(COLOR_BLUE)run$(COLOR_RESET)              - Build and run"
-	@echo "  $(COLOR_BLUE)run-verbose$(COLOR_RESET)      - Build and run with verbose logging"
-	@echo "  $(COLOR_BLUE)run-capabilities$(COLOR_RESET) - Run with capability detection debugging"
+	@echo "Running:"
+	@echo "  run              - Build and run"
+	@echo "  run-verbose      - Build and run with verbose logging"
+	@echo "  run-capabilities - Run with capability detection debugging"
 	@echo ""
-	@echo "$(COLOR_GREEN)Development:$(COLOR_RESET)"
-	@echo "  $(COLOR_BLUE)print-caps$(COLOR_RESET)       - Show detected EGL/OpenGL ES capabilities"
-	@echo "  $(COLOR_BLUE)format$(COLOR_RESET)           - Format code with clang-format"
-	@echo "  $(COLOR_BLUE)analyze$(COLOR_RESET)          - Run static analysis with cppcheck"
-	@echo "  $(COLOR_BLUE)help$(COLOR_RESET)             - Show this help"
+	@echo "Development:"
+	@echo "  print-caps       - Show detected EGL/OpenGL ES capabilities"
+	@echo "  format           - Format code with clang-format"
+	@echo "  analyze          - Run static analysis with cppcheck"
+	@echo "  help             - Show this help"
 	@echo ""
-	@echo "$(COLOR_GREEN)Variables:$(COLOR_RESET)"
-	@echo "  $(COLOR_BLUE)PREFIX$(COLOR_RESET)           - Installation prefix (default: /usr/local)"
-	@echo "  $(COLOR_BLUE)DESTDIR$(COLOR_RESET)          - Staging directory for installation"
-	@echo "  $(COLOR_BLUE)CC$(COLOR_RESET)               - C compiler (default: gcc)"
-	@echo ""
-	@echo "$(COLOR_YELLOW)Note:$(COLOR_RESET) The build system automatically detects available EGL/OpenGL ES"
-	@echo "      versions and compiles only the supported features."
+	@echo "Variables:"
+	@echo "  PREFIX           - Installation prefix (default: /usr/local)"
+	@echo "  DESTDIR          - Staging directory for installation"
+	@echo "  CC               - C compiler (default: gcc)"
 	@echo ""
 
 # ============================================================================
