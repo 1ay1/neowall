@@ -28,9 +28,9 @@ jobs:
 
       - name: Check binary
         run: |
-          test -f build/bin/staticwall
-          ./build/bin/staticwall --version
-          ./build/bin/staticwall --help
+          test -f build/bin/neowall
+          ./build/bin/neowall --version
+          ./build/bin/neowall --help
 
   build-ubuntu:
     name: Build on Ubuntu
@@ -53,12 +53,12 @@ jobs:
 
       - name: Check binary
         run: |
-          test -f build/bin/staticwall
-          ./build/bin/staticwall --version
-          ./build/bin/staticwall --help
+          test -f build/bin/neowall
+          ./build/bin/neowall --version
+          ./build/bin/neowall --help
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: staticwall-ubuntu
-          path: build/bin/staticwall
+          name: neowall-ubuntu
+          path: build/bin/neowall
