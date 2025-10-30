@@ -32,6 +32,7 @@ typedef struct {
     const char *action_message; /* Message shown when executed */
     void (*handler)(int);       /* Signal handler function */
     bool needs_state_check;     /* Whether to check wallpaper state instead of signaling */
+    bool check_cycle;           /* Whether to check if cycling is possible before sending signal */
 } DaemonCommand;
 
 /* Special signal numbers for shader speed control (runtime-initialized) */
@@ -40,15 +41,15 @@ static int SHADER_SPEED_DOWN_SIGNAL = 0;
 
 /* Centralized command registry - Single source of truth */
 static DaemonCommand daemon_commands[] = {
-    {"next",              SIGUSR1,      "Skip to next wallpaper",                  "Skipping to next wallpaper...",      handle_next_wallpaper,       false},
-    {"pause",             SIGUSR2,      "Pause wallpaper cycling",                 "Pausing wallpaper cycling...",       handle_pause,                false},
-    {"resume",            SIGCONT,      "Resume wallpaper cycling",                "Resuming wallpaper cycling...",      handle_resume,               false},
-    {"reload",            SIGHUP,       "Reload configuration",                    "Reloading configuration...",         handle_reload,               false},
-    {"shader_speed_up",   0,            "Increase shader animation speed by 1.0x", "Increasing shader speed...",         handle_shader_speed_adjust,  false},  /* Initialized at runtime */
-    {"shader_speed_down", 0,            "Decrease shader animation speed by 1.0x", "Decreasing shader speed...",         handle_shader_speed_adjust,  false},  /* Initialized at runtime */
-    {"current",           0,            "Show current wallpaper",                  NULL,                                 NULL,                        true},
-    {"status",            0,            "Show current wallpaper",                  NULL,                                 NULL,                        true},
-    {NULL, 0, NULL, NULL, NULL, false}  /* Sentinel */
+    {"next",              SIGUSR1,      "Skip to next wallpaper",                  "Skipping to next wallpaper...",      handle_next_wallpaper,       false, true},   /* check_cycle = true */
+    {"pause",             SIGUSR2,      "Pause wallpaper cycling",                 "Pausing wallpaper cycling...",       handle_pause,                false, false},
+    {"resume",            SIGCONT,      "Resume wallpaper cycling",                "Resuming wallpaper cycling...",      handle_resume,               false, false},
+    {"reload",            SIGHUP,       "Reload configuration",                    "Reloading configuration...",         handle_reload,               false, false},
+    {"shader_speed_up",   0,            "Increase shader animation speed by 1.0x", "Increasing shader speed...",         handle_shader_speed_adjust,  false, false},  /* Initialized at runtime */
+    {"shader_speed_down", 0,            "Decrease shader animation speed by 1.0x", "Decreasing shader speed...",         handle_shader_speed_adjust,  false, false},  /* Initialized at runtime */
+    {"current",           0,            "Show current wallpaper",                  NULL,                                 NULL,                        true,  false},
+    {"status",            0,            "Show current wallpaper",                  NULL,                                 NULL,                        true,  false},
+    {NULL, 0, NULL, NULL, NULL, false, false}  /* Sentinel */
 };
 
 /* Initialize runtime signal values */
@@ -207,7 +208,31 @@ static bool kill_daemon(void) {
 }
 
 /* Send signal to running daemon */
-static bool send_daemon_signal(int signal, const char *action) {
+/* Check if cycling is possible by reading state file */
+static bool can_cycle_wallpaper(void) {
+    const char *state_path = get_state_file_path();
+    FILE *fp = fopen(state_path, "r");
+    
+    if (!fp) {
+        return false;  /* No state file = unknown, let daemon handle it */
+    }
+    
+    char line[MAX_PATH_LENGTH];
+    int cycle_total = 0;
+    
+    while (fgets(line, sizeof(line), fp)) {
+        line[strcspn(line, "\n")] = 0;
+        if (strncmp(line, "cycle_total=", 12) == 0) {
+            cycle_total = atoi(line + 12);
+            break;
+        }
+    }
+    
+    fclose(fp);
+    return cycle_total > 1;  /* Can cycle if we have more than 1 wallpaper */
+}
+
+static bool send_daemon_signal(int signal, const char *action, bool check_cycle) {
     const char *pid_path = get_pid_file_path();
     FILE *fp = fopen(pid_path, "r");
 
@@ -232,6 +257,20 @@ static bool send_daemon_signal(int signal, const char *action) {
             remove_pid_file();
             return false;
         }
+    }
+
+    /* For 'next' command, check if cycling is possible before claiming to skip */
+    if (check_cycle && !can_cycle_wallpaper()) {
+        printf("Cannot cycle wallpaper: Only one wallpaper/shader configured.\n");
+        printf("\n");
+        printf("To enable cycling:\n");
+        printf("  • Use a directory path ending with '/' in your config\n");
+        printf("    Example: path ~/Pictures/Wallpapers/\n");
+        printf("  • Or configure a 'duration' to cycle through wallpapers\n");
+        printf("  • Multiple files will be loaded and cycled alphabetically\n");
+        printf("\n");
+        printf("Check current status with: staticwall current\n");
+        return false;
     }
 
     /* Send signal */
@@ -618,7 +657,8 @@ int main(int argc, char *argv[]) {
                 } else {
                     /* Commands that send signals to daemon */
                     return send_daemon_signal(daemon_commands[i].signal,
-                                            daemon_commands[i].action_message)
+                                            daemon_commands[i].action_message,
+                                            daemon_commands[i].check_cycle)
                            ? EXIT_SUCCESS : EXIT_FAILURE;
                 }
             }

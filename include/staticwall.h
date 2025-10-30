@@ -75,9 +75,9 @@ struct wallpaper_config {
     char path[MAX_PATH_LENGTH];         /* Path to wallpaper image */
     char shader_path[MAX_PATH_LENGTH];  /* Path to GLSL shader file */
     enum wallpaper_mode mode;           /* Display mode */
-    uint32_t duration;                  /* Duration in seconds (for cycling) */
+    float duration;                     /* Duration in seconds (for cycling) */
     enum transition_type transition;    /* Transition effect */
-    uint32_t transition_duration;       /* Transition duration in ms */
+    float transition_duration;          /* Transition duration in seconds */
     float shader_speed;                 /* Shader animation speed multiplier (default 1.0) */
     bool cycle;                         /* Enable wallpaper cycling */
     char **cycle_paths;                 /* Array of paths for cycling */
@@ -287,6 +287,8 @@ void config_reload(struct staticwall_state *state);
 uint64_t get_time_ms(void);
 const char *wallpaper_mode_to_string(enum wallpaper_mode mode);
 enum wallpaper_mode wallpaper_mode_from_string(const char *str);
+const char *transition_type_to_string(enum transition_type type);
+enum transition_type transition_type_from_string(const char *str);
 
 /* Logging */
 #define LOG_LEVEL_ERROR 0
@@ -302,7 +304,8 @@ float ease_in_out_cubic(float t);
 /* State file functions */
 const char *get_state_file_path(void);
 bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
-                           const char *mode, int cycle_index, int cycle_total);
+                           const char *mode, int cycle_index, int cycle_total,
+                           const char *status);
 bool read_wallpaper_state(void);
 int restore_cycle_index_from_state(const char *output_name);
 

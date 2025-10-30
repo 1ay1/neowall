@@ -928,7 +928,8 @@ bool render_frame_shader(struct output_state *output) {
                     const char *mode_str = wallpaper_mode_to_string(output->config.mode);
                     write_wallpaper_state(output->model, output->pending_shader_path, mode_str,
                                          output->config.current_cycle_index,
-                                         output->config.cycle_count);
+                                         output->config.cycle_count,
+                                         "active");
                     
                     log_info("Shader switched during cross-fade: %s", output->pending_shader_path);
                     
@@ -1043,6 +1044,10 @@ bool render_frame(struct output_state *output) {
     if (output->transition_start_time > 0 && 
         output->config.transition != TRANSITION_NONE &&
         output->next_image && output->next_texture) {
+        log_debug("Using transition render: start_time=%llu, progress=%.2f, type=%d",
+                 (unsigned long long)output->transition_start_time,
+                 output->transition_progress,
+                 output->config.transition);
         /* Use transition rendering */
         return render_frame_transition(output, output->transition_progress);
     }
@@ -1140,13 +1145,29 @@ bool render_frame(struct output_state *output) {
  * Dispatches to modular transition implementations */
 bool render_frame_transition(struct output_state *output, float progress) {
     if (!output || !output->current_image || !output->next_image) {
+        log_debug("Transition fallback: output=%p, current_image=%p, next_image=%p",
+                 (void*)output, 
+                 output ? (void*)output->current_image : NULL,
+                 output ? (void*)output->next_image : NULL);
         return render_frame(output);
     }
 
     if (output->texture == 0 || output->next_texture == 0) {
+        log_debug("Transition fallback: texture=%u, next_texture=%u",
+                 output->texture, output->next_texture);
         return render_frame(output);
     }
 
+    log_debug("Calling transition_render: type=%d, progress=%.2f, duration=%ums",
+             output->config.transition, progress, output->config.transition_duration);
+
     /* Dispatch to modular transition renderer */
-    return transition_render(output, output->config.transition, progress);
+    bool result = transition_render(output, output->config.transition, progress);
+    
+    if (!result) {
+        log_error("transition_render failed, falling back to normal render");
+        return render_frame(output);
+    }
+    
+    return result;
 }

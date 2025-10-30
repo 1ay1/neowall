@@ -1,4 +1,6 @@
 #include <stddef.h>
+#include <GLES2/gl2.h>
+#include <string.h>
 #include "staticwall.h"
 #include "constants.h"
 #include "transitions.h"
@@ -65,4 +67,78 @@ bool transition_render(struct output_state *output, enum transition_type type, f
 
     log_error("Unknown transition type: %d", type);
     return false;
+}
+
+/**
+ * Common Transition Helper Functions (DRY Principle)
+ * 
+ * These functions provide shared functionality across all transitions
+ * to avoid code duplication and ensure consistency.
+ */
+
+/**
+ * Setup fullscreen quad vertices for transitions
+ * 
+ * During transitions, we use a fullscreen quad with standard texture coordinates
+ * to prevent size changes between images with different aspect ratios.
+ * 
+ * @param vbo VBO to bind and upload data to
+ * @param vertices Output array to populate (must be 16 floats)
+ */
+void transition_setup_fullscreen_quad(GLuint vbo, float vertices[16]) {
+    /* Fullscreen quad: position (x,y) and texcoord (u,v) interleaved
+     * This ensures consistent rendering size regardless of source image dimensions */
+    vertices[0]  = -1.0f; vertices[1]  =  1.0f; vertices[2]  = 0.0f; vertices[3]  = 0.0f;  /* top-left */
+    vertices[4]  =  1.0f; vertices[5]  =  1.0f; vertices[6]  = 1.0f; vertices[7]  = 0.0f;  /* top-right */
+    vertices[8]  = -1.0f; vertices[9]  = -1.0f; vertices[10] = 0.0f; vertices[11] = 1.0f;  /* bottom-left */
+    vertices[12] =  1.0f; vertices[13] = -1.0f; vertices[14] = 1.0f; vertices[15] = 1.0f;  /* bottom-right */
+    
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 16, vertices, GL_DYNAMIC_DRAW);
+}
+
+/**
+ * Bind texture for transition rendering with consistent settings
+ * 
+ * @param texture Texture to bind
+ * @param texture_unit GL_TEXTURE0, GL_TEXTURE1, etc.
+ */
+void transition_bind_texture_for_transition(GLuint texture, GLenum texture_unit) {
+    glActiveTexture(texture_unit);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    
+    /* Always use CLAMP_TO_EDGE during transitions to prevent artifacts
+     * This ensures edges don't wrap or repeat unexpectedly */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+}
+
+/**
+ * Setup common vertex attributes for transitions
+ * 
+ * Most transitions use position and texcoord attributes with the same layout.
+ * This function sets them up consistently.
+ * 
+ * @param program Shader program to get attribute locations from
+ * @param vbo VBO that's already bound with vertex data
+ */
+void transition_setup_common_attributes(GLuint program, GLuint vbo) {
+    GLint pos_attrib = glGetAttribLocation(program, "position");
+    GLint tex_attrib = glGetAttribLocation(program, "texcoord");
+    
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    
+    /* Position attribute (x, y) - first 2 floats of each vertex */
+    if (pos_attrib >= 0) {
+        glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
+                             4 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(pos_attrib);
+    }
+    
+    /* Texcoord attribute (u, v) - last 2 floats of each vertex */
+    if (tex_attrib >= 0) {
+        glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
+                             4 * sizeof(float), (void*)(2 * sizeof(float)));
+        glEnableVertexAttribArray(tex_attrib);
+    }
 }

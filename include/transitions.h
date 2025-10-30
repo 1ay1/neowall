@@ -17,6 +17,11 @@ struct transition {
 void transitions_init(void);
 bool transition_render(struct output_state *output, enum transition_type type, float progress);
 
+/* Common transition helper functions (DRY) */
+void transition_setup_fullscreen_quad(GLuint vbo, float vertices[16]);
+void transition_bind_texture_for_transition(GLuint texture, GLenum texture_unit);
+void transition_setup_common_attributes(GLuint program, GLuint vbo);
+
 /* Individual transition implementations */
 bool transition_fade_render(struct output_state *output, float progress);
 bool transition_slide_left_render(struct output_state *output, float progress);

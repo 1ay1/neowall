@@ -165,58 +165,21 @@ bool transition_pixelate_render(struct output_state *output, float progress) {
     GLint progress_uniform = glGetUniformLocation(output->pixelate_program, "progress");
     GLint time_uniform = glGetUniformLocation(output->pixelate_program, "time");
 
-    /* Calculate mode-aware vertices to preserve display mode during transition */
-    float old_vertices[16];
-    float new_vertices[16];
-    calculate_vertex_coords_for_image(output, output->next_image, old_vertices);
-    calculate_vertex_coords_for_image(output, output->current_image, new_vertices);
-    
-    /* Use the new image's vertices as the base */
+    /* Setup fullscreen quad using DRY helper */
     float vertices[16];
-    memcpy(vertices, new_vertices, sizeof(new_vertices));
-
-    /* Bind VBO */
-    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
-
-    /* Set up vertex attributes */
-    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
-                         4 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(pos_attrib);
-
-    glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
-                         4 * sizeof(float), (void*)(2 * sizeof(float)));
-    glEnableVertexAttribArray(tex_attrib);
-
-    /* Bind old texture to texture unit 0 */
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, output->next_texture);
+    transition_setup_fullscreen_quad(output->vbo, vertices);
     
-    /* Handle tile mode texture wrapping for old image */
-    if (output->config.mode == MODE_TILE) {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    } else {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    }
-    
+    /* Setup vertex attributes using DRY helper */
+    transition_setup_common_attributes(output->pixelate_program, output->vbo);
+
+    /* Bind old texture to texture unit 0 using DRY helper */
+    transition_bind_texture_for_transition(output->next_texture, GL_TEXTURE0);
     if (tex0_uniform >= 0) {
         glUniform1i(tex0_uniform, 0);
     }
 
-    /* Bind new texture to texture unit 1 */
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, output->texture);
-    
-    /* Handle tile mode texture wrapping for new image */
-    if (output->config.mode == MODE_TILE) {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    } else {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    }
+    /* Bind new texture to texture unit 1 using DRY helper */
+    transition_bind_texture_for_transition(output->texture, GL_TEXTURE1);
     
     if (tex1_uniform >= 0) {
         glUniform1i(tex1_uniform, 1);
@@ -237,8 +200,12 @@ bool transition_pixelate_render(struct output_state *output, float progress) {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     /* Clean up */
-    glDisableVertexAttribArray(pos_attrib);
-    glDisableVertexAttribArray(tex_attrib);
+    if (pos_attrib >= 0) {
+        glDisableVertexAttribArray(pos_attrib);
+    }
+    if (tex_attrib >= 0) {
+        glDisableVertexAttribArray(tex_attrib);
+    }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     
     /* Unbind textures */

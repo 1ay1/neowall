@@ -111,12 +111,23 @@ bool shader_create_glitch_program(GLuint *program) {
  */
 bool transition_glitch_render(struct output_state *output, float progress) {
     if (!output || !output->current_image || !output->next_image) {
+        log_error("Glitch transition: invalid parameters (output=%p)", (void*)output);
         return false;
     }
 
     if (output->texture == 0 || output->next_texture == 0) {
+        log_error("Glitch transition: missing textures (texture=%u, next_texture=%u)",
+                 output->texture, output->next_texture);
         return false;
     }
+
+    if (output->glitch_program == 0) {
+        log_error("Glitch transition: glitch_program not initialized");
+        return false;
+    }
+
+    log_debug("Glitch transition rendering: progress=%.2f, program=%u", 
+             progress, output->glitch_program);
 
     /* Set viewport */
     glViewport(0, 0, output->width, output->height);
@@ -138,61 +149,21 @@ bool transition_glitch_render(struct output_state *output, float progress) {
     GLint progress_uniform = glGetUniformLocation(output->glitch_program, "progress");
     GLint time_uniform = glGetUniformLocation(output->glitch_program, "time");
 
-    /* IMPORTANT: Calculate mode-aware vertices to preserve display mode during transition
-     * We need to blend between old and new image vertices since they may have different dimensions */
-    float old_vertices[16];
-    float new_vertices[16];
-    calculate_vertex_coords_for_image(output, output->next_image, old_vertices);
-    calculate_vertex_coords_for_image(output, output->current_image, new_vertices);
-    
-    /* For glitch effect, we'll use the new image's vertices as the base
-     * This ensures proper sizing throughout the transition */
+    /* Setup fullscreen quad using DRY helper */
     float vertices[16];
-    memcpy(vertices, new_vertices, sizeof(new_vertices));
-
-    /* Bind VBO */
-    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
-
-    /* Set up vertex attributes */
-    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
-                         4 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(pos_attrib);
-
-    glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
-                         4 * sizeof(float), (void*)(2 * sizeof(float)));
-    glEnableVertexAttribArray(tex_attrib);
-
-    /* Bind old texture to texture unit 0 */
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, output->next_texture);
+    transition_setup_fullscreen_quad(output->vbo, vertices);
     
-    /* Handle tile mode texture wrapping for old image */
-    if (output->config.mode == MODE_TILE) {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    } else {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    }
-    
+    /* Setup vertex attributes using DRY helper */
+    transition_setup_common_attributes(output->glitch_program, output->vbo);
+
+    /* Bind old texture to texture unit 0 using DRY helper */
+    transition_bind_texture_for_transition(output->next_texture, GL_TEXTURE0);
     if (tex0_uniform >= 0) {
         glUniform1i(tex0_uniform, 0);
     }
-
-    /* Bind new texture to texture unit 1 */
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, output->texture);
     
-    /* Handle tile mode texture wrapping for new image */
-    if (output->config.mode == MODE_TILE) {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    } else {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    }
-    
+    /* Bind new texture to texture unit 1 using DRY helper */
+    transition_bind_texture_for_transition(output->texture, GL_TEXTURE1);
     if (tex1_uniform >= 0) {
         glUniform1i(tex1_uniform, 1);
     }
@@ -212,8 +183,12 @@ bool transition_glitch_render(struct output_state *output, float progress) {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     /* Clean up */
-    glDisableVertexAttribArray(pos_attrib);
-    glDisableVertexAttribArray(tex_attrib);
+    if (pos_attrib >= 0) {
+        glDisableVertexAttribArray(pos_attrib);
+    }
+    if (tex_attrib >= 0) {
+        glDisableVertexAttribArray(tex_attrib);
+    }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     
     /* Unbind textures */
@@ -231,6 +206,7 @@ bool transition_glitch_render(struct output_state *output, float progress) {
         return false;
     }
 
+    log_debug("Glitch transition frame rendered successfully");
     output->needs_redraw = true;
     output->frames_rendered++;
 
