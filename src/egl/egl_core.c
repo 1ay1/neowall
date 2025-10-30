@@ -5,7 +5,7 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
-#include "../../include/staticwall.h"
+#include "../../include/neowall.h"
 #include "../../include/egl/egl_core.h"
 #include "../../include/egl/capability.h"
 
@@ -47,7 +47,7 @@ bool egl_check_error(const char *context) {
 }
 
 /* Simple implementation - uses new modular system */
-bool egl_core_init(struct staticwall_state *state) {
+bool egl_core_init(struct neowall_state *state) {
     if (!state || !state->display) {
         log_error("Invalid state or Wayland display");
         return false;
@@ -222,7 +222,7 @@ bool egl_core_init(struct staticwall_state *state) {
     return true;
 }
 
-void egl_core_cleanup(struct staticwall_state *state) {
+void egl_core_cleanup(struct neowall_state *state) {
     if (!state) return;
     
     struct output_state *output = state->outputs;
@@ -250,7 +250,7 @@ void egl_core_cleanup(struct staticwall_state *state) {
     }
 }
 
-bool egl_core_make_current(struct staticwall_state *state, struct output_state *output) {
+bool egl_core_make_current(struct neowall_state *state, struct output_state *output) {
     if (!state || state->egl_display == EGL_NO_DISPLAY) return false;
     
     if (!output) {
@@ -264,7 +264,7 @@ bool egl_core_make_current(struct staticwall_state *state, struct output_state *
                          output->egl_surface, state->egl_context);
 }
 
-bool egl_core_swap_buffers(struct staticwall_state *state, struct output_state *output) {
+bool egl_core_swap_buffers(struct neowall_state *state, struct output_state *output) {
     if (!state || !output || state->egl_display == EGL_NO_DISPLAY) return false;
     if (output->egl_surface == EGL_NO_SURFACE) return false;
     return eglSwapBuffers(state->egl_display, output->egl_surface);

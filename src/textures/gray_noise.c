@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <GLES2/gl2.h>
-#include "staticwall.h"
+#include "neowall.h"
 
 /* Generate grayscale noise texture
  * Single channel noise that's useful for many effects

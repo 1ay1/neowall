@@ -1,7 +1,7 @@
 #ifndef TRANSITIONS_H
 #define TRANSITIONS_H
 
-#include "staticwall.h"
+#include "neowall.h"
 
 /* Transition rendering function signature */
 typedef bool (*transition_render_func)(struct output_state *output, float progress);

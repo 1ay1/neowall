@@ -7,13 +7,13 @@
 #include <time.h>
 #include <sys/timerfd.h>
 #include <sys/eventfd.h>
-#include "staticwall.h"
+#include "neowall.h"
 #include "constants.h"
 
-static struct staticwall_state *event_loop_state = NULL;
+static struct neowall_state *event_loop_state = NULL;
 
 /* Update timerfd to wake up at next cycle time */
-static void update_cycle_timer(struct staticwall_state *state) {
+static void update_cycle_timer(struct neowall_state *state) {
     if (!state || state->timer_fd < 0) {
         return;
     }
@@ -68,7 +68,7 @@ static void update_cycle_timer(struct staticwall_state *state) {
 }
 
 /* Render all outputs that need redrawing */
-static void render_outputs(struct staticwall_state *state) {
+static void render_outputs(struct neowall_state *state) {
     if (!state) {
         return;
     }
@@ -223,7 +223,7 @@ static void render_outputs(struct staticwall_state *state) {
 }
 
 /* Handle pending Wayland events */
-static bool handle_wayland_events(struct staticwall_state *state) {
+static bool handle_wayland_events(struct neowall_state *state) {
     if (!state || !state->display) {
         return false;
     }
@@ -246,7 +246,7 @@ static bool handle_wayland_events(struct staticwall_state *state) {
 }
 
 /* Main event loop */
-void event_loop_run(struct staticwall_state *state) {
+void event_loop_run(struct neowall_state *state) {
     if (!state) {
         log_error("Invalid state for event loop");
         return;
@@ -519,7 +519,7 @@ void event_loop_run(struct staticwall_state *state) {
 }
 
 /* Stop the event loop */
-void event_loop_stop(struct staticwall_state *state) {
+void event_loop_stop(struct neowall_state *state) {
     if (state) {
         state->running = false;
         log_info("Event loop stop requested");
@@ -527,7 +527,7 @@ void event_loop_stop(struct staticwall_state *state) {
 }
 
 /* Request a redraw for all outputs */
-void event_loop_request_redraw(struct staticwall_state *state) {
+void event_loop_request_redraw(struct neowall_state *state) {
     if (!state) {
         return;
     }

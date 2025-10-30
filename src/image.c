@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <png.h>
 #include <jpeglib.h>
-#include "staticwall.h"
+#include "neowall.h"
 #include "constants.h"
 
 /* Forward declarations */

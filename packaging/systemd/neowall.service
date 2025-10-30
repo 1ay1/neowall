@@ -1,13 +1,13 @@
 [Unit]
-Description=Staticwall - Wayland Wallpaper Daemon
-Documentation=https://github.com/1ay1/staticwall
+Description=NeoWall - Wayland Wallpaper Daemon
+Documentation=https://github.com/1ay1/neowall
 After=graphical-session.target
 PartOf=graphical-session.target
 ConditionEnvironment=WAYLAND_DISPLAY
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/staticwall
+ExecStart=%h/.local/bin/neowall
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5

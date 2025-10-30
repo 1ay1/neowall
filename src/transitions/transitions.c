@@ -1,7 +1,7 @@
 #include <stddef.h>
 #include <GLES2/gl2.h>
 #include <string.h>
-#include "staticwall.h"
+#include "neowall.h"
 #include "constants.h"
 #include "transitions.h"
 

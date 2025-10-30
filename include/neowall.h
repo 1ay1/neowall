@@ -1,5 +1,5 @@
-#ifndef STATICWALL_H
-#define STATICWALL_H
+#ifndef NEOWALL_H
+#define NEOWALL_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -12,7 +12,7 @@
 #include <GLES2/gl2.h>
 #include "egl/capability.h"
 
-#define STATICWALL_VERSION "0.2.1"
+#define NEOWALL_VERSION "0.3.0"
 #define MAX_PATH_LENGTH 4096
 #define MAX_OUTPUTS 16
 #define MAX_WALLPAPERS 256
@@ -21,7 +21,7 @@
 
 
 /* Forward declarations */
-struct staticwall_state;
+struct neowall_state;
 struct output_state;
 struct wallpaper_config;
 struct zwlr_layer_shell_v1;
@@ -109,7 +109,7 @@ struct output_state {
     bool configured;
     bool needs_redraw;
 
-    struct staticwall_state *state;  /* Back-pointer to global state */
+    struct neowall_state *state;  /* Back-pointer to global state */
 
     struct wallpaper_config config;
     struct image_data *current_image;
@@ -174,7 +174,7 @@ struct output_state {
 };
 
 /* Global application state */
-struct staticwall_state {
+struct neowall_state {
     /* Wayland globals */
     struct wl_display *display;
     struct wl_registry *registry;
@@ -218,7 +218,7 @@ struct staticwall_state {
 };
 
 /* Configuration parsing */
-bool config_load(struct staticwall_state *state, const char *config_path);
+bool config_load(struct neowall_state *state, const char *config_path);
 bool config_parse_wallpaper(struct wallpaper_config *config, const char *output_name);
 void config_free_wallpaper(struct wallpaper_config *config);
 const char *config_get_default_path(void);
@@ -236,14 +236,14 @@ struct image_data *image_load_png(const char *path);
 struct image_data *image_load_jpeg(const char *path);
 
 /* Wayland/EGL initialization */
-bool wayland_init(struct staticwall_state *state);
-void wayland_cleanup(struct staticwall_state *state);
-bool egl_init(struct staticwall_state *state);
-void egl_cleanup(struct staticwall_state *state);
-void detect_gl_capabilities(struct staticwall_state *state);
+bool wayland_init(struct neowall_state *state);
+void wayland_cleanup(struct neowall_state *state);
+bool egl_init(struct neowall_state *state);
+void egl_cleanup(struct neowall_state *state);
+void detect_gl_capabilities(struct neowall_state *state);
 
 /* Output management */
-struct output_state *output_create(struct staticwall_state *state,
+struct output_state *output_create(struct neowall_state *state,
                                    struct wl_output *output, uint32_t name);
 void output_destroy(struct output_state *output);
 bool output_configure_layer_surface(struct output_state *output);
@@ -269,19 +269,19 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
 /* GL shader programs */
 bool shader_create_program(GLuint *program);
 void shader_destroy_program(GLuint program);
-const char *get_glsl_version_string(struct staticwall_state *state);
-char *adapt_shader_for_version(struct staticwall_state *state, const char *shader_code, bool is_fragment_shader);
-char *adapt_vertex_shader(struct staticwall_state *state, const char *shader_code);
-char *adapt_fragment_shader(struct staticwall_state *state, const char *shader_code);
+const char *get_glsl_version_string(struct neowall_state *state);
+char *adapt_shader_for_version(struct neowall_state *state, const char *shader_code, bool is_fragment_shader);
+char *adapt_vertex_shader(struct neowall_state *state, const char *shader_code);
+char *adapt_fragment_shader(struct neowall_state *state, const char *shader_code);
 
 /* Main loop */
-void event_loop_run(struct staticwall_state *state);
-void event_loop_stop(struct staticwall_state *state);
+void event_loop_run(struct neowall_state *state);
+void event_loop_stop(struct neowall_state *state);
 
 /* Config watching */
 void *config_watch_thread(void *arg);
-bool config_has_changed(struct staticwall_state *state);
-void config_reload(struct staticwall_state *state);
+bool config_has_changed(struct neowall_state *state);
+void config_reload(struct neowall_state *state);
 
 /* Utility functions */
 uint64_t get_time_ms(void);
@@ -310,7 +310,7 @@ bool read_wallpaper_state(void);
 int restore_cycle_index_from_state(const char *output_name);
 
 /* Signal handling */
-void signal_handler_init(struct staticwall_state *state);
+void signal_handler_init(struct neowall_state *state);
 void signal_handler_cleanup(void);
 
-#endif /* STATICWALL_H */
+#endif /* NEOWALL_H */

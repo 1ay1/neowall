@@ -1,8 +1,8 @@
-# Staticwall - A reliable Wayland wallpaper daemon with Multi-Version EGL/OpenGL ES Support
+# NeoWall - A reliable Wayland wallpaper daemon with Multi-Version EGL/OpenGL ES Support
 # Copyright (C) 2024
 
-PROJECT = staticwall
-VERSION = 0.2.1
+PROJECT = neowall
+VERSION = 0.3.0
 
 # Directories
 SRC_DIR = src
@@ -84,7 +84,7 @@ ifeq ($(HAS_EGL),yes)
     LDFLAGS += -lEGL
     $(info $(COLOR_GREEN)✓ EGL detected: $(EGL_VERSION)$(COLOR_RESET))
 else
-    $(error $(COLOR_RED)✗ EGL not found - required for Staticwall$(COLOR_RESET))
+    $(error $(COLOR_RED)✗ EGL not found - required for NeoWall$(COLOR_RESET))
 endif
 
 # OpenGL ES 1.x support (optional, for legacy compatibility)
@@ -253,7 +253,7 @@ all: banner directories protocols $(TARGET) success
 banner:
 	@echo "$(COLOR_BLUE)"
 	@echo "╔════════════════════════════════════════════════════════════════╗"
-	@echo "║           Staticwall - Multi-Version EGL/OpenGL ES             ║"
+	@echo "║           NeoWall - Multi-Version EGL/OpenGL ES             ║"
 	@echo "║                    Version $(VERSION)                              ║"
 	@echo "╚════════════════════════════════════════════════════════════════╝"
 	@echo "$(COLOR_RESET)"
@@ -360,9 +360,9 @@ PREFIX ?= /usr/local
 DESTDIR ?=
 
 install: $(TARGET)
-	@echo "$(COLOR_GREEN)Installing Staticwall...$(COLOR_RESET)"
+	@echo "$(COLOR_GREEN)Installing NeoWall...$(COLOR_RESET)"
 	install -Dm755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/$(PROJECT)
-	install -Dm644 config/staticwall.vibe $(DESTDIR)$(PREFIX)/share/$(PROJECT)/config.vibe.example
+	install -Dm644 config/neowall.vibe $(DESTDIR)$(PREFIX)/share/$(PROJECT)/config.vibe.example
 	install -Dm644 $(ASSETS_DIR)/default.png $(DESTDIR)$(PREFIX)/share/$(PROJECT)/default.png
 	@mkdir -p $(DESTDIR)$(PREFIX)/share/$(PROJECT)/shaders
 	@for shader in examples/shaders/*.glsl; do \
@@ -377,13 +377,13 @@ install: $(TARGET)
 	@echo "$(COLOR_BLUE)Example config:$(COLOR_RESET) $(DESTDIR)$(PREFIX)/share/$(PROJECT)/config.vibe.example"
 	@echo "$(COLOR_BLUE)Example shaders:$(COLOR_RESET) $(DESTDIR)$(PREFIX)/share/$(PROJECT)/shaders/"
 	@echo ""
-	@echo "$(COLOR_YELLOW)Note:$(COLOR_RESET) Staticwall runs as normal user. No sudo needed to run!"
-	@echo "$(COLOR_YELLOW)On first run, config will be copied to ~/.config/staticwall/$(COLOR_RESET)"
+	@echo "$(COLOR_YELLOW)Note:$(COLOR_RESET) NeoWall runs as normal user. No sudo needed to run!"
+	@echo "$(COLOR_YELLOW)On first run, config will be copied to ~/.config/neowall/$(COLOR_RESET)"
 	@echo ""
 
 # Uninstall
 uninstall:
-	@echo "$(COLOR_RED)Uninstalling Staticwall...$(COLOR_RESET)"
+	@echo "$(COLOR_RED)Uninstalling NeoWall...$(COLOR_RESET)"
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(PROJECT)
 	rm -rf $(DESTDIR)$(PREFIX)/share/$(PROJECT)
 	@echo "$(COLOR_GREEN)Uninstalled$(COLOR_RESET)"
@@ -459,7 +459,7 @@ analyze:
 
 help:
 	@echo "$(COLOR_BLUE)╔════════════════════════════════════════════════════════════════╗$(COLOR_RESET)"
-	@echo "$(COLOR_BLUE)║           Staticwall Multi-Version Build System                ║$(COLOR_RESET)"
+	@echo "$(COLOR_BLUE)║           NeoWall Multi-Version Build System                ║$(COLOR_RESET)"
 	@echo "$(COLOR_BLUE)╚════════════════════════════════════════════════════════════════╝$(COLOR_RESET)"
 	@echo ""
 	@echo "$(COLOR_GREEN)Build Targets:$(COLOR_RESET)"

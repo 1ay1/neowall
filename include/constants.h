@@ -1,8 +1,8 @@
-#ifndef STATICWALL_CONSTANTS_H
-#define STATICWALL_CONSTANTS_H
+#ifndef NEOWALL_CONSTANTS_H
+#define NEOWALL_CONSTANTS_H
 
 /* ============================================================================
- * Staticwall Constants - Single Source of Truth
+ * NeoWall Constants - Single Source of Truth
  * ============================================================================
  * Centralized constants to eliminate magic numbers and improve maintainability
  * ============================================================================ */
@@ -46,4 +46,4 @@
 #define MIN_SHADER_SPEED        0.1f
 #define SHADER_SPEED_INCREMENT  1.0f
 
-#endif /* STATICWALL_CONSTANTS_H */
+#endif /* NEOWALL_CONSTANTS_H */

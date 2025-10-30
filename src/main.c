@@ -9,11 +9,11 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <time.h>
-#include "staticwall.h"
+#include "neowall.h"
 #include "constants.h"
 #include "egl/egl_core.h"
 
-static struct staticwall_state *global_state = NULL;
+static struct neowall_state *global_state = NULL;
 
 /* Forward declarations for signal handlers */
 static void handle_shutdown(int signum);
@@ -73,13 +73,13 @@ static const char *get_pid_file_path(void) {
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
 
     if (runtime_dir) {
-        snprintf(pid_path, sizeof(pid_path), "%s/staticwall.pid", runtime_dir);
+        snprintf(pid_path, sizeof(pid_path), "%s/neowall.pid", runtime_dir);
     } else {
         const char *home = getenv("HOME");
         if (home) {
-            snprintf(pid_path, sizeof(pid_path), "%s/.staticwall.pid", home);
+            snprintf(pid_path, sizeof(pid_path), "%s/.neowall.pid", home);
         } else {
-            snprintf(pid_path, sizeof(pid_path), "/tmp/staticwall-%d.pid", getuid());
+            snprintf(pid_path, sizeof(pid_path), "/tmp/neowall-%d.pid", getuid());
         }
     }
 
@@ -154,7 +154,7 @@ static bool kill_daemon(void) {
     FILE *fp = fopen(pid_path, "r");
 
     if (!fp) {
-        printf("No running staticwall daemon found (no PID file at %s)\n", pid_path);
+        printf("No running neowall daemon found (no PID file at %s)\n", pid_path);
         return false;
     }
 
@@ -169,14 +169,14 @@ static bool kill_daemon(void) {
     /* Check if process exists */
     if (kill(pid, 0) == -1) {
         if (errno == ESRCH) {
-            printf("Staticwall daemon (PID %d) is not running. Cleaning up stale PID file.\n", pid);
+            printf("NeoWall daemon (PID %d) is not running. Cleaning up stale PID file.\n", pid);
             remove_pid_file();
             return false;
         }
     }
 
     /* Send SIGTERM */
-    printf("Stopping staticwall daemon (PID %d)...\n", pid);
+    printf("Stopping neowall daemon (PID %d)...\n", pid);
     if (kill(pid, SIGTERM) == -1) {
         log_error("Failed to kill process %d: %s", pid, strerror(errno));
         return false;
@@ -187,7 +187,7 @@ static bool kill_daemon(void) {
     int attempts = 0;
     while (attempts < 50) {  /* Wait up to 5 seconds */
         if (kill(pid, 0) == -1 && errno == ESRCH) {
-            printf("Staticwall daemon stopped successfully.\n");
+            printf("NeoWall daemon stopped successfully.\n");
             remove_pid_file();
             return true;
         }
@@ -198,7 +198,7 @@ static bool kill_daemon(void) {
     /* Force kill if still running */
     printf("Daemon didn't stop gracefully, forcing...\n");
     if (kill(pid, SIGKILL) == 0) {
-        printf("Staticwall daemon killed.\n");
+        printf("NeoWall daemon killed.\n");
         remove_pid_file();
         return true;
     }
@@ -237,8 +237,8 @@ static bool send_daemon_signal(int signal, const char *action, bool check_cycle)
     FILE *fp = fopen(pid_path, "r");
 
     if (!fp) {
-        printf("No running staticwall daemon found.\n");
-        printf("Start the daemon first with: staticwall\n");
+        printf("No running neowall daemon found.\n");
+        printf("Start the daemon first with: neowall\n");
         return false;
     }
 
@@ -253,7 +253,7 @@ static bool send_daemon_signal(int signal, const char *action, bool check_cycle)
     /* Check if process exists */
     if (kill(pid, 0) == -1) {
         if (errno == ESRCH) {
-            printf("Staticwall daemon (PID %d) is not running.\n", pid);
+            printf("NeoWall daemon (PID %d) is not running.\n", pid);
             remove_pid_file();
             return false;
         }
@@ -269,7 +269,7 @@ static bool send_daemon_signal(int signal, const char *action, bool check_cycle)
         printf("  • Or configure a 'duration' to cycle through wallpapers\n");
         printf("  • Multiple files will be loaded and cycled alphabetically\n");
         printf("\n");
-        printf("Check current status with: staticwall current\n");
+        printf("Check current status with: neowall current\n");
         return false;
     }
 
@@ -284,7 +284,7 @@ static bool send_daemon_signal(int signal, const char *action, bool check_cycle)
 }
 
 static void print_usage(const char *program_name) {
-    printf("Staticwall v%s - Sets wallpapers until it... doesn't.\n\n", STATICWALL_VERSION);
+    printf("NeoWall v%s - Sets wallpapers until it... doesn't.\n\n", NEOWALL_VERSION);
     printf("Usage: %s [OPTIONS]\n\n", program_name);
     printf("Options:\n");
     printf("  -c, --config PATH     Path to configuration file\n");
@@ -306,13 +306,13 @@ static void print_usage(const char *program_name) {
         printf("  %-21s %s\n", daemon_commands[i].name, daemon_commands[i].description);
     }
     printf("\n");
-    printf("Note: By default, staticwall runs as a daemon. Use -f for foreground.\n");
+    printf("Note: By default, neowall runs as a daemon. Use -f for foreground.\n");
     printf("If a daemon is already running, subsequent calls act as control commands.\n");
     printf("\n");
     printf("Configuration file locations (in order of preference):\n");
-    printf("  1. $XDG_CONFIG_HOME/staticwall/config.vibe\n");
-    printf("  2. $HOME/.config/staticwall/config.vibe\n");
-    printf("  3. /etc/staticwall/config.vibe\n");
+    printf("  1. $XDG_CONFIG_HOME/neowall/config.vibe\n");
+    printf("  2. $HOME/.config/neowall/config.vibe\n");
+    printf("  3. /etc/neowall/config.vibe\n");
     printf("\n");
     printf("Example config.vibe:\n");
     printf("  default {\n");
@@ -330,7 +330,7 @@ static void print_usage(const char *program_name) {
 }
 
 static void print_version(void) {
-    printf("Staticwall v%s\n", STATICWALL_VERSION);
+    printf("NeoWall v%s\n", NEOWALL_VERSION);
     printf("Sets wallpapers until it... doesn't.\n");
     printf("(Statically compiled, dynamically cycling. We contain multitudes.)\n");
     printf("\nSupported features:\n");
@@ -602,14 +602,14 @@ static bool create_config_directory(void) {
     char config_dir[MAX_PATH_LENGTH];
 
     if (config_home) {
-        snprintf(config_dir, sizeof(config_dir), "%s/staticwall", config_home);
+        snprintf(config_dir, sizeof(config_dir), "%s/neowall", config_home);
     } else {
         const char *home = getenv("HOME");
         if (!home) {
             log_error("Cannot determine home directory");
             return false;
         }
-        snprintf(config_dir, sizeof(config_dir), "%s/.config/staticwall", home);
+        snprintf(config_dir, sizeof(config_dir), "%s/.config/neowall", home);
     }
 
     struct stat st;
@@ -629,7 +629,7 @@ int main(int argc, char *argv[]) {
     /* Initialize runtime signal values for command table */
     init_command_signals();
 
-    struct staticwall_state state = {0};
+    struct neowall_state state = {0};
     char config_path[MAX_PATH_LENGTH] = {0};
     bool daemon_mode = true;  /* Default to daemon mode */
     bool watch_config = true;  /* Enable by default for better UX */
@@ -717,7 +717,7 @@ int main(int argc, char *argv[]) {
     if (verbose) {
         log_set_level(LOG_LEVEL_DEBUG);
     }
-    log_info("Staticwall v%s starting...", STATICWALL_VERSION);
+    log_info("NeoWall v%s starting...", NEOWALL_VERSION);
 
     /* Ensure config directory exists */
     if (!create_config_directory()) {
@@ -749,10 +749,10 @@ int main(int argc, char *argv[]) {
             }
             fclose(fp);
         }
-        log_error("Staticwall is already running (PID %d)", existing_pid);
-        fprintf(stderr, "Error: Staticwall is already running (PID %d)\n", existing_pid);
+        log_error("NeoWall is already running (PID %d)", existing_pid);
+        fprintf(stderr, "Error: NeoWall is already running (PID %d)\n", existing_pid);
         fprintf(stderr, "PID file: %s\n", pid_path);
-        fprintf(stderr, "Use 'staticwall kill' to stop the running instance.\n");
+        fprintf(stderr, "Use 'neowall kill' to stop the running instance.\n");
         return EXIT_FAILURE;
     }
 
@@ -833,7 +833,7 @@ int main(int argc, char *argv[]) {
     /* Remove PID file */
     remove_pid_file();
 
-    log_info("Staticwall terminated successfully");
+    log_info("NeoWall terminated successfully");
 
     return EXIT_SUCCESS;
 }

@@ -3,7 +3,7 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
-#include "staticwall.h"
+#include "neowall.h"
 #include "constants.h"
 #include "shader.h"
 #include "../protocols/wlr-layer-shell-unstable-v1-client-protocol.h"
@@ -12,7 +12,7 @@
 
 
 
-struct output_state *output_create(struct staticwall_state *state,
+struct output_state *output_create(struct neowall_state *state,
                                    struct wl_output *output, uint32_t name) {
     if (!state || !output) {
         log_error("Invalid parameters for output_create");
@@ -690,7 +690,7 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
 }
 
 /* Find output by name */
-struct output_state *output_find_by_name(struct staticwall_state *state, uint32_t name) {
+struct output_state *output_find_by_name(struct neowall_state *state, uint32_t name) {
     if (!state) {
         return NULL;
     }
@@ -707,7 +707,7 @@ struct output_state *output_find_by_name(struct staticwall_state *state, uint32_
 }
 
 /* Find output by model string */
-struct output_state *output_find_by_model(struct staticwall_state *state, const char *model) {
+struct output_state *output_find_by_model(struct neowall_state *state, const char *model) {
     if (!state || !model) {
         return NULL;
     }
@@ -1079,7 +1079,7 @@ void output_apply_deferred_config(struct output_state *output) {
 }
 
 /* Get output count */
-uint32_t output_get_count(struct staticwall_state *state) {
+uint32_t output_get_count(struct neowall_state *state) {
     if (!state) {
         return 0;
     }
@@ -1087,7 +1087,7 @@ uint32_t output_get_count(struct staticwall_state *state) {
 }
 
 /* Iterate through all outputs and apply a function */
-void output_foreach(struct staticwall_state *state,
+void output_foreach(struct neowall_state *state,
                    void (*callback)(struct output_state *, void *),
                    void *userdata) {
     if (!state || !callback) {

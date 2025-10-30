@@ -1,5 +1,5 @@
 # ============================================================================
-# Staticwall Configuration File
+# NeoWall Configuration File
 # ============================================================================
 # "Sets wallpapers until it... doesn't."
 #
@@ -37,23 +37,23 @@ default {
   #    Example: path ~/Pictures/wallpaper.png
   #
   # Use ~ for home directory, absolute paths, or relative paths
-  # Default: Use the shipped wallpaper (copied to ~/.local/share/staticwall/default.png on first run)
-  path ~/.local/share/staticwall/default.png
+  # Default: Use the shipped wallpaper (copied to ~/.local/share/neowall/default.png on first run)
+  path ~/.local/share/neowall/default.png
 
   # Option 2: Live Shader Wallpaper (NEW!)
   # Animated, GPU-accelerated shader effects
   # Just specify the shader filename - no path needed!
   # shader plasma.glsl
   #
-  # Available shaders (in ~/.config/staticwall/shaders/):
+  # Available shaders (in ~/.config/neowall/shaders/):
   #   - plasma.glsl   : Colorful animated plasma effect
   #   - wave.glsl     : Rippling wave patterns
   #   - matrix.glsl   : Matrix-style falling characters
   #   - gradient.glsl : Smooth color gradients
   #
   # You can also use full paths:
-  # shader ~/.config/staticwall/shaders/plasma.glsl
-  # shader /usr/share/staticwall/shaders/wave.glsl
+  # shader ~/.config/neowall/shaders/plasma.glsl
+  # shader /usr/share/neowall/shaders/wave.glsl
   #
   # NOTE: Use EITHER 'path' OR 'shader', not both!
 
@@ -92,7 +92,7 @@ default {
 
   # NOTE: You don't need a 'cycle' option anymore!
   # Just set path to a directory (with trailing /) and set duration > 0
-  # Staticwall automatically cycles through all images in the directory
+  # NeoWall automatically cycles through all images in the directory
 }
 
 # ============================================================================
@@ -177,7 +177,7 @@ output {
 #   duration 600                      # Change every 10 minutes
 #   # transition fade                 # Optional: already defaults to 'fade'
 #   transition_duration 1000          # Optional: smooth 1 second transitions
-#   # That's it! Staticwall auto-loads ALL PNG/JPEG files from the directory
+#   # That's it! NeoWall auto-loads ALL PNG/JPEG files from the directory
 # }
 
 # --- Example 4: Multi-Monitor Gaming Setup ---
@@ -234,13 +234,13 @@ output {
 # ============================================================================
 #
 # 1. Hot-reload configuration:
-#    staticwall reload
+#    neowall reload
 #
 # 2. Run with auto-reload (watches config file for changes):
-#    staticwall --watch
+#    neowall --watch
 #
 # 3. Test configuration before daemonizing:
-#    staticwall -v -f
+#    neowall -v -f
 #
 # 4. Use absolute paths if ~ doesn't work:
 #    path /home/username/Pictures/wallpaper.png
@@ -250,11 +250,11 @@ output {
 #    path ~/Pictures/Wallpapers/Nature/
 #
 # 6. Check logs for errors:
-#    staticwall -f -v  (run in foreground with verbose logging)
+#    neowall -f -v  (run in foreground with verbose logging)
 #
 # 7. Different configs for different scenarios:
-#    staticwall -c ~/.config/staticwall/work.vibe
-#    staticwall -c ~/.config/staticwall/home.vibe
+#    neowall -c ~/.config/neowall/work.vibe
+#    neowall -c ~/.config/neowall/home.vibe
 #
 # 8. Transition effects:
 #    - fade:       Smooth crossfade (DEFAULT)
@@ -278,26 +278,26 @@ output {
 #    Much easier than listing files manually!
 #
 # 11. Live shader wallpapers:
-#     - Installed to ~/.config/staticwall/shaders/ on first run
+#     - Installed to ~/.config/neowall/shaders/ on first run
 #     - Just use the filename: shader plasma.glsl
 #     - Renders at ~60 FPS with minimal CPU usage
 #     - Control animation speed: shader_speed 2.0 (2x faster) or 0.5 (slower)
 #     - Create your own shaders! See shaders/README.md
 #
 # 12. Control the daemon:
-#     staticwall kill      # Stop daemon
-#     staticwall reload    # Reload config
-#     staticwall next      # Skip to next wallpaper
-#     staticwall pause     # Pause cycling
-#     staticwall resume    # Resume cycling
-#     staticwall current   # Show current wallpaper
+#     neowall kill      # Stop daemon
+#     neowall reload    # Reload config
+#     neowall next      # Skip to next wallpaper
+#     neowall pause     # Pause cycling
+#     neowall resume    # Resume cycling
+#     neowall current   # Show current wallpaper
 #
 # ============================================================================
 # TROUBLESHOOTING
 # ============================================================================
 #
 # Problem: "Configuration file not found"
-# Solution: Make sure this file is at ~/.config/staticwall/config.vibe
+# Solution: Make sure this file is at ~/.config/neowall/config.vibe
 #
 # Problem: "Failed to parse VIBE config"
 # Solution: Check for mismatched braces { } and brackets [ ]
@@ -312,11 +312,11 @@ output {
 # Solution: Ensure duration > 0 and path points to a directory (with trailing /)
 #
 # Problem: Shader not found
-# Solution: Shaders are in ~/.config/staticwall/shaders/ (copied on first run)
+# Solution: Shaders are in ~/.config/neowall/shaders/ (copied on first run)
 #          Use just the filename: shader plasma.glsl
 #
 # Problem: Black screen with shader
-# Solution: Check logs with: staticwall -f -v
+# Solution: Check logs with: neowall -f -v
 #          Ensure your GPU supports OpenGL ES 2.0
 #
 # Problem: Shader performance issues
@@ -328,13 +328,13 @@ output {
 #
 # Full documentation:     README.md
 # Configuration guide:    docs/CONFIG_GUIDE.md
-# Shader documentation:   ~/.config/staticwall/shaders/README.md
-# Project repository:     https://github.com/staticwall/staticwall
+# Shader documentation:   ~/.config/neowall/shaders/README.md
+# Project repository:     https://github.com/neowall/neowall
 #
-# Example shaders:        ~/.config/staticwall/shaders/
-# System shaders:         /usr/share/staticwall/shaders/
+# Example shaders:        ~/.config/neowall/shaders/
+# System shaders:         /usr/share/neowall/shaders/
 #
 # Report issues or get help:
-#   https://github.com/yourusername/staticwall/issues
+#   https://github.com/yourusername/neowall/issues
 #
 # ============================================================================

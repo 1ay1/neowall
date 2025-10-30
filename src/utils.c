@@ -6,7 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include "staticwall.h"
+#include "neowall.h"
 #include "constants.h"
 
 /* Current log level */
@@ -221,13 +221,13 @@ const char *get_state_file_path(void) {
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
     
     if (runtime_dir) {
-        snprintf(state_path, sizeof(state_path), "%s/staticwall-state.txt", runtime_dir);
+        snprintf(state_path, sizeof(state_path), "%s/neowall-state.txt", runtime_dir);
     } else {
         const char *home = getenv("HOME");
         if (home) {
-            snprintf(state_path, sizeof(state_path), "%s/.staticwall-state", home);
+            snprintf(state_path, sizeof(state_path), "%s/.neowall-state", home);
         } else {
-            snprintf(state_path, sizeof(state_path), "/tmp/staticwall-state-%d.txt", getuid());
+            snprintf(state_path, sizeof(state_path), "/tmp/neowall-state-%d.txt", getuid());
         }
     }
     
@@ -347,7 +347,7 @@ bool read_wallpaper_state(void) {
     fclose(fp);
     
     /* Display state */
-    printf("Staticwall Status:\n");
+    printf("NeoWall Status:\n");
     printf("  Output: %s\n", output);
     printf("  Wallpaper: %s\n", wallpaper);
     printf("  Mode: %s\n", mode);

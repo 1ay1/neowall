@@ -3,7 +3,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
-#include "staticwall.h"
+#include "neowall.h"
 #include "../protocols/wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "../protocols/xdg-shell-client-protocol.h"
 
@@ -133,7 +133,7 @@ static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
 static void registry_handle_global(void *data, struct wl_registry *registry,
                                    uint32_t name, const char *interface,
                                    uint32_t version) {
-    struct staticwall_state *state = data;
+    struct neowall_state *state = data;
     (void)version;
 
     log_debug("Registry: interface=%s, name=%u, version=%u", interface, name, version);
@@ -170,7 +170,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 
 static void registry_handle_global_remove(void *data, struct wl_registry *registry,
                                           uint32_t name) {
-    struct staticwall_state *state = data;
+    struct neowall_state *state = data;
     (void)registry;
 
     log_info("Registry: global removed (name=%u)", name);
@@ -196,7 +196,7 @@ static const struct wl_registry_listener registry_listener = {
 };
 
 /* Public Wayland functions */
-bool wayland_init(struct staticwall_state *state) {
+bool wayland_init(struct neowall_state *state) {
     if (!state) {
         log_error("Invalid state pointer");
         return false;
@@ -268,7 +268,7 @@ bool wayland_init(struct staticwall_state *state) {
     return true;
 }
 
-void wayland_cleanup(struct staticwall_state *state) {
+void wayland_cleanup(struct neowall_state *state) {
     if (!state) {
         return;
     }
@@ -319,7 +319,7 @@ bool output_configure_layer_surface(struct output_state *output) {
         return false;
     }
 
-    struct staticwall_state *state = output->state;
+    struct neowall_state *state = output->state;
 
     /* Create layer surface */
     output->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
@@ -327,7 +327,7 @@ bool output_configure_layer_surface(struct output_state *output) {
         output->surface,
         output->output,
         ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
-        "staticwall"
+        "neowall"
     );
 
     if (!output->layer_surface) {

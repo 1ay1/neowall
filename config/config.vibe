@@ -1,5 +1,5 @@
 default {
-  shader ~/.config/staticwall/shaders/
+  shader ~/.config/neowall/shaders/
   duration 300
   shader_speed 1.0
 }

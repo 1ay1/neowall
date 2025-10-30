@@ -1,14 +1,16 @@
-# Staticwall
+# NeoWall
 
-> GPU-accelerated Wayland wallpaper daemon with live shader support
+> "What if your wallpaper could be alive?"
 
-**Staticwall** brings GPU-powered animated wallpapers to Wayland. Run Shadertoy shaders, cycle through images with smooth transitions, and configure everything with a single clean config file.
+**NeoWall** brings GPU-powered animated wallpapers to Wayland. Run Shadertoy shaders (including Matrix rain), cycle through images with smooth transitions, and configure everything with a single clean config file.
+
+Take the red pill. 🔴💊
 
 https://github.com/user-attachments/assets/386243d0-53ca-4287-9ab6-873265d3d53a
 
-## Why "Staticwall" if wallpapers can be animated?
+## Why NeoWall?
 
-It's ironic branding - we're statically compiled but dynamically animated. Like calling a racecar "SlowPoke." Plus it's catchier than "DynamicLiveAnimatedShaderWallpaperDaemon." 🤷
+Named after Neo from The Matrix - because your wallpaper can now run The Matrix. Also fits the "neo" family of modern Linux tools (neovim, neofetch). Plus, GPU shaders are the next evolution of wallpapers. 🎬
 
 ## Features
 
@@ -20,9 +22,9 @@ It's ironic branding - we're statically compiled but dynamically animated. Like 
 - 🔥 **Hot-Reload** - Edit config, changes apply instantly
 - ⚡ **Hyprland Ready** - Works on Hyprland, Sway, River, and other wlroots compositors
 
-## Why Staticwall?
+## Why NeoWall?
 
-| Feature | Staticwall | swaybg | hyprpaper | wpaperd |
+| Feature | NeoWall | swaybg | hyprpaper | wpaperd |
 |---------|------------|--------|-----------|---------|
 | Live GPU Shaders | ✅ | ❌ | ❌ | ❌ |
 | Shadertoy Compatible | ✅ | ❌ | ❌ | ❌ |
@@ -36,24 +38,24 @@ It's ironic branding - we're statically compiled but dynamically animated. Like 
 
 ```bash
 # Install (Arch)
-yay -S staticwall-git
+yay -S neowall-git
 
 # Or build from source
 make
 sudo make install
 
 # Run (creates default config on first run)
-staticwall
+neowall
 
 # Edit your config
-$EDITOR ~/.config/staticwall/config.vibe
+$EDITOR ~/.config/neowall/config.vibe
 
 # Changes apply automatically! No restart needed.
 ```
 
 ## Configuration
 
-Staticwall uses **VIBE** config format - no quotes, no colons, just clean hierarchy. Visual structure at a glance.
+NeoWall uses **VIBE** config format - no quotes, no colons, just clean hierarchy. Visual structure at a glance.
 
 ```vibe
 default {
@@ -99,11 +101,12 @@ default {
 }
 ```
 
-Shaders are installed to `~/.config/staticwall/shaders/` on first run. Includes:
+Shaders are installed to `~/.config/neowall/shaders/` on first run. Includes:
+- `matrix_rain.glsl` - **The Matrix green code (featured!)** ⚡
 - `aurora.glsl` - Northern lights effect
-- `matrix_rain.glsl` - The Matrix green code
 - `plasma.glsl` - Colorful plasma waves
-- And many more!
+- `2d_clouds.glsl` - Procedural clouds
+- And 10+ more!
 
 ### Multi-Monitor Setup
 
@@ -132,8 +135,8 @@ Find your monitor names:
 
 ```vibe
 default {
-  shader ~/.config/staticwall/shaders/    # Point at directory
-  duration 300                             # Change shader every 5 minutes
+  shader ~/.config/neowall/shaders/    # Point at directory
+  duration 300                          # Change shader every 5 minutes
 }
 ```
 
@@ -149,11 +152,11 @@ All shaders in the directory cycle alphabetically. Name them `01-aurora.glsl`, `
 
 ## 🎨 Included Shaders
 
-Staticwall comes with 13+ high-quality shaders ready to use:
+NeoWall comes with 13+ high-quality shaders ready to use:
 
+- **matrix_rain.glsl** - Classic Matrix falling code effect 🟢
+- **matrix_real.glsl** - Enhanced Matrix with more detail 🟢
 - **2d_clouds.glsl** - Procedural cloud formations
-- **matrix_rain.glsl** - Classic Matrix falling code effect
-- **matrix_real.glsl** - Enhanced Matrix with more detail
 - **plasma.glsl** - Colorful flowing plasma waves
 - **aurora.glsl** - Northern lights simulation
 - **sunrise.glsl** - Dynamic sunrise/sunset sky
@@ -163,7 +166,7 @@ Staticwall comes with 13+ high-quality shaders ready to use:
 - **star_field.glsl** - Animated starfield
 - And more!
 
-All shaders are installed to `~/.config/staticwall/shaders/` on first run. Just reference them by filename in your config.
+All shaders are installed to `~/.config/neowall/shaders/` on first run. Just reference them by filename in your config.
 
 Want more? Browse [Shadertoy.com](https://www.shadertoy.com/) - most shaders work with minimal tweaks!
 
@@ -180,13 +183,13 @@ Available effects:
 ## Commands
 
 ```bash
-staticwall              # Start daemon
-staticwall kill         # Stop daemon
-staticwall reload       # Reload config
-staticwall next         # Skip to next wallpaper/shader
-staticwall pause        # Pause cycling
-staticwall resume       # Resume cycling
-staticwall current      # Show current wallpaper
+neowall              # Start daemon
+neowall kill         # Stop daemon
+neowall reload       # Reload config
+neowall next         # Skip to next wallpaper/shader
+neowall pause        # Pause cycling
+neowall resume       # Resume cycling
+neowall current      # Show current wallpaper
 ```
 
 ## Writing Custom Shaders
@@ -207,7 +210,7 @@ void main() {
 }
 ```
 
-Save as `~/.config/staticwall/shaders/myshader.glsl` and use:
+Save as `~/.config/neowall/shaders/myshader.glsl` and use:
 
 ```vibe
 default {
@@ -217,24 +220,24 @@ default {
 
 **Shadertoy Compatible!** Most Shadertoy shaders work with minimal changes. We provide `iTime`, `iResolution`, `iChannel0-4` uniforms.
 
-## Why Staticwall?
+## Installation
 
 - **No dependencies** - Single binary, statically linked (except system libs)
 - **Actually works** - Tested on Hyprland, Sway, River
-- **Fast** - Shaders run at 60 FPS with minimal CPU usage
+- **Fast** - Shaders run at 60 FPS with minimal CPU usage (2% CPU on average)
 - **Simple** - One config file, sensible defaults
-- **Funny name** - Worth it for the puns alone
+- **The Matrix** - Run actual Matrix rain as your wallpaper 🟢
 
 ## Troubleshooting
 
 **Shader shows black screen?**
-- Check logs: `staticwall -fv` (foreground + verbose)
+- Check logs: `neowall -fv` (foreground + verbose)
 - Shaders compile on load, may take a second
 - Complex shaders may need optimization
 
 **Config changes don't apply?**
 - Hot-reload is enabled by default, just wait 2 seconds
-- Force reload: `staticwall reload`
+- Force reload: `neowall reload`
 
 **Wallpaper not visible?**
 - Make sure no other wallpaper daemon is running (swaybg, hyprpaper, etc.)
@@ -257,7 +260,7 @@ make -j$(nproc)
 sudo make install
 
 # Run
-staticwall
+neowall
 ```
 
 ## Contributing
@@ -271,7 +274,7 @@ Please:
 
 ## License
 
-MIT - Do whatever you want, just don't sue us if your wallpaper becomes sentient.
+MIT - Do whatever you want, just don't sue us if your wallpaper becomes sentient. (Looking at you, Matrix rain.) 🟢
 
 ## Credits
 
@@ -281,4 +284,6 @@ MIT - Do whatever you want, just don't sue us if your wallpaper becomes sentient
 
 ---
 
-**Staticwall** - Because your wallpaper deserves better than being... static. 🎨✨
+**NeoWall** - Your desktop's red pill. 💊✨
+
+*"I know kung fu... and GLSL shaders."* - Neo (probably)

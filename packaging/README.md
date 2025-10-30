@@ -1,15 +1,15 @@
-# Packaging Files for Staticwall
+# Packaging Files for NeoWall
 
 This directory contains files needed by package maintainers.
 
 ## What's Here
 
-- **`systemd/staticwall.service`** - Systemd user service file
-- **`staticwall.install`** - Optional Arch Linux post-install script
+- **`systemd/neowall.service`** - Systemd user service file
+- **`neowall.install`** - Optional Arch Linux post-install script
 
 ## For Package Maintainers
 
-If you're packaging Staticwall for a distribution, see:
+If you're packaging NeoWall for a distribution, see:
 - **[docs/PACKAGING.md](../docs/PACKAGING.md)** - Complete packaging guide
 
 ### Quick Reference
@@ -22,13 +22,13 @@ make install PREFIX=/usr
 
 **Systemd service install location:**
 ```
-/usr/lib/systemd/user/staticwall.service
+/usr/lib/systemd/user/neowall.service
 ```
 
 **Arch .install file usage:**
 Add to PKGBUILD:
 ```bash
-install=staticwall.install
+install=neowall.install
 ```
 
 ## Creating AUR Package
@@ -36,7 +36,7 @@ install=staticwall.install
 PKGBUILD files are **NOT** kept in this repo. Create them in a separate AUR git repository:
 
 ```bash
-git clone ssh://aur@aur.archlinux.org/staticwall-git.git
+git clone ssh://aur@aur.archlinux.org/neowall-git.git
 # Create PKGBUILD there
 ```
 

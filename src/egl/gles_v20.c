@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <GLES2/gl2.h>
-#include "../../include/staticwall.h"
+#include "../../include/neowall.h"
 #include "../../include/egl/capability.h"
 
 /**

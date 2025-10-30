@@ -3,7 +3,7 @@
 #include <string.h>
 #include <math.h>
 #include <GLES2/gl2.h>
-#include "staticwall.h"
+#include "neowall.h"
 #include "constants.h"
 #include "transitions.h"
 #include "shader.h"
@@ -645,8 +645,8 @@ bool render_frame_shader(struct output_state *output) {
     if (output->shader_uniforms.position == -2) {
         /* -2 means uninitialized, -1 means not found, >= 0 is valid location */
         output->shader_uniforms.position = glGetAttribLocation(output->live_shader_program, "position");
-        output->shader_uniforms.u_time = glGetUniformLocation(output->live_shader_program, "_staticwall_time");
-        output->shader_uniforms.u_resolution = glGetUniformLocation(output->live_shader_program, "_staticwall_resolution");
+        output->shader_uniforms.u_time = glGetUniformLocation(output->live_shader_program, "_neowall_time");
+        output->shader_uniforms.u_resolution = glGetUniformLocation(output->live_shader_program, "_neowall_resolution");
         
         /* Also get iResolution uniform location (Shadertoy vec3) */
         GLint iResolution_loc = glGetUniformLocation(output->live_shader_program, "iResolution");

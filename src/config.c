@@ -10,7 +10,7 @@
 #include <strings.h>
 #include <dirent.h>
 #include "vibe.h"
-#include "staticwall.h"
+#include "neowall.h"
 
 /* ============================================================================
  * CONFIGURATION PHILOSOPHY
@@ -41,7 +41,7 @@ const char *config_get_default_path(void) {
     /* Try XDG_CONFIG_HOME first */
     const char *xdg_config_home = getenv("XDG_CONFIG_HOME");
     if (xdg_config_home) {
-        snprintf(path, sizeof(path), "%s/staticwall/config.vibe", xdg_config_home);
+        snprintf(path, sizeof(path), "%s/neowall/config.vibe", xdg_config_home);
         if (access(path, F_OK) == 0) {
             return path;
         }
@@ -50,21 +50,21 @@ const char *config_get_default_path(void) {
     /* Try ~/.config */
     const char *home = getenv("HOME");
     if (home) {
-        snprintf(path, sizeof(path), "%s/.config/staticwall/config.vibe", home);
+        snprintf(path, sizeof(path), "%s/.config/neowall/config.vibe", home);
         if (access(path, F_OK) == 0) {
             return path;
         }
     }
 
     /* Try /etc */
-    snprintf(path, sizeof(path), "/etc/staticwall/config.vibe");
+    snprintf(path, sizeof(path), "/etc/neowall/config.vibe");
     if (access(path, F_OK) == 0) {
         return path;
     }
 
     /* Return user config path even if it doesn't exist */
     if (home) {
-        snprintf(path, sizeof(path), "%s/.config/staticwall/config.vibe", home);
+        snprintf(path, sizeof(path), "%s/.config/neowall/config.vibe", home);
         return path;
     }
 
@@ -903,7 +903,7 @@ static bool config_create_default(const char *config_path) {
         char user_wallpaper_dir[MAX_PATH_LENGTH];
         char user_wallpaper_path[MAX_PATH_LENGTH];
         int ret1 = snprintf(user_wallpaper_dir, sizeof(user_wallpaper_dir), 
-                           "%s/.local/share/staticwall", home);
+                           "%s/.local/share/neowall", home);
         if (ret1 < 0 || (size_t)ret1 >= sizeof(user_wallpaper_dir)) {
             log_error("Path too long for user wallpaper directory");
             default_wallpaper_path = "~/Pictures/wallpaper.png";
@@ -918,8 +918,8 @@ static bool config_create_default(const char *config_path) {
                 if (access(user_wallpaper_path, F_OK) != 0) {
                     /* Try to find and copy the default wallpaper from installation */
                     const char *source_paths[] = {
-                        "/usr/share/staticwall/default.png",
-                        "/usr/local/share/staticwall/default.png",
+                        "/usr/share/neowall/default.png",
+                        "/usr/local/share/neowall/default.png",
                         NULL
                     };
                     
@@ -958,7 +958,7 @@ static bool config_create_default(const char *config_path) {
                 
                 /* Use the user's local copy if it exists */
                 if (access(user_wallpaper_path, F_OK) == 0) {
-                    default_wallpaper_path = "~/.local/share/staticwall/default.png";
+                    default_wallpaper_path = "~/.local/share/neowall/default.png";
                 } else {
                     default_wallpaper_path = "~/Pictures/wallpaper.png";
                 }
@@ -970,8 +970,8 @@ static bool config_create_default(const char *config_path) {
 
     /* Try to copy example config from installation as the main config */
     const char *example_config_paths[] = {
-        "/usr/share/staticwall/config.vibe.example",
-        "/usr/local/share/staticwall/config.vibe.example",
+        "/usr/share/neowall/config.vibe.example",
+        "/usr/local/share/neowall/config.vibe.example",
         NULL
     };
     
@@ -1004,8 +1004,8 @@ static bool config_create_default(const char *config_path) {
     /* Try to copy example shaders from installation if available */
     if (home) {
         const char *shader_install_paths[] = {
-            "/usr/share/staticwall/shaders",
-            "/usr/local/share/staticwall/shaders",
+            "/usr/share/neowall/shaders",
+            "/usr/local/share/neowall/shaders",
             NULL
         };
         
@@ -1015,13 +1015,13 @@ static bool config_create_default(const char *config_path) {
                 /* Create user shader directory */
                 char user_shader_dir[MAX_PATH_LENGTH];
                 snprintf(user_shader_dir, sizeof(user_shader_dir), 
-                        "%s/.config/staticwall/shaders", home);
+                        "%s/.config/neowall/shaders", home);
                 
                 /* Create directory structure */
                 char tmp[MAX_PATH_LENGTH];
                 snprintf(tmp, sizeof(tmp), "%s/.config", home);
                 mkdir(tmp, 0755);
-                snprintf(tmp, sizeof(tmp), "%s/.config/staticwall", home);
+                snprintf(tmp, sizeof(tmp), "%s/.config/neowall", home);
                 mkdir(tmp, 0755);
                 mkdir(user_shader_dir, 0755);
                 
@@ -1084,7 +1084,7 @@ static bool config_create_default(const char *config_path) {
         }
         
         if (copied_shaders) {
-            log_info("Example shaders available at ~/.config/staticwall/shaders/");
+            log_info("Example shaders available at ~/.config/neowall/shaders/");
         }
     }
     
@@ -1093,7 +1093,7 @@ static bool config_create_default(const char *config_path) {
         log_info("Could not find example config, creating minimal fallback");
         
         const char *fallback_config =
-            "# Staticwall Configuration\n"
+            "# NeoWall Configuration\n"
             "# This is a minimal fallback config\n"
             "#\n"
             "# IMPORTANT: 'path' and 'shader' are MUTUALLY EXCLUSIVE\n"
@@ -1109,7 +1109,7 @@ static bool config_create_default(const char *config_path) {
             "#\n"
             "# Shader example:\n"
             "#   default {\n"
-            "#     shader ~/.config/staticwall/shaders/plasma.glsl\n"
+            "#     shader ~/.config/neowall/shaders/plasma.glsl\n"
             "#     shader_speed 1.0\n"
             "#   }\n"
             "#\n"
@@ -1148,7 +1148,7 @@ return true;
  * Built-in fallback configuration (used when config file fails)
  * ============================================================================ */
 
-static bool apply_builtin_default_config(struct staticwall_state *state) {
+static bool apply_builtin_default_config(struct neowall_state *state) {
     log_info("Applying built-in default configuration");
     
     /* Create a minimal working config */
@@ -1160,7 +1160,7 @@ static bool apply_builtin_default_config(struct staticwall_state *state) {
     if (home) {
         /* Try common wallpaper locations */
         const char *try_paths[] = {
-            "~/.local/share/staticwall/default.png",
+            "~/.local/share/neowall/default.png",
             "~/Pictures/wallpaper.png",
             "~/Pictures/wallpapers/wallpaper.png",
             "~/Pictures/WallpaperBank/",
@@ -1238,7 +1238,7 @@ static bool apply_builtin_default_config(struct staticwall_state *state) {
  * Main Configuration Loading Function
  * ============================================================================ */
 
-bool config_load(struct staticwall_state *state, const char *config_path) {
+bool config_load(struct neowall_state *state, const char *config_path) {
     if (!state || !config_path) {
         log_error("Invalid parameters for config_load");
         return apply_builtin_default_config(state);
@@ -1458,7 +1458,7 @@ bool config_load(struct staticwall_state *state, const char *config_path) {
  * Configuration Watching and Reloading
  * ============================================================================ */
 
-bool config_has_changed(struct staticwall_state *state) {
+bool config_has_changed(struct neowall_state *state) {
     if (!state || !state->config_path[0]) {
         return false;
     }
@@ -1482,7 +1482,7 @@ bool config_has_changed(struct staticwall_state *state) {
     return changed;
 }
 
-void config_reload(struct staticwall_state *state) {
+void config_reload(struct neowall_state *state) {
     if (!state) return;
 
     log_info("Reloading configuration...");
@@ -1561,7 +1561,7 @@ void config_reload(struct staticwall_state *state) {
 }
 
 void *config_watch_thread(void *arg) {
-    struct staticwall_state *state = (struct staticwall_state *)arg;
+    struct neowall_state *state = (struct neowall_state *)arg;
     if (!state) {
         log_error("config_watch_thread: state is NULL");
         return NULL;

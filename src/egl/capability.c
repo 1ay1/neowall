@@ -37,24 +37,24 @@ static void parse_version(const char *version_str, int *major, int *minor) {
 /* Detect EGL version */
 egl_version_t egl_detect_version(EGLDisplay display) {
     if (display == EGL_NO_DISPLAY) {
-        return STATICWALL_EGL_VERSION_UNKNOWN;
+        return NEOWALL_EGL_VERSION_UNKNOWN;
     }
     
     EGLint major = 0, minor = 0;
     if (!eglInitialize(display, &major, &minor)) {
-        return STATICWALL_EGL_VERSION_UNKNOWN;
+        return NEOWALL_EGL_VERSION_UNKNOWN;
     }
     
     if (major == 1) {
-        if (minor >= 5) return STATICWALL_EGL_VERSION_1_5;
-        if (minor >= 4) return STATICWALL_EGL_VERSION_1_4;
-        if (minor >= 3) return STATICWALL_EGL_VERSION_1_3;
-        if (minor >= 2) return STATICWALL_EGL_VERSION_1_2;
-        if (minor >= 1) return STATICWALL_EGL_VERSION_1_1;
-        return STATICWALL_EGL_VERSION_1_0;
+        if (minor >= 5) return NEOWALL_EGL_VERSION_1_5;
+        if (minor >= 4) return NEOWALL_EGL_VERSION_1_4;
+        if (minor >= 3) return NEOWALL_EGL_VERSION_1_3;
+        if (minor >= 2) return NEOWALL_EGL_VERSION_1_2;
+        if (minor >= 1) return NEOWALL_EGL_VERSION_1_1;
+        return NEOWALL_EGL_VERSION_1_0;
     }
     
-    return STATICWALL_EGL_VERSION_UNKNOWN;
+    return NEOWALL_EGL_VERSION_UNKNOWN;
 }
 
 /* Detect OpenGL ES version */
@@ -381,22 +381,22 @@ bool egl_detect_capabilities(EGLDisplay display, egl_capabilities_t *caps) {
     if (extensions) strncpy(caps->egl_extensions, extensions, sizeof(caps->egl_extensions) - 1);
     
     /* Detect EGL capabilities by version */
-    if (caps->egl_version >= STATICWALL_EGL_VERSION_1_0) {
+    if (caps->egl_version >= NEOWALL_EGL_VERSION_1_0) {
         detect_egl_v10_caps(display, &caps->egl_v10);
     }
-    if (caps->egl_version >= STATICWALL_EGL_VERSION_1_1) {
+    if (caps->egl_version >= NEOWALL_EGL_VERSION_1_1) {
         detect_egl_v11_caps(display, &caps->egl_v11);
     }
-    if (caps->egl_version >= STATICWALL_EGL_VERSION_1_2) {
+    if (caps->egl_version >= NEOWALL_EGL_VERSION_1_2) {
         detect_egl_v12_caps(display, &caps->egl_v12);
     }
-    if (caps->egl_version >= STATICWALL_EGL_VERSION_1_3) {
+    if (caps->egl_version >= NEOWALL_EGL_VERSION_1_3) {
         detect_egl_v13_caps(display, &caps->egl_v13);
     }
-    if (caps->egl_version >= STATICWALL_EGL_VERSION_1_4) {
+    if (caps->egl_version >= NEOWALL_EGL_VERSION_1_4) {
         detect_egl_v14_caps(display, &caps->egl_v14);
     }
-    if (caps->egl_version >= STATICWALL_EGL_VERSION_1_5) {
+    if (caps->egl_version >= NEOWALL_EGL_VERSION_1_5) {
         detect_egl_v15_caps(display, &caps->egl_v15);
     }
     
@@ -502,13 +502,13 @@ bool gles_detect_capabilities_for_context(EGLDisplay display, EGLContext context
 /* Get version strings - Table lookup */
 const char *egl_version_string(egl_version_t version) {
     static const char *version_strings[] = {
-        [STATICWALL_EGL_VERSION_UNKNOWN] = "Unknown",
-        [STATICWALL_EGL_VERSION_1_0] = "1.0",
-        [STATICWALL_EGL_VERSION_1_1] = "1.1",
-        [STATICWALL_EGL_VERSION_1_2] = "1.2",
-        [STATICWALL_EGL_VERSION_1_3] = "1.3",
-        [STATICWALL_EGL_VERSION_1_4] = "1.4",
-        [STATICWALL_EGL_VERSION_1_5] = "1.5",
+        [NEOWALL_EGL_VERSION_UNKNOWN] = "Unknown",
+        [NEOWALL_EGL_VERSION_1_0] = "1.0",
+        [NEOWALL_EGL_VERSION_1_1] = "1.1",
+        [NEOWALL_EGL_VERSION_1_2] = "1.2",
+        [NEOWALL_EGL_VERSION_1_3] = "1.3",
+        [NEOWALL_EGL_VERSION_1_4] = "1.4",
+        [NEOWALL_EGL_VERSION_1_5] = "1.5",
     };
     
     if (version >= 0 && version < (int)(sizeof(version_strings) / sizeof(version_strings[0]))) {

@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <GLES2/gl2.h>
 #include <ctype.h>
-#include "staticwall.h"
+#include "neowall.h"
 #include "constants.h"
 #include "shader.h"
 #include "shadertoy_compat.h"
@@ -41,20 +41,20 @@ static const char *shadertoy_wrapper_prefix_es2 =
     "precision highp int;\n"
     "\n"
     "// Shadertoy compatibility uniforms (prefixed to avoid conflicts)\n"
-    "uniform float _staticwall_time;          // Maps to iTime\n"
-    "uniform vec2 _staticwall_resolution;     // Maps to iResolution.xy\n"
+    "uniform float _neowall_time;          // Maps to iTime\n"
+    "uniform vec2 _neowall_resolution;     // Maps to iResolution.xy\n"
     "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
     "\n"
     "// Non-Shadertoy uniforms (for plain shaders)\n"
-    "#define time _staticwall_time\n"
-    "#define resolution _staticwall_resolution\n"
+    "#define time _neowall_time\n"
+    "#define resolution _neowall_resolution\n"
     "\n"
     "// Shadertoy uniform arrays (must come after precision specifier)\n"
     "uniform vec4 iChannelTime[4];\n"
     "uniform vec3 iChannelResolution[4];\n"
     "\n"
     "// Shadertoy uniforms - defined with default behavior\n"
-    "#define iTime _staticwall_time\n"
+    "#define iTime _neowall_time\n"
     "#define iTimeDelta 0.016667\n"
     "#define iFrame 0\n"
     "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
@@ -69,20 +69,20 @@ static const char *shadertoy_wrapper_prefix_es3 =
     "precision highp int;\n"
     "\n"
     "// Shadertoy compatibility uniforms (prefixed to avoid conflicts)\n"
-    "uniform float _staticwall_time;          // Maps to iTime\n"
-    "uniform vec2 _staticwall_resolution;     // Maps to iResolution.xy\n"
+    "uniform float _neowall_time;          // Maps to iTime\n"
+    "uniform vec2 _neowall_resolution;     // Maps to iResolution.xy\n"
     "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
     "\n"
     "// Non-Shadertoy uniforms (for plain shaders)\n"
-    "#define time _staticwall_time\n"
-    "#define resolution _staticwall_resolution\n"
+    "#define time _neowall_time\n"
+    "#define resolution _neowall_resolution\n"
     "\n"
     "// Shadertoy uniform arrays (must come after precision specifier)\n"
     "uniform vec4 iChannelTime[4];\n"
     "uniform vec3 iChannelResolution[4];\n"
     "\n"
     "// Shadertoy uniforms - defined with default behavior\n"
-    "#define iTime _staticwall_time\n"
+    "#define iTime _neowall_time\n"
     "#define iTimeDelta 0.016667\n"
     "#define iFrame 0\n"
     "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
@@ -332,21 +332,21 @@ static bool shader_resolve_path(const char *shader_name, char *resolved_path, si
     char search_paths[4][MAX_PATH_LENGTH];
     int num_paths = 0;
     
-    /* 1. XDG_CONFIG_HOME/staticwall/shaders/ */
+    /* 1. XDG_CONFIG_HOME/neowall/shaders/ */
     if (xdg_config_home && home) {
-        snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "%s/staticwall/shaders/%s", xdg_config_home, shader_name);
+        snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "%s/neowall/shaders/%s", xdg_config_home, shader_name);
     }
     
-    /* 2. ~/.config/staticwall/shaders/ */
+    /* 2. ~/.config/neowall/shaders/ */
     if (home) {
-        snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "%s/.config/staticwall/shaders/%s", home, shader_name);
+        snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "%s/.config/neowall/shaders/%s", home, shader_name);
     }
     
-    /* 3. /usr/share/staticwall/shaders/ */
-    snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "/usr/share/staticwall/shaders/%s", shader_name);
+    /* 3. /usr/share/neowall/shaders/ */
+    snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "/usr/share/neowall/shaders/%s", shader_name);
     
-    /* 4. /usr/local/share/staticwall/shaders/ */
-    snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "/usr/local/share/staticwall/shaders/%s", shader_name);
+    /* 4. /usr/local/share/neowall/shaders/ */
+    snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "/usr/local/share/neowall/shaders/%s", shader_name);
     
     /* Check each path */
     for (int i = 0; i < num_paths; i++) {
@@ -700,11 +700,11 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
     }
     
     /* Save wrapped shader for debugging on failure */
-    FILE *debug_fp = fopen("/tmp/staticwall_shader_debug.glsl", "w");
+    FILE *debug_fp = fopen("/tmp/neowall_shader_debug.glsl", "w");
     if (debug_fp) {
         fprintf(debug_fp, "%s", final_fragment_src);
         fclose(debug_fp);
-        log_debug("Saved wrapped shader to /tmp/staticwall_shader_debug.glsl for debugging");
+        log_debug("Saved wrapped shader to /tmp/neowall_shader_debug.glsl for debugging");
     }
     
     /* Create program with standard vertex shader and loaded fragment shader */

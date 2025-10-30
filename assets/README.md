@@ -1,10 +1,10 @@
-# Staticwall Assets
+# NeoWall Assets
 
-This directory contains default assets for Staticwall.
+This directory contains default assets for NeoWall.
 
 ## Default Wallpaper
 
-The `default.png` file is used as the fallback wallpaper when Staticwall runs for the first time and no configuration exists yet.
+The `default.png` file is used as the fallback wallpaper when NeoWall runs for the first time and no configuration exists yet.
 
 ### Using Your Own Default Wallpaper
 

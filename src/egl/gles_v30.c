@@ -7,7 +7,7 @@
 #else
 #include <GLES2/gl2.h>
 #endif
-#include "../../include/staticwall.h"
+#include "../../include/neowall.h"
 #include "../../include/egl/capability.h"
 
 /**

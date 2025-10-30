@@ -7,7 +7,7 @@
 #include "capability.h"
 
 /* Forward declarations */
-struct staticwall_state;
+struct neowall_state;
 
 /**
  * EGL Core Dispatch System
@@ -38,27 +38,27 @@ typedef struct {
 /**
  * Initialize EGL with automatic version detection
  * 
- * @param state Staticwall global state
+ * @param state NeoWall global state
  * @return true on success, false on failure
  */
-bool egl_core_init(struct staticwall_state *state);
+bool egl_core_init(struct neowall_state *state);
 
 /**
  * Initialize EGL with specific strategy
  * 
- * @param state Staticwall global state
+ * @param state NeoWall global state
  * @param strategy Context creation strategy
  * @return true on success, false on failure
  */
-bool egl_core_init_with_strategy(struct staticwall_state *state, 
+bool egl_core_init_with_strategy(struct neowall_state *state, 
                                   egl_context_strategy_t strategy);
 
 /**
  * Cleanup EGL resources
  * 
- * @param state Staticwall global state
+ * @param state NeoWall global state
  */
-void egl_core_cleanup(struct staticwall_state *state);
+void egl_core_cleanup(struct neowall_state *state);
 
 /**
  * Create best available OpenGL ES context
@@ -85,21 +85,21 @@ EGLContext egl_create_context_version(EGLDisplay display, EGLConfig config,
 /**
  * Make EGL context current for an output
  * 
- * @param state Staticwall global state
+ * @param state NeoWall global state
  * @param output Output state (can be NULL to unbind)
  * @return true on success, false on failure
  */
-bool egl_core_make_current(struct staticwall_state *state, 
+bool egl_core_make_current(struct neowall_state *state, 
                            struct output_state *output);
 
 /**
  * Swap buffers for an output
  * 
- * @param state Staticwall global state
+ * @param state NeoWall global state
  * @param output Output state
  * @return true on success, false on failure
  */
-bool egl_core_swap_buffers(struct staticwall_state *state,
+bool egl_core_swap_buffers(struct neowall_state *state,
                            struct output_state *output);
 
 /**
@@ -116,17 +116,17 @@ bool egl_get_best_config(EGLDisplay display, gles_version_t version,
 /**
  * Validate EGL setup
  * 
- * @param state Staticwall global state
+ * @param state NeoWall global state
  * @return true if valid, false otherwise
  */
-bool egl_core_validate(struct staticwall_state *state);
+bool egl_core_validate(struct neowall_state *state);
 
 /**
  * Print EGL configuration info
  * 
- * @param state Staticwall global state
+ * @param state NeoWall global state
  */
-void egl_core_print_info(struct staticwall_state *state);
+void egl_core_print_info(struct neowall_state *state);
 
 /**
  * Get human-readable error string

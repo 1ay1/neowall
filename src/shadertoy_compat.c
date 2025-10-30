@@ -2,14 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include "staticwall.h"
+#include "neowall.h"
 #include "constants.h"
 
 /**
  * Intelligent Shadertoy Shader Preprocessor
  * 
  * This preprocessor deeply analyzes Shadertoy shaders and intelligently transforms them
- * to be compatible with staticwall by:
+ * to be compatible with neowall by:
  * 1. Detecting all Shadertoy-specific features and providing fallbacks
  * 2. Analyzing function dependencies and injecting required implementations
  * 3. Automatically fixing common compatibility issues
@@ -884,7 +884,7 @@ void shadertoy_analyze_shader(const char *source) {
     }
     
     if (channel_count > 0) {
-        log_info("Note: This shader expects texture input which staticwall doesn't support yet");
+        log_info("Note: This shader expects texture input which neowall doesn't support yet");
         log_info("      Using procedural noise as fallback - visuals will differ from Shadertoy");
     }
     

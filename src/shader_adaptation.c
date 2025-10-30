@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include "../include/staticwall.h"
+#include "../include/neowall.h"
 #include "../include/shader.h"
 #include "../include/egl/capability.h"
 
@@ -11,7 +11,7 @@
  * 
  * Automatically adapts shaders between OpenGL ES 2.0 and ES 3.0 syntax.
  * This allows Shadertoy shaders (which often use ES 3.0 features) to work
- * seamlessly with staticwall, while maintaining backward compatibility with ES 2.0.
+ * seamlessly with neowall, while maintaining backward compatibility with ES 2.0.
  * 
  * Key conversions:
  * - #version directives (100 <-> 300 es)
@@ -21,7 +21,7 @@
  */
 
 /* Get appropriate GLSL version string based on detected OpenGL ES version */
-const char *get_glsl_version_string(struct staticwall_state *state) {
+const char *get_glsl_version_string(struct neowall_state *state) {
     if (!state) {
         return "#version 100\n";  // Safe default
     }
@@ -325,7 +325,7 @@ static char *convert_es2_to_es3(const char *shader_code, bool is_fragment_shader
  * @param is_fragment_shader True for fragment shaders, false for vertex shaders
  * @return Adapted shader code (caller must free), or NULL on error
  */
-char *adapt_shader_for_version(struct staticwall_state *state, 
+char *adapt_shader_for_version(struct neowall_state *state, 
                                 const char *shader_code,
                                 bool is_fragment_shader) {
     if (!state || !shader_code) {
@@ -385,13 +385,13 @@ char *adapt_shader_for_version(struct staticwall_state *state,
 /**
  * Adapt vertex shader for current GL version
  */
-char *adapt_vertex_shader(struct staticwall_state *state, const char *shader_code) {
+char *adapt_vertex_shader(struct neowall_state *state, const char *shader_code) {
     return adapt_shader_for_version(state, shader_code, false);
 }
 
 /**
  * Adapt fragment shader for current GL version
  */
-char *adapt_fragment_shader(struct staticwall_state *state, const char *shader_code) {
+char *adapt_fragment_shader(struct neowall_state *state, const char *shader_code) {
     return adapt_shader_for_version(state, shader_code, true);
 }

@@ -6,7 +6,7 @@
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 #endif
-#include "../../include/staticwall.h"
+#include "../../include/neowall.h"
 #include "../../include/egl/capability.h"
 
 /**

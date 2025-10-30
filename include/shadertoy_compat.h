@@ -7,11 +7,11 @@
  * Shadertoy Compatibility Layer
  * 
  * Provides preprocessing and analysis for Shadertoy-format shaders
- * to make them compatible with staticwall's rendering system.
+ * to make them compatible with neowall's rendering system.
  */
 
 /**
- * Preprocess a Shadertoy shader to make it compatible with staticwall.
+ * Preprocess a Shadertoy shader to make it compatible with neowall.
  * 
  * This function:
  * - Detects usage of texture channels (iChannel0-3)

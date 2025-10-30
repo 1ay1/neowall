@@ -13,7 +13,7 @@ We actively maintain and provide security updates for the following versions:
 
 ## Reporting a Vulnerability
 
-We take security seriously. If you discover a security vulnerability in Staticwall, please report it responsibly.
+We take security seriously. If you discover a security vulnerability in NeoWall, please report it responsibly.
 
 ### How to Report
 
@@ -22,7 +22,7 @@ We take security seriously. If you discover a security vulnerability in Staticwa
 Instead, please:
 
 1. **Email:** Send details to the maintainer (check GitHub profile for contact)
-2. **GitHub Security Advisory:** Use the [private vulnerability reporting feature](https://github.com/1ay1/staticwall/security/advisories/new)
+2. **GitHub Security Advisory:** Use the [private vulnerability reporting feature](https://github.com/1ay1/neowall/security/advisories/new)
 
 ### What to Include
 
@@ -46,7 +46,7 @@ Please provide:
 
 ### Security Considerations
 
-Staticwall is designed with security in mind:
+NeoWall is designed with security in mind:
 
 - **No Root Privileges:** Runs as a normal user
 - **No Network Access:** Purely local, no external connections
@@ -57,7 +57,7 @@ Staticwall is designed with security in mind:
 
 ### Known Security Boundaries
 
-What Staticwall does NOT protect against:
+What NeoWall does NOT protect against:
 
 - **Malicious Images:** We load PNG/JPEG files - ensure your image sources are trusted
 - **Config Injection:** Don't allow untrusted users to modify your config file
@@ -66,13 +66,13 @@ What Staticwall does NOT protect against:
 
 ### Security Best Practices
 
-When using Staticwall:
+When using NeoWall:
 
-1. ✅ Keep Staticwall updated to the latest version
+1. ✅ Keep NeoWall updated to the latest version
 2. ✅ Use wallpapers from trusted sources
-3. ✅ Set appropriate file permissions on config files (`chmod 600 ~/.config/staticwall/config.vibe`)
+3. ✅ Set appropriate file permissions on config files (`chmod 600 ~/.config/neowall/config.vibe`)
 4. ✅ Verify image files before using them as wallpapers
-5. ✅ Don't run Staticwall with elevated privileges (unnecessary and dangerous)
+5. ✅ Don't run NeoWall with elevated privileges (unnecessary and dangerous)
 6. ✅ Review config changes if using auto-reload (`--watch`)
 
 ### Past Security Issues

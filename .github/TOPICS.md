@@ -1,4 +1,4 @@
-# GitHub Topics for Staticwall
+# GitHub Topics for NeoWall
 
 ## How to Add Topics
 
