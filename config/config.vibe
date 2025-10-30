@@ -1,5 +1,4 @@
 default {
-  shader ~/.config/neowall/shaders/
-  duration 300
+  shader matrix_real.glsl
   shader_speed 1.0
 }
