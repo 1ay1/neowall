@@ -79,15 +79,15 @@ bool transition_render(struct output_state *output, enum transition_type type, f
 /**
  * Setup fullscreen quad vertices for transitions
  * 
- * During transitions, we use a fullscreen quad with standard texture coordinates
- * to prevent size changes between images with different aspect ratios.
+ * Creates a simple fullscreen quad with standard texture coordinates.
+ * This provides consistent rendering during transitions regardless of
+ * image aspect ratios or display modes.
  * 
  * @param vbo VBO to bind and upload data to
  * @param vertices Output array to populate (must be 16 floats)
  */
 void transition_setup_fullscreen_quad(GLuint vbo, float vertices[16]) {
-    /* Fullscreen quad: position (x,y) and texcoord (u,v) interleaved
-     * This ensures consistent rendering size regardless of source image dimensions */
+    /* Fullscreen quad: position (x,y) and texcoord (u,v) interleaved */
     vertices[0]  = -1.0f; vertices[1]  =  1.0f; vertices[2]  = 0.0f; vertices[3]  = 0.0f;  /* top-left */
     vertices[4]  =  1.0f; vertices[5]  =  1.0f; vertices[6]  = 1.0f; vertices[7]  = 0.0f;  /* top-right */
     vertices[8]  = -1.0f; vertices[9]  = -1.0f; vertices[10] = 0.0f; vertices[11] = 1.0f;  /* bottom-left */

@@ -518,6 +518,154 @@ static void calculate_optimal_dimensions(uint32_t img_width, uint32_t img_height
     }
 }
 
+/* Pad image to exact dimensions with transparent borders (center positioning) */
+static struct image_data *image_center_pad(struct image_data *img, uint32_t pad_width, uint32_t pad_height) {
+    if (!img || !img->pixels) {
+        return img;
+    }
+    
+    /* No padding needed if already exact size or larger */
+    if (img->width >= pad_width && img->height >= pad_height) {
+        return img;
+    }
+    
+    log_debug("Center-padding image from %ux%u to %ux%u",
+             img->width, img->height, pad_width, pad_height);
+    
+    /* Allocate new pixel buffer filled with opaque black (R=0, G=0, B=0, A=255) */
+    size_t new_size = (size_t)pad_width * pad_height * 4; /* RGBA */
+    uint8_t *new_pixels = malloc(new_size);
+    if (!new_pixels) {
+        log_error("Failed to allocate memory for padded image");
+        return img;
+    }
+    
+    /* Fill with opaque black (important: alpha = 255 for opaque) */
+    for (size_t i = 0; i < new_size; i += 4) {
+        new_pixels[i] = 0;       /* R */
+        new_pixels[i + 1] = 0;   /* G */
+        new_pixels[i + 2] = 0;   /* B */
+        new_pixels[i + 3] = 255; /* A - opaque */
+    }
+    
+    /* Calculate position to center the image */
+    uint32_t offset_x = (pad_width > img->width) ? (pad_width - img->width) / 2 : 0;
+    uint32_t offset_y = (pad_height > img->height) ? (pad_height - img->height) / 2 : 0;
+    
+    /* Copy original image to center of new buffer */
+    for (uint32_t y = 0; y < img->height; y++) {
+        uint32_t dst_y = offset_y + y;
+        uint32_t src_offset = y * img->width * 4;
+        uint32_t dst_offset = (dst_y * pad_width + offset_x) * 4;
+        memcpy(new_pixels + dst_offset, img->pixels + src_offset, img->width * 4);
+    }
+    
+    /* Replace old pixels with padded ones */
+    free(img->pixels);
+    img->pixels = new_pixels;
+    img->width = pad_width;
+    img->height = pad_height;
+    
+    return img;
+}
+
+/* Tile image to fill exact dimensions by repeating the source image */
+static struct image_data *image_tile_to_size(struct image_data *img, uint32_t target_width, uint32_t target_height) {
+    if (!img || !img->pixels) {
+        return img;
+    }
+    
+    /* No tiling needed if already exact size or larger */
+    if (img->width >= target_width && img->height >= target_height) {
+        return img;
+    }
+    
+    log_debug("Tiling image from %ux%u to fill %ux%u",
+             img->width, img->height, target_width, target_height);
+    
+    /* Allocate new pixel buffer for tiled result */
+    size_t new_size = (size_t)target_width * target_height * 4; /* RGBA */
+    uint8_t *new_pixels = malloc(new_size);
+    if (!new_pixels) {
+        log_error("Failed to allocate memory for tiled image");
+        return img;
+    }
+    
+    /* Tile the image by copying it repeatedly */
+    for (uint32_t dst_y = 0; dst_y < target_height; dst_y++) {
+        uint32_t src_y = dst_y % img->height;  /* Wrap vertically */
+        
+        for (uint32_t dst_x = 0; dst_x < target_width; dst_x++) {
+            uint32_t src_x = dst_x % img->width;  /* Wrap horizontally */
+            
+            /* Copy pixel from source to destination */
+            uint32_t src_offset = (src_y * img->width + src_x) * 4;
+            uint32_t dst_offset = (dst_y * target_width + dst_x) * 4;
+            
+            new_pixels[dst_offset + 0] = img->pixels[src_offset + 0]; /* R */
+            new_pixels[dst_offset + 1] = img->pixels[src_offset + 1]; /* G */
+            new_pixels[dst_offset + 2] = img->pixels[src_offset + 2]; /* B */
+            new_pixels[dst_offset + 3] = img->pixels[src_offset + 3]; /* A */
+        }
+    }
+    
+    /* Replace old pixels with tiled ones */
+    free(img->pixels);
+    img->pixels = new_pixels;
+    img->width = target_width;
+    img->height = target_height;
+    
+    log_info("Image tiled to %ux%u", target_width, target_height);
+    return img;
+}
+
+/* Center-crop image to exact dimensions */
+static struct image_data *image_center_crop(struct image_data *img, uint32_t crop_width, uint32_t crop_height) {
+    if (!img || !img->pixels) {
+        return img;
+    }
+    
+    /* No crop needed if already exact size */
+    if (img->width == crop_width && img->height == crop_height) {
+        return img;
+    }
+    
+    /* Calculate crop offsets (center crop) */
+    uint32_t offset_x = (img->width > crop_width) ? (img->width - crop_width) / 2 : 0;
+    uint32_t offset_y = (img->height > crop_height) ? (img->height - crop_height) / 2 : 0;
+    
+    /* Ensure we don't crop to larger than source */
+    uint32_t actual_crop_width = (crop_width < img->width) ? crop_width : img->width;
+    uint32_t actual_crop_height = (crop_height < img->height) ? crop_height : img->height;
+    
+    log_debug("Center-cropping image from %ux%u to %ux%u (offset: %u,%u)",
+             img->width, img->height, actual_crop_width, actual_crop_height, offset_x, offset_y);
+    
+    /* Allocate new pixel buffer */
+    size_t new_size = (size_t)actual_crop_width * actual_crop_height * 4; /* RGBA */
+    uint8_t *new_pixels = malloc(new_size);
+    if (!new_pixels) {
+        log_error("Failed to allocate memory for cropped image");
+        return img;
+    }
+    
+    /* Copy cropped region row by row */
+    for (uint32_t y = 0; y < actual_crop_height; y++) {
+        uint32_t src_y = offset_y + y;
+        uint32_t src_offset = (src_y * img->width + offset_x) * 4;
+        uint32_t dst_offset = y * actual_crop_width * 4;
+        memcpy(new_pixels + dst_offset, img->pixels + src_offset, actual_crop_width * 4);
+    }
+    
+    /* Replace old pixels with cropped ones */
+    free(img->pixels);
+    img->pixels = new_pixels;
+    img->width = actual_crop_width;
+    img->height = actual_crop_height;
+    
+    return img;
+}
+
 /* Scale image to optimal size for display mode */
 static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 
                                                    int32_t display_height, enum wallpaper_mode mode) {
@@ -550,7 +698,49 @@ static struct image_data *image_scale_to_display(struct image_data *img, int32_t
              img->width, img->height, target_width, target_height, 
              display_width, display_height, mode);
     
-    return image_scale_bilinear(img, target_width, target_height);
+    img = image_scale_bilinear(img, target_width, target_height);
+    
+    if (!img || !img->pixels) {
+        return img;
+    }
+    
+    /* Adjust image to exact display size for seamless transitions
+     * All modes except TILE need to be exact display size for consistent rendering */
+    switch (mode) {
+        case MODE_FILL:
+            /* Already scaled to fill, now crop excess to exact display size */
+            img = image_center_crop(img, display_width, display_height);
+            break;
+            
+        case MODE_FIT:
+            /* Scaled to fit inside, now pad to exact display size with black borders */
+            if (img->width < (uint32_t)display_width || img->height < (uint32_t)display_height) {
+                img = image_center_pad(img, display_width, display_height);
+            }
+            break;
+            
+        case MODE_CENTER:
+            /* No scaling (1:1 pixels), crop if larger or pad if smaller to exact display size */
+            if (img->width > (uint32_t)display_width || img->height > (uint32_t)display_height) {
+                img = image_center_crop(img, display_width, display_height);
+            } else if (img->width < (uint32_t)display_width || img->height < (uint32_t)display_height) {
+                img = image_center_pad(img, display_width, display_height);
+            }
+            /* else: already exact size, perfect! */
+            break;
+            
+        case MODE_STRETCH:
+            /* Already scaled to exact display size, no adjustment needed */
+            break;
+            
+        case MODE_TILE:
+            /* Physically tile the image to exact display size for seamless transitions
+             * This makes transitions work perfectly while maintaining tile appearance */
+            img = image_tile_to_size(img, display_width, display_height);
+            break;
+    }
+    
+    return img;
 }
 
 /* High-quality bilinear image scaling */

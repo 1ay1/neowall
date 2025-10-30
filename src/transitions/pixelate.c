@@ -30,12 +30,7 @@ static const char *pixelate_fragment_shader_source =
     "uniform sampler2D texture0;\n"
     "uniform sampler2D texture1;\n"
     "uniform float progress;\n"
-    "uniform float time;\n"
-    "\n"
-    "// Pseudo-random function\n"
-    "float rand(vec2 co) {\n"
-    "    return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);\n"
-    "}\n"
+    "uniform vec2 resolution;\n"
     "\n"
     "void main() {\n"
     "    vec2 uv = v_texcoord;\n"
@@ -47,32 +42,28 @@ static const char *pixelate_fragment_shader_source =
     "    \n"
     "    // Dramatic pixelation curve - gets HUGE in the middle\n"
     "    float intensity = sin(eased * 3.14159);\n"
-    "    float pixelation = pow(intensity, 0.7) * 120.0 + 1.0;\n"
+    "    // Simplified: avoid pow() for better compatibility\n"
+    "    float pixelation = intensity * intensity * 80.0 + 1.0;\n"
     "    \n"
     "    // Calculate pixel block\n"
     "    vec2 pixel_size = vec2(1.0) / pixelation;\n"
     "    vec2 block_id = floor(uv / pixel_size);\n"
     "    vec2 block_center = (block_id + 0.5) * pixel_size;\n"
     "    \n"
-    "    // Add subtle rotation to blocks at peak pixelation\n"
-    "    float rotation = (rand(block_id) - 0.5) * intensity * 0.15;\n"
-    "    float cos_r = cos(rotation);\n"
-    "    float sin_r = sin(rotation);\n"
-    "    vec2 rotated_uv = block_center + mat2(cos_r, -sin_r, sin_r, cos_r) * (uv - block_center);\n"
+    "    // Blend between pixelated (block_center) and normal (uv) sampling\n"
+    "    // At intensity=0 (start/end), use normal UVs; at intensity=1 (peak), use block centers\n"
+    "    vec2 sample_uv = mix(uv, block_center, intensity);\n"
     "    \n"
-    "    // Clamp to prevent sampling outside texture\n"
-    "    rotated_uv = clamp(rotated_uv, 0.0, 1.0);\n"
-    "    \n"
-    "    // Sample at block center for mosaic effect\n"
-    "    vec4 old_color = texture2D(texture0, block_center);\n"
-    "    vec4 new_color = texture2D(texture1, block_center);\n"
+    "    // Sample at blended position for mosaic effect\n"
+    "    vec4 old_color = texture2D(texture0, sample_uv);\n"
+    "    vec4 new_color = texture2D(texture1, sample_uv);\n"
     "    \n"
     "    // Chromatic aberration increases with pixelation\n"
-    "    float aberration = intensity * pixel_size.x * 2.0;\n"
-    "    vec4 old_r = texture2D(texture0, block_center + vec2(aberration, 0.0));\n"
-    "    vec4 old_b = texture2D(texture0, block_center - vec2(aberration, 0.0));\n"
-    "    vec4 new_r = texture2D(texture1, block_center + vec2(aberration, 0.0));\n"
-    "    vec4 new_b = texture2D(texture1, block_center - vec2(aberration, 0.0));\n"
+    "    float aberration = intensity * pixel_size.x * 1.5;\n"
+    "    vec4 old_r = texture2D(texture0, sample_uv + vec2(aberration, 0.0));\n"
+    "    vec4 old_b = texture2D(texture0, sample_uv - vec2(aberration, 0.0));\n"
+    "    vec4 new_r = texture2D(texture1, sample_uv + vec2(aberration, 0.0));\n"
+    "    vec4 new_b = texture2D(texture1, sample_uv - vec2(aberration, 0.0));\n"
     "    \n"
     "    old_color.r = old_r.r;\n"
     "    old_color.b = old_b.b;\n"
@@ -83,22 +74,17 @@ static const char *pixelate_fragment_shader_source =
     "    vec4 color = mix(old_color, new_color, eased);\n"
     "    \n"
     "    // Add color vibrance boost at peak\n"
-    "    float vibrance = intensity * 0.25;\n"
-    "    color.rgb = mix(color.rgb, color.rgb * 1.3, vibrance);\n"
+    "    float vibrance = intensity * 0.2;\n"
+    "    color.rgb = mix(color.rgb, color.rgb * 1.2, vibrance);\n"
     "    \n"
     "    // Pixel grid lines for retro effect\n"
     "    vec2 grid = fract(uv * pixelation);\n"
-    "    float grid_line = step(0.92, max(grid.x, grid.y)) * intensity * 0.4;\n"
-    "    color.rgb += grid_line;\n"
-    "    \n"
-    "    // Subtle vignette darkening at edges of each block\n"
-    "    vec2 block_edge = abs(grid - 0.5) * 2.0;\n"
-    "    float vignette = 1.0 - pow(max(block_edge.x, block_edge.y), 2.0) * intensity * 0.3;\n"
-    "    color.rgb *= vignette;\n"
+    "    float grid_line = step(0.9, max(grid.x, grid.y)) * intensity * 0.3;\n"
+    "    color.rgb += vec3(grid_line);\n"
     "    \n"
     "    // Flash effect at peak transition\n"
     "    float peak_flash = 1.0 - abs(eased - 0.5) * 2.0;\n"
-    "    color.rgb += vec3(peak_flash * 0.15);\n"
+    "    color.rgb += vec3(peak_flash * 0.1);\n"
     "    \n"
     "    gl_FragColor = color;\n"
     "}\n";
@@ -119,18 +105,17 @@ bool shader_create_pixelate_program(GLuint *program) {
 /**
  * Pixelate Transition
  * 
- * Dramatic mosaic/pixelation effect. Image progressively breaks into huge pixel
+ * Dramatic mosaic/pixelation effect. Image progressively breaks into large pixel
  * blocks with chromatic aberration, then smoothly transitions to the new image
  * as blocks reform. Creates a vibrant retro-digital aesthetic.
  * 
  * Features:
- * - Smooth easing with dramatic pixelation curve (up to 120x120 blocks!)
+ * - Smooth easing with dramatic pixelation curve (up to 80x80 blocks)
  * - RGB chromatic aberration that intensifies with pixelation
- * - Subtle block rotation for dynamic feel
  * - Pixel grid lines for authentic retro look
- * - Vignette effect on block edges
  * - Color vibrance boost at transition peak
  * - Flash effect at maximum pixelation
+ * - Optimized for OpenGL ES 2.0 compatibility (avoids pow() with fractional exponents)
  * 
  * @param output Output state containing images and textures
  * @param progress Transition progress (0.0 to 1.0)
@@ -138,12 +123,23 @@ bool shader_create_pixelate_program(GLuint *program) {
  */
 bool transition_pixelate_render(struct output_state *output, float progress) {
     if (!output || !output->current_image || !output->next_image) {
+        log_error("Pixelate transition: invalid parameters (output=%p)", (void*)output);
         return false;
     }
 
     if (output->texture == 0 || output->next_texture == 0) {
+        log_error("Pixelate transition: missing textures (texture=%u, next_texture=%u)",
+                 output->texture, output->next_texture);
         return false;
     }
+
+    if (output->pixelate_program == 0) {
+        log_error("Pixelate transition: program not initialized");
+        return false;
+    }
+
+    log_debug("Pixelate transition rendering: progress=%.2f, program=%u", 
+             progress, output->pixelate_program);
 
     /* Set viewport */
     glViewport(0, 0, output->width, output->height);
@@ -163,7 +159,10 @@ bool transition_pixelate_render(struct output_state *output, float progress) {
     GLint tex0_uniform = glGetUniformLocation(output->pixelate_program, "texture0");
     GLint tex1_uniform = glGetUniformLocation(output->pixelate_program, "texture1");
     GLint progress_uniform = glGetUniformLocation(output->pixelate_program, "progress");
-    GLint time_uniform = glGetUniformLocation(output->pixelate_program, "time");
+    GLint resolution_uniform = glGetUniformLocation(output->pixelate_program, "resolution");
+    
+    log_debug("Pixelate uniforms: tex0=%d, tex1=%d, progress=%d, resolution=%d",
+             tex0_uniform, tex1_uniform, progress_uniform, resolution_uniform);
 
     /* Setup fullscreen quad using DRY helper */
     float vertices[16];
@@ -190,10 +189,8 @@ bool transition_pixelate_render(struct output_state *output, float progress) {
         glUniform1f(progress_uniform, progress);
     }
 
-    if (time_uniform >= 0) {
-        /* Use transition progress as time */
-        float time_value = progress;
-        glUniform1f(time_uniform, time_value);
+    if (resolution_uniform >= 0) {
+        glUniform2f(resolution_uniform, (float)output->width, (float)output->height);
     }
 
     /* Draw fullscreen quad */
@@ -226,5 +223,6 @@ bool transition_pixelate_render(struct output_state *output, float progress) {
     output->needs_redraw = true;
     output->frames_rendered++;
 
+    log_debug("Pixelate transition frame rendered successfully");
     return true;
 }

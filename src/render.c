@@ -582,100 +582,18 @@ void calculate_vertex_coords_for_image(struct output_state *output,
         return;
     }
     
-    float img_width = (float)image->width;
-    float img_height = (float)image->height;
-    float disp_width = (float)output->width;
-    float disp_height = (float)output->height;
+    /* All display modes now pre-process images to exact display size during load time:
+     * - MODE_FILL: scaled and center-cropped to exact size
+     * - MODE_FIT: scaled and padded with black borders to exact size
+     * - MODE_CENTER: kept at 1:1 pixels, cropped or padded to exact size
+     * - MODE_STRETCH: scaled to exact size
+     * - MODE_TILE: physically tiled to exact size
+     * 
+     * This means we can use a simple fullscreen quad for all modes,
+     * ensuring consistent rendering during both transitions and normal display.
+     * No special vertex or texture coordinate calculations needed! */
     
-    switch (output->config.mode) {
-        case MODE_CENTER: {
-            /* Center image at actual size (1:1 pixels) */
-            if (img_width > disp_width || img_height > disp_height) {
-                /* Image is larger than display - crop to show center portion */
-                if (img_width > disp_width) {
-                    /* Crop horizontally */
-                    float crop_ratio = disp_width / img_width;
-                    float crop_offset = (1.0f - crop_ratio) / 2.0f;
-                    vertices[2] = crop_offset;        /* top-left texcoord */
-                    vertices[6] = 1.0f - crop_offset; /* top-right texcoord */
-                    vertices[10] = crop_offset;       /* bottom-left texcoord */
-                    vertices[14] = 1.0f - crop_offset; /* bottom-right texcoord */
-                }
-                if (img_height > disp_height) {
-                    /* Crop vertically */
-                    float crop_ratio = disp_height / img_height;
-                    float crop_offset = (1.0f - crop_ratio) / 2.0f;
-                    vertices[3] = crop_offset;        /* top-left texcoord */
-                    vertices[7] = crop_offset;        /* top-right texcoord */
-                    vertices[11] = 1.0f - crop_offset; /* bottom-left texcoord */
-                    vertices[15] = 1.0f - crop_offset; /* bottom-right texcoord */
-                }
-                /* Vertices stay fullscreen to fill display */
-            } else {
-                /* Image is smaller than display - center it */
-                float scale_x = img_width / disp_width;
-                float scale_y = img_height / disp_height;
-                
-                vertices[0] = -scale_x; vertices[1] = scale_y;   /* top-left position */
-                vertices[4] = scale_x;  vertices[5] = scale_y;   /* top-right position */
-                vertices[8] = -scale_x; vertices[9] = -scale_y;  /* bottom-left position */
-                vertices[12] = scale_x; vertices[13] = -scale_y; /* bottom-right position */
-            }
-            break;
-        }
-        
-        case MODE_FIT: {
-            /* Scale to fit inside display (image was pre-scaled) */
-            float scale_x = img_width / disp_width;
-            float scale_y = img_height / disp_height;
-            
-            vertices[0] = -scale_x; vertices[1] = scale_y;   /* top-left position */
-            vertices[4] = scale_x;  vertices[5] = scale_y;   /* top-right position */
-            vertices[8] = -scale_x; vertices[9] = -scale_y;  /* bottom-left position */
-            vertices[12] = scale_x; vertices[13] = -scale_y; /* bottom-right position */
-            break;
-        }
-        
-        case MODE_FILL: {
-            /* Image was pre-scaled to fill display, crop excess to center */
-            /* The scaled image is larger than display in one dimension */
-            if (img_width > disp_width) {
-                /* Image is wider - crop horizontal */
-                float crop_ratio = disp_width / img_width;
-                float crop_offset = (1.0f - crop_ratio) / 2.0f;
-                vertices[2] = crop_offset;        /* top-left texcoord */
-                vertices[6] = 1.0f - crop_offset; /* top-right texcoord */
-                vertices[10] = crop_offset;       /* bottom-left texcoord */
-                vertices[14] = 1.0f - crop_offset; /* bottom-right texcoord */
-            } else if (img_height > disp_height) {
-                /* Image is taller - crop vertical */
-                float crop_ratio = disp_height / img_height;
-                float crop_offset = (1.0f - crop_ratio) / 2.0f;
-                vertices[3] = crop_offset;        /* top-left texcoord */
-                vertices[7] = crop_offset;        /* top-right texcoord */
-                vertices[11] = 1.0f - crop_offset; /* bottom-left texcoord */
-                vertices[15] = 1.0f - crop_offset; /* bottom-right texcoord */
-            }
-            /* else: image fits exactly, no cropping needed */
-            break;
-        }
-        
-        case MODE_STRETCH:
-            /* Stretch to fill entire screen - use default fullscreen quad */
-            break;
-            
-        case MODE_TILE: {
-            /* Tile image across screen - adjust texture coordinates */
-            float tile_x = disp_width / img_width;
-            float tile_y = disp_height / img_height;
-            
-            vertices[2] = 0.0f;    vertices[3] = 0.0f;      /* top-left texcoord */
-            vertices[6] = tile_x;  vertices[7] = 0.0f;      /* top-right texcoord */
-            vertices[10] = 0.0f;   vertices[11] = tile_y;   /* bottom-left texcoord */
-            vertices[14] = tile_x; vertices[15] = tile_y;   /* bottom-right texcoord */
-            break;
-        }
-    }
+    (void)output; /* Unused but kept for API consistency */
 }
 
 /* Calculate vertex coordinates based on display mode (uses current_image) */
