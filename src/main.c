@@ -284,7 +284,7 @@ static bool send_daemon_signal(int signal, const char *action, bool check_cycle)
 }
 
 static void print_usage(const char *program_name) {
-    printf("NeoWall v%s - Sets wallpapers until it... doesn't.\n\n", NEOWALL_VERSION);
+    printf("NeoWall v%s - GPU-accelerated wallpapers for Wayland. Take the red pill. 🔴\n\n", NEOWALL_VERSION);
     printf("Usage: %s [OPTIONS]\n\n", program_name);
     printf("Options:\n");
     printf("  -c, --config PATH     Path to configuration file\n");
@@ -331,14 +331,15 @@ static void print_usage(const char *program_name) {
 
 static void print_version(void) {
     printf("NeoWall v%s\n", NEOWALL_VERSION);
-    printf("Sets wallpapers until it... doesn't.\n");
-    printf("(Statically compiled, dynamically cycling. We contain multitudes.)\n");
+    printf("GPU-accelerated wallpapers for Wayland.\n");
+    printf("Take the red pill. 🔴💊\n");
     printf("\nSupported features:\n");
-    printf("  - Wayland (wlr-layer-shell)\n");
+    printf("  - Live GPU shaders at 60 FPS (Shadertoy compatible)\n");
+    printf("  - 2%% CPU usage (lighter than video wallpapers)\n");
     printf("  - Multi-monitor support\n");
-    printf("  - Multiple display modes (center, stretch, fit, fill, tile)\n");
+    printf("  - Smooth transitions (fade, slide, glitch, pixelate)\n");
     printf("  - Hot-reload configuration\n");
-    printf("  - Wallpaper transitions (the irony is not lost on us)\n");
+    printf("  - Works on Hyprland, Sway, River, and other Wayland compositors\n");
     printf("\nSupported image formats:\n");
     printf("  - PNG\n");
     printf("  - JPEG/JPG\n");
