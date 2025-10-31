@@ -212,4 +212,4 @@ MIT
 
 ---
 
-**NeoWall** - Shaders as wallpapers.
+**NeoWall** - Shaders as wallpapers and well... wallpapers as wallpapers.
