@@ -1277,7 +1277,9 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         return apply_builtin_default_config(state);
     }
 
+    log_info("========================================");
     log_info("Loading configuration from: %s", config_path);
+    log_info("========================================");
 
     /* Check if file exists, create default if not */
     struct stat st;
@@ -1341,9 +1343,16 @@ bool config_load(struct neowall_state *state, const char *config_path) {
     if (!root) {
         VibeError error = vibe_get_last_error(parser);
         if (error.has_error) {
-            log_error("Failed to parse VIBE config at line %d, column %d: %s",
-                     error.line, error.column, error.message);
+            log_error("========================================");
+            log_error("CONFIG PARSE ERROR");
+            log_error("========================================");
+            log_error("File: %s", config_path);
+            log_error("Line: %d, Column: %d", error.line, error.column);
+            log_error("Error: %s", error.message);
+            log_error("========================================");
             log_error("Using built-in default configuration");
+            log_error("Fix the config file to resolve this issue");
+            log_error("========================================");
         } else {
             log_error("Failed to parse VIBE config, using built-in defaults");
         }
@@ -1477,10 +1486,46 @@ bool config_load(struct neowall_state *state, const char *config_path) {
     if (config_applied) {
         /* Only update mtime if config was successfully loaded */
         state->config_mtime = new_mtime;
-        log_info("Configuration loaded successfully");
+        log_info("========================================");
+        log_info("✓ Configuration loaded successfully");
+        
+        /* Print summary of what was configured */
+        int output_count = 0;
+        int shader_count = 0;
+        int image_count = 0;
+        struct output_state *summary_output = state->outputs;
+        while (summary_output) {
+            output_count++;
+            if (summary_output->config.type == WALLPAPER_SHADER) {
+                shader_count++;
+                log_info("  Output %s: SHADER mode - %s (speed=%.1fx)", 
+                         summary_output->model[0] ? summary_output->model : "unknown",
+                         summary_output->config.shader_path,
+                         summary_output->config.shader_speed);
+            } else {
+                image_count++;
+                log_info("  Output %s: IMAGE mode - %s (mode=%s)", 
+                         summary_output->model[0] ? summary_output->model : "unknown",
+                         summary_output->config.path,
+                         wallpaper_mode_to_string(summary_output->config.mode));
+            }
+            if (summary_output->config.cycle && summary_output->config.cycle_count > 1) {
+                log_info("    ↳ Cycling through %zu items, duration=%.0fs", 
+                         summary_output->config.cycle_count, summary_output->config.duration);
+            }
+            summary_output = summary_output->next;
+        }
+        log_info("Total: %d output(s) configured (%d shader, %d image)", 
+                 output_count, shader_count, image_count);
+        log_info("========================================");
         return true;
     } else {
-        log_error("No valid configuration found in file, using built-in defaults");
+        log_error("========================================");
+        log_error("✗ No valid configuration found in file");
+        log_error("========================================");
+        log_error("The config file was parsed but contains no valid settings");
+        log_error("Using built-in default configuration");
+        log_error("========================================");
         /* Update mtime to prevent repeated reloading of the same invalid config */
         state->config_mtime = new_mtime;
         return apply_builtin_default_config(state);
@@ -1518,42 +1563,61 @@ bool config_has_changed(struct neowall_state *state) {
 void config_reload(struct neowall_state *state) {
     if (!state) return;
 
-    log_info("Reloading configuration...");
-    log_info("Performing full cleanup and reset of all outputs...");
+    log_info("=== CONFIG RELOAD: Treating as full restart ===");
+    log_info("Performing complete cleanup of all outputs...");
 
-    /* Complete cleanup of all output resources - treat reload as fresh start */
+    /* STEP 1: Complete GPU resource cleanup - MUST happen before config changes */
     struct output_state *output = state->outputs;
     while (output) {
-        /* Free wallpaper config data */
-        config_free_wallpaper(&output->config);
+        /* Make this output's EGL context current for proper cleanup */
+        if (output->egl_surface != EGL_NO_SURFACE) {
+            if (!eglMakeCurrent(state->egl_display, output->egl_surface,
+                               output->egl_surface, state->egl_context)) {
+                log_error("Failed to make EGL context current for cleanup: 0x%x", 
+                         eglGetError());
+            }
+        }
         
-        /* Clean up image resources */
-        if (output->current_image) {
-            image_free(output->current_image);
-            output->current_image = NULL;
+        /* Clean up ALL shader programs */
+        if (output->live_shader_program) {
+            log_debug("Destroying live shader program for %s", output->model);
+            shader_destroy_program(output->live_shader_program);
+            output->live_shader_program = 0;
         }
-        if (output->next_image) {
-            image_free(output->next_image);
-            output->next_image = NULL;
+        if (output->program) {
+            log_debug("Destroying main program for %s", output->model);
+            shader_destroy_program(output->program);
+            output->program = 0;
         }
+        if (output->glitch_program) {
+            shader_destroy_program(output->glitch_program);
+            output->glitch_program = 0;
+        }
+        if (output->pixelate_program) {
+            shader_destroy_program(output->pixelate_program);
+            output->pixelate_program = 0;
+        }
+        
+        /* Clean up ALL textures */
         if (output->texture) {
+            log_debug("Destroying main texture for %s", output->model);
             render_destroy_texture(output->texture);
             output->texture = 0;
         }
         if (output->next_texture) {
+            log_debug("Destroying next texture for %s", output->model);
             render_destroy_texture(output->next_texture);
             output->next_texture = 0;
         }
         
-        /* Clean up shader resources */
-        if (output->live_shader_program) {
-            shader_destroy_program(output->live_shader_program);
-            output->live_shader_program = 0;
-        }
+        /* Clean up channel textures (iChannel0-4) */
         if (output->channel_textures) {
+            log_debug("Destroying %zu channel textures for %s", 
+                     output->channel_count, output->model);
             for (size_t i = 0; i < output->channel_count; i++) {
                 if (output->channel_textures[i]) {
                     render_destroy_texture(output->channel_textures[i]);
+                    output->channel_textures[i] = 0;
                 }
             }
             free(output->channel_textures);
@@ -1561,36 +1625,94 @@ void config_reload(struct neowall_state *state) {
             output->channel_count = 0;
         }
         
-        /* Reset all state */
+        /* Clean up image data */
+        if (output->current_image) {
+            log_debug("Freeing current image for %s", output->model);
+            image_free(output->current_image);
+            output->current_image = NULL;
+        }
+        if (output->next_image) {
+            log_debug("Freeing next image for %s", output->model);
+            image_free(output->next_image);
+            output->next_image = NULL;
+        }
+        
+        /* Reset VBO if needed */
+        if (output->vbo) {
+            glDeleteBuffers(1, &output->vbo);
+            output->vbo = 0;
+        }
+        
+        /* Clear all shader uniform locations */
+        memset(&output->shader_uniforms, 0, sizeof(output->shader_uniforms));
+        if (output->shader_uniforms.iChannel) {
+            free(output->shader_uniforms.iChannel);
+            output->shader_uniforms.iChannel = NULL;
+        }
+        memset(&output->program_uniforms, 0, sizeof(output->program_uniforms));
+        memset(&output->transition_uniforms, 0, sizeof(output->transition_uniforms));
+        
+        /* Clear GL state cache */
+        memset(&output->gl_state, 0, sizeof(output->gl_state));
+        
+        /* Reset all timing and state */
         output->transition_start_time = 0;
         output->transition_progress = 0.0f;
         output->shader_start_time = 0;
         output->shader_fade_start_time = 0;
+        output->last_cycle_time = get_time_ms();  /* Reset cycle timer */
         output->pending_shader_path[0] = '\0';
         
-        log_debug("Cleaned up all resources for output %s", 
+        log_info("✓ Cleaned up all GPU resources for output %s", 
                  output->model[0] ? output->model : "unknown");
         
         output = output->next;
     }
     
-    /* Now load new configuration - outputs are clean slate */
+    /* STEP 2: Free wallpaper config data (cycle paths, etc) */
+    output = state->outputs;
+    while (output) {
+        config_free_wallpaper(&output->config);
+        /* Initialize config to safe defaults */
+        init_wallpaper_config_defaults(&output->config);
+        output = output->next;
+    }
+    
+    /* STEP 3: Unbind all GL resources to ensure clean state */
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glUseProgram(0);
+    
+    log_info("All GPU resources cleaned, loading new configuration...");
+    
+    /* STEP 4: Load new configuration - outputs are now completely clean */
     bool reload_success = config_load(state, state->config_path);
     
     if (reload_success) {
-        log_info("Configuration reloaded successfully");
+        log_info("✓ Configuration reloaded successfully");
     } else {
-        log_info("Configuration reload failed, built-in defaults applied");
+        log_info("✗ Configuration reload failed, built-in defaults applied");
     }
     
-    /* Mark all outputs for redraw to apply new configuration */
+    /* STEP 5: Re-initialize rendering for all outputs */
     output = state->outputs;
     while (output) {
+        /* Re-initialize the output's rendering resources */
+        log_debug("Re-initializing rendering for output %s", output->model);
+        
+        if (!render_init_output(output)) {
+            log_error("Failed to re-initialize rendering for output %s", output->model);
+        } else {
+            log_debug("✓ Rendering re-initialized for %s", output->model);
+        }
+        
+        /* Mark for immediate redraw */
         output->needs_redraw = true;
-        log_debug("Marked output %s for redraw after config reload", 
-                 output->model[0] ? output->model : "unknown");
+        
         output = output->next;
     }
+    
+    log_info("=== CONFIG RELOAD COMPLETE ===");
 }
 
 void *config_watch_thread(void *arg) {
