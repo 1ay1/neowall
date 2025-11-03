@@ -1487,7 +1487,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         /* Only update mtime if config was successfully loaded */
         state->config_mtime = new_mtime;
         log_info("========================================");
-        log_info("✓ Configuration loaded successfully");
+        log_info("[OK] Configuration loaded successfully");
         
         /* Print summary of what was configured */
         int output_count = 0;
@@ -1510,7 +1510,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
                          wallpaper_mode_to_string(summary_output->config.mode));
             }
             if (summary_output->config.cycle && summary_output->config.cycle_count > 1) {
-                log_info("    ↳ Cycling through %zu items, duration=%.0fs", 
+                log_info("    -> Cycling through %zu items, duration=%.0fs", 
                          summary_output->config.cycle_count, summary_output->config.duration);
             }
             summary_output = summary_output->next;
@@ -1521,7 +1521,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         return true;
     } else {
         log_error("========================================");
-        log_error("✗ No valid configuration found in file");
+        log_error("[ERROR] No valid configuration found in file");
         log_error("========================================");
         log_error("The config file was parsed but contains no valid settings");
         log_error("Using built-in default configuration");
@@ -1663,7 +1663,7 @@ void config_reload(struct neowall_state *state) {
         output->last_cycle_time = get_time_ms();  /* Reset cycle timer */
         output->pending_shader_path[0] = '\0';
         
-        log_info("✓ Cleaned up all GPU resources for output %s", 
+        log_info("[OK] Cleaned up all GPU resources for output %s", 
                  output->model[0] ? output->model : "unknown");
         
         output = output->next;
@@ -1689,9 +1689,9 @@ void config_reload(struct neowall_state *state) {
     bool reload_success = config_load(state, state->config_path);
     
     if (reload_success) {
-        log_info("✓ Configuration reloaded successfully");
+        log_info("[OK] Configuration reloaded successfully");
     } else {
-        log_info("✗ Configuration reload failed, built-in defaults applied");
+        log_info("[ERROR] Configuration reload failed, built-in defaults applied");
     }
     
     /* STEP 5: Re-initialize rendering for all outputs */
@@ -1703,7 +1703,7 @@ void config_reload(struct neowall_state *state) {
         if (!render_init_output(output)) {
             log_error("Failed to re-initialize rendering for output %s", output->model);
         } else {
-            log_debug("✓ Rendering re-initialized for %s", output->model);
+            log_debug("[OK] Rendering re-initialized for %s", output->model);
         }
         
         /* Mark for immediate redraw */
