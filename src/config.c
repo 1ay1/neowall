@@ -1575,18 +1575,54 @@ void config_reload(struct neowall_state *state) {
     /* Acquire write lock to prevent concurrent access during reload */
     pthread_rwlock_wrlock(&state->output_list_lock);
     pthread_mutex_lock(&state->state_mutex);
+    
+    /* BUG FIX #1: Ensure a valid GL context is current before ANY GL operations
+     * Find the first output with a valid EGL surface and make it current */
+    bool context_made_current = false;
+    struct output_state *first_valid_output = state->outputs;
+    while (first_valid_output) {
+        if (first_valid_output->egl_surface != EGL_NO_SURFACE &&
+            state->egl_display != EGL_NO_DISPLAY &&
+            state->egl_context != EGL_NO_CONTEXT) {
+            if (eglMakeCurrent(state->egl_display, first_valid_output->egl_surface,
+                              first_valid_output->egl_surface, state->egl_context)) {
+                context_made_current = true;
+                log_debug("Made EGL context current on %s for cleanup operations",
+                         first_valid_output->model[0] ? first_valid_output->model : "unknown");
+                break;
+            }
+        }
+        first_valid_output = first_valid_output->next;
+    }
+    
+    if (!context_made_current) {
+        log_error("WARNING: Could not make any EGL context current during reload!");
+        log_error("GL resource cleanup may fail - outputs may have been disconnected");
+        /* Continue anyway - we'll try per-output context switching */
+    }
 
     /* STEP 1: Complete GPU resource cleanup - MUST happen before config changes */
     struct output_state *output = state->outputs;
     while (output) {
-        /* Make this output's EGL context current for proper cleanup */
-        if (output->egl_surface != EGL_NO_SURFACE) {
-            if (!eglMakeCurrent(state->egl_display, output->egl_surface,
-                               output->egl_surface, state->egl_context)) {
-                log_error("Failed to make EGL context current for cleanup: 0x%x", 
-                         eglGetError());
+        /* BUG FIX #1 (continued): Try to make this output's context current
+         * If it fails, skip GL operations for this output */
+        bool can_do_gl_ops = context_made_current;  /* Use global context if available */
+        
+        if (!context_made_current && output->egl_surface != EGL_NO_SURFACE) {
+            /* Try to make this specific output's context current */
+            if (eglMakeCurrent(state->egl_display, output->egl_surface,
+                              output->egl_surface, state->egl_context)) {
+                can_do_gl_ops = true;
+            } else {
+                log_error("Failed to make EGL context current for %s: 0x%x", 
+                         output->model, eglGetError());
+                log_error("Skipping GL resource cleanup for this output (may leak GPU memory)");
+                can_do_gl_ops = false;
             }
         }
+        
+        /* Only perform GL operations if we have a valid context */
+        if (can_do_gl_ops) {
         
         /* Clean up ALL shader programs */
         if (output->live_shader_program) {
@@ -1675,6 +1711,14 @@ void config_reload(struct neowall_state *state) {
         
         log_info("[OK] Cleaned up all GPU resources for output %s", 
                  output->model[0] ? output->model : "unknown");
+                 
+        } else {
+            /* No GL context - can't clean up GPU resources, but free CPU memory */
+            log_error("No GL context for %s - cleaning up CPU resources only",
+                    output->model[0] ? output->model : "unknown");
+            log_error("GPU resources will leak, but continuing to avoid crash");
+            /* Note: GPU resources will leak, but better than crashing */
+        }
         
         output = output->next;
     }
@@ -1689,9 +1733,13 @@ void config_reload(struct neowall_state *state) {
     }
     
     /* STEP 3: Unbind all GL resources to ensure clean state */
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glUseProgram(0);
+    /* BUG FIX #1: Only call GL functions if context is current */
+    if (context_made_current) {
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glUseProgram(0);
+        log_debug("Unbound all GL resources");
+    }
     
     log_info("All GPU resources cleaned, loading new configuration...");
     
@@ -1737,12 +1785,43 @@ void *config_watch_thread(void *arg) {
     }
 
     log_info("Configuration watcher thread started for: %s", state->config_path);
+    
+    /* BUG FIX #5: Use pthread_cond_timedwait instead of sleep for interruptible wait
+     * This allows immediate shutdown without waiting for sleep() to complete */
 
     while (atomic_load_explicit(&state->running, memory_order_acquire)) {
-        sleep(CONFIG_WATCH_INTERVAL);
-
-        if (!atomic_load_explicit(&state->running, memory_order_acquire)) break;
-
+        pthread_mutex_lock(&state->watch_mutex);
+        
+        /* Calculate timeout (CONFIG_WATCH_INTERVAL seconds from now) */
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += CONFIG_WATCH_INTERVAL;
+        
+        /* Wait with timeout - can be interrupted by pthread_cond_signal */
+        int wait_result = pthread_cond_timedwait(&state->watch_cond, &state->watch_mutex, &ts);
+        
+        pthread_mutex_unlock(&state->watch_mutex);
+        
+        /* Check if we should exit */
+        if (!atomic_load_explicit(&state->running, memory_order_acquire)) {
+            log_debug("Config watch thread detected shutdown signal");
+            break;
+        }
+        
+        /* If we were signaled (not timeout), it's likely a shutdown signal
+         * Check running flag again and continue if still running */
+        if (wait_result == 0) {
+            /* We were signaled - check if it's shutdown or spurious wakeup */
+            if (!atomic_load_explicit(&state->running, memory_order_acquire)) {
+                log_debug("Config watch thread woken for shutdown");
+                break;
+            }
+            /* Spurious wakeup or explicit signal - continue to next iteration */
+            log_debug("Config watch thread spurious wakeup, continuing...");
+            continue;
+        }
+        
+        /* Timeout occurred (wait_result == ETIMEDOUT) - check for config changes */
         if (config_has_changed(state)) {
             log_info("Configuration file changed, signaling main thread to reload...");
             
@@ -1764,7 +1843,7 @@ void *config_watch_thread(void *arg) {
         }
     }
 
-    log_info("Configuration watcher thread stopped");
+    log_info("Configuration watcher thread stopped cleanly");
     return NULL;
 }
 

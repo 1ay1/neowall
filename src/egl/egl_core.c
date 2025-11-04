@@ -155,7 +155,10 @@ bool egl_core_init(struct neowall_state *state) {
         log_info("Created OpenGL ES 2.0 context");
     }
     
-    /* Create surfaces and detect GL capabilities */
+    /* BUG FIX #2: Protect output list traversal with read lock */
+    /* Create surfaces and detect GL capabilities - FIRST TRAVERSAL */
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    
     struct output_state *output = state->outputs;
     while (output) {
         if (output->width > 0 && output->height > 0) {
@@ -180,7 +183,12 @@ bool egl_core_init(struct neowall_state *state) {
         output = output->next;
     }
     
-    /* Make context current to detect GL capabilities */
+    pthread_rwlock_unlock(&state->output_list_lock);
+    
+    /* BUG FIX #2: Second traversal also needs lock protection */
+    /* Make context current to detect GL capabilities - SECOND TRAVERSAL */
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    
     output = state->outputs;
     if (output && output->egl_surface != EGL_NO_SURFACE) {
         if (eglMakeCurrent(state->egl_display, output->egl_surface,
@@ -195,8 +203,13 @@ bool egl_core_init(struct neowall_state *state) {
         }
     }
     
-    /* Initialize rendering resources for each output */
+    pthread_rwlock_unlock(&state->output_list_lock);
+    
+    /* BUG FIX #10: Third traversal also needs lock protection */
+    /* Initialize rendering resources for each output - THIRD TRAVERSAL */
     log_debug("Initializing rendering resources for outputs...");
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    
     output = state->outputs;
     while (output) {
         if (output->egl_surface != EGL_NO_SURFACE) {
@@ -211,13 +224,20 @@ bool egl_core_init(struct neowall_state *state) {
         output = output->next;
     }
     
-    /* Apply any deferred configuration now that surfaces are ready */
+    pthread_rwlock_unlock(&state->output_list_lock);
+    
+    /* BUG FIX #10: Fourth traversal also needs lock protection */
+    /* Apply any deferred configuration now that surfaces are ready - FOURTH TRAVERSAL */
     log_debug("Applying deferred configuration to outputs...");
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    
     output = state->outputs;
     while (output) {
         output_apply_deferred_config(output);
         output = output->next;
     }
+    
+    pthread_rwlock_unlock(&state->output_list_lock);
     
     return true;
 }

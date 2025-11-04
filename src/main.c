@@ -205,11 +205,28 @@ static bool kill_daemon(void) {
 /* Send signal to running daemon */
 /* Check if cycling is possible by reading state file */
 static bool can_cycle_wallpaper(void) {
+    /* BUG FIX #7: Add file-level locking for cross-process synchronization
+     * Note: We can't use state_file_lock mutex here because we're in a different
+     * process. We need file-level locking (flock/fcntl) for cross-process sync. */
     const char *state_path = get_state_file_path();
     FILE *fp = fopen(state_path, "r");
     
     if (!fp) {
         return false;  /* No state file = unknown, let daemon handle it */
+    }
+    
+    /* Acquire read lock on the file */
+    int fd = fileno(fp);
+    struct flock lock = {
+        .l_type = F_RDLCK,      /* Read lock */
+        .l_whence = SEEK_SET,
+        .l_start = 0,
+        .l_len = 0              /* Lock entire file */
+    };
+    
+    if (fcntl(fd, F_SETLKW, &lock) == -1) {
+        /* Failed to lock, but continue anyway (non-critical) */
+        log_debug("Failed to lock state file for reading: %s", strerror(errno));
     }
     
     char line[MAX_PATH_LENGTH];
@@ -222,6 +239,10 @@ static bool can_cycle_wallpaper(void) {
             break;
         }
     }
+    
+    /* Release lock */
+    lock.l_type = F_UNLCK;
+    fcntl(fd, F_SETLK, &lock);
     
     fclose(fp);
     return cycle_total > 1;  /* Can cycle if we have more than 1 wallpaper */
@@ -379,7 +400,8 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
             /* Prevent counter overflow */
             if (new_count > MAX_NEXT_REQUESTS) {
                 log_error("Too many queued next requests (%d), resetting to 10", new_count);
-                atomic_store_explicit(&state->next_requested, 10, memory_order_release);
+                /* BUG FIX #6: Use seq_cst to prevent reordering on weak architectures */
+                atomic_store_explicit(&state->next_requested, 10, memory_order_seq_cst);
             }
             break;
         }
@@ -784,6 +806,10 @@ int main(int argc, char *argv[]) {
     pthread_mutex_init(&state.state_mutex, NULL);
     pthread_rwlock_init(&state.output_list_lock, NULL);
     pthread_mutex_init(&state.state_file_lock, NULL);
+    
+    /* BUG FIX #5: Initialize watch thread condition variable */
+    pthread_mutex_init(&state.watch_mutex, NULL);
+    pthread_cond_init(&state.watch_cond, NULL);
 
     /* Set up signalfd for race-free signal handling */
     state.signal_fd = setup_signalfd();
@@ -829,8 +855,16 @@ int main(int argc, char *argv[]) {
     log_info("Shutting down...");
 
     if (watch_config) {
-        pthread_cancel(state.watch_thread);
+        /* BUG FIX #5: Signal condition variable to wake watch thread for clean shutdown
+         * This replaces pthread_cancel which is not clean and can leave resources locked */
+        log_debug("Signaling config watch thread to shutdown...");
+        pthread_mutex_lock(&state.watch_mutex);
+        pthread_cond_signal(&state.watch_cond);  /* Wake the watch thread */
+        pthread_mutex_unlock(&state.watch_mutex);
+        
+        /* Wait for watch thread to exit cleanly */
         pthread_join(state.watch_thread, NULL);
+        log_debug("Config watch thread joined successfully");
     }
 
     egl_core_cleanup(&state);
@@ -844,6 +878,10 @@ int main(int argc, char *argv[]) {
     pthread_rwlock_destroy(&state.output_list_lock);
     pthread_mutex_destroy(&state.state_mutex);
     pthread_mutex_destroy(&state.state_file_lock);
+    
+    /* BUG FIX #5: Destroy condition variable and mutex */
+    pthread_cond_destroy(&state.watch_cond);
+    pthread_mutex_destroy(&state.watch_mutex);
 
     /* Remove PID file */
     remove_pid_file();

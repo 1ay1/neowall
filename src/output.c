@@ -317,10 +317,14 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         return;
     }
 
-    /* Use local copy of model string to avoid race */
+    /* BUG FIX #8: Protect model string access with mutex to avoid data race */
     char model_copy[64];
+    
+    /* Acquire state mutex to safely read model string */
+    pthread_mutex_lock(&output->state->state_mutex);
     strncpy(model_copy, output->model, sizeof(model_copy) - 1);
     model_copy[sizeof(model_copy) - 1] = '\0';
+    pthread_mutex_unlock(&output->state->state_mutex);
 
     log_info("Setting shader for output %s: %s",
              model_copy[0] ? model_copy : "unknown", shader_path);

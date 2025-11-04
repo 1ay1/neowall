@@ -214,6 +214,35 @@ struct neowall_state {
     pthread_rwlock_t output_list_lock; /* Read-write lock for output linked list traversal */
     pthread_mutex_t state_file_lock; /* Mutex for state file I/O operations */
     
+    /* BUG FIX #5: Condition variable for clean config watch thread shutdown */
+    pthread_mutex_t watch_mutex;     /* Mutex for watch condition variable */
+    pthread_cond_t watch_cond;       /* Condition variable to wake watch thread */
+    
+    /* BUG FIX #9: LOCK ORDERING POLICY (to prevent deadlock)
+     * ========================================================
+     * Always acquire locks in this order:
+     * 1. output_list_lock (rwlock)
+     * 2. state_mutex
+     * 
+     * NEVER acquire them in reverse order!
+     * 
+     * Correct example:
+     *   pthread_rwlock_rdlock(&state->output_list_lock);   // 1st
+     *   pthread_mutex_lock(&state->state_mutex);           // 2nd - OK
+     *   // ... critical section ...
+     *   pthread_mutex_unlock(&state->state_mutex);
+     *   pthread_rwlock_unlock(&state->output_list_lock);
+     *
+     * WRONG (will cause deadlock):
+     *   pthread_mutex_lock(&state->state_mutex);           // 2nd first
+     *   pthread_rwlock_rdlock(&state->output_list_lock);   // 1st second - DEADLOCK!
+     *
+     * Rationale: output_list_lock is the coarser-grained lock (protects the
+     * entire list structure), while state_mutex is fine-grained (protects
+     * individual fields). Acquiring coarse-grained locks first prevents
+     * deadlock scenarios.
+     *========================================================*/
+    
     /* Event-driven timer for wallpaper cycling */
     int timer_fd;               /* timerfd for next wallpaper cycle */
     int wakeup_fd;              /* eventfd for waking poll on internal events */

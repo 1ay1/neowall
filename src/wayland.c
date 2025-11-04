@@ -127,6 +127,25 @@ static void layer_surface_closed(void *data,
     if (state) {
         pthread_rwlock_wrlock(&state->output_list_lock);
         
+        /* BUG FIX #4: Verify output is still in the list before destroying
+         * It might have been removed by another thread */
+        bool found = false;
+        struct output_state *check = state->outputs;
+        while (check) {
+            if (check == output) {
+                found = true;
+                break;
+            }
+            check = check->next;
+        }
+        
+        if (!found) {
+            log_error("Output %s already removed from list, skipping destroy",
+                    output->model);
+            pthread_rwlock_unlock(&state->output_list_lock);
+            return;
+        }
+        
         /* Remove from linked list before destroying */
         struct output_state **output_ptr = &state->outputs;
         while (*output_ptr) {

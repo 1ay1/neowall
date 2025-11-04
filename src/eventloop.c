@@ -84,6 +84,15 @@ static void render_outputs(struct neowall_state *state) {
 
     uint64_t current_time = get_time_ms();
     
+    /* BUG FIX #3: Check if config reload is in progress */
+    /* If reload is active, skip rendering to avoid use-after-free of GL resources */
+    bool reload_in_progress = atomic_load_explicit(&state->reload_requested, memory_order_acquire);
+    if (reload_in_progress) {
+        log_debug("Config reload in progress, skipping render frame to avoid resource race");
+        /* Don't process next requests either during reload */
+        return;
+    }
+    
     /* Check if there are any pending next requests - process ONE globally per frame to ensure rendering */
     int next_count = atomic_load_explicit(&state->next_requested, memory_order_acquire);
     bool processed_next = false;
