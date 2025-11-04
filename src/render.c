@@ -238,6 +238,8 @@ GLuint render_create_texture(struct image_data *img) {
         log_error("Invalid image data for texture creation");
         return 0;
     }
+    
+    /* Note: Caller MUST ensure EGL context is current before calling this function */
 
     GLuint texture;
     glGenTextures(1, &texture);
@@ -292,6 +294,8 @@ GLuint render_create_texture_flipped(struct image_data *img) {
         log_error("Invalid image data for texture creation");
         return 0;
     }
+    
+    /* Note: Caller MUST ensure EGL context is current before calling this function */
 
     /* Flip the image vertically for OpenGL texture coordinates */
     size_t row_size = img->width * img->channels;
@@ -534,6 +538,13 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
         return false;
     }
     
+    /* CRITICAL: Ensure EGL context is current before GL operations */
+    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                       output->egl_surface, output->state->egl_context)) {
+        log_error("Failed to make EGL context current for texture update");
+        return false;
+    }
+    
     /* Load the new image */
     struct image_data *img = image_load(image_path, 0, 0, MODE_FILL);
     if (!img) {
@@ -619,6 +630,13 @@ bool render_frame_shader(struct output_state *output) {
     
     if (output->egl_surface == EGL_NO_SURFACE) {
         log_error("EGL surface not available for shader rendering (display may be disconnected)");
+        return false;
+    }
+    
+    /* CRITICAL: Ensure EGL context is current on this thread before any GL operations */
+    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                       output->egl_surface, output->state->egl_context)) {
+        log_error("Failed to make EGL context current for shader rendering");
         return false;
     }
 
@@ -937,6 +955,17 @@ bool render_frame(struct output_state *output) {
         return false;
     }
     
+    /* CRITICAL: Ensure EGL context is current before any GL operations */
+    if (output->state && output->state->egl_display != EGL_NO_DISPLAY &&
+        output->egl_surface != EGL_NO_SURFACE) {
+        if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                           output->egl_surface, output->state->egl_context)) {
+            log_error("Failed to make EGL context current for rendering");
+            return false;
+        }
+    }
+
+    /* Handle shader wallpapers */
     /* Validate EGL context is still valid */
     if (!output->state || output->state->egl_display == EGL_NO_DISPLAY) {
         log_error("EGL display not available for rendering (display may be disconnected)");

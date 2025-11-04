@@ -12,6 +12,10 @@
 #include <GLES2/gl2.h>
 #include "egl/capability.h"
 
+/* Thread-safe atomic types for flags accessed from multiple threads */
+typedef atomic_bool atomic_bool_t;
+typedef atomic_int atomic_int_t;
+
 #define NEOWALL_VERSION "0.3.0"
 #define MAX_PATH_LENGTH 4096
 #define MAX_OUTPUTS 16
@@ -199,18 +203,21 @@ struct neowall_state {
     time_t config_mtime;        /* Last modification time */
     bool watch_config;          /* Watch for config changes */
 
-    /* Runtime state */
-    bool running;
-    bool reload_requested;
-    bool paused;                /* Pause wallpaper cycling */
-    bool outputs_need_init;     /* Flag when new outputs need initialization */
-    atomic_int next_requested;  /* Counter for skip to next wallpaper requests */
+    /* Runtime state - ALL flags must be atomic for thread safety */
+    atomic_bool_t running;           /* Main loop running flag - accessed from signal handlers */
+    atomic_bool_t reload_requested;  /* Config reload request - set by watch thread, read by main */
+    atomic_bool_t paused;            /* Pause wallpaper cycling - set by signal handlers */
+    atomic_bool_t outputs_need_init; /* Flag when new outputs need initialization */
+    atomic_int_t next_requested;     /* Counter for skip to next wallpaper requests */
     pthread_t watch_thread;
-    pthread_mutex_t state_mutex;
+    pthread_mutex_t state_mutex;     /* Protects output list and config data */
+    pthread_rwlock_t output_list_lock; /* Read-write lock for output linked list traversal */
+    pthread_mutex_t state_file_lock; /* Mutex for state file I/O operations */
     
     /* Event-driven timer for wallpaper cycling */
     int timer_fd;               /* timerfd for next wallpaper cycle */
     int wakeup_fd;              /* eventfd for waking poll on internal events */
+    int signal_fd;              /* signalfd for race-free signal handling */
 
     /* Statistics */
     uint64_t frames_rendered;

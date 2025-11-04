@@ -121,7 +121,28 @@ static void layer_surface_closed(void *data,
     (void)layer_surface;
 
     log_info("Layer surface closed for output %s", output->model);
-    output_destroy(output);
+    
+    /* CRITICAL: Must acquire write lock before destroying output and modifying list */
+    struct neowall_state *state = output->state;
+    if (state) {
+        pthread_rwlock_wrlock(&state->output_list_lock);
+        
+        /* Remove from linked list before destroying */
+        struct output_state **output_ptr = &state->outputs;
+        while (*output_ptr) {
+            if (*output_ptr == output) {
+                *output_ptr = output->next;
+                state->output_count--;
+                break;
+            }
+            output_ptr = &(*output_ptr)->next;
+        }
+        
+        output_destroy(output);
+        pthread_rwlock_unlock(&state->output_list_lock);
+    } else {
+        output_destroy(output);
+    }
 }
 
 static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
@@ -148,14 +169,18 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
         struct wl_output *output_obj = wl_registry_bind(registry, name,
                                                          &wl_output_interface, 3);
+        
+        /* CRITICAL: Acquire write lock before creating output and modifying list */
+        pthread_rwlock_wrlock(&state->output_list_lock);
         struct output_state *output = output_create(state, output_obj, name);
+        pthread_rwlock_unlock(&state->output_list_lock);
 
         if (output) {
             wl_output_add_listener(output_obj, &output_listener, output);
             log_info("New output detected (name=%u, model=%s) - will initialize on configuration", 
                      name, output->model[0] ? output->model : "pending");
-            /* Set flag to trigger initialization in event loop */
-            state->outputs_need_init = true;
+            /* Set flag to trigger initialization in event loop - use atomic */
+            atomic_store_explicit(&state->outputs_need_init, true, memory_order_release);
             log_debug("Set outputs_need_init flag, will initialize after Wayland events are processed");
         } else {
             log_error("Failed to create output state");
@@ -175,6 +200,9 @@ static void registry_handle_global_remove(void *data, struct wl_registry *regist
 
     log_info("Registry: global removed (name=%u)", name);
 
+    /* CRITICAL: Acquire write lock before modifying output list */
+    pthread_rwlock_wrlock(&state->output_list_lock);
+    
     /* Find and remove the output with this name */
     struct output_state **output_ptr = &state->outputs;
     while (*output_ptr) {
@@ -182,12 +210,17 @@ static void registry_handle_global_remove(void *data, struct wl_registry *regist
         if (output->name == name) {
             log_info("Removing output %s (name=%u)", output->model, name);
             *output_ptr = output->next;
-            output_destroy(output);
             state->output_count--;
+            
+            /* Unlock before destroying (destroy might take time) */
+            pthread_rwlock_unlock(&state->output_list_lock);
+            output_destroy(output);
             return;
         }
         output_ptr = &output->next;
     }
+    
+    pthread_rwlock_unlock(&state->output_list_lock);
 }
 
 static const struct wl_registry_listener registry_listener = {
@@ -253,7 +286,8 @@ bool wayland_init(struct neowall_state *state) {
     /* Do another roundtrip to ensure outputs are configured */
     wl_display_roundtrip(state->display);
 
-    /* Configure layer surfaces for all outputs */
+    /* Configure layer surfaces for all outputs - use read lock for safe traversal */
+    pthread_rwlock_rdlock(&state->output_list_lock);
     struct output_state *output = state->outputs;
     while (output) {
         if (!output_configure_layer_surface(output)) {
@@ -261,6 +295,7 @@ bool wayland_init(struct neowall_state *state) {
         }
         output = output->next;
     }
+    pthread_rwlock_unlock(&state->output_list_lock);
 
     /* Final roundtrip */
     wl_display_roundtrip(state->display);
@@ -275,13 +310,15 @@ void wayland_cleanup(struct neowall_state *state) {
 
     log_debug("Cleaning up Wayland resources");
 
-    /* Destroy all outputs */
+    /* Destroy all outputs - acquire write lock since we're modifying the list */
+    pthread_rwlock_wrlock(&state->output_list_lock);
     while (state->outputs) {
         struct output_state *next = state->outputs->next;
         output_destroy(state->outputs);
         state->outputs = next;
     }
     state->output_count = 0;
+    pthread_rwlock_unlock(&state->output_list_lock);
 
     /* Destroy Wayland objects */
     if (state->layer_shell) {

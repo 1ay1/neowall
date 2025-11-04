@@ -7,8 +7,12 @@
 #include <time.h>
 #include <sys/timerfd.h>
 #include <sys/eventfd.h>
+#include <sys/signalfd.h>
 #include "neowall.h"
 #include "constants.h"
+
+/* Forward declaration for signal handler from main.c */
+extern void handle_signal_from_fd(struct neowall_state *state, int signum);
 
 static struct neowall_state *event_loop_state = NULL;
 
@@ -21,10 +25,13 @@ static void update_cycle_timer(struct neowall_state *state) {
     uint64_t now = get_time_ms();
     uint64_t next_wake_ms = UINT64_MAX;
     
-    /* Find the earliest cycle time across all outputs */
+    /* Find the earliest cycle time across all outputs - use read lock */
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    
+    bool paused = atomic_load_explicit(&state->paused, memory_order_acquire);
     struct output_state *output = state->outputs;
     while (output) {
-        if (!state->paused && output->config.cycle && output->config.duration > 0.0f &&
+        if (!paused && output->config.cycle && output->config.duration > 0.0f &&
             output->config.cycle_count > 1 && output->current_image) {
             uint64_t elapsed_ms = now - output->last_cycle_time;
             uint64_t duration_ms = (uint64_t)(output->config.duration * 1000.0f);  /* Convert seconds to milliseconds */
@@ -42,6 +49,8 @@ static void update_cycle_timer(struct neowall_state *state) {
         }
         output = output->next;
     }
+    
+    pthread_rwlock_unlock(&state->output_list_lock);
     
     /* Set the timer */
     struct itimerspec timer_spec;
@@ -73,14 +82,16 @@ static void render_outputs(struct neowall_state *state) {
         return;
     }
 
-    struct output_state *output = state->outputs;
     uint64_t current_time = get_time_ms();
     
     /* Check if there are any pending next requests - process ONE globally per frame to ensure rendering */
-    int next_count = atomic_load(&state->next_requested);
+    int next_count = atomic_load_explicit(&state->next_requested, memory_order_acquire);
     bool processed_next = false;
     bool has_cycleable_output = false;
     int total_outputs = 0;
+    
+    /* Acquire read lock for output list traversal */
+    pthread_rwlock_rdlock(&state->output_list_lock);
     
     if (next_count > 0) {
         log_debug("Processing next request: %d pending in queue", next_count);
@@ -96,6 +107,7 @@ static void render_outputs(struct neowall_state *state) {
         }
     }
 
+    struct output_state *output = state->outputs;
     while (output) {
         /* Handle next wallpaper request - ONE total per frame (ensures each change is actually rendered) */
         if (next_count > 0 && !processed_next && output->config.cycle && output->config.cycle_count > 0) {
@@ -105,7 +117,7 @@ static void render_outputs(struct neowall_state *state) {
             current_time = get_time_ms();
             processed_next = true;
             /* Decrement counter immediately after processing */
-            atomic_fetch_sub(&state->next_requested, 1);
+            atomic_fetch_sub_explicit(&state->next_requested, 1, memory_order_acq_rel);
         }
         
         /* Check if we should cycle wallpaper (timer-driven) */
@@ -197,6 +209,9 @@ static void render_outputs(struct neowall_state *state) {
         output = output->next;
     }
     
+    /* Release read lock after output traversal */
+    pthread_rwlock_unlock(&state->output_list_lock);
+    
     /* If we had a next request but couldn't process it, inform the user */
     if (next_count > 0 && !processed_next) {
         if (!has_cycleable_output) {
@@ -225,6 +240,11 @@ static void render_outputs(struct neowall_state *state) {
 /* Handle pending Wayland events */
 static bool handle_wayland_events(struct neowall_state *state) {
     if (!state || !state->display) {
+        return false;
+    }
+
+    /* Check running flag atomically */
+    if (!atomic_load_explicit(&state->running, memory_order_acquire)) {
         return false;
     }
 
@@ -273,7 +293,8 @@ void event_loop_run(struct neowall_state *state) {
     }
     log_info("Created eventfd for internal event notifications");
 
-    /* Log initial cycling configuration for debugging */
+    /* Log initial cycling configuration for debugging - use read lock */
+    pthread_rwlock_rdlock(&state->output_list_lock);
     struct output_state *output = state->outputs;
     while (output) {
         if (output->config.cycle && output->config.duration > 0.0f) {
@@ -284,6 +305,7 @@ void event_loop_run(struct neowall_state *state) {
         }
         output = output->next;
     }
+    pthread_rwlock_unlock(&state->output_list_lock);
 
     /* Get Wayland display file descriptor */
     int wl_fd = wl_display_get_fd(state->display);
@@ -292,20 +314,24 @@ void event_loop_run(struct neowall_state *state) {
         return;
     }
 
-    struct pollfd fds[3];
+    struct pollfd fds[4];
     fds[0].fd = wl_fd;
     fds[0].events = POLLIN;
     fds[1].fd = state->timer_fd;
     fds[1].events = POLLIN;
     fds[2].fd = state->wakeup_fd;
     fds[2].events = POLLIN;
+    fds[3].fd = state->signal_fd;
+    fds[3].events = POLLIN;
 
-    /* Initial render for all outputs */
+    /* Initial render for all outputs - use read lock */
+    pthread_rwlock_rdlock(&state->output_list_lock);
     output = state->outputs;
     while (output) {
         output->needs_redraw = true;
         output = output->next;
     }
+    pthread_rwlock_unlock(&state->output_list_lock);
 
     uint64_t last_stats_time = get_time_ms();
     uint64_t frame_count = 0;
@@ -325,20 +351,20 @@ void event_loop_run(struct neowall_state *state) {
     static bool shader_mode_logged = false;
     uint64_t log_throttle_counter = 0;
     
-    while (state->running) {
+    while (atomic_load_explicit(&state->running, memory_order_acquire)) {
         
         /* Handle new outputs that need initialization (reconnected displays) */
-        if (state->outputs_need_init) {
+        if (atomic_load_explicit(&state->outputs_need_init, memory_order_acquire)) {
             log_info("New outputs detected, will be initialized by normal config load");
-            state->outputs_need_init = false;
+            atomic_store_explicit(&state->outputs_need_init, false, memory_order_release);
             /* Don't call config_reload here - it causes deadlock on startup */
             /* Outputs will be initialized through the normal config_load path */
         }
         
         /* Handle configuration reload if requested */
-        if (state->reload_requested) {
+        if (atomic_load_explicit(&state->reload_requested, memory_order_acquire)) {
             log_info("Config reload requested, reloading...");
-            state->reload_requested = false;  /* Reset flag before reload */
+            atomic_store_explicit(&state->reload_requested, false, memory_order_release);  /* Reset flag before reload */
             config_reload(state);
             /* Update cycle timer with new configuration */
             update_cycle_timer(state);
@@ -354,11 +380,11 @@ void event_loop_run(struct neowall_state *state) {
                 wl_display_cancel_read(state->display);
                 break;
             }
-        }
 
-        if (!state->running) {
-            wl_display_cancel_read(state->display);
-            break;
+            if (!atomic_load_explicit(&state->running, memory_order_acquire)) {
+                wl_display_cancel_read(state->display);
+                break;
+            }
         }
 
         /* Flush before polling */
@@ -373,7 +399,8 @@ void event_loop_run(struct neowall_state *state) {
         /* Calculate poll timeout - only for transitions/shaders, otherwise wait indefinitely */
         int timeout_ms = POLL_TIMEOUT_INFINITE; /* Pure event-driven by default */
         
-        /* Check if any output has active transitions or shader wallpapers */
+        /* Check if any output has active transitions or shader wallpapers - use read lock */
+        pthread_rwlock_rdlock(&state->output_list_lock);
         output = state->outputs;
         int shader_count = 0;
         while (output) {
@@ -395,24 +422,26 @@ void event_loop_run(struct neowall_state *state) {
             }
             output = output->next;
         }
+        pthread_rwlock_unlock(&state->output_list_lock);
+        
         if (shader_count == 0 && shader_mode_logged) {
             log_info("No active shaders, reverting to event-driven mode");
             shader_mode_logged = false;
         }
         
         /* If next requests pending, wake immediately */
-        if (atomic_load(&state->next_requested) > 0) {
+        if (atomic_load_explicit(&state->next_requested, memory_order_acquire) > 0) {
             timeout_ms = 0;
         }
         
         /* Poll for events */
-        int ret = poll(fds, 3, timeout_ms);
+        int ret = poll(fds, 4, timeout_ms);
 
         if (ret < 0) {
             if (errno == EINTR) {
                 log_info("Poll interrupted by signal (EINTR), checking running flag");
                 wl_display_cancel_read(state->display);
-                if (!state->running) {
+                if (!atomic_load_explicit(&state->running, memory_order_acquire)) {
                     log_info("Running flag is false, exiting event loop");
                     break;
                 }
@@ -420,7 +449,7 @@ void event_loop_run(struct neowall_state *state) {
             }
             log_error("Poll failed: %s", strerror(errno));
             wl_display_cancel_read(state->display);
-            state->running = false;
+            atomic_store_explicit(&state->running, false, memory_order_release);
             break;
         }
 
@@ -432,7 +461,7 @@ void event_loop_run(struct neowall_state *state) {
             if (fds[0].revents & POLLIN) {
                 if (wl_display_read_events(state->display) < 0) {
                     log_error("Failed to read Wayland events");
-                    state->running = false;
+                    atomic_store_explicit(&state->running, false, memory_order_release);
                     break;
                 }
             } else {
@@ -448,12 +477,22 @@ void event_loop_run(struct neowall_state *state) {
                 }
             }
             
-            /* Check eventfd - internal wakeup (config reload, etc) */
+            /* Check wakeup fd - internal events (config reload, etc) */
             if (fds[2].revents & POLLIN) {
                 uint64_t value;
                 ssize_t s = read(state->wakeup_fd, &value, sizeof(value));
                 if (s == sizeof(value)) {
-                    log_debug("Wakeup event received (value=%lu)", value);
+                    log_debug("Event loop woken by internal event (value=%lu)", value);
+                }
+            }
+            
+            /* Check signal fd - signals delivered as file descriptor events (race-free) */
+            if (fds[3].revents & POLLIN) {
+                struct signalfd_siginfo fdsi;
+                ssize_t s = read(state->signal_fd, &fdsi, sizeof(fdsi));
+                if (s == sizeof(fdsi)) {
+                    log_debug("Received signal %d via signalfd", fdsi.ssi_signo);
+                    handle_signal_from_fd(state, fdsi.ssi_signo);
                 }
             }
         }

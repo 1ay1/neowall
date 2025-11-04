@@ -1254,6 +1254,8 @@ static bool apply_builtin_default_config(struct neowall_state *state) {
     /* Apply to all outputs - even if no image found, outputs need valid config
      * If no image was found, the config will have an empty path and outputs
      * will render black (which is better than crashing or having invalid state) */
+    /* Use read lock for safe output list traversal */
+    pthread_rwlock_rdlock(&state->output_list_lock);
     struct output_state *output = state->outputs;
     while (output) {
         struct wallpaper_config config_copy;
@@ -1263,6 +1265,7 @@ static bool apply_builtin_default_config(struct neowall_state *state) {
                  output->model[0] ? output->model : "unknown");
         output = output->next;
     }
+    pthread_rwlock_unlock(&state->output_list_lock);
     
     return true;
 }
@@ -1451,7 +1454,8 @@ bool config_load(struct neowall_state *state, const char *config_path) {
                          output_name, type_str, path_str, 
                          wallpaper_mode_to_string(output_config.mode));
 
-                /* Find matching output and apply config */
+                /* Find matching output and apply config - use read lock for safe traversal */
+                pthread_rwlock_rdlock(&state->output_list_lock);
                 struct output_state *target = state->outputs;
                 bool found = false;
                 while (target) {
@@ -1489,7 +1493,8 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         log_info("========================================");
         log_info("[OK] Configuration loaded successfully");
         
-        /* Print summary of what was configured */
+        /* Print summary of what was configured - use read lock for safe traversal */
+        pthread_rwlock_rdlock(&state->output_list_lock);
         int output_count = 0;
         int shader_count = 0;
         int image_count = 0;
@@ -1515,7 +1520,8 @@ bool config_load(struct neowall_state *state, const char *config_path) {
             }
             summary_output = summary_output->next;
         }
-        log_info("Total: %d output(s) configured (%d shader, %d image)", 
+        pthread_rwlock_unlock(&state->output_list_lock);
+        log_info("Total: %d output(s) configured (%d shader, %d image)",
                  output_count, shader_count, image_count);
         log_info("========================================");
         return true;
@@ -1565,6 +1571,10 @@ void config_reload(struct neowall_state *state) {
 
     log_info("=== CONFIG RELOAD: Treating as full restart ===");
     log_info("Performing complete cleanup of all outputs...");
+
+    /* Acquire write lock to prevent concurrent access during reload */
+    pthread_rwlock_wrlock(&state->output_list_lock);
+    pthread_mutex_lock(&state->state_mutex);
 
     /* STEP 1: Complete GPU resource cleanup - MUST happen before config changes */
     struct output_state *output = state->outputs;
@@ -1712,6 +1722,10 @@ void config_reload(struct neowall_state *state) {
         output = output->next;
     }
     
+    /* Release locks after reload is complete */
+    pthread_mutex_unlock(&state->state_mutex);
+    pthread_rwlock_unlock(&state->output_list_lock);
+    
     log_info("=== CONFIG RELOAD COMPLETE ===");
 }
 
@@ -1724,19 +1738,17 @@ void *config_watch_thread(void *arg) {
 
     log_info("Configuration watcher thread started for: %s", state->config_path);
 
-    while (state->running) {
+    while (atomic_load_explicit(&state->running, memory_order_acquire)) {
         sleep(CONFIG_WATCH_INTERVAL);
 
-        if (!state->running) break;
+        if (!atomic_load_explicit(&state->running, memory_order_acquire)) break;
 
         if (config_has_changed(state)) {
             log_info("Configuration file changed, signaling main thread to reload...");
             
             /* Signal main thread to handle reload (config_reload does EGL operations
              * which must happen on the main thread, not the watcher thread) */
-            pthread_mutex_lock(&state->state_mutex);
-            state->reload_requested = true;
-            pthread_mutex_unlock(&state->state_mutex);
+            atomic_store_explicit(&state->reload_requested, true, memory_order_release);
             
             /* Wake up the event loop to process reload immediately */
             if (state->wakeup_fd >= 0) {

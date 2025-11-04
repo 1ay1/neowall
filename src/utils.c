@@ -238,23 +238,36 @@ const char *get_state_file_path(void) {
 bool write_wallpaper_state(const char *output_name, const char *wallpaper_path, 
                            const char *mode, int cycle_index, int cycle_total,
                            const char *status) {
+    /* CRITICAL: This function is called from multiple contexts (main thread, render path)
+     * We need to use file locking to prevent concurrent writes from corrupting the file.
+     * However, we don't have direct access to neowall_state here, so we use a static mutex.
+     * This is safe because the state file is a singleton resource. */
+    
+    static pthread_mutex_t state_file_mutex = PTHREAD_MUTEX_INITIALIZER;
+    
     const char *state_path = get_state_file_path();
+    
+    /* Acquire lock before file operations */
+    pthread_mutex_lock(&state_file_mutex);
+    
     FILE *fp = fopen(state_path, "w");
     
     if (!fp) {
         log_error("Failed to write state file %s: %s", state_path, strerror(errno));
+        pthread_mutex_unlock(&state_file_mutex);
         return false;
     }
     
     fprintf(fp, "output=%s\n", output_name ? output_name : "unknown");
     fprintf(fp, "wallpaper=%s\n", wallpaper_path ? wallpaper_path : "none");
-    fprintf(fp, "mode=%s\n", mode ? mode : "unknown");
+    fprintf(fp, "mode=%s\n", mode ? mode : "fill");
     fprintf(fp, "cycle_index=%d\n", cycle_index);
     fprintf(fp, "cycle_total=%d\n", cycle_total);
     fprintf(fp, "status=%s\n", status ? status : "active");
     fprintf(fp, "timestamp=%ld\n", (long)time(NULL));
     
     fclose(fp);
+    pthread_mutex_unlock(&state_file_mutex);
     return true;
 }
 

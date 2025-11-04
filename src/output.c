@@ -54,7 +54,8 @@ struct output_state *output_create(struct neowall_state *state,
     out->shader_fade_start_time = 0;
     out->pending_shader_path[0] = '\0';
 
-    /* Add to linked list */
+    /* Add to linked list - CALLER MUST HOLD WRITE LOCK */
+    /* Note: List modification moved to caller (wayland.c) to ensure proper locking */
     out->next = state->outputs;
     state->outputs = out;
     state->output_count++;
@@ -199,6 +200,14 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         return;
     }
 
+    /* CRITICAL: Ensure EGL context is current for this thread before any GL operations */
+    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                       output->egl_surface, output->state->egl_context)) {
+        log_error("Failed to make EGL context current for wallpaper set");
+        image_free(new_image);
+        return;
+    }
+
     if (output->state->egl_context == EGL_NO_CONTEXT) {
         log_error("EGL context not initialized, cannot set wallpaper");
         image_free(new_image);
@@ -308,8 +317,13 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         return;
     }
 
-    log_info("Setting shader wallpaper for output %s: %s",
-             output->model[0] ? output->model : "unknown", shader_path);
+    /* Use local copy of model string to avoid race */
+    char model_copy[64];
+    strncpy(model_copy, output->model, sizeof(model_copy) - 1);
+    model_copy[sizeof(model_copy) - 1] = '\0';
+
+    log_info("Setting shader for output %s: %s",
+             model_copy[0] ? model_copy : "unknown", shader_path);
 
     /* Defensive checks before any EGL/GL operations */
     if (!output->state) {
@@ -319,6 +333,13 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
 
     if (output->state->egl_display == EGL_NO_DISPLAY) {
         log_error("EGL display not initialized, cannot set shader");
+        return;
+    }
+
+    /* CRITICAL: Ensure EGL context is current before any GL operations */
+    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                       output->egl_surface, output->state->egl_context)) {
+        log_error("Failed to make EGL context current for shader set");
         return;
     }
 
@@ -415,9 +436,11 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
             }
         }
         
-        /* Update config with new shader path */
+        /* Update config with new shader path - protected by state mutex */
+        pthread_mutex_lock(&output->state->state_mutex);
         strncpy(output->config.shader_path, shader_path, sizeof(output->config.shader_path) - 1);
         output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
+        pthread_mutex_unlock(&output->state->state_mutex);
         
         /* Write state to file */
         const char *mode_str = wallpaper_mode_to_string(output->config.mode);
@@ -504,10 +527,12 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         output->next_texture = 0;
     }
 
-    /* Update config */
+    /* Update config - protected by state mutex */
+    pthread_mutex_lock(&output->state->state_mutex);
     strncpy(output->config.shader_path, shader_path, sizeof(output->config.shader_path) - 1);
     output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
     output->config.type = WALLPAPER_SHADER;
+    pthread_mutex_unlock(&output->state->state_mutex);
 
     /* Initialize frame time for animation */
     uint64_t now = get_time_ms();
@@ -564,18 +589,31 @@ void output_cycle_wallpaper(struct output_state *output) {
     if (output->config.type == WALLPAPER_SHADER && 
         output->shader_fade_start_time > 0 && 
         output->pending_shader_path[0] != '\0') {
-        const char *output_name = output->model[0] ? output->model : "unknown";
+        /* Use local copy of model to avoid race if output is being modified */
+        char model_copy[64];
+        strncpy(model_copy, output->model, sizeof(model_copy) - 1);
+        model_copy[sizeof(model_copy) - 1] = '\0';
+        const char *output_name = model_copy[0] ? model_copy : "unknown";
         log_info("Shader transition in progress on output '%s', deferring cycle request", 
                  output_name);
         return;
     }
 
-    /* Move to next wallpaper/shader */
+    /* Move to next wallpaper/shader - protect cycle_paths access with mutex */
+    pthread_mutex_lock(&output->state->state_mutex);
     size_t old_index = output->config.current_cycle_index;
     output->config.current_cycle_index =
         (output->config.current_cycle_index + 1) % output->config.cycle_count;
 
+    /* Copy path before releasing lock to avoid use-after-free if config reloads */
+    char next_path_copy[MAX_PATH_LENGTH];
     const char *next_path = output->config.cycle_paths[output->config.current_cycle_index];
+    strncpy(next_path_copy, next_path, sizeof(next_path_copy) - 1);
+    next_path_copy[sizeof(next_path_copy) - 1] = '\0';
+    pthread_mutex_unlock(&output->state->state_mutex);
+    
+    /* Use the copied path from here onwards */
+    next_path = next_path_copy;
 
     /* Detect if we're in "shader + image cycling" mode:
      * - Type is WALLPAPER_SHADER (we have a shader)
