@@ -484,6 +484,596 @@ static bool is_shadertoy_format(const char *source) {
 }
 
 /**
+ * Skip whitespace, comments, and preprocessor directives
+ * @param p Current position in source
+ * @return Position after skipped content
+ */
+static const char *skip_whitespace_and_comments(const char *p) {
+    if (!p) return NULL;
+    
+    while (*p) {
+        /* Skip whitespace */
+        if (isspace(*p)) {
+            p++;
+            continue;
+        }
+        
+        /* Skip single-line comments */
+        if (*p == '/' && *(p+1) == '/') {
+            p += 2;
+            while (*p && *p != '\n') p++;
+            if (*p) p++;
+            continue;
+        }
+        
+        /* Skip multi-line comments */
+        if (*p == '/' && *(p+1) == '*') {
+            p += 2;
+            while (*p && !(*p == '*' && *(p+1) == '/')) p++;
+            if (*p) p += 2;
+            continue;
+        }
+        
+        /* Skip preprocessor directives */
+        if (*p == '#') {
+            while (*p && *p != '\n') p++;
+            if (*p) p++;
+            continue;
+        }
+        
+        break;
+    }
+    
+    return p;
+}
+
+/**
+ * Check if character is a valid identifier character
+ */
+static inline bool is_identifier_char(char c) {
+    return isalnum(c) || c == '_';
+}
+
+/**
+ * Intelligent uniform declaration detector
+ * Handles comments, preprocessor directives, and multi-line declarations
+ * 
+ * @param source Shader source code
+ * @param uniform_name Name of uniform to search for
+ * @return true if uniform is declared, false otherwise
+ */
+static bool has_uniform_declaration(const char *source, const char *uniform_name) {
+    if (!source || !uniform_name) {
+        return false;
+    }
+    
+    const char *p = source;
+    size_t name_len = strlen(uniform_name);
+    
+    while (*p) {
+        p = skip_whitespace_and_comments(p);
+        if (!*p) break;
+        
+        /* Look for "uniform" keyword */
+        if (strncmp(p, "uniform", 7) == 0 && !is_identifier_char(*(p+7))) {
+            p += 7;
+            p = skip_whitespace_and_comments(p);
+            
+            /* Skip type declaration (float, vec2, vec3, sampler2D, etc.) */
+            /* Could be: float, vec2, vec3, vec4, int, mat3, mat4, sampler2D, etc. */
+            while (*p && is_identifier_char(*p)) p++;
+            
+            /* Skip array brackets if present: float[4] */
+            p = skip_whitespace_and_comments(p);
+            if (*p == '[') {
+                while (*p && *p != ']') p++;
+                if (*p) p++;
+            }
+            
+            p = skip_whitespace_and_comments(p);
+            
+            /* Now we should be at the uniform name */
+            if (strncmp(p, uniform_name, name_len) == 0 && 
+                !is_identifier_char(*(p + name_len))) {
+                /* Verify what follows is valid (semicolon, equals, or array bracket) */
+                const char *after = skip_whitespace_and_comments(p + name_len);
+                if (*after == ';' || *after == '=' || *after == '[' || *after == ',') {
+                    log_debug("Found uniform declaration: %s at position %ld", 
+                             uniform_name, (long)(p - source));
+                    return true;
+                }
+            }
+        }
+        
+        p++;
+    }
+    
+    return false;
+}
+
+/**
+ * Detect assignment to a uniform-like variable
+ * Looks for patterns like: iTime = value; or _neowall_time += value;
+ * 
+ * @param source Shader source code
+ * @param var_name Variable name to check
+ * @return true if assignment found, false otherwise
+ */
+static bool has_uniform_assignment(const char *source, const char *var_name) {
+    if (!source || !var_name) {
+        return false;
+    }
+    
+    const char *p = source;
+    size_t name_len = strlen(var_name);
+    
+    while ((p = strstr(p, var_name)) != NULL) {
+        /* Check if this is a complete identifier (not part of another word) */
+        bool valid_start = (p == source || !is_identifier_char(*(p-1)));
+        bool valid_end = !is_identifier_char(*(p + name_len));
+        
+        if (valid_start && valid_end) {
+            /* Skip whitespace after the identifier */
+            const char *after = skip_whitespace_and_comments(p + name_len);
+            
+            /* Check for assignment operators: =, +=, -=, *=, /= */
+            if (after && (*after == '=' || 
+                         (*after == '+' && *(after+1) == '=') ||
+                         (*after == '-' && *(after+1) == '=') ||
+                         (*after == '*' && *(after+1) == '=') ||
+                         (*after == '/' && *(after+1) == '='))) {
+                log_debug("Found assignment to %s at position %ld", 
+                         var_name, (long)(p - source));
+                return true;
+            }
+        }
+        
+        p++;
+    }
+    
+    return false;
+}
+
+/**
+ * Detect global variable declaration (non-uniform)
+ * Looks for patterns like: float time = 0.0; or vec3 resolution;
+ * 
+ * @param source Shader source code
+ * @param var_name Variable name to check
+ * @return true if global variable declaration found, false otherwise
+ */
+static bool has_global_variable_declaration(const char *source, const char *var_name) {
+    if (!source || !var_name) {
+        return false;
+    }
+    
+    const char *p = source;
+    size_t name_len = strlen(var_name);
+    
+    /* Look for type keywords that indicate variable declarations */
+    const char *types[] = {
+        "float", "vec2", "vec3", "vec4", 
+        "int", "ivec2", "ivec3", "ivec4",
+        "bool", "bvec2", "bvec3", "bvec4",
+        "mat2", "mat3", "mat4",
+        NULL
+    };
+    
+    while (*p) {
+        p = skip_whitespace_and_comments(p);
+        if (!*p) break;
+        
+        /* Check for type keywords (but not uniform or const) */
+        for (int i = 0; types[i]; i++) {
+            size_t type_len = strlen(types[i]);
+            if (strncmp(p, types[i], type_len) == 0 && 
+                !is_identifier_char(*(p + type_len))) {
+                
+                /* Make sure this isn't preceded by "uniform" or "const" */
+                const char *check_back = p;
+                while (check_back > source && isspace(*(check_back - 1))) {
+                    check_back--;
+                }
+                
+                bool is_uniform = (check_back >= source + 7 && 
+                                  strncmp(check_back - 7, "uniform", 7) == 0);
+                bool is_const = (check_back >= source + 5 && 
+                                strncmp(check_back - 5, "const", 5) == 0);
+                
+                if (!is_uniform && !is_const) {
+                    /* This is a regular variable declaration - check the name */
+                    const char *name_pos = p + type_len;
+                    name_pos = skip_whitespace_and_comments(name_pos);
+                    
+                    if (strncmp(name_pos, var_name, name_len) == 0 && 
+                        !is_identifier_char(*(name_pos + name_len))) {
+                        
+                        /* Check what follows - should be =, ;, or [ */
+                        const char *after = skip_whitespace_and_comments(name_pos + name_len);
+                        if (*after == '=' || *after == ';' || *after == '[') {
+                            log_debug("Found global variable declaration: %s at position %ld", 
+                                     var_name, (long)(name_pos - source));
+                            return true;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        
+        p++;
+    }
+    
+    return false;
+}
+
+/**
+ * Detect and report all conflicts in shader source
+ * 
+ * @param source Shader source code
+ * @return Bitmask of conflicts (0 = no conflicts)
+ */
+static uint32_t detect_shader_conflicts(const char *source) {
+    if (!source) return 0;
+    
+    uint32_t conflicts = 0;
+    
+    /* Check for reserved neowall uniform declarations */
+    if (has_uniform_declaration(source, "_neowall_time")) {
+        conflicts |= (1 << 0);
+        log_info("Shader declares '_neowall_time' uniform (neowall provides this)");
+    }
+    
+    if (has_uniform_declaration(source, "_neowall_resolution")) {
+        conflicts |= (1 << 1);
+        log_info("Shader declares '_neowall_resolution' uniform (neowall provides this)");
+    }
+    
+    /* Check for Shadertoy standard uniforms that we provide via macros */
+    if (has_uniform_declaration(source, "iTime")) {
+        conflicts |= (1 << 2);
+        log_info("Shader declares 'iTime' uniform (neowall provides this via macro)");
+    }
+    
+    if (has_uniform_declaration(source, "iResolution")) {
+        conflicts |= (1 << 3);
+        log_info("Shader declares 'iResolution' uniform (neowall provides this)");
+    }
+    
+    /* Check for assignments to uniforms (which are read-only) */
+    if (has_uniform_assignment(source, "_neowall_time")) {
+        conflicts |= (1 << 4);
+        log_info("Shader attempts to assign to '_neowall_time' (uniforms are read-only)");
+    }
+    
+    if (has_uniform_assignment(source, "iTime")) {
+        conflicts |= (1 << 5);
+        log_info("Shader attempts to assign to 'iTime' (expands to uniform, read-only)");
+    }
+    
+    /* Check for global variable shadowing (variables that would conflict with our macros) */
+    if (has_global_variable_declaration(source, "time")) {
+        conflicts |= (1 << 6);
+        log_info("Shader declares global variable 'time' (conflicts with neowall macro)");
+    }
+    
+    if (has_global_variable_declaration(source, "resolution")) {
+        conflicts |= (1 << 7);
+        log_info("Shader declares global variable 'resolution' (conflicts with neowall macro)");
+    }
+    
+    return conflicts;
+}
+
+/**
+ * Remove conflicting global variable declarations
+ * Removes declarations like: float time = 0.0;
+ * 
+ * @param source Original shader source
+ * @return Cleaned shader source (caller must free), or NULL on error
+ */
+static char *strip_global_variables(const char *source) {
+    if (!source) return NULL;
+    
+    /* Variables to strip */
+    const char *strip_vars[] = {
+        "time",
+        "resolution",
+        NULL
+    };
+    
+    /* Allocate result buffer */
+    size_t src_len = strlen(source);
+    char *result = malloc(src_len + 1);
+    if (!result) {
+        log_error("Failed to allocate memory for global variable cleaning");
+        return NULL;
+    }
+    
+    const char *read_ptr = source;
+    char *write_ptr = result;
+    int removed_count = 0;
+    
+    while (*read_ptr) {
+        const char *line_start = read_ptr;
+        bool should_remove = false;
+        const char *found_var = NULL;
+        
+        /* Check if this line contains a global variable declaration to remove */
+        for (int i = 0; strip_vars[i]; i++) {
+            if (has_global_variable_declaration(line_start, strip_vars[i])) {
+                /* Verify this declaration is on the current line */
+                const char *line_end = strchr(line_start, '\n');
+                const char *semicolon = strchr(line_start, ';');
+                
+                if (semicolon && (!line_end || semicolon < line_end)) {
+                    should_remove = true;
+                    found_var = strip_vars[i];
+                    break;
+                }
+            }
+        }
+        
+        if (should_remove) {
+            /* Skip this line - find the semicolon */
+            const char *semicolon = strchr(read_ptr, ';');
+            if (semicolon) {
+                read_ptr = semicolon + 1;
+                /* Also skip trailing newline if present */
+                if (*read_ptr == '\n') read_ptr++;
+                
+                removed_count++;
+                log_info("Removed conflicting global variable: %s", found_var);
+            } else {
+                /* No semicolon found - just skip the line */
+                const char *newline = strchr(read_ptr, '\n');
+                if (newline) {
+                    read_ptr = newline + 1;
+                } else {
+                    break;
+                }
+            }
+        } else {
+            /* Keep this line */
+            while (*read_ptr && *read_ptr != '\n') {
+                *write_ptr++ = *read_ptr++;
+            }
+            if (*read_ptr == '\n') {
+                *write_ptr++ = *read_ptr++;
+            }
+        }
+    }
+    
+    *write_ptr = '\0';
+    
+    if (removed_count > 0) {
+        log_info("Automatically removed %d conflicting global variable(s)", removed_count);
+    }
+    
+    return result;
+}
+
+/**
+ * Remove conflicting uniform declarations from shader source
+ * Strategy: Comment out or remove lines with conflicting declarations
+ * 
+ * @param source Original shader source
+ * @return Cleaned shader source (caller must free), or NULL on error
+ */
+static char *strip_conflicting_uniforms(const char *source) {
+    if (!source) return NULL;
+    
+    /* Names to strip */
+    const char *strip_uniforms[] = {
+        "_neowall_time",
+        "_neowall_resolution",
+        "iTime",
+        "iResolution",
+        NULL
+    };
+    
+    /* Allocate result buffer (same size as original) */
+    size_t src_len = strlen(source);
+    char *result = malloc(src_len + 1);
+    if (!result) {
+        log_error("Failed to allocate memory for shader cleaning");
+        return NULL;
+    }
+    
+    const char *read_ptr = source;
+    char *write_ptr = result;
+    int removed_count = 0;
+    
+    while (*read_ptr) {
+        const char *line_start = read_ptr;
+        
+        /* Skip whitespace and comments at line start */
+        const char *content_start = skip_whitespace_and_comments(read_ptr);
+        
+        /* Check if this line contains a uniform declaration to remove */
+        bool should_remove = false;
+        const char *found_uniform = NULL;
+        
+        if (content_start && strncmp(content_start, "uniform", 7) == 0 && 
+            !is_identifier_char(*(content_start + 7))) {
+            
+            /* This line starts with "uniform" - check if it declares a conflicting name */
+            for (int i = 0; strip_uniforms[i]; i++) {
+                if (has_uniform_declaration(line_start, strip_uniforms[i])) {
+                    /* Find if this uniform declaration is on this line */
+                    const char *line_end = strchr(line_start, '\n');
+                    const char *semicolon = strchr(line_start, ';');
+                    
+                    if (semicolon && (!line_end || semicolon < line_end)) {
+                        should_remove = true;
+                        found_uniform = strip_uniforms[i];
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (should_remove) {
+            /* Skip this line - find the semicolon */
+            const char *semicolon = strchr(read_ptr, ';');
+            if (semicolon) {
+                read_ptr = semicolon + 1;
+                /* Also skip trailing newline if present */
+                if (*read_ptr == '\n') read_ptr++;
+                
+                removed_count++;
+                log_info("Removed conflicting uniform declaration: %s", found_uniform);
+            } else {
+                /* No semicolon found - just skip the line */
+                const char *newline = strchr(read_ptr, '\n');
+                if (newline) {
+                    read_ptr = newline + 1;
+                } else {
+                    break; /* End of file */
+                }
+            }
+        } else {
+            /* Keep this line - copy character by character until newline */
+            while (*read_ptr && *read_ptr != '\n') {
+                *write_ptr++ = *read_ptr++;
+            }
+            if (*read_ptr == '\n') {
+                *write_ptr++ = *read_ptr++;
+            }
+        }
+    }
+    
+    *write_ptr = '\0';
+    
+    if (removed_count > 0) {
+        log_info("Automatically removed %d conflicting uniform declaration(s)", removed_count);
+    }
+    
+    return result;
+}
+
+/**
+ * Replace assignments to read-only uniforms with local variables
+ * Strategy: Remove or comment out assignments like "time = iTime;"
+ * Since these variables will be macros that expand to uniforms, assignments are illegal
+ * 
+ * @param source Original shader source
+ * @return Fixed shader source (caller must free), or NULL on error
+ */
+static char *fix_uniform_assignments(const char *source) {
+    if (!source) return NULL;
+    
+    /* Check if we need to fix anything */
+    bool needs_fix = has_uniform_assignment(source, "iTime") ||
+                     has_uniform_assignment(source, "_neowall_time") ||
+                     has_uniform_assignment(source, "time") ||
+                     has_uniform_assignment(source, "resolution");
+    
+    if (!needs_fix) {
+        return strdup(source); /* No changes needed */
+    }
+    
+    /* Allocate result buffer - add extra space for comments we might add */
+    size_t src_len = strlen(source);
+    char *result = malloc(src_len * 2); /* Double size for safety - comments add text */
+    if (!result) {
+        log_error("Failed to allocate memory for fixing uniform assignments");
+        return NULL;
+    }
+    
+    const char *read_ptr = source;
+    char *write_ptr = result;
+    int fix_count = 0;
+    
+    /* List of variables that map to read-only uniforms */
+    const char *readonly_vars[] = {
+        "iTime", "_neowall_time", "time",
+        "iResolution", "_neowall_resolution", "resolution",
+        NULL
+    };
+    
+    while (*read_ptr) {
+        const char *line_start = read_ptr;
+        bool should_remove = false;
+        const char *found_var = NULL;
+        
+        /* Check if this line contains an assignment to a read-only variable */
+        for (int i = 0; readonly_vars[i]; i++) {
+            const char *var_name = readonly_vars[i];
+            size_t var_len = strlen(var_name);
+            
+            /* Look for the variable name in this line */
+            const char *var_pos = strstr(line_start, var_name);
+            if (var_pos) {
+                /* Verify it's a complete identifier */
+                bool valid_start = (var_pos == line_start || !is_identifier_char(*(var_pos-1)));
+                bool valid_end = !is_identifier_char(*(var_pos + var_len));
+                
+                if (valid_start && valid_end) {
+                    /* Check if followed by assignment operator */
+                    const char *after = skip_whitespace_and_comments(var_pos + var_len);
+                    if (after && *after == '=') {
+                        /* Check it's not == (comparison) */
+                        if (*(after + 1) != '=') {
+                            const char *line_end = strchr(line_start, '\n');
+                            const char *semicolon = strchr(var_pos, ';');
+                            
+                            if (semicolon && (!line_end || semicolon < line_end)) {
+                                should_remove = true;
+                                found_var = var_name;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (should_remove) {
+            /* Remove this assignment line - skip to semicolon */
+            const char *semicolon = strchr(read_ptr, ';');
+            if (semicolon) {
+                /* Add a comment explaining what was removed */
+                write_ptr += sprintf(write_ptr, "// [neowall] Removed assignment to read-only uniform: %s", found_var);
+                
+                read_ptr = semicolon + 1;
+                /* Preserve newline if present */
+                if (*read_ptr == '\n') {
+                    *write_ptr++ = *read_ptr++;
+                }
+                
+                fix_count++;
+                log_info("Removed assignment to read-only uniform: %s", found_var);
+            } else {
+                /* No semicolon - skip whole line */
+                const char *newline = strchr(read_ptr, '\n');
+                if (newline) {
+                    read_ptr = newline + 1;
+                } else {
+                    break;
+                }
+            }
+        } else {
+            /* Keep this line */
+            while (*read_ptr && *read_ptr != '\n') {
+                *write_ptr++ = *read_ptr++;
+            }
+            if (*read_ptr == '\n') {
+                *write_ptr++ = *read_ptr++;
+            }
+        }
+    }
+    
+    *write_ptr = '\0';
+    
+    if (fix_count > 0) {
+        log_info("Fixed %d assignment(s) to read-only uniforms", fix_count);
+    }
+    
+    return result;
+}
+
+/**
  * Strip #version directive from shader source
  * 
  * @param source Shader source code
@@ -525,6 +1115,92 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
     
     /* Strip #version directive from original source if present */
     const char *source_body = strip_version_directive(shadertoy_source);
+    
+    /* INTELLIGENT CONFLICT RESOLUTION - Strategy 2 & 3 */
+    
+    /* Step 1: Detect conflicts before processing */
+    uint32_t conflicts = detect_shader_conflicts(source_body);
+    
+    /* Step 2: Apply automatic fixes if conflicts detected */
+    char *cleaned_source = NULL;
+    bool needs_cleanup = false;
+    
+    if (conflicts) {
+        log_info("╔══════════════════════════════════════════════════════════════╗");
+        log_info("║ Shader Conflict Detected - Applying Automatic Fixes         ║");
+        log_info("╚══════════════════════════════════════════════════════════════╝");
+        
+        /* Fix 1: Remove conflicting uniform declarations */
+        if (conflicts & ((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3))) {
+            log_info("» Removing conflicting uniform declarations...");
+            cleaned_source = strip_conflicting_uniforms(source_body);
+            if (cleaned_source) {
+                source_body = cleaned_source;
+                needs_cleanup = true;
+                log_info("✓ Successfully removed conflicting uniforms");
+            } else {
+                log_error("✗ Failed to clean conflicting uniforms");
+                return NULL;
+            }
+        }
+        
+        /* Fix 2: Remove conflicting global variable declarations */
+        if (conflicts & ((1 << 6) | (1 << 7))) {
+            log_info("» Removing conflicting global variables...");
+            char *cleaned_vars = strip_global_variables(source_body);
+            if (cleaned_vars) {
+                if (needs_cleanup) {
+                    free(cleaned_source);
+                }
+                source_body = cleaned_vars;
+                cleaned_source = cleaned_vars;
+                needs_cleanup = true;
+                log_info("✓ Successfully removed conflicting global variables");
+                
+                /* After removing global variables, check for orphaned assignments */
+                /* Example: "float time = 0;" was removed, but "time = iTime;" remains */
+                /* This will expand to "_neowall_time = iTime" which is an assignment to uniform */
+                if (has_uniform_assignment(source_body, "time") || 
+                    has_uniform_assignment(source_body, "resolution")) {
+                    log_info("» Detected orphaned assignments after removing global variables");
+                    conflicts |= (1 << 4);  /* Set assignment conflict flag */
+                }
+            } else {
+                log_error("✗ Failed to clean conflicting global variables");
+                if (needs_cleanup) {
+                    free(cleaned_source);
+                }
+                return NULL;
+            }
+        }
+        
+        /* Fix 3: Replace assignments to read-only uniforms */
+        if (conflicts & ((1 << 4) | (1 << 5))) {
+            log_info("» Fixing assignments to read-only uniforms...");
+            char *fixed_source = fix_uniform_assignments(source_body);
+            if (fixed_source) {
+                if (needs_cleanup) {
+                    free(cleaned_source);
+                }
+                source_body = fixed_source;
+                cleaned_source = fixed_source;
+                needs_cleanup = true;
+                log_info("✓ Successfully fixed uniform assignments");
+            } else {
+                log_error("✗ Could not fix uniform assignments automatically");
+            }
+        }
+        
+        log_info("╔══════════════════════════════════════════════════════════════╗");
+        log_info("║ Conflict Resolution Complete                                 ║");
+        log_info("╠══════════════════════════════════════════════════════════════╣");
+        log_info("║ Your shader has been automatically modified to work with     ║");
+        log_info("║ neowall. Conflicting declarations have been removed.         ║");
+        log_info("║                                                               ║");
+        log_info("║ If you see compilation errors, please check:                 ║");
+        log_info("║   /tmp/neowall_shader_debug.glsl                              ║");
+        log_info("╚══════════════════════════════════════════════════════════════╝");
+    }
     
     /* Build dynamic iChannel declarations */
     char *channel_decls = build_ichannel_declarations(channel_count);
@@ -575,6 +1251,11 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
     strcat(wrapped, suffix);
     
     free(channel_decls);
+    
+    /* Clean up the conflict-resolution allocated source */
+    if (needs_cleanup && cleaned_source) {
+        free(cleaned_source);
+    }
     
     /* Only convert texture calls if we're using ES 2.0 wrapper */
     if (!use_es3) {
