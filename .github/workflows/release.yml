@@ -1,0 +1,114 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 0.3.0)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            echo "TAG=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            TAG=${GITHUB_REF#refs/tags/}
+            VERSION=${TAG#v}
+            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+            echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            wayland-protocols \
+            libwayland-dev \
+            libpng-dev \
+            libjpeg-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            pkg-config \
+            make \
+            gcc
+
+      - name: Build neowall
+        run: make
+
+      - name: Create tarball
+        run: |
+          mkdir -p release
+          tar -czf release/neowall-${{ steps.version.outputs.VERSION }}.tar.gz \
+            --exclude='.git' \
+            --exclude='release' \
+            --exclude='.github' \
+            --transform "s,^,neowall-${{ steps.version.outputs.VERSION }}/," \
+            *
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Get previous tag
+            PREV_TAG=$(git describe --abbrev=0 --tags ${{ steps.version.outputs.TAG }}^ 2>/dev/null || echo "")
+            if [ -n "$PREV_TAG" ]; then
+              echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+              git log $PREV_TAG..${{ steps.version.outputs.TAG }} --pretty=format:"- %s (%h)" >> $GITHUB_OUTPUT
+              echo "" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+            else
+              echo "CHANGELOG=Initial release" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "CHANGELOG=Manual release of version ${{ steps.version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.TAG }}
+          name: Release ${{ steps.version.outputs.TAG }}
+          body: |
+            ## Neowall ${{ steps.version.outputs.VERSION }}
+
+            ### Changes
+            ${{ steps.changelog.outputs.CHANGELOG }}
+
+            ### Installation
+
+            #### Arch Linux (AUR)
+            ```bash
+            yay -S neowall-git
+            ```
+
+            #### From source
+            ```bash
+            tar -xzf neowall-${{ steps.version.outputs.VERSION }}.tar.gz
+            cd neowall-${{ steps.version.outputs.VERSION }}
+            make
+            sudo make install
+            ```
+          files: |
+            release/neowall-${{ steps.version.outputs.VERSION }}.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
