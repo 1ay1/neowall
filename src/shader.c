@@ -766,6 +766,40 @@ static uint32_t detect_shader_conflicts(const char *source) {
 }
 
 /**
+ * Find where true global scope ends (before any function body with braces)
+ * This is more accurate than just finding 'void' which could be in many places
+ */
+static const char *find_global_scope_end(const char *source) {
+    const char *p = source;
+    int brace_depth = 0;
+    
+    while (*p) {
+        p = skip_whitespace_and_comments(p);
+        if (!*p) break;
+        
+        /* Track brace depth */
+        if (*p == '{') {
+            brace_depth++;
+            /* First opening brace at depth 0 means we entered a function */
+            if (brace_depth == 1) {
+                /* Back up to start of this line as the boundary */
+                const char *line_start = p;
+                while (line_start > source && *(line_start - 1) != '\n') {
+                    line_start--;
+                }
+                return line_start;
+            }
+        } else if (*p == '}') {
+            brace_depth--;
+        }
+        
+        p++;
+    }
+    
+    return source + strlen(source);
+}
+
+/**
  * Remove conflicting global variable declarations
  * Removes declarations like: float time = 0.0;
  * ONLY operates on GLOBAL scope (before any function definitions)
@@ -783,12 +817,8 @@ static char *strip_global_variables(const char *source) {
         NULL
     };
     
-    /* Find where global scope ends (first function or mainImage) */
-    const char *global_end = strstr(source, "void");
-    if (!global_end) {
-        /* No functions found - entire source is global scope */
-        global_end = source + strlen(source);
-    }
+    /* Find where global scope ends (before first function body) */
+    const char *global_end = find_global_scope_end(source);
     
     /* Allocate result buffer */
     size_t src_len = strlen(source);
