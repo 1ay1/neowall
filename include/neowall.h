@@ -20,7 +20,7 @@ typedef atomic_int atomic_int_t;
 #define MAX_PATH_LENGTH 4096
 #define MAX_OUTPUTS 16
 #define MAX_WALLPAPERS 256
-#define CONFIG_WATCH_INTERVAL 2
+#define CONFIG_WATCH_INTERVAL 1
 
 
 
@@ -173,6 +173,7 @@ struct output_state {
     char pending_shader_path[MAX_PATH_LENGTH]; /* Next shader to load after fade-out */
     float transition_progress;
     uint64_t frames_rendered;
+    bool shader_load_failed;            /* Set to true after 3 failed shader load attempts */
 
     struct output_state *next;
 };

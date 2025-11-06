@@ -171,7 +171,27 @@ static void render_outputs(struct neowall_state *state) {
 
             /* Render frame */
             if (!render_frame(output)) {
-                log_error("Failed to render frame for output %s", output->model);
+                /* Only log if shader hasn't permanently failed (after 3 attempts, be silent) */
+                if (!output->shader_load_failed) {
+                    /* Throttle error logging to prevent spam when shader fails to load */
+                    static uint64_t last_render_error_time = 0;
+                    static int render_error_count = 0;
+                    uint64_t current_time = get_time_ms();
+                    
+                    if (current_time - last_render_error_time >= 1000) {
+                        /* Log once per second */
+                        if (render_error_count > 0) {
+                            log_error("Failed to render frame for output %s (%d failures in last second)", 
+                                     output->model, render_error_count + 1);
+                        } else {
+                            log_error("Failed to render frame for output %s", output->model);
+                        }
+                        last_render_error_time = current_time;
+                        render_error_count = 0;
+                    } else {
+                        render_error_count++;
+                    }
+                }
                 state->errors_count++;
             } else {
                 /* Swap buffers */
@@ -369,18 +389,6 @@ void event_loop_run(struct neowall_state *state) {
             /* Don't call config_reload here - it causes deadlock on startup */
             /* Outputs will be initialized through the normal config_load path */
         }
-        
-        /* Handle configuration reload if requested */
-        if (atomic_load_explicit(&state->reload_requested, memory_order_acquire)) {
-            log_info("Config reload requested, reloading...");
-            atomic_store_explicit(&state->reload_requested, false, memory_order_release);  /* Reset flag before reload */
-            config_reload(state);
-            /* Update cycle timer with new configuration */
-            update_cycle_timer(state);
-            /* Trigger render to apply new config */
-            render_outputs(state);
-            wl_display_flush(state->display);
-        }
 
         /* Prepare for reading events */
         while (wl_display_prepare_read(state->display) != 0) {
@@ -405,27 +413,33 @@ void event_loop_run(struct neowall_state *state) {
             }
         }
 
-        /* Calculate poll timeout - only for transitions/shaders, otherwise wait indefinitely */
-        int timeout_ms = POLL_TIMEOUT_INFINITE; /* Pure event-driven by default */
+        /* Calculate poll timeout - use 1 second max to ensure signals are processed promptly
+         * BUG FIX: Previously used POLL_TIMEOUT_INFINITE (-1) which caused slow signal response
+         * (Ctrl+C, neowall kill, etc.) because poll wouldn't return until a Wayland event arrived */
+        int timeout_ms = 1000; /* 1 second max - ensures signals checked regularly */
         
         /* Check if any output has active transitions or shader wallpapers - use read lock */
         pthread_rwlock_rdlock(&state->output_list_lock);
         output = state->outputs;
         int shader_count = 0;
         while (output) {
-            if (output->config.type == WALLPAPER_SHADER) {
+            /* Only count shader as active if it loaded successfully and hasn't failed */
+            if (output->config.type == WALLPAPER_SHADER && 
+                !output->shader_load_failed && 
+                output->live_shader_program != 0) {
                 shader_count++;
                 timeout_ms = FRAME_TIME_MS; /* ~60 FPS for smooth transitions/animations */
                 /* Only log shader detection once, not every frame */
                 if (!shader_mode_logged) {
-                    log_info("Shader detected on %s, setting poll timeout to %dms for continuous animation", 
-                             output->model, FRAME_TIME_MS);
+                    log_info("Shader active on %s, rendering at 60 FPS", output->model);
                     shader_mode_logged = true;
                 }
             }
             if ((output->transition_start_time > 0 && 
                  output->config.transition != TRANSITION_NONE) ||
-                output->config.type == WALLPAPER_SHADER) {
+                (output->config.type == WALLPAPER_SHADER && 
+                 !output->shader_load_failed && 
+                 output->live_shader_program != 0)) {
                 timeout_ms = FRAME_TIME_MS;
                 break;
             }
@@ -490,9 +504,7 @@ void event_loop_run(struct neowall_state *state) {
             if (fds[2].revents & POLLIN) {
                 uint64_t value;
                 ssize_t s = read(state->wakeup_fd, &value, sizeof(value));
-                if (s == sizeof(value)) {
-                    log_debug("Event loop woken by internal event (value=%lu)", value);
-                }
+                (void)s; /* Silence unused variable warning */
             }
             
             /* Check signal fd - signals delivered as file descriptor events (race-free) */
@@ -503,6 +515,77 @@ void event_loop_run(struct neowall_state *state) {
                     log_debug("Received signal %d via signalfd", fdsi.ssi_signo);
                     handle_signal_from_fd(state, fdsi.ssi_signo);
                 }
+            }
+        }
+
+        /* Config reload - exactly like startup */
+        static atomic_bool reload_in_progress = ATOMIC_VAR_INIT(false);
+        bool reload_flag = atomic_load_explicit(&state->reload_requested, memory_order_acquire);
+        
+        if (reload_flag) {
+            /* Prevent concurrent reloads */
+            bool expected = false;
+            if (!atomic_compare_exchange_strong(&reload_in_progress, &expected, true)) {
+                log_debug("Reload already in progress, skipping duplicate request");
+                atomic_store_explicit(&state->reload_requested, false, memory_order_release);
+            } else {
+                log_info("Config changed, reloading...");
+                atomic_store_explicit(&state->reload_requested, false, memory_order_release);
+                
+                /* Step 1: Clear old resources for all outputs */
+                pthread_rwlock_wrlock(&state->output_list_lock);
+                struct output_state *output = state->outputs;
+                while (output) {
+                    /* Destroy old shader program before loading new one */
+                    if (output->live_shader_program != 0) {
+                        glDeleteProgram(output->live_shader_program);
+                        output->live_shader_program = 0;
+                    }
+                    /* Reset failure flags to allow retry */
+                    output->shader_load_failed = false;
+                    output = output->next;
+                }
+                pthread_rwlock_unlock(&state->output_list_lock);
+                
+                /* Step 2: Reload config file (this updates output configs) */
+                bool reload_ok = config_load(state, state->config_path);
+                
+                /* Step 3: Apply to all outputs and trigger re-initialization */
+                pthread_rwlock_wrlock(&state->output_list_lock);
+                output = state->outputs;
+                bool all_outputs_ok = true;
+                while (output) {
+                    /* Apply deferred config (loads shaders/images) */
+                    output_apply_deferred_config(output);
+                    
+                    /* Check if shader failed to load for SHADER type outputs */
+                    if (output->config.type == WALLPAPER_SHADER && output->live_shader_program == 0) {
+                        log_error("Output %s: Shader failed to load from '%s'", 
+                                 output->model, output->config.shader_path);
+                        all_outputs_ok = false;
+                    }
+                    
+                    /* Force redraw */
+                    output->needs_redraw = true;
+                    
+                    output = output->next;
+                }
+                pthread_rwlock_unlock(&state->output_list_lock);
+                
+                if (reload_ok && all_outputs_ok) {
+                    log_info("╔═══════════════════════════════════════════════════════════════╗");
+                    log_info("║ ✓ Config reloaded successfully!                              ║");
+                    log_info("║   Wallpapers/shaders have been updated                        ║");
+                    log_info("╚═══════════════════════════════════════════════════════════════╝");
+                } else {
+                    log_error("╔═══════════════════════════════════════════════════════════════╗");
+                    log_error("║ ✗ Config reload failed - check errors above                  ║");
+                    log_error("║   Fix config and save - hot-reload will retry automatically  ║");
+                    log_error("╚═══════════════════════════════════════════════════════════════╝");
+                }
+                
+                /* Release reload lock */
+                atomic_store(&reload_in_progress, false);
             }
         }
 
@@ -538,8 +621,11 @@ void event_loop_run(struct neowall_state *state) {
                 output->config.transition != TRANSITION_NONE) {
                 output->needs_redraw = true;
             }
-            /* Keep redrawing for shader wallpapers (continuous animation) */
-            if (output->config.type == WALLPAPER_SHADER) {
+            /* Keep redrawing for shader wallpapers (continuous animation) 
+             * but only if shader loaded successfully and hasn't failed */
+            if (output->config.type == WALLPAPER_SHADER && 
+                !output->shader_load_failed && 
+                output->live_shader_program != 0) {
                 output->needs_redraw = true;
             }
             output = output->next;
