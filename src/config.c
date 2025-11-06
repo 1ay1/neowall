@@ -1614,11 +1614,14 @@ bool config_has_changed(struct neowall_state *state) {
     return changed;
 }
 
+/* Global flag to track if config reload is in progress
+ * Used by both config_reload() and config watcher thread to prevent reload storms */
+atomic_bool reload_in_progress = ATOMIC_VAR_INIT(false);
+
 void config_reload(struct neowall_state *state) {
     if (!state) return;
 
     /* SAFETY CHECK: Prevent concurrent reloads (shouldn't happen, but be defensive) */
-    static atomic_bool reload_in_progress = ATOMIC_VAR_INIT(false);
     bool expected = false;
     if (!atomic_compare_exchange_strong(&reload_in_progress, &expected, true)) {
         log_error("Config reload already in progress, ignoring duplicate request");
@@ -2084,10 +2087,18 @@ void *config_watch_thread(void *arg) {
                 continue;
             }
             
-            /* Check if a reload is already pending (rapid successive edits) */
+            /* Check if a reload is already pending or in progress (rapid successive edits) */
             bool already_pending = atomic_load_explicit(&state->reload_requested, memory_order_acquire);
             if (already_pending) {
                 log_debug("Reload already pending, skipping duplicate signal");
+                continue;
+            }
+            
+            /* Also check if a reload is currently being processed */
+            extern atomic_bool reload_in_progress;  /* Defined in config_reload */
+            bool reload_active = atomic_load_explicit(&reload_in_progress, memory_order_acquire);
+            if (reload_active) {
+                log_debug("Reload currently in progress, skipping new signal (will detect changes on next poll)");
                 continue;
             }
             
