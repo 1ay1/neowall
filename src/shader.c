@@ -768,6 +768,7 @@ static uint32_t detect_shader_conflicts(const char *source) {
 /**
  * Remove conflicting global variable declarations
  * Removes declarations like: float time = 0.0;
+ * ONLY operates on GLOBAL scope (before any function definitions)
  * 
  * @param source Original shader source
  * @return Cleaned shader source (caller must free), or NULL on error
@@ -782,6 +783,13 @@ static char *strip_global_variables(const char *source) {
         NULL
     };
     
+    /* Find where global scope ends (first function or mainImage) */
+    const char *global_end = strstr(source, "void");
+    if (!global_end) {
+        /* No functions found - entire source is global scope */
+        global_end = source + strlen(source);
+    }
+    
     /* Allocate result buffer */
     size_t src_len = strlen(source);
     char *result = malloc(src_len + 1);
@@ -794,30 +802,66 @@ static char *strip_global_variables(const char *source) {
     char *write_ptr = result;
     int removed_count = 0;
     
-    while (*read_ptr) {
+    /* Process global scope only */
+    while (read_ptr < global_end) {
         const char *line_start = read_ptr;
         bool should_remove = false;
         const char *found_var = NULL;
         
         /* Check if this line contains a global variable declaration to remove */
         for (int i = 0; strip_vars[i]; i++) {
-            if (has_global_variable_declaration(line_start, strip_vars[i])) {
-                /* Verify this declaration is on the current line */
-                const char *line_end = strchr(line_start, '\n');
-                const char *semicolon = strchr(line_start, ';');
+            const char *var_pos = strstr(line_start, strip_vars[i]);
+            
+            /* Only check within current line and before global_end */
+            const char *line_end = strchr(line_start, '\n');
+            if (!line_end || line_end > global_end) {
+                line_end = global_end;
+            }
+            
+            if (var_pos && var_pos < line_end) {
+                /* Check if it's a variable declaration (not const, not uniform) */
+                const char *check_back = var_pos;
+                while (check_back > line_start && isspace(*(check_back - 1))) {
+                    check_back--;
+                }
                 
-                if (semicolon && (!line_end || semicolon < line_end)) {
-                    should_remove = true;
-                    found_var = strip_vars[i];
-                    break;
+                /* Look backwards for type keyword */
+                bool is_type_decl = false;
+                const char *types[] = {"float", "vec2", "vec3", "vec4", NULL};
+                for (int t = 0; types[t]; t++) {
+                    size_t type_len = strlen(types[t]);
+                    if (check_back >= source + type_len &&
+                        strncmp(check_back - type_len, types[t], type_len) == 0) {
+                        is_type_decl = true;
+                        check_back -= type_len;
+                        break;
+                    }
+                }
+                
+                if (is_type_decl) {
+                    /* Make sure it's not const or uniform */
+                    while (check_back > source && isspace(*(check_back - 1))) {
+                        check_back--;
+                    }
+                    
+                    bool is_const = (check_back >= source + 5 && 
+                                    strncmp(check_back - 5, "const", 5) == 0);
+                    bool is_uniform = (check_back >= source + 7 && 
+                                      strncmp(check_back - 7, "uniform", 7) == 0);
+                    
+                    if (!is_const && !is_uniform) {
+                        should_remove = true;
+                        found_var = strip_vars[i];
+                        break;
+                    }
                 }
             }
         }
         
         if (should_remove) {
-            /* Skip this line - find the semicolon */
+            /* Skip this declaration - find the semicolon */
             const char *semicolon = strchr(read_ptr, ';');
-            if (semicolon) {
+            if (semicolon && semicolon < global_end) {
                 read_ptr = semicolon + 1;
                 /* Also skip trailing newline if present */
                 if (*read_ptr == '\n') read_ptr++;
@@ -825,23 +869,28 @@ static char *strip_global_variables(const char *source) {
                 removed_count++;
                 log_info("Removed conflicting global variable: %s", found_var);
             } else {
-                /* No semicolon found - just skip the line */
+                /* Skip to next line */
                 const char *newline = strchr(read_ptr, '\n');
-                if (newline) {
+                if (newline && newline < global_end) {
                     read_ptr = newline + 1;
                 } else {
-                    break;
+                    read_ptr = global_end;
                 }
             }
         } else {
             /* Keep this line */
-            while (*read_ptr && *read_ptr != '\n') {
+            while (read_ptr < global_end && *read_ptr != '\n') {
                 *write_ptr++ = *read_ptr++;
             }
-            if (*read_ptr == '\n') {
+            if (read_ptr < global_end && *read_ptr == '\n') {
                 *write_ptr++ = *read_ptr++;
             }
         }
+    }
+    
+    /* Copy the rest of the source (function definitions, etc.) */
+    while (*read_ptr) {
+        *write_ptr++ = *read_ptr++;
     }
     
     *write_ptr = '\0';
@@ -1015,13 +1064,36 @@ static char *fix_uniform_assignments(const char *source) {
                     if (after && *after == '=') {
                         /* Check it's not == (comparison) */
                         if (*(after + 1) != '=') {
-                            const char *line_end = strchr(line_start, '\n');
-                            const char *semicolon = strchr(var_pos, ';');
+                            /* IMPORTANT: Check if this is a LOCAL variable declaration */
+                            /* Look backwards for type keywords (float, vec2, etc.) */
+                            const char *check_back = var_pos;
+                            while (check_back > line_start && isspace(*(check_back - 1))) {
+                                check_back--;
+                            }
                             
-                            if (semicolon && (!line_end || semicolon < line_end)) {
-                                should_remove = true;
-                                found_var = var_name;
-                                break;
+                            /* Check for type keywords before the variable name */
+                            bool is_local_decl = false;
+                            const char *types[] = {"float", "vec2", "vec3", "vec4", "int", "ivec2", "ivec3", "ivec4", NULL};
+                            for (int t = 0; types[t]; t++) {
+                                size_t type_len = strlen(types[t]);
+                                if (check_back >= line_start + type_len &&
+                                    strncmp(check_back - type_len, types[t], type_len) == 0 &&
+                                    (check_back - type_len == line_start || isspace(*(check_back - type_len - 1)))) {
+                                    is_local_decl = true;
+                                    break;
+                                }
+                            }
+                            
+                            /* Only remove if it's NOT a local variable declaration */
+                            if (!is_local_decl) {
+                                const char *line_end = strchr(line_start, '\n');
+                                const char *semicolon = strchr(var_pos, ';');
+                                
+                                if (semicolon && (!line_end || semicolon < line_end)) {
+                                    should_remove = true;
+                                    found_var = var_name;
+                                    break;
+                                }
                             }
                         }
                     }
