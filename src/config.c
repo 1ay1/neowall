@@ -1704,6 +1704,14 @@ void config_reload(struct neowall_state *state) {
         atomic_store(&reload_in_progress, false);
         return;
     }
+    
+    /* CRITICAL: Update config_mtime IMMEDIATELY to prevent reload loops
+     * If we wait until after reload completes, the watcher thread will keep
+     * detecting the "same" change over and over during slow reloads */
+    log_debug("Updating config_mtime from %ld to %ld before reload starts",
+             (long)state->config_mtime, (long)st.st_mtime);
+    state->config_mtime = st.st_mtime;
+    
     if (!S_ISREG(st.st_mode)) {
         log_error("Config file is not a regular file (mode=0%o), aborting reload", st.st_mode);
         atomic_store(&reload_in_progress, false);
@@ -1934,17 +1942,10 @@ void config_reload(struct neowall_state *state) {
     
     if (reload_success) {
         log_info("[OK] Configuration reloaded successfully");
-        
-        /* BUG FIX: Update config_mtime to prevent infinite reload loop
-         * The watch thread checks if mtime changed, so we must update it after reload */
-        struct stat st;
-        if (stat(state->config_path, &st) == 0) {
-            state->config_mtime = st.st_mtime;
-        } else {
-            log_error("Failed to stat config file after reload: %s", strerror(errno));
-        }
+        /* Note: config_mtime already updated at start of reload to prevent detection loops */
     } else {
         log_info("[ERROR] Configuration reload failed, built-in defaults applied");
+        /* Note: config_mtime still updated to prevent re-detecting the same bad config */
     }
     
     /* STEP 5: Re-acquire locks for output re-initialization
