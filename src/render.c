@@ -29,6 +29,10 @@ static const char *color_fragment_shader =
 
 static GLuint color_overlay_program = 0;
 
+/* Global cache for default iChannel textures (generated once, reused forever) */
+static GLuint cached_default_channel_textures[5] = {0, 0, 0, 0, 0};
+static bool default_channels_initialized = false;
+
 /* Fullscreen quad vertices (position + texcoord) */
 static const float quad_vertices[] = {
     /* positions */  /* texcoords */
@@ -426,7 +430,6 @@ bool render_load_channel_textures(struct output_state *output, struct wallpaper_
             /* Check if it's "_" (skip this channel) */
             if (path && strcmp(path, "_") == 0) {
                 output->channel_textures[i] = 0;
-                log_debug("iChannel%zu: skipped (placeholder)", i);
                 continue;
             }
             is_default = false;
@@ -439,19 +442,14 @@ bool render_load_channel_textures(struct output_state *output, struct wallpaper_
             /* Check if it's a named default texture */
             if (strcmp(path, TEXTURE_NAME_RGBA_NOISE) == 0 || strcmp(path, "default") == 0) {
                 texture = texture_create_rgba_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                log_debug("iChannel%zu: %s", i, TEXTURE_NAME_RGBA_NOISE);
             } else if (strcmp(path, TEXTURE_NAME_GRAY_NOISE) == 0) {
                 texture = texture_create_gray_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                log_debug("iChannel%zu: %s", i, TEXTURE_NAME_GRAY_NOISE);
             } else if (strcmp(path, TEXTURE_NAME_BLUE_NOISE) == 0) {
                 texture = texture_create_blue_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                log_debug("iChannel%zu: %s", i, TEXTURE_NAME_BLUE_NOISE);
             } else if (strcmp(path, TEXTURE_NAME_WOOD) == 0) {
                 texture = texture_create_wood(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                log_debug("iChannel%zu: %s", i, TEXTURE_NAME_WOOD);
             } else if (strcmp(path, TEXTURE_NAME_ABSTRACT) == 0) {
                 texture = texture_create_abstract(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                log_debug("iChannel%zu: %s", i, TEXTURE_NAME_ABSTRACT);
             } else {
                 /* Try to load as image file */
                 struct image_data *img = image_load(path, 0, 0, MODE_FILL);
@@ -465,33 +463,22 @@ bool render_load_channel_textures(struct output_state *output, struct wallpaper_
                 }
             }
         } else {
-            /* Use default textures */
-            switch (i) {
-                case 0:
-                    texture = texture_create_rgba_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    log_debug("iChannel%zu: %s (default)", i, TEXTURE_NAME_RGBA_NOISE);
-                    break;
-                case 1:
-                    texture = texture_create_gray_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    log_debug("iChannel%zu: %s (default)", i, TEXTURE_NAME_GRAY_NOISE);
-                    break;
-                case 2:
-                    texture = texture_create_blue_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    log_debug("iChannel%zu: %s (default)", i, TEXTURE_NAME_BLUE_NOISE);
-                    break;
-                case 3:
-                    texture = texture_create_wood(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    log_debug("iChannel%zu: %s (default)", i, TEXTURE_NAME_WOOD);
-                    break;
-                case 4:
-                    texture = texture_create_abstract(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    log_debug("iChannel%zu: %s (default)", i, TEXTURE_NAME_ABSTRACT);
-                    break;
-                default:
-                    /* For additional channels beyond 5, use RGBA noise */
-                    texture = texture_create_rgba_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    log_debug("iChannel%zu: %s (fallback)", i, TEXTURE_NAME_RGBA_NOISE);
-                    break;
+            /* Use cached default textures (generate once, reuse forever) */
+            if (!default_channels_initialized) {
+                cached_default_channel_textures[0] = texture_create_rgba_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+                cached_default_channel_textures[1] = texture_create_gray_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+                cached_default_channel_textures[2] = texture_create_blue_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+                cached_default_channel_textures[3] = texture_create_wood(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+                cached_default_channel_textures[4] = texture_create_abstract(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+                default_channels_initialized = true;
+            }
+            
+            /* Reuse cached texture */
+            if (i < 5) {
+                texture = cached_default_channel_textures[i];
+            } else {
+                /* For channels beyond 5, use channel 0's texture */
+                texture = cached_default_channel_textures[0];
             }
         }
         
@@ -502,12 +489,6 @@ bool render_load_channel_textures(struct output_state *output, struct wallpaper_
         }
     }
     
-    log_info("Loaded %zu iChannel textures for output %s", channel_count, output->model);
-    for (size_t i = 0; i < channel_count; i++) {
-        log_info("  iChannel%zu: texture ID %u (from config: %s)", 
-                 i, output->channel_textures[i], 
-                 (config && config->channel_paths && i < config->channel_count) ? config->channel_paths[i] : "default");
-    }
     return true;
 }
 
@@ -979,21 +960,66 @@ bool render_frame(struct output_state *output) {
 
     /* Check if this is a shader wallpaper */
     if (output->config.type == WALLPAPER_SHADER) {
+        /* Check if shader loading has permanently failed */
+        if (output->shader_load_failed) {
+            /* Permanently failed - don't spam logs, just return false silently */
+            return false;
+        }
+        
         /* Defensive check: ensure shader program is actually loaded */
         if (output->live_shader_program == 0) {
-            log_error("Config type is SHADER but shader program not loaded for output %s", 
-                     output->model[0] ? output->model : "unknown");
-            log_error("This may happen after config reload. Attempting to reload shader...");
+            /* Track reload attempts to prevent infinite spam */
+            static uint64_t last_reload_attempt_time = 0;
+            static int consecutive_failures = 0;
+            uint64_t current_time = get_time_ms();
             
-            /* Try to load the shader if we have a path */
-            if (output->config.shader_path[0] != '\0') {
-                output_set_shader(output, output->config.shader_path);
-                if (output->live_shader_program == 0) {
-                    log_error("Failed to reload shader, skipping frame");
+            /* Only attempt reload once per second max, and give up after 3 failures */
+            if (current_time - last_reload_attempt_time >= 1000 && consecutive_failures < 3) {
+                log_error("Config type is SHADER but shader program not loaded for output %s", 
+                         output->model[0] ? output->model : "unknown");
+                log_error("This may happen after config reload. Attempting to reload shader (attempt %d/3)...", 
+                         consecutive_failures + 1);
+                
+                last_reload_attempt_time = current_time;
+                
+                /* Try to load the shader if we have a path */
+                if (output->config.shader_path[0] != '\0') {
+                    output_set_shader(output, output->config.shader_path);
+                    if (output->live_shader_program == 0) {
+                        consecutive_failures++;
+                        log_error("Failed to reload shader (attempt %d/3), skipping frame", consecutive_failures);
+                        
+                        if (consecutive_failures >= 3) {
+                            log_error("╔═══════════════════════════════════════════════════════════════╗");
+                            log_error("║ CRITICAL: Shader failed to load after 3 attempts             ║");
+                            log_error("╠═══════════════════════════════════════════════════════════════╣");
+                            log_error("║ Config has bad shader path: '%s'", output->config.shader_path);
+                            log_error("║                                                               ║");
+                            log_error("║ FIX YOUR CONFIG:                                              ║");
+                            log_error("║   1. Edit: ~/.config/neowall/config.vibe                      ║");
+                            log_error("║   2. Fix shader path (check spelling, file exists)            ║");
+                            log_error("║   3. Save - hot-reload will detect change automatically       ║");
+                            log_error("║                                                               ║");
+                            log_error("║ Program will continue running with blank screen               ║");
+                            log_error("║ until you fix config and it reloads.                          ║");
+                            log_error("╚═══════════════════════════════════════════════════════════════╝");
+                            output->shader_load_failed = true; /* Mark as permanently failed */
+                        }
+                        return false;
+                    } else {
+                        /* Success! Reset failure counter and clear failed flag */
+                        consecutive_failures = 0;
+                        output->shader_load_failed = false;
+                        log_info("Shader successfully reloaded after failure");
+                    }
+                } else {
+                    log_error("No shader path configured, skipping frame");
+                    consecutive_failures = 3; /* Don't retry if no path */
+                    output->shader_load_failed = true; /* Mark as permanently failed */
                     return false;
                 }
             } else {
-                log_error("No shader path configured, skipping frame");
+                /* Silently skip frame - already logged error */
                 return false;
             }
         }

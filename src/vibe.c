@@ -785,7 +785,7 @@ VibeValue* vibe_parse_file(VibeParser* parser, const char* filename) {
     size_t bytes_read = fread(buffer, 1, size, file);
     buffer[bytes_read] = '\0';
     fclose(file);
-    
+
     if (bytes_read != (size_t)size) {
         free(buffer);
         set_error(parser, "Failed to read file completely");

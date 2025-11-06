@@ -1302,35 +1302,55 @@ bool config_load(struct neowall_state *state, const char *config_path) {
     /* Store modification time temporarily for comparison */
     time_t new_mtime = st.st_mtime;
 
-    /* Read file content */
+    /* Validate file is a regular file before opening (security check) */
+    if (!S_ISREG(st.st_mode)) {
+        log_error("Config path is not a regular file (mode=0%o), using built-in defaults", 
+                 st.st_mode);
+        return apply_builtin_default_config(state);
+    }
+
+    /* Sanity check file size (config should be reasonable, < 1MB) */
+    if (st.st_size > 1024 * 1024) {
+        log_error("Config file too large (%ld bytes), using built-in defaults", 
+                 (long)st.st_size);
+        return apply_builtin_default_config(state);
+    }
+
+    /* Read file content with error handling */
     FILE *fp = fopen(config_path, "r");
     if (!fp) {
-        log_error("Failed to open config file: %s, using built-in defaults", strerror(errno));
+        /* File might have been deleted between stat and open (race condition) */
+        if (errno == ENOENT) {
+            log_error("Config file disappeared between stat and open (race), using built-in defaults");
+        } else {
+            log_error("Failed to open config file: %s, using built-in defaults", strerror(errno));
+        }
         return apply_builtin_default_config(state);
     }
 
-    /* Get file size */
-    fseek(fp, 0, SEEK_END);
-    long file_size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
+    /* Use file size from stat (already validated) */
+    long file_size = st.st_size;
 
-    if (file_size <= 0) {
-        log_error("Config file is empty, using built-in defaults");
-        fclose(fp);
-        return apply_builtin_default_config(state);
-    }
-
-    /* Read entire file */
+    /* Allocate buffer for file content */
     char *content = malloc(file_size + 1);
     if (!content) {
-        log_error("Failed to allocate memory for config, using built-in defaults");
+        log_error("Failed to allocate %ld bytes for config, using built-in defaults", 
+                 file_size + 1);
         fclose(fp);
         return apply_builtin_default_config(state);
     }
 
-    size_t read_size = fread(content, 1, file_size, fp);
-    content[read_size] = '\0';
+    /* Read entire file in one operation */
+    size_t bytes_read = fread(content, 1, file_size, fp);
+    content[bytes_read] = '\0';
     fclose(fp);
+
+    if (bytes_read != (size_t)file_size) {
+        log_error("Failed to read config file (expected %ld, got %zu), using built-in defaults",
+                 file_size, bytes_read);
+        free(content);
+        return apply_builtin_default_config(state);
+    }
 
     /* Parse VIBE */
     VibeParser *parser = vibe_parser_new();
@@ -1460,9 +1480,13 @@ bool config_load(struct neowall_state *state, const char *config_path) {
                 bool found = false;
                 while (target) {
                     if (strcmp(target->model, output_name) == 0) {
-                        output_apply_config(target, &output_config);
-                        log_info("Applied configuration to output '%s'", output_name);
-                        config_applied = true;
+                        bool apply_result = output_apply_config(target, &output_config);
+                        if (!apply_result) {
+                            log_error("Failed to apply config to output '%s'", output_name);
+                        } else {
+                            log_info("Applied configuration to output '%s'", output_name);
+                            config_applied = true;
+                        }
                         found = true;
                         break;
                     }
@@ -1491,7 +1515,8 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         /* Only update mtime if config was successfully loaded */
         state->config_mtime = new_mtime;
         log_info("========================================");
-        log_info("[OK] Configuration loaded successfully");
+        log_info("[OK] Configuration loaded successfully from %s", config_path);
+        log_debug("Config mtime updated to %ld", (long)new_mtime);
         
         /* Print summary of what was configured - use read lock for safe traversal */
         pthread_rwlock_rdlock(&state->output_list_lock);
@@ -1549,7 +1574,30 @@ bool config_has_changed(struct neowall_state *state) {
 
     struct stat st;
     if (stat(state->config_path, &st) == -1) {
-        log_debug("Failed to stat config file: %s", strerror(errno));
+        /* File might be deleted or moved during editor atomic save */
+        if (errno == ENOENT) {
+            log_debug("Config file temporarily not found (editor atomic save), will retry");
+            return false;
+        }
+        log_error("Failed to stat config file: %s", strerror(errno));
+        return false;
+    }
+
+    /* Validate file is still a regular file (not replaced with directory/link/pipe) */
+    if (!S_ISREG(st.st_mode)) {
+        log_error("Config file is no longer a regular file (mode=0%o), ignoring", st.st_mode);
+        return false;
+    }
+
+    /* Ignore empty files (might be mid-write by editor) */
+    if (st.st_size == 0) {
+        log_debug("Config file is empty (might be mid-write), will retry");
+        return false;
+    }
+
+    /* Ignore files that are too large (sanity check - config should be < 1MB) */
+    if (st.st_size > 1024 * 1024) {
+        log_error("Config file too large (%ld bytes), ignoring", (long)st.st_size);
         return false;
     }
 
@@ -1559,8 +1607,8 @@ bool config_has_changed(struct neowall_state *state) {
     bool changed = (st.st_mtime != state->config_mtime);
     
     if (changed) {
-        log_debug("Config file modification time changed: %ld -> %ld",
-                 (long)state->config_mtime, (long)st.st_mtime);
+        log_debug("Config file modification time changed: %ld -> %ld (size=%ld bytes)",
+                 (long)state->config_mtime, (long)st.st_mtime, (long)st.st_size);
     }
     
     return changed;
@@ -1569,7 +1617,101 @@ bool config_has_changed(struct neowall_state *state) {
 void config_reload(struct neowall_state *state) {
     if (!state) return;
 
+    /* SAFETY CHECK: Prevent concurrent reloads (shouldn't happen, but be defensive) */
+    static atomic_bool reload_in_progress = ATOMIC_VAR_INIT(false);
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&reload_in_progress, &expected, true)) {
+        log_error("Config reload already in progress, ignoring duplicate request");
+        return;
+    }
+
+    /* BACKUP: Save current config state before reload in case new config is invalid
+     * We'll restore this if reload fails */
+    struct wallpaper_config *backup_configs = NULL;
+    size_t backup_count = 0;
+    
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    struct output_state *count_output = state->outputs;
+    while (count_output) {
+        backup_count++;
+        count_output = count_output->next;
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+    
+    if (backup_count > 0) {
+        backup_configs = calloc(backup_count, sizeof(struct wallpaper_config));
+        if (backup_configs) {
+            pthread_rwlock_rdlock(&state->output_list_lock);
+            struct output_state *backup_output = state->outputs;
+            size_t idx = 0;
+            while (backup_output && idx < backup_count) {
+                /* Deep copy config (paths need to be duplicated) */
+                memcpy(&backup_configs[idx], &backup_output->config, sizeof(struct wallpaper_config));
+                
+                /* Duplicate cycle paths array if present */
+                if (backup_output->config.cycle_paths && backup_output->config.cycle_count > 0) {
+                    backup_configs[idx].cycle_paths = malloc(sizeof(char*) * backup_output->config.cycle_count);
+                    if (backup_configs[idx].cycle_paths) {
+                        for (size_t i = 0; i < backup_output->config.cycle_count; i++) {
+                            backup_configs[idx].cycle_paths[i] = strdup(backup_output->config.cycle_paths[i]);
+                        }
+                    }
+                }
+                
+                /* Duplicate channel paths array if present */
+                if (backup_output->config.channel_paths && backup_output->config.channel_count > 0) {
+                    backup_configs[idx].channel_paths = malloc(sizeof(char*) * backup_output->config.channel_count);
+                    if (backup_configs[idx].channel_paths) {
+                        for (size_t i = 0; i < backup_output->config.channel_count; i++) {
+                            backup_configs[idx].channel_paths[i] = strdup(backup_output->config.channel_paths[i]);
+                        }
+                    }
+                }
+                
+                idx++;
+                backup_output = backup_output->next;
+            }
+            pthread_rwlock_unlock(&state->output_list_lock);
+            log_debug("Backed up %zu output configurations for rollback", backup_count);
+        } else {
+            log_error("Failed to allocate backup config array, proceeding without backup");
+        }
+    }
+
+    /* THROTTLE: Prevent rapid successive reloads (editor auto-save spam protection) */
+    static uint64_t last_reload_time = 0;
+    uint64_t current_time = get_time_ms();
+    uint64_t time_since_last_reload = current_time - last_reload_time;
+    
+    if (last_reload_time > 0 && time_since_last_reload < 1000) {
+        log_info("Config reload requested too soon after previous reload (%lu ms ago), "
+                 "throttling to prevent rapid reloads", time_since_last_reload);
+        atomic_store(&reload_in_progress, false);
+        return;
+    }
+    last_reload_time = current_time;
+
     log_info("=== CONFIG RELOAD: Treating as full restart ===");
+    
+    /* Validate config file before starting expensive cleanup */
+    struct stat st;
+    if (stat(state->config_path, &st) == -1) {
+        log_error("Config file not accessible before reload: %s", strerror(errno));
+        log_error("Keeping current configuration");
+        atomic_store(&reload_in_progress, false);
+        return;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        log_error("Config file is not a regular file (mode=0%o), aborting reload", st.st_mode);
+        atomic_store(&reload_in_progress, false);
+        return;
+    }
+    if (st.st_size == 0 || st.st_size > 1024 * 1024) {
+        log_error("Config file has invalid size (%ld bytes), aborting reload", (long)st.st_size);
+        atomic_store(&reload_in_progress, false);
+        return;
+    }
+
     log_info("Performing complete cleanup of all outputs...");
 
     /* Acquire write lock to prevent concurrent access during reload */
@@ -1683,6 +1825,9 @@ void config_reload(struct neowall_state *state) {
             output->next_image = NULL;
         }
         
+        /* Reset shader load failure flag to allow retry after config reload */
+        output->shader_load_failed = false;
+        
         /* Reset VBO if needed */
         if (output->vbo) {
             glDeleteBuffers(1, &output->vbo);
@@ -1743,25 +1888,96 @@ void config_reload(struct neowall_state *state) {
     
     log_info("All GPU resources cleaned, loading new configuration...");
     
-    /* STEP 4: Load new configuration - outputs are now completely clean */
+    /* STEP 4: Release locks before config_load to prevent deadlock
+     * config_load() needs to acquire read locks, and we currently hold write locks.
+     * POSIX rwlocks don't allow upgrading/downgrading on the same thread - it deadlocks! */
+    pthread_mutex_unlock(&state->state_mutex);
+    pthread_rwlock_unlock(&state->output_list_lock);
+    log_debug("Released locks before config_load to prevent rwlock deadlock");
+    
+    /* Load new configuration - outputs are now completely clean */
     bool reload_success = config_load(state, state->config_path);
+    
+    log_debug("config_load returned: %s", reload_success ? "success" : "failed");
+    
+    /* RECOVERY: If reload failed and we have backup, restore it */
+    if (!reload_success && backup_configs && backup_count > 0) {
+        log_error("Config reload failed, attempting to restore previous configuration...");
+        
+        pthread_rwlock_wrlock(&state->output_list_lock);
+        struct output_state *restore_output = state->outputs;
+        size_t idx = 0;
+        
+        while (restore_output && idx < backup_count) {
+            /* Free any partial config that might have been set */
+            config_free_wallpaper(&restore_output->config);
+            
+            /* Restore backup */
+            memcpy(&restore_output->config, &backup_configs[idx], sizeof(struct wallpaper_config));
+            
+            /* The backup already has duplicated strings, so we just copy pointers back */
+            log_info("Restored previous config for output %s", restore_output->model);
+            
+            idx++;
+            restore_output = restore_output->next;
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
+        
+        log_info("Previous configuration restored successfully after failed reload");
+        
+        /* Don't free backup_configs here - the pointers are now owned by outputs */
+        backup_configs = NULL;
+    }
     
     if (reload_success) {
         log_info("[OK] Configuration reloaded successfully");
+        
+        /* BUG FIX: Update config_mtime to prevent infinite reload loop
+         * The watch thread checks if mtime changed, so we must update it after reload */
+        struct stat st;
+        if (stat(state->config_path, &st) == 0) {
+            state->config_mtime = st.st_mtime;
+        } else {
+            log_error("Failed to stat config file after reload: %s", strerror(errno));
+        }
     } else {
         log_info("[ERROR] Configuration reload failed, built-in defaults applied");
     }
     
-    /* STEP 5: Re-initialize rendering for all outputs */
+    /* STEP 5: Re-acquire locks for output re-initialization
+     * We released them before config_load, now we need them again for render init */
+    pthread_rwlock_wrlock(&state->output_list_lock);
+    pthread_mutex_lock(&state->state_mutex);
+    
+    /* Re-initialize rendering for all outputs */
     output = state->outputs;
     while (output) {
         /* Re-initialize the output's rendering resources */
-        log_debug("Re-initializing rendering for output %s", output->model);
-        
         if (!render_init_output(output)) {
             log_error("Failed to re-initialize rendering for output %s", output->model);
-        } else {
-            log_debug("[OK] Rendering re-initialized for %s", output->model);
+        }
+        
+        /* CRITICAL: Verify shader actually loaded for SHADER type outputs */
+        if (output->config.type == WALLPAPER_SHADER) {
+            if (output->live_shader_program == 0) {
+                log_error("CRITICAL: Output %s has SHADER config but no shader program loaded!", 
+                         output->model);
+                log_error("         Shader path in config: '%s'", output->config.shader_path);
+                log_error("         This indicates shader loading failed during config_load()");
+                
+                /* Attempt to load shader explicitly */
+                if (output->config.shader_path[0] != '\0') {
+                    log_info("Attempting explicit shader load for %s: %s", 
+                            output->model, output->config.shader_path);
+                    output_set_shader(output, output->config.shader_path);
+                    
+                    if (output->live_shader_program == 0) {
+                        log_error("FAILED: Shader still not loaded after explicit attempt");
+                    }
+                } else {
+                    log_error("FAILED: No shader path configured");
+                }
+            }
         }
         
         /* Mark for immediate redraw */
@@ -1773,6 +1989,30 @@ void config_reload(struct neowall_state *state) {
     /* Release locks after reload is complete */
     pthread_mutex_unlock(&state->state_mutex);
     pthread_rwlock_unlock(&state->output_list_lock);
+    
+    /* Free backup configs if we still own them (reload succeeded) */
+    if (backup_configs) {
+        for (size_t i = 0; i < backup_count; i++) {
+            /* Free allocated arrays within backup */
+            if (backup_configs[i].cycle_paths) {
+                for (size_t j = 0; j < backup_configs[i].cycle_count; j++) {
+                    free(backup_configs[i].cycle_paths[j]);
+                }
+                free(backup_configs[i].cycle_paths);
+            }
+            if (backup_configs[i].channel_paths) {
+                for (size_t j = 0; j < backup_configs[i].channel_count; j++) {
+                    free(backup_configs[i].channel_paths[j]);
+                }
+                free(backup_configs[i].channel_paths);
+            }
+        }
+        free(backup_configs);
+        log_debug("Freed backup configurations");
+    }
+    
+    /* Clear reload-in-progress flag */
+    atomic_store(&reload_in_progress, false);
     
     log_info("=== CONFIG RELOAD COMPLETE ===");
 }
@@ -1823,7 +2063,35 @@ void *config_watch_thread(void *arg) {
         
         /* Timeout occurred (wait_result == ETIMEDOUT) - check for config changes */
         if (config_has_changed(state)) {
-            log_info("Configuration file changed, signaling main thread to reload...");
+            /* DEBOUNCE: Wait a bit to let editors finish writing (atomic renames, etc.) */
+            log_debug("Config change detected, waiting 200ms for editor to finish...");
+            
+            struct timespec debounce_time = {0, 200000000}; /* 200ms */
+            nanosleep(&debounce_time, NULL);
+            
+            /* Re-check: File might have been reverted or still being written */
+            struct stat verify_st;
+            if (stat(state->config_path, &verify_st) == -1) {
+                log_debug("Config file disappeared during debounce, ignoring");
+                continue;
+            }
+            if (verify_st.st_size == 0) {
+                log_debug("Config file is empty after debounce (still being written?), ignoring");
+                continue;
+            }
+            if (!config_has_changed(state)) {
+                log_debug("Config change disappeared after debounce (editor reverted?), ignoring");
+                continue;
+            }
+            
+            /* Check if a reload is already pending (rapid successive edits) */
+            bool already_pending = atomic_load_explicit(&state->reload_requested, memory_order_acquire);
+            if (already_pending) {
+                log_debug("Reload already pending, skipping duplicate signal");
+                continue;
+            }
+            
+            log_info("Configuration file changed (verified after debounce), signaling main thread to reload...");
             
             /* Signal main thread to handle reload (config_reload does EGL operations
              * which must happen on the main thread, not the watcher thread) */
