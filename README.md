@@ -6,7 +6,7 @@ Run Shadertoy shaders on your desktop at 60 FPS. Works with most of the 10,000+ 
 
 Wayland only. Tested on Hyprland, Sway, and River.
 
-https://github.com/user-attachments/assets/386243d0-53ca-4287-9ab6-873265d3d53a
+[https://github.com/user-attachments/assets/386243d0-53ca-4287-9ab6-873265d3d53a](https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560)
 
 ## What
 
