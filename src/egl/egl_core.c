@@ -191,6 +191,13 @@ bool egl_core_init(struct neowall_state *state) {
     
     output = state->outputs;
     if (output && output->egl_surface != EGL_NO_SURFACE) {
+        /* Enable vsync to reduce GPU usage and prevent tearing */
+        if (!eglSwapInterval(state->egl_display, 1)) {
+            log_error("Failed to set swap interval (vsync): 0x%x", eglGetError());
+        } else {
+            log_info("Enabled vsync (swap interval = 1) for power efficiency");
+        }
+        
         if (eglMakeCurrent(state->egl_display, output->egl_surface,
                           output->egl_surface, state->egl_context)) {
             gles_detect_capabilities_for_context(state->egl_display, 
