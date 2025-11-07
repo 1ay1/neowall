@@ -6,7 +6,7 @@ Watch fractals breathe, waves ripple, and neon cities pulse—all at silky 60 FP
 
 **Wayland • Live Shaders • Zero Compromises**
 
-![NeoWall Demo](https://github.com/user-attachments/assets/386243d0-53ca-4287-9ab6-873265d3d53a)
+[https://github.com/user-attachments/assets/386243d0-53ca-4287-9ab6-873265d3d53a](https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560)
 
 ## ✨ Why NeoWall?
 
