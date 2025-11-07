@@ -3,9 +3,14 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <time.h>
 #include "neowall.h"
 #include "../protocols/wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "../protocols/xdg-shell-client-protocol.h"
+
+/* Maximum retries and delay when waiting for compositor to be ready */
+#define COMPOSITOR_READY_MAX_RETRIES 20
+#define COMPOSITOR_READY_RETRY_DELAY_MS 250
 
 /* Output listener callbacks */
 static void output_handle_geometry(void *data, struct wl_output *wl_output,
@@ -79,6 +84,58 @@ static const struct wl_output_listener output_listener = {
     .done = output_handle_done,
     .scale = output_handle_scale,
 };
+
+/* Wait for compositor outputs to be fully configured and ready
+ * This is compositor-agnostic and works with any Wayland compositor */
+static bool wait_for_outputs_configured(struct neowall_state *state) {
+    log_info("Waiting for compositor outputs to be fully configured...");
+    
+    int retry_count = 0;
+    while (retry_count < COMPOSITOR_READY_MAX_RETRIES) {
+        /* Check if we have outputs and if they're configured */
+        bool all_configured = false;
+        
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        if (state->output_count > 0) {
+            all_configured = true;
+            struct output_state *output = state->outputs;
+            while (output) {
+                if (!output->configured) {
+                    all_configured = false;
+                    break;
+                }
+                output = output->next;
+            }
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
+        
+        if (all_configured && state->output_count > 0) {
+            log_info("All %u output(s) fully configured and ready", state->output_count);
+            return true;
+        }
+        
+        if (retry_count > 0) {
+            log_debug("Waiting for outputs to be configured... (retry %d/%d, outputs: %u)",
+                     retry_count, COMPOSITOR_READY_MAX_RETRIES, state->output_count);
+        }
+        
+        /* Sleep and then do another roundtrip to process events */
+        struct timespec ts = {
+            .tv_sec = 0,
+            .tv_nsec = COMPOSITOR_READY_RETRY_DELAY_MS * 1000000L
+        };
+        nanosleep(&ts, NULL);
+        
+        /* Process any pending Wayland events to receive output configuration */
+        wl_display_roundtrip(state->display);
+        
+        retry_count++;
+    }
+    
+    log_info("Timeout waiting for outputs after %d retries (found %u outputs)",
+             COMPOSITOR_READY_MAX_RETRIES, state->output_count);
+    return state->output_count > 0;  /* Continue if we have at least one output */
+}
 
 /* Layer surface listener callbacks */
 static void layer_surface_configure(void *data,
@@ -278,6 +335,14 @@ bool wayland_init(struct neowall_state *state) {
 
     /* Roundtrip to get all globals */
     wl_display_roundtrip(state->display);
+    
+    /* Wait for outputs to be fully configured before proceeding
+     * This ensures compositor is ready to display our layer surfaces */
+    if (!wait_for_outputs_configured(state)) {
+        log_error("Failed to detect configured outputs");
+        wayland_cleanup(state);
+        return false;
+    }
 
     /* Verify we have required interfaces */
     if (!state->compositor) {
@@ -294,17 +359,6 @@ bool wayland_init(struct neowall_state *state) {
         return false;
     }
 
-    if (state->output_count == 0) {
-        log_error("No outputs detected");
-        wayland_cleanup(state);
-        return false;
-    }
-
-    log_info("Found %u output(s)", state->output_count);
-
-    /* Do another roundtrip to ensure outputs are configured */
-    wl_display_roundtrip(state->display);
-
     /* Configure layer surfaces for all outputs - use read lock for safe traversal */
     pthread_rwlock_rdlock(&state->output_list_lock);
     struct output_state *output = state->outputs;
@@ -316,8 +370,15 @@ bool wayland_init(struct neowall_state *state) {
     }
     pthread_rwlock_unlock(&state->output_list_lock);
 
-    /* Final roundtrip */
+    /* Flush all pending requests to ensure compositor processes them immediately
+     * This is critical for autostart scenarios where compositor may be under load */
+    log_debug("Flushing Wayland display to ensure compositor processes layer surfaces");
+    wl_display_flush(state->display);
+
+    /* Final roundtrip to wait for configure events */
     wl_display_roundtrip(state->display);
+
+    log_info("Wayland initialization complete, all surfaces configured");
 
     return true;
 }
@@ -406,8 +467,11 @@ bool output_configure_layer_surface(struct output_state *output) {
 
     /* Commit surface to trigger configure event */
     wl_surface_commit(output->surface);
+    
+    /* Force immediate flush to compositor - critical for autostart timing */
+    wl_display_flush(state->display);
 
-    log_debug("Layer surface configured for output %s", output->model);
+    log_info("Layer surface configured and committed for output %s", output->model);
 
     return true;
 }
