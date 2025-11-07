@@ -78,6 +78,13 @@ static void update_cycle_timer(struct neowall_state *state) {
 }
 
 /* Render all outputs that need redrawing */
+/* Structure to track outputs that need buffer swapping */
+struct swap_info {
+    struct output_state *output;
+    bool render_success;
+    struct swap_info *next;
+};
+
 static void render_outputs(struct neowall_state *state) {
     if (!state) {
         return;
@@ -116,6 +123,10 @@ static void render_outputs(struct neowall_state *state) {
             check_output = check_output->next;
         }
     }
+
+    /* List to track outputs that need buffer swapping (built while holding lock) */
+    struct swap_info *swap_list = NULL;
+    struct swap_info *swap_tail = NULL;
 
     struct output_state *output = state->outputs;
     while (output) {
@@ -171,7 +182,8 @@ static void render_outputs(struct neowall_state *state) {
             }
 
             /* Render frame */
-            if (!render_frame(output)) {
+            bool render_success = render_frame(output);
+            if (!render_success) {
                 /* Only log if shader hasn't permanently failed (after 3 attempts, be silent) */
                 if (!output->shader_load_failed) {
                     /* Throttle error logging to prevent spam when shader fails to load */
@@ -194,53 +206,86 @@ static void render_outputs(struct neowall_state *state) {
                     }
                 }
                 state->errors_count++;
-            } else {
-                /* Swap buffers */
-                if (!eglSwapBuffers(state->egl_display, output->egl_surface)) {
-                    log_error("Failed to swap buffers for output %s: 0x%x",
-                             output->model, eglGetError());
-                    state->errors_count++;
+            }
+            
+            /* BUG FIX #10: Add output to swap list to defer eglSwapBuffers until after lock release
+             * This prevents deadlock where render thread holds read lock while blocking in
+             * eglSwapBuffers, and config reload tries to acquire write lock */
+            struct swap_info *info = malloc(sizeof(struct swap_info));
+            if (info) {
+                info->output = output;
+                info->render_success = render_success;
+                info->next = NULL;
+                
+                if (swap_tail) {
+                    swap_tail->next = info;
                 } else {
-                    /* Damage the entire surface to tell compositor it needs repainting */
-                    wl_surface_damage(output->surface, 0, 0, INT32_MAX, INT32_MAX);
-                    
-                    /* Commit Wayland surface */
-                    wl_surface_commit(output->surface);
-                    output->last_frame_time = current_time;
-                    state->frames_rendered++;
-                    
-                    /* Clean up transition after final frame is rendered */
-                    if (output->transition_start_time > 0 && 
-                        output->transition_progress >= 1.0f) {
-                        output->transition_start_time = 0;
-                        
-                        /* Clean up old texture */
-                        if (output->next_texture) {
-                            render_destroy_texture(output->next_texture);
-                            output->next_texture = 0;
-                        }
-                        
-                        if (output->next_image) {
-                            image_free(output->next_image);
-                            output->next_image = NULL;
-                        }
-                    }
-                    
-                    /* Reset needs_redraw unless we're in a transition or using a shader wallpaper */
-                    if ((output->transition_start_time == 0 || 
-                         output->config->transition == TRANSITION_NONE) &&
-                        output->config->type != WALLPAPER_SHADER) {
-                        output->needs_redraw = false;
-                    }
+                    swap_list = info;
                 }
+                swap_tail = info;
             }
         }
 
         output = output->next;
     }
     
-    /* Release read lock after output traversal */
+    /* BUG FIX #10: Release read lock BEFORE calling eglSwapBuffers
+     * eglSwapBuffers can block (waiting for vsync), and if we hold the lock during
+     * that block, a signal handler (like SIGHUP config reload) trying to acquire
+     * a write lock will deadlock. Always release locks before blocking operations! */
     pthread_rwlock_unlock(&state->output_list_lock);
+    
+    /* Now perform buffer swaps without holding any locks */
+    struct swap_info *swap = swap_list;
+    while (swap) {
+        struct output_state *output = swap->output;
+        
+        if (swap->render_success) {
+            /* Swap buffers - this can BLOCK waiting for vsync, so no locks must be held */
+            if (!eglSwapBuffers(state->egl_display, output->egl_surface)) {
+                log_error("Failed to swap buffers for output %s: 0x%x",
+                         output->model, eglGetError());
+                state->errors_count++;
+            } else {
+                /* Damage the entire surface to tell compositor it needs repainting */
+                wl_surface_damage(output->surface, 0, 0, INT32_MAX, INT32_MAX);
+                
+                /* Commit Wayland surface */
+                wl_surface_commit(output->surface);
+                output->last_frame_time = current_time;
+                state->frames_rendered++;
+                
+                /* Clean up transition after final frame is rendered */
+                if (output->transition_start_time > 0 && 
+                    output->transition_progress >= 1.0f) {
+                    output->transition_start_time = 0;
+                    
+                    /* Clean up old texture */
+                    if (output->next_texture) {
+                        render_destroy_texture(output->next_texture);
+                        output->next_texture = 0;
+                    }
+                    
+                    if (output->next_image) {
+                        image_free(output->next_image);
+                        output->next_image = NULL;
+                    }
+                }
+                
+                /* Reset needs_redraw unless we're in a transition or using a shader wallpaper */
+                if ((output->transition_start_time == 0 || 
+                     output->config->transition == TRANSITION_NONE) &&
+                    output->config->type != WALLPAPER_SHADER) {
+                    output->needs_redraw = false;
+                }
+            }
+        }
+        
+        /* Free this swap info node and move to next */
+        struct swap_info *next = swap->next;
+        free(swap);
+        swap = next;
+    }
     
     /* If we had a next request but couldn't process it, inform the user */
     if (next_count > 0 && !processed_next) {
