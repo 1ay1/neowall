@@ -7,12 +7,16 @@ VERSION = 0.3.0
 # Directories
 SRC_DIR = src
 EGL_DIR = $(SRC_DIR)/egl
+COMPOSITOR_DIR = $(SRC_DIR)/compositor
+COMPOSITOR_BACKEND_DIR = $(COMPOSITOR_DIR)/backends
 INC_DIR = include
 EGL_INC_DIR = $(INC_DIR)/egl
 PROTO_DIR = protocols
 BUILD_DIR = build
 OBJ_DIR = $(BUILD_DIR)/obj
 EGL_OBJ_DIR = $(OBJ_DIR)/egl
+COMPOSITOR_OBJ_DIR = $(OBJ_DIR)/compositor
+COMPOSITOR_BACKEND_OBJ_DIR = $(OBJ_DIR)/compositor/backends
 BIN_DIR = $(BUILD_DIR)/bin
 ASSETS_DIR = assets
 
@@ -154,6 +158,16 @@ TRANSITION_SOURCES = $(wildcard $(SRC_DIR)/transitions/*.c)
 TEXTURE_SOURCES = $(wildcard $(SRC_DIR)/textures/*.c)
 PROTO_SOURCES = $(wildcard $(PROTO_DIR)/*.c)
 
+# Compositor abstraction layer sources
+COMPOSITOR_SOURCES = $(COMPOSITOR_DIR)/compositor_registry.c \
+                     $(COMPOSITOR_DIR)/compositor_surface.c
+
+# Compositor backend sources
+COMPOSITOR_BACKEND_SOURCES = $(COMPOSITOR_BACKEND_DIR)/wlr_layer_shell.c \
+                             $(COMPOSITOR_BACKEND_DIR)/kde_plasma.c \
+                             $(COMPOSITOR_BACKEND_DIR)/gnome_shell.c \
+                             $(COMPOSITOR_BACKEND_DIR)/fallback.c
+
 # EGL core (always compiled)
 EGL_CORE_SOURCES = $(EGL_DIR)/capability.c $(EGL_DIR)/egl_core.c
 
@@ -191,7 +205,7 @@ endif
 EGL_SOURCES = $(EGL_CORE_SOURCES) $(EGL_VERSION_SOURCES) $(GLES_SOURCES)
 
 # Combine all sources
-ALL_SOURCES = $(CORE_SOURCES) $(EGL_SOURCES) $(TRANSITION_SOURCES) $(TEXTURE_SOURCES) $(PROTO_SOURCES)
+ALL_SOURCES = $(CORE_SOURCES) $(EGL_SOURCES) $(TRANSITION_SOURCES) $(TEXTURE_SOURCES) $(PROTO_SOURCES) $(COMPOSITOR_SOURCES) $(COMPOSITOR_BACKEND_SOURCES)
 
 # ============================================================================
 # Object Files
@@ -202,8 +216,10 @@ EGL_OBJECTS = $(EGL_SOURCES:$(EGL_DIR)/%.c=$(EGL_OBJ_DIR)/%.o)
 TRANSITION_OBJECTS = $(TRANSITION_SOURCES:$(SRC_DIR)/transitions/%.c=$(OBJ_DIR)/transitions_%.o)
 TEXTURE_OBJECTS = $(TEXTURE_SOURCES:$(SRC_DIR)/textures/%.c=$(OBJ_DIR)/textures_%.o)
 PROTO_OBJECTS = $(PROTO_SOURCES:$(PROTO_DIR)/%.c=$(OBJ_DIR)/proto_%.o)
+COMPOSITOR_OBJECTS = $(COMPOSITOR_SOURCES:$(COMPOSITOR_DIR)/%.c=$(COMPOSITOR_OBJ_DIR)/%.o)
+COMPOSITOR_BACKEND_OBJECTS = $(COMPOSITOR_BACKEND_SOURCES:$(COMPOSITOR_BACKEND_DIR)/%.c=$(COMPOSITOR_BACKEND_OBJ_DIR)/%.o)
 
-ALL_OBJECTS = $(CORE_OBJECTS) $(EGL_OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJECTS) $(PROTO_OBJECTS)
+ALL_OBJECTS = $(CORE_OBJECTS) $(EGL_OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJECTS) $(PROTO_OBJECTS) $(COMPOSITOR_OBJECTS) $(COMPOSITOR_BACKEND_OBJECTS)
 
 # ============================================================================
 # Wayland Protocol Files
@@ -284,7 +300,7 @@ endif
 
 # Create necessary directories
 directories:
-	@mkdir -p $(OBJ_DIR) $(EGL_OBJ_DIR) $(BIN_DIR) $(PROTO_DIR)
+	@mkdir -p $(OBJ_DIR) $(EGL_OBJ_DIR) $(COMPOSITOR_OBJ_DIR) $(COMPOSITOR_BACKEND_OBJ_DIR) $(BIN_DIR) $(PROTO_DIR)
 
 # Generate Wayland protocol files
 protocols: $(PROTO_HEADERS) $(PROTO_SRCS)
@@ -340,6 +356,16 @@ $(OBJ_DIR)/transitions_%.o: $(SRC_DIR)/transitions/%.c | directories protocols
 # Compile texture files
 $(OBJ_DIR)/textures_%.o: $(SRC_DIR)/textures/%.c | directories protocols
 	@echo "Compiling texture: $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+# Compile compositor abstraction layer files
+$(COMPOSITOR_OBJ_DIR)/%.o: $(COMPOSITOR_DIR)/%.c | directories protocols
+	@echo "Compiling compositor: $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+# Compile compositor backend files
+$(COMPOSITOR_BACKEND_OBJ_DIR)/%.o: $(COMPOSITOR_BACKEND_DIR)/%.c | directories protocols
+	@echo "Compiling compositor backend: $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 # Link the binary

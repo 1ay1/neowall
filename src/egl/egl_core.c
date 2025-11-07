@@ -6,6 +6,7 @@
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 #include "../../include/neowall.h"
+#include "../../include/compositor.h"
 #include "../../include/egl/egl_core.h"
 #include "../../include/egl/capability.h"
 
@@ -162,22 +163,13 @@ bool egl_core_init(struct neowall_state *state) {
     struct output_state *output = state->outputs;
     while (output) {
         if (output->width > 0 && output->height > 0) {
+            /* Create EGL surface using compositor abstraction */
             if (output_create_egl_surface(output)) {
-                output->egl_surface = eglCreateWindowSurface(
-                    state->egl_display,
-                    state->egl_config,
-                    (EGLNativeWindowType)output->egl_window,
-                    NULL
-                );
-                
-                if (output->egl_surface != EGL_NO_SURFACE) {
-                    log_debug("Created EGL surface for output %s",
-                              output->model[0] ? output->model : "unknown");
-                } else {
-                    log_error("Failed to create EGL surface for output %s: 0x%x",
-                              output->model[0] ? output->model : "unknown",
-                              eglGetError());
-                }
+                log_debug("Created EGL surface for output %s",
+                          output->model[0] ? output->model : "unknown");
+            } else {
+                log_error("Failed to create EGL surface for output %s",
+                          output->model[0] ? output->model : "unknown");
             }
         }
         output = output->next;
@@ -190,7 +182,7 @@ bool egl_core_init(struct neowall_state *state) {
     pthread_rwlock_rdlock(&state->output_list_lock);
     
     output = state->outputs;
-    if (output && output->egl_surface != EGL_NO_SURFACE) {
+    if (output && output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
         /* Enable vsync to reduce GPU usage and prevent tearing */
         if (!eglSwapInterval(state->egl_display, 1)) {
             log_error("Failed to set swap interval (vsync): 0x%x", eglGetError());
@@ -198,8 +190,9 @@ bool egl_core_init(struct neowall_state *state) {
             log_info("Enabled vsync (swap interval = 1) for power efficiency");
         }
         
-        if (eglMakeCurrent(state->egl_display, output->egl_surface,
-                          output->egl_surface, state->egl_context)) {
+        if (output->compositor_surface && 
+            eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
+                          output->compositor_surface->egl_surface, state->egl_context)) {
             gles_detect_capabilities_for_context(state->egl_display, 
                                                  state->egl_context,
                                                  &state->gl_caps);
@@ -219,7 +212,7 @@ bool egl_core_init(struct neowall_state *state) {
     
     output = state->outputs;
     while (output) {
-        if (output->egl_surface != EGL_NO_SURFACE) {
+        if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
             if (!render_init_output(output)) {
                 log_error("Failed to initialize rendering for output %s",
                           output->model[0] ? output->model : "unknown");
@@ -254,9 +247,8 @@ void egl_core_cleanup(struct neowall_state *state) {
     
     struct output_state *output = state->outputs;
     while (output) {
-        if (output->egl_surface != EGL_NO_SURFACE) {
-            eglDestroySurface(state->egl_display, output->egl_surface);
-            output->egl_surface = EGL_NO_SURFACE;
+        if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+            compositor_surface_destroy_egl(output->compositor_surface, state->egl_display);
         }
         output = output->next;
     }
@@ -285,14 +277,14 @@ bool egl_core_make_current(struct neowall_state *state, struct output_state *out
                              EGL_NO_SURFACE, EGL_NO_CONTEXT);
     }
     
-    if (output->egl_surface == EGL_NO_SURFACE) return false;
+    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) return false;
     
-    return eglMakeCurrent(state->egl_display, output->egl_surface,
-                         output->egl_surface, state->egl_context);
+    return eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
+                         output->compositor_surface->egl_surface, state->egl_context);
 }
 
 bool egl_core_swap_buffers(struct neowall_state *state, struct output_state *output) {
     if (!state || !output || state->egl_display == EGL_NO_DISPLAY) return false;
-    if (output->egl_surface == EGL_NO_SURFACE) return false;
-    return eglSwapBuffers(state->egl_display, output->egl_surface);
+    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) return false;
+    return eglSwapBuffers(state->egl_display, output->compositor_surface->egl_surface);
 }

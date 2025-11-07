@@ -11,6 +11,7 @@
 #include "neowall.h"
 #include "config_access.h"
 #include "constants.h"
+#include "compositor.h"
 
 /* Forward declarations */
 extern void handle_signal_from_fd(struct neowall_state *state, int signum);
@@ -154,10 +155,11 @@ static void render_outputs(struct neowall_state *state) {
         }
 
         /* Check if this output needs rendering */
-        if (output->needs_redraw && output->egl_surface != EGL_NO_SURFACE) {
+        if (output->needs_redraw && output->compositor_surface &&
+            output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
             /* Make EGL context current for this output */
-            if (!eglMakeCurrent(state->egl_display, output->egl_surface,
-                               output->egl_surface, state->egl_context)) {
+            if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
+                               output->compositor_surface->egl_surface, state->egl_context)) {
                 log_error("Failed to make EGL context current for output %s: 0x%x",
                          output->model, eglGetError());
                 output = output->next;
@@ -244,16 +246,16 @@ static void render_outputs(struct neowall_state *state) {
         
         if (swap->render_success) {
             /* Swap buffers - this can BLOCK waiting for vsync, so no locks must be held */
-            if (!eglSwapBuffers(state->egl_display, output->egl_surface)) {
+            if (!eglSwapBuffers(state->egl_display, output->compositor_surface->egl_surface)) {
                 log_error("Failed to swap buffers for output %s: 0x%x",
                          output->model, eglGetError());
                 state->errors_count++;
             } else {
                 /* Damage the entire surface to tell compositor it needs repainting */
-                wl_surface_damage(output->surface, 0, 0, INT32_MAX, INT32_MAX);
+                wl_surface_damage(output->compositor_surface->wl_surface, 0, 0, INT32_MAX, INT32_MAX);
                 
                 /* Commit Wayland surface */
-                wl_surface_commit(output->surface);
+                wl_surface_commit(output->compositor_surface->wl_surface);
                 output->last_frame_time = current_time;
                 state->frames_rendered++;
                 

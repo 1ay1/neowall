@@ -4,10 +4,10 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include "neowall.h"
+#include "compositor.h"
 #include "config_access.h"
 #include "constants.h"
 #include "shader.h"
-#include "../protocols/wlr-layer-shell-unstable-v1-client-protocol.h"
 
 
 
@@ -41,13 +41,8 @@ struct output_state *output_create(struct neowall_state *state,
     out->preload_path[0] = '\0';
     out->preload_ready = false;
 
-    /* Create Wayland surface */
-    out->surface = wl_compositor_create_surface(state->compositor);
-    if (!out->surface) {
-        log_error("Failed to create Wayland surface");
-        free(out);
-        return NULL;
-    }
+    /* Compositor surface will be created later in output_configure_compositor_surface() */
+    out->compositor_surface = NULL;
 
     /* Initialize double-buffered config slots */
     for (int i = 0; i < 2; i++) {
@@ -139,27 +134,16 @@ void output_destroy(struct output_state *output) {
         output->preload_image = NULL;
     }
 
-    /* Destroy EGL surface */
-    if (output->egl_surface != EGL_NO_SURFACE && output->state && output->state->egl_display != EGL_NO_DISPLAY) {
-        eglDestroySurface(output->state->egl_display, output->egl_surface);
-        output->egl_surface = EGL_NO_SURFACE;
-    }
-    
-    if (output->egl_window) {
-        wl_egl_window_destroy(output->egl_window);
-        output->egl_window = NULL;
-    }
+    log_debug("Destroying output %s (name=%u)",
+              output->model[0] ? output->model : "unknown", output->name);
 
-    /* Destroy layer surface */
-    if (output->layer_surface) {
-        zwlr_layer_surface_v1_destroy(output->layer_surface);
-        output->layer_surface = NULL;
-    }
-
-    /* Destroy Wayland surface */
-    if (output->surface) {
-        wl_surface_destroy(output->surface);
-        output->surface = NULL;
+    /* Destroy compositor surface (handles all surface cleanup) */
+    if (output->compositor_surface) {
+        if (output->compositor_surface->egl_surface != EGL_NO_SURFACE && output->state) {
+            compositor_surface_destroy_egl(output->compositor_surface, output->state->egl_display);
+        }
+        compositor_surface_destroy(output->compositor_surface);
+        output->compositor_surface = NULL;
     }
 
     /* Note: We don't destroy output->output as it's managed by Wayland */
@@ -173,8 +157,8 @@ bool output_create_egl_surface(struct output_state *output) {
         return false;
     }
 
-    if (!output->surface) {
-        log_error("Invalid Wayland surface for output %s (NULL)",
+    if (!output->compositor_surface) {
+        log_error("Invalid compositor surface for output %s (NULL)",
                   output->model[0] ? output->model : "unknown");
         return false;
     }
@@ -186,26 +170,34 @@ bool output_create_egl_surface(struct output_state *output) {
         return false;
     }
 
-    /* Check if EGL window already exists */
-    if (output->egl_window) {
-        log_debug("EGL window already exists for output %s, skipping creation",
+    /* Check if EGL surface already exists */
+    if (output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+        log_debug("EGL surface already exists for output %s, skipping creation",
                   output->model[0] ? output->model : "unknown");
         return true;
     }
 
-    log_debug("Creating EGL window for output %s: %dx%d",
+    log_debug("Creating EGL surface for output %s: %dx%d",
               output->model[0] ? output->model : "unknown",
               output->width, output->height);
 
-    /* Create EGL window */
-    output->egl_window = wl_egl_window_create(output->surface,
-                                              output->width,
-                                              output->height);
-    if (!output->egl_window) {
-        log_error("Failed to create EGL window for output %s",
+    /* Create EGL surface through compositor abstraction */
+    EGLSurface egl_surface = compositor_surface_create_egl(
+        output->compositor_surface,
+        output->state->egl_display,
+        output->state->egl_config,
+        output->width,
+        output->height
+    );
+    
+    if (egl_surface == EGL_NO_SURFACE) {
+        log_error("Failed to create EGL surface for output %s",
                   output->model[0] ? output->model : "unknown");
         return false;
     }
+
+    log_debug("Created EGL surface for output %s",
+              output->model[0] ? output->model : "unknown");
 
     log_info("Created EGL surface for output %s: %dx%d",
              output->model[0] ? output->model : "unknown",
@@ -275,15 +267,15 @@ void output_preload_next_wallpaper(struct output_state *output) {
     /* Check EGL context is available */
     if (!output->state || output->state->egl_display == EGL_NO_DISPLAY || 
         output->state->egl_context == EGL_NO_CONTEXT || 
-        output->egl_surface == EGL_NO_SURFACE) {
+        !output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         log_debug("EGL not ready for preload, deferring");
         image_free(new_image);
         return;
     }
     
     /* Make EGL context current before creating texture */
-    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                       output->egl_surface, output->state->egl_context)) {
+    if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
+                       output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for preload");
         image_free(new_image);
         return;
@@ -361,8 +353,8 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     }
 
     /* CRITICAL: Ensure EGL context is current for this thread before any GL operations */
-    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                       output->egl_surface, output->state->egl_context)) {
+    if (!output->compositor_surface || !eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
+                       output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for wallpaper set");
         image_free(new_image);
         return;
@@ -374,7 +366,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         return;
     }
 
-    if (output->egl_surface == EGL_NO_SURFACE) {
+    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         log_debug("EGL surface not ready for output %s, deferring wallpaper load",
                   output->model[0] ? output->model : "unknown");
         image_free(new_image);
@@ -389,7 +381,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         return;
     }
     
-    if (output->egl_surface == EGL_NO_SURFACE) {
+    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         log_error("EGL surface not available for output %s (display may be disconnected)",
                   output->model[0] ? output->model : "unknown");
         image_free(new_image);
@@ -397,8 +389,8 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     }
 
     /* Make EGL context current before creating textures */
-    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                       output->egl_surface, output->state->egl_context)) {
+    if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
+                       output->compositor_surface->egl_surface, output->state->egl_context)) {
         EGLint egl_error = eglGetError();
         log_error("Failed to make EGL context current for output %s: 0x%x (display may be disconnected)",
                   output->model[0] ? output->model : "unknown", egl_error);
@@ -520,8 +512,8 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     }
 
     /* CRITICAL: Ensure EGL context is current before any GL operations */
-    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                       output->egl_surface, output->state->egl_context)) {
+    if (!output->compositor_surface || !eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
+                       output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for shader set");
         return;
     }
@@ -531,7 +523,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         return;
     }
 
-    if (output->egl_surface == EGL_NO_SURFACE) {
+    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         log_debug("EGL surface not ready for output %s, deferring shader load: %s",
                   output->model[0] ? output->model : "unknown", shader_path);
         /* Store shader path in config for later application when surface is ready */
@@ -541,7 +533,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         return;
     }
 
-    if (!output->egl_window) {
+    if (!output->compositor_surface || !output->compositor_surface->egl_window) {
         log_error("EGL window not created for output %s, cannot set shader",
                   output->model[0] ? output->model : "unknown");
         return;
@@ -554,15 +546,15 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         return;
     }
     
-    if (output->egl_surface == EGL_NO_SURFACE) {
+    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         log_error("EGL surface not available for output %s (display may be disconnected)",
                   output->model[0] ? output->model : "unknown");
         return;
     }
 
     /* Make EGL context current before creating shader program */
-    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                       output->egl_surface, output->state->egl_context)) {
+    if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
+                       output->compositor_surface->egl_surface, output->state->egl_context)) {
         EGLint egl_error = eglGetError();
         log_error("Failed to make EGL context current for output %s: 0x%x (display may be disconnected)",
                   output->model[0] ? output->model : "unknown", egl_error);
@@ -957,10 +949,9 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     /* Lock the inactive slot */
     pthread_mutex_lock(&output->config_slots[inactive].lock);
 
-    log_debug("Applying config to output %s (egl_surface=%p, egl_window=%p, configured=%d)",
+    log_debug("Applying config to output %s (compositor_surface=%p, configured=%d)",
               output->model[0] ? output->model : "unknown",
-              (void*)output->egl_surface,
-              (void*)output->egl_window,
+              (void*)output->compositor_surface,
               output->configured);
     
     log_info("Config for output %s: type=%s, mode=%s, transition=%d, duration=%.2fs",
@@ -1206,7 +1197,7 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         
         if (initial_shader[0] != '\0') {
             /* Check if output is ready for shader loading */
-            if (output->egl_surface != EGL_NO_SURFACE && output->egl_window) {
+            if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE && output->compositor_surface->egl_window) {
                 output_set_shader(output, initial_shader);
                 
                 /* If shader + image cycling mode, load the first image into iChannel0 */
@@ -1234,16 +1225,16 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
 
         if (initial_path[0] != '\0') {
             /* Check if output is ready for wallpaper loading */
-            if (output->egl_surface != EGL_NO_SURFACE && output->egl_window) {
+            if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE && output->compositor_surface->egl_window) {
                 log_info("Loading wallpaper for output %s: %s", 
                          output->model[0] ? output->model : "unknown", initial_path);
                 output_set_wallpaper(output, initial_path);
                 log_info("Wallpaper load completed for output %s", 
                          output->model[0] ? output->model : "unknown");
             } else {
-                log_error("Output %s not ready for wallpaper load (surface=%p, window=%p)",
+                log_error("Output %s not ready for wallpaper load (compositor_surface=%p)",
                           output->model[0] ? output->model : "unknown",
-                          (void*)output->egl_surface, (void*)output->egl_window);
+                          (void*)output->compositor_surface);
                 log_error("This may indicate a problem after config reload cleanup");
                 /* Config is already stored in output->config, will be applied when surface is ready */
             }
@@ -1283,7 +1274,7 @@ void output_apply_deferred_config(struct output_state *output) {
     }
 
     /* Check if output is ready for rendering */
-    if (output->egl_surface == EGL_NO_SURFACE || !output->egl_window) {
+    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE || !output->compositor_surface->egl_window) {
         log_debug("Output %s not ready for deferred config application",
                   output->model[0] ? output->model : "unknown");
         return;

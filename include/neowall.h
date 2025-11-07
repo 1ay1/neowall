@@ -28,8 +28,7 @@ typedef atomic_int atomic_int_t;
 struct neowall_state;
 struct output_state;
 struct wallpaper_config;
-struct zwlr_layer_shell_v1;
-struct zwlr_layer_surface_v1;
+struct compositor_backend;
 
 /* Wallpaper display modes */
 enum wallpaper_mode {
@@ -103,10 +102,7 @@ typedef struct {
 /* Output (monitor) state */
 struct output_state {
     struct wl_output *output;
-    struct zwlr_layer_surface_v1 *layer_surface;
-    struct wl_surface *surface;
-    struct wl_egl_window *egl_window;
-    EGLSurface egl_surface;
+    struct compositor_surface *compositor_surface;  /* Compositor abstraction surface */
 
     uint32_t name;              /* Wayland output name/ID */
     int32_t width;
@@ -204,7 +200,9 @@ struct neowall_state {
     struct wl_registry *registry;
     struct wl_compositor *compositor;
     struct wl_shm *shm;
-    struct zwlr_layer_shell_v1 *layer_shell;
+
+    /* Compositor abstraction backend */
+    struct compositor_backend *compositor_backend;
 
     /* EGL context */
     EGLDisplay egl_display;
@@ -302,7 +300,7 @@ void detect_gl_capabilities(struct neowall_state *state);
 struct output_state *output_create(struct neowall_state *state,
                                    struct wl_output *output, uint32_t name);
 void output_destroy(struct output_state *output);
-bool output_configure_layer_surface(struct output_state *output);
+bool output_configure_compositor_surface(struct output_state *output);
 bool output_create_egl_surface(struct output_state *output);
 void output_set_wallpaper(struct output_state *output, const char *path);
 void output_set_shader(struct output_state *output, const char *shader_path);
