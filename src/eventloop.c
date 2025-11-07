@@ -331,16 +331,28 @@ static bool handle_wayland_events(struct neowall_state *state) {
         return false;
     }
 
+    /* Check for display errors first */
+    int display_error = wl_display_get_error(state->display);
+    if (display_error != 0) {
+        log_error("Wayland display error (code %d), compositor disconnected", display_error);
+        return false;
+    }
+
     /* Dispatch pending events */
     if (wl_display_dispatch_pending(state->display) < 0) {
-        log_error("Failed to dispatch pending Wayland events");
+        log_error("Failed to dispatch pending Wayland events, compositor may be shutting down");
         return false;
     }
 
     /* Flush outgoing requests */
     if (wl_display_flush(state->display) < 0) {
-        if (errno != EAGAIN) {
+        if (errno != EAGAIN && errno != EPIPE) {
             log_error("Failed to flush Wayland display: %s", strerror(errno));
+            return false;
+        }
+        /* EPIPE means compositor disconnected */
+        if (errno == EPIPE) {
+            log_error("Wayland display pipe broken (EPIPE), compositor disconnected");
             return false;
         }
     }
@@ -534,10 +546,26 @@ void event_loop_run(struct neowall_state *state) {
             /* Timeout - no events */
             wl_display_cancel_read(state->display);
         } else {
+            /* Check for compositor disconnect (POLLHUP/POLLERR on Wayland fd) */
+            if (fds[0].revents & (POLLHUP | POLLERR)) {
+                log_error("Wayland display disconnected (POLLHUP/POLLERR), compositor shut down");
+                wl_display_cancel_read(state->display);
+                atomic_store_explicit(&state->running, false, memory_order_release);
+                break;
+            }
+            
             /* Events available */
             if (fds[0].revents & POLLIN) {
                 if (wl_display_read_events(state->display) < 0) {
                     log_error("Failed to read Wayland events");
+                    atomic_store_explicit(&state->running, false, memory_order_release);
+                    break;
+                }
+                
+                /* Check for display errors after reading events (compositor shutdown) */
+                int display_error = wl_display_get_error(state->display);
+                if (display_error != 0) {
+                    log_error("Wayland display error (code %d), compositor disconnected", display_error);
                     atomic_store_explicit(&state->running, false, memory_order_release);
                     break;
                 }
@@ -591,8 +619,16 @@ void event_loop_run(struct neowall_state *state) {
 
         /* Dispatch any events that were read */
         if (!handle_wayland_events(state)) {
-            log_error("Failed to handle Wayland events");
-            state->running = false;
+            log_error("Failed to handle Wayland events, compositor may have disconnected");
+            atomic_store_explicit(&state->running, false, memory_order_release);
+            break;
+        }
+        
+        /* Additional check for display errors after dispatching events */
+        int display_error = wl_display_get_error(state->display);
+        if (display_error != 0) {
+            log_error("Wayland display error detected (code %d), exiting", display_error);
+            atomic_store_explicit(&state->running, false, memory_order_release);
             break;
         }
 

@@ -9,8 +9,8 @@
 #include "../protocols/xdg-shell-client-protocol.h"
 
 /* Maximum retries and delay when waiting for compositor to be ready */
-#define COMPOSITOR_READY_MAX_RETRIES 20
-#define COMPOSITOR_READY_RETRY_DELAY_MS 250
+#define COMPOSITOR_READY_MAX_RETRIES 5
+#define COMPOSITOR_READY_RETRY_DELAY_MS 200
 
 /* Output listener callbacks */
 static void output_handle_geometry(void *data, struct wl_output *wl_output,
@@ -85,56 +85,41 @@ static const struct wl_output_listener output_listener = {
     .scale = output_handle_scale,
 };
 
-/* Wait for compositor outputs to be fully configured and ready
+/* Wait for compositor outputs to be available with minimal retries
  * This is compositor-agnostic and works with any Wayland compositor */
 static bool wait_for_outputs_configured(struct neowall_state *state) {
-    log_info("Waiting for compositor outputs to be fully configured...");
-    
+    /* Simple retry with short delay - don't be too aggressive during compositor startup */
     int retry_count = 0;
-    while (retry_count < COMPOSITOR_READY_MAX_RETRIES) {
-        /* Check if we have outputs and if they're configured */
-        bool all_configured = false;
-        
-        pthread_rwlock_rdlock(&state->output_list_lock);
-        if (state->output_count > 0) {
-            all_configured = true;
-            struct output_state *output = state->outputs;
-            while (output) {
-                if (!output->configured) {
-                    all_configured = false;
-                    break;
-                }
-                output = output->next;
-            }
-        }
-        pthread_rwlock_unlock(&state->output_list_lock);
-        
-        if (all_configured && state->output_count > 0) {
-            log_info("All %u output(s) fully configured and ready", state->output_count);
-            return true;
-        }
-        
+    while (retry_count < COMPOSITOR_READY_MAX_RETRIES && state->output_count == 0) {
         if (retry_count > 0) {
-            log_debug("Waiting for outputs to be configured... (retry %d/%d, outputs: %u)",
-                     retry_count, COMPOSITOR_READY_MAX_RETRIES, state->output_count);
+            log_debug("Waiting for outputs... (retry %d/%d)",
+                     retry_count, COMPOSITOR_READY_MAX_RETRIES);
+            
+            /* Sleep briefly */
+            struct timespec ts = {
+                .tv_sec = 0,
+                .tv_nsec = COMPOSITOR_READY_RETRY_DELAY_MS * 1000000L
+            };
+            nanosleep(&ts, NULL);
         }
         
-        /* Sleep and then do another roundtrip to process events */
-        struct timespec ts = {
-            .tv_sec = 0,
-            .tv_nsec = COMPOSITOR_READY_RETRY_DELAY_MS * 1000000L
-        };
-        nanosleep(&ts, NULL);
-        
-        /* Process any pending Wayland events to receive output configuration */
-        wl_display_roundtrip(state->display);
+        /* Do a quick roundtrip to check for outputs */
+        int ret = wl_display_roundtrip(state->display);
+        if (ret < 0) {
+            log_error("Wayland roundtrip failed (compositor may be shutting down)");
+            return false;
+        }
         
         retry_count++;
     }
     
-    log_info("Timeout waiting for outputs after %d retries (found %u outputs)",
-             COMPOSITOR_READY_MAX_RETRIES, state->output_count);
-    return state->output_count > 0;  /* Continue if we have at least one output */
+    if (state->output_count > 0) {
+        log_info("Found %u output(s)", state->output_count);
+        return true;
+    }
+    
+    log_error("No outputs detected after %d retries", COMPOSITOR_READY_MAX_RETRIES);
+    return false;
 }
 
 /* Layer surface listener callbacks */
@@ -332,7 +317,7 @@ bool wayland_init(struct neowall_state *state) {
 
     /* Add registry listener */
     wl_registry_add_listener(state->registry, &registry_listener, state);
-
+    
     /* Roundtrip to get all globals */
     wl_display_roundtrip(state->display);
     

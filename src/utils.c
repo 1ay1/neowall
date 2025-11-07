@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <time.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
@@ -215,17 +216,30 @@ float ease_in_out_cubic(float t) {
     }
 }
 
-/* Get state file path */
+/* Get state file path - use persistent location that survives reboots */
 const char *get_state_file_path(void) {
     static char state_path[MAX_PATH_LENGTH];
-    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+    const char *state_home = getenv("XDG_STATE_HOME");
+    const char *config_home = getenv("XDG_CONFIG_HOME");
+    const char *home = getenv("HOME");
     
-    if (runtime_dir) {
-        snprintf(state_path, sizeof(state_path), "%s/neowall-state.txt", runtime_dir);
-    } else {
-        const char *home = getenv("HOME");
-        if (home) {
-            snprintf(state_path, sizeof(state_path), "%s/.neowall-state", home);
+    /* Prefer XDG_STATE_HOME for persistent state (usually ~/.local/state) */
+    if (state_home && state_home[0] != '\0') {
+        snprintf(state_path, sizeof(state_path), "%s/neowall/state", state_home);
+    }
+    /* Fall back to config directory */
+    else if (config_home && config_home[0] != '\0') {
+        snprintf(state_path, sizeof(state_path), "%s/neowall/state", config_home);
+    }
+    /* Fall back to ~/.config/neowall/state */
+    else if (home && home[0] != '\0') {
+        snprintf(state_path, sizeof(state_path), "%s/.config/neowall/state", home);
+    }
+    /* Last resort: tmpfs (will be lost on reboot) */
+    else {
+        const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+        if (runtime_dir) {
+            snprintf(state_path, sizeof(state_path), "%s/neowall-state.txt", runtime_dir);
         } else {
             snprintf(state_path, sizeof(state_path), "/tmp/neowall-state-%d.txt", getuid());
         }
@@ -249,6 +263,30 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
     
     /* Acquire lock before file operations */
     pthread_mutex_lock(&state_file_mutex);
+    
+    /* Ensure state directory exists */
+    char dir_path[MAX_PATH_LENGTH];
+    strncpy(dir_path, state_path, sizeof(dir_path) - 1);
+    dir_path[sizeof(dir_path) - 1] = '\0';
+    char *last_slash = strrchr(dir_path, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        /* Create directory recursively - simple approach for at most 2 levels */
+        struct stat st = {0};
+        if (stat(dir_path, &st) == -1) {
+            /* Try to create parent first */
+            char parent_path[MAX_PATH_LENGTH];
+            strncpy(parent_path, dir_path, sizeof(parent_path) - 1);
+            parent_path[sizeof(parent_path) - 1] = '\0';
+            char *parent_slash = strrchr(parent_path, '/');
+            if (parent_slash) {
+                *parent_slash = '\0';
+                mkdir(parent_path, 0755);
+            }
+            /* Now create the target directory */
+            mkdir(dir_path, 0755);
+        }
+    }
     
     FILE *fp = fopen(state_path, "w");
     

@@ -873,20 +873,20 @@ int main(int argc, char *argv[]) {
 
     /* Cleanup */
     log_info("Shutting down...");
+    
+    /* Set alarm as last resort - force exit after 2 seconds if cleanup hangs */
+    alarm(2);
 
     if (watch_config) {
-        /* BUG FIX #5: Signal condition variable to wake watch thread for clean shutdown
-         * This replaces pthread_cancel which is not clean and can leave resources locked */
-        log_debug("Signaling config watch thread to shutdown...");
-        pthread_mutex_lock(&state.watch_mutex);
-        pthread_cond_signal(&state.watch_cond);  /* Wake the watch thread */
-        pthread_mutex_unlock(&state.watch_mutex);
-        
-        /* Wait for watch thread to exit cleanly */
-        pthread_join(state.watch_thread, NULL);
-        log_debug("Config watch thread joined successfully");
+        /* During shutdown, just cancel and detach the watch thread for fast exit
+         * The OS will clean up the resources when the process exits */
+        log_debug("Canceling config watch thread for fast shutdown...");
+        pthread_cancel(state.watch_thread);
+        pthread_detach(state.watch_thread);
+        log_debug("Config watch thread detached");
     }
 
+    /* Quick cleanup - don't spend too much time on this during shutdown */
     egl_core_cleanup(&state);
     wayland_cleanup(&state);
     
@@ -895,16 +895,18 @@ int main(int argc, char *argv[]) {
         close(state.signal_fd);
     }
     
+    /* Skip mutex/lock destruction during fast shutdown - OS will clean up */
     pthread_rwlock_destroy(&state.output_list_lock);
     pthread_mutex_destroy(&state.state_mutex);
     pthread_mutex_destroy(&state.state_file_lock);
-    
-    /* BUG FIX #5: Destroy condition variable and mutex */
     pthread_cond_destroy(&state.watch_cond);
     pthread_mutex_destroy(&state.watch_mutex);
 
     /* Remove PID file */
     remove_pid_file();
+    
+    /* Cancel alarm - we finished cleanup in time */
+    alarm(0);
 
     log_info("NeoWall terminated successfully");
 
