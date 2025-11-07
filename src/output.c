@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include "neowall.h"
+#include "config_access.h"
 #include "constants.h"
 #include "shader.h"
 #include "../protocols/wlr-layer-shell-unstable-v1-client-protocol.h"
@@ -42,15 +43,33 @@ struct output_state *output_create(struct neowall_state *state,
         return NULL;
     }
 
-    /* Initialize wallpaper config with defaults */
-    out->config.mode = MODE_FILL;
-    out->config.duration = 0;
-    out->config.transition = TRANSITION_NONE;
-    out->config.transition_duration = 300;
-    out->config.cycle = false;
-    out->config.cycle_paths = NULL;
-    out->config.cycle_count = 0;
-    out->config.current_cycle_index = 0;
+    /* Initialize double-buffered config slots */
+    for (int i = 0; i < 2; i++) {
+        pthread_mutex_init(&out->config_slots[i].lock, NULL);
+        
+        /* Initialize with defaults */
+        out->config_slots[i].config.mode = MODE_FILL;
+        out->config_slots[i].config.duration = 0;
+        out->config_slots[i].config.transition = TRANSITION_NONE;
+        out->config_slots[i].config.transition_duration = 300;
+        out->config_slots[i].config.cycle = false;
+        out->config_slots[i].config.cycle_paths = NULL;
+        out->config_slots[i].config.cycle_count = 0;
+        out->config_slots[i].config.current_cycle_index = 0;
+        out->config_slots[i].config.type = WALLPAPER_IMAGE;
+        out->config_slots[i].config.path[0] = '\0';
+        out->config_slots[i].config.shader_path[0] = '\0';
+        out->config_slots[i].config.shader_speed = 1.0f;
+        out->config_slots[i].config.channel_paths = NULL;
+        out->config_slots[i].config.channel_count = 0;
+        
+        out->config_slots[i].valid = false;
+    }
+    
+    /* Start with slot 0 as active */
+    atomic_store(&out->active_slot, 0);
+    out->config = &out->config_slots[0].config;
+    
     out->shader_fade_start_time = 0;
     out->pending_shader_path[0] = '\0';
 
@@ -82,8 +101,15 @@ void output_destroy(struct output_state *output) {
         output->live_shader_program = 0;
     }
 
-    /* Free wallpaper config */
-    config_free_wallpaper(&output->config);
+    /* Free wallpaper config from both slots */
+    for (int i = 0; i < 2; i++) {
+        pthread_mutex_lock(&output->config_slots[i].lock);
+        if (output->config_slots[i].valid) {
+            config_free_wallpaper(&output->config_slots[i].config);
+        }
+        pthread_mutex_unlock(&output->config_slots[i].lock);
+        pthread_mutex_destroy(&output->config_slots[i].lock);
+    }
 
     /* Free image data */
     if (output->current_image) {
@@ -181,7 +207,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
              output->model[0] ? output->model : "unknown", path);
 
     /* Load new image with display-aware scaling */
-    struct image_data *new_image = image_load(path, output->width, output->height, output->config.mode);
+    struct image_data *new_image = image_load(path, output->width, output->height, output->config->mode);
     if (!new_image) {
         log_error("Failed to load wallpaper image: %s", path);
         return;
@@ -250,7 +276,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
               output->model[0] ? output->model : "unknown");
 
     /* Handle transition */
-    if (output->config.transition != TRANSITION_NONE && output->current_image && output->texture) {
+    if (output->config->transition != TRANSITION_NONE && output->current_image && output->texture) {
         /* Store current image as "next_image" for transition */
         if (output->next_image) {
             image_free(output->next_image);
@@ -270,10 +296,10 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         output->texture = render_create_texture(new_image);
         
         log_info("Transition started: %s -> %s (type=%d '%s', duration=%.2fs)",
-                  output->config.path, path,
-                  output->config.transition, 
-                  transition_type_to_string(output->config.transition),
-                  output->config.transition_duration);
+                  output->config->path, path,
+                  output->config->transition, 
+                  transition_type_to_string(output->config->transition),
+                  output->config->transition_duration);
     } else {
         /* No transition, just replace */
         if (output->current_image) {
@@ -291,8 +317,8 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     }
 
     /* Update config path */
-    strncpy(output->config.path, path, sizeof(output->config.path) - 1);
-    output->config.path[sizeof(output->config.path) - 1] = '\0';
+    strncpy(output->config->path, path, sizeof(output->config->path) - 1);
+    output->config->path[sizeof(output->config->path) - 1] = '\0';
 
     /* Initialize frame time for cycling */
     uint64_t now = get_time_ms();
@@ -300,10 +326,10 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     output->last_cycle_time = now;
 
     /* Write current state to file */
-    const char *mode_str = wallpaper_mode_to_string(output->config.mode);
+    const char *mode_str = wallpaper_mode_to_string(output->config->mode);
     write_wallpaper_state(output->model, path, mode_str, 
-                         output->config.current_cycle_index,
-                         output->config.cycle_count,
+                         output->config->current_cycle_index,
+                         output->config->cycle_count,
                          "active");
 
     /* Mark for redraw */
@@ -356,9 +382,9 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         log_debug("EGL surface not ready for output %s, deferring shader load: %s",
                   output->model[0] ? output->model : "unknown", shader_path);
         /* Store shader path in config for later application when surface is ready */
-        strncpy(output->config.shader_path, shader_path, sizeof(output->config.shader_path) - 1);
-        output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
-        output->config.type = WALLPAPER_SHADER;
+        strncpy(output->config->shader_path, shader_path, sizeof(output->config->shader_path) - 1);
+        output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
+        output->config->type = WALLPAPER_SHADER;
         return;
     }
 
@@ -442,15 +468,15 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         
         /* Update config with new shader path - protected by state mutex */
         pthread_mutex_lock(&output->state->state_mutex);
-        strncpy(output->config.shader_path, shader_path, sizeof(output->config.shader_path) - 1);
-        output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
+        strncpy(output->config->shader_path, shader_path, sizeof(output->config->shader_path) - 1);
+        output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
         pthread_mutex_unlock(&output->state->state_mutex);
         
         /* Write state to file */
-        const char *mode_str = wallpaper_mode_to_string(output->config.mode);
+        const char *mode_str = wallpaper_mode_to_string(output->config->mode);
         write_wallpaper_state(output->model, shader_path, mode_str,
-                             output->config.current_cycle_index,
-                             output->config.cycle_count,
+                             output->config->current_cycle_index,
+                             output->config->cycle_count,
                              "active");
         
         /* Mark for immediate redraw with new shader */
@@ -464,7 +490,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     /* First shader load - no fade needed, load and compile immediately */
     
     /* Load iChannel textures based on config */
-    if (!render_load_channel_textures(output, &output->config)) {
+    if (!render_load_channel_textures(output, output->config)) {
         log_error("Failed to load iChannel textures for shader: %s", shader_path);
         /* Continue anyway - shader may work without textures */
     }
@@ -533,9 +559,9 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
 
     /* Update config - protected by state mutex */
     pthread_mutex_lock(&output->state->state_mutex);
-    strncpy(output->config.shader_path, shader_path, sizeof(output->config.shader_path) - 1);
-    output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
-    output->config.type = WALLPAPER_SHADER;
+    strncpy(output->config->shader_path, shader_path, sizeof(output->config->shader_path) - 1);
+    output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
+    output->config->type = WALLPAPER_SHADER;
     pthread_mutex_unlock(&output->state->state_mutex);
 
     /* Initialize frame time for animation */
@@ -547,10 +573,10 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     output->needs_redraw = true;
 
     /* Write current state to file */
-    const char *mode_str = wallpaper_mode_to_string(output->config.mode);
+    const char *mode_str = wallpaper_mode_to_string(output->config->mode);
     write_wallpaper_state(output->model, shader_path, mode_str, 
-                         output->config.current_cycle_index,
-                         output->config.cycle_count,
+                         output->config->current_cycle_index,
+                         output->config->cycle_count,
                          "active");
 
     log_info("Live shader wallpaper loaded successfully");
@@ -563,26 +589,26 @@ void output_cycle_wallpaper(struct output_state *output) {
         return;
     }
     
-    if (!output->config.cycle || output->config.cycle_count == 0) {
+    if (!output->config->cycle || output->config->cycle_count == 0) {
         /* Provide clear feedback about why cycling is not possible */
         const char *output_name = output->model[0] ? output->model : "unknown";
         
-        if (output->config.cycle_count == 0) {
+        if (output->config->cycle_count == 0) {
             log_info("Cannot cycle wallpaper on output '%s': No wallpapers configured for cycling", 
                      output_name);
             log_info("Hint: Configure multiple wallpapers using a directory path or duration setting");
-        } else if (!output->config.cycle) {
+        } else if (!output->config->cycle) {
             log_info("Cannot cycle wallpaper on output '%s': Cycling is disabled", 
                      output_name);
             log_info("Current wallpaper: %s", 
-                     output->config.type == WALLPAPER_SHADER ? 
-                     output->config.shader_path : output->config.path);
+                     output->config->type == WALLPAPER_SHADER ? 
+                     output->config->shader_path : output->config->path);
         }
         
         /* Write state file to indicate cycling is not available */
-        const char *current_path = output->config.type == WALLPAPER_SHADER ? 
-                                   output->config.shader_path : output->config.path;
-        const char *mode_str = wallpaper_mode_to_string(output->config.mode);
+        const char *current_path = output->config->type == WALLPAPER_SHADER ? 
+                                   output->config->shader_path : output->config->path;
+        const char *mode_str = wallpaper_mode_to_string(output->config->mode);
         write_wallpaper_state(output->model, current_path, mode_str, 0, 0,
                              "cycling not enabled");
         
@@ -590,7 +616,7 @@ void output_cycle_wallpaper(struct output_state *output) {
     }
 
     /* Don't cycle if a shader cross-fade is in progress */
-    if (output->config.type == WALLPAPER_SHADER && 
+    if (output->config->type == WALLPAPER_SHADER && 
         output->shader_fade_start_time > 0 && 
         output->pending_shader_path[0] != '\0') {
         /* Use local copy of model to avoid race if output is being modified */
@@ -605,13 +631,13 @@ void output_cycle_wallpaper(struct output_state *output) {
 
     /* Move to next wallpaper/shader - protect cycle_paths access with mutex */
     pthread_mutex_lock(&output->state->state_mutex);
-    size_t old_index = output->config.current_cycle_index;
-    output->config.current_cycle_index =
-        (output->config.current_cycle_index + 1) % output->config.cycle_count;
+    size_t old_index = output->config->current_cycle_index;
+    output->config->current_cycle_index =
+        (output->config->current_cycle_index + 1) % output->config->cycle_count;
 
     /* Copy path before releasing lock to avoid use-after-free if config reloads */
     char next_path_copy[MAX_PATH_LENGTH];
-    const char *next_path = output->config.cycle_paths[output->config.current_cycle_index];
+    const char *next_path = output->config->cycle_paths[output->config->current_cycle_index];
     strncpy(next_path_copy, next_path, sizeof(next_path_copy) - 1);
     next_path_copy[sizeof(next_path_copy) - 1] = '\0';
     pthread_mutex_unlock(&output->state->state_mutex);
@@ -627,8 +653,8 @@ void output_cycle_wallpaper(struct output_state *output) {
      * In this mode, we keep the same shader but cycle images through iChannel0
      */
     bool is_shader_with_image_cycling = false;
-    if (output->config.type == WALLPAPER_SHADER && 
-        output->config.shader_path[0] != '\0') {
+    if (output->config->type == WALLPAPER_SHADER && 
+        output->config->shader_path[0] != '\0') {
         /* Check if the first cycle path looks like an image (not a .glsl shader) */
         const char *ext = strrchr(next_path, '.');
         if (ext && (strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 || 
@@ -643,9 +669,9 @@ void output_cycle_wallpaper(struct output_state *output) {
         log_info("Cycling image for shader on output %s: index %zu->%zu (%zu/%zu): %s",
                  output->model[0] ? output->model : "unknown",
                  old_index,
-                 output->config.current_cycle_index,
-                 output->config.current_cycle_index + 1,
-                 output->config.cycle_count,
+                 output->config->current_cycle_index,
+                 output->config->current_cycle_index + 1,
+                 output->config->cycle_count,
                  next_path);
         
         /* Update iChannel0 with the new image */
@@ -655,27 +681,27 @@ void output_cycle_wallpaper(struct output_state *output) {
         }
         
         /* Write state to file */
-        const char *mode_str = wallpaper_mode_to_string(output->config.mode);
-        write_wallpaper_state(output->model, output->config.shader_path, mode_str,
-                             output->config.current_cycle_index,
-                             output->config.cycle_count,
+        const char *mode_str = wallpaper_mode_to_string(output->config->mode);
+        write_wallpaper_state(output->model, output->config->shader_path, mode_str,
+                             output->config->current_cycle_index,
+                             output->config->cycle_count,
                              "active");
         
         log_info("Image cycled through shader successfully");
     } else {
         /* Normal cycling mode: change the wallpaper or shader entirely */
-        const char *type_str = (output->config.type == WALLPAPER_SHADER) ? "shader" : "wallpaper";
+        const char *type_str = (output->config->type == WALLPAPER_SHADER) ? "shader" : "wallpaper";
         log_info("Cycling %s for output %s: index %zu->%zu (%zu/%zu): %s",
                  type_str,
                  output->model[0] ? output->model : "unknown",
                  old_index,
-                 output->config.current_cycle_index,
-                 output->config.current_cycle_index + 1,
-                 output->config.cycle_count,
+                 output->config->current_cycle_index,
+                 output->config->current_cycle_index + 1,
+                 output->config->cycle_count,
                  next_path);
 
         /* Apply the next item based on type */
-        if (output->config.type == WALLPAPER_SHADER) {
+        if (output->config->type == WALLPAPER_SHADER) {
             output_set_shader(output, next_path);
         } else {
             output_set_wallpaper(output, next_path);
@@ -694,29 +720,29 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
         return false;
     }
 
-    if (!output->config.cycle) {
+    if (!output->config->cycle) {
         return false;
     }
 
-    if (output->config.duration == 0.0f) {
+    if (output->config->duration == 0.0f) {
         return false;
     }
 
     /* For images, check if current_image exists. For shaders, check if shader program exists */
-    if (output->config.type == WALLPAPER_IMAGE && !output->current_image) {
+    if (output->config->type == WALLPAPER_IMAGE && !output->current_image) {
         return false;
     }
     
-    if (output->config.type == WALLPAPER_SHADER && output->live_shader_program == 0) {
+    if (output->config->type == WALLPAPER_SHADER && output->live_shader_program == 0) {
         return false;
     }
 
-    if (output->config.cycle_count <= 1) {
+    if (output->config->cycle_count <= 1) {
         return false;
     }
 
     uint64_t elapsed_ms = current_time - output->last_cycle_time;
-    uint64_t duration_ms = (uint64_t)(output->config.duration * 1000.0f);  /* Convert seconds to milliseconds */
+    uint64_t duration_ms = (uint64_t)(output->config->duration * 1000.0f);  /* Convert seconds to milliseconds */
 
     bool should_cycle = elapsed_ms >= duration_ms;
 
@@ -724,8 +750,8 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
         log_debug("Output %s should cycle: elapsed=%lums >= duration=%lums (current_index=%zu/%zu)",
                   output->model[0] ? output->model : "unknown",
                   elapsed_ms, duration_ms,
-                  output->config.current_cycle_index,
-                  output->config.cycle_count);
+                  output->config->current_cycle_index,
+                  output->config->cycle_count);
     }
 
     return should_cycle;
@@ -772,6 +798,12 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         return false;
     }
 
+    /* Get inactive slot for writing new config */
+    int inactive = get_inactive_slot(output);
+    
+    /* Lock the inactive slot */
+    pthread_mutex_lock(&output->config_slots[inactive].lock);
+
     log_debug("Applying config to output %s (egl_surface=%p, egl_window=%p, configured=%d)",
               output->model[0] ? output->model : "unknown",
               (void*)output->egl_surface,
@@ -786,12 +818,12 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
              config->duration);
 
     /* Clean up old resources when switching modes */
-    if (output->config.type != config->type) {
+    if (output->config->type != config->type) {
         log_info("Switching mode from %s to %s, cleaning up old resources",
-                 output->config.type == WALLPAPER_SHADER ? "shader" : "image",
+                 output->config->type == WALLPAPER_SHADER ? "shader" : "image",
                  config->type == WALLPAPER_SHADER ? "shader" : "image");
         
-        if (output->config.type == WALLPAPER_IMAGE) {
+        if (output->config->type == WALLPAPER_IMAGE) {
             /* Switching from IMAGE to SHADER - clean up image resources */
             if (output->current_image) {
                 image_free(output->current_image);
@@ -813,7 +845,7 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
             output->transition_start_time = 0;
             output->transition_progress = 0.0f;
             
-        } else if (output->config.type == WALLPAPER_SHADER) {
+        } else if (output->config->type == WALLPAPER_SHADER) {
             /* Switching from SHADER to IMAGE - clean up shader resources */
             if (output->live_shader_program) {
                 shader_destroy_program(output->live_shader_program);
@@ -837,55 +869,56 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         }
     }
 
-    /* Free old channel_paths if they exist */
-    if (output->config.channel_paths) {
-        for (size_t i = 0; i < output->config.channel_count; i++) {
-            if (output->config.channel_paths[i]) {
-                free(output->config.channel_paths[i]);
+    /* Free old config in inactive slot */
+    if (output->config_slots[inactive].config.channel_paths) {
+        for (size_t i = 0; i < output->config_slots[inactive].config.channel_count; i++) {
+            if (output->config_slots[inactive].config.channel_paths[i]) {
+                free(output->config_slots[inactive].config.channel_paths[i]);
             }
         }
-        free(output->config.channel_paths);
-        output->config.channel_paths = NULL;
-        output->config.channel_count = 0;
+        free(output->config_slots[inactive].config.channel_paths);
+        output->config_slots[inactive].config.channel_paths = NULL;
+        output->config_slots[inactive].config.channel_count = 0;
     }
     
-    /* Free old cycle_paths if they exist */
-    if (output->config.cycle_paths) {
-        for (size_t i = 0; i < output->config.cycle_count; i++) {
-            if (output->config.cycle_paths[i]) {
-                free(output->config.cycle_paths[i]);
+    if (output->config_slots[inactive].config.cycle_paths) {
+        for (size_t i = 0; i < output->config_slots[inactive].config.cycle_count; i++) {
+            if (output->config_slots[inactive].config.cycle_paths[i]) {
+                free(output->config_slots[inactive].config.cycle_paths[i]);
             }
         }
-        free(output->config.cycle_paths);
-        output->config.cycle_paths = NULL;
-        output->config.cycle_count = 0;
+        free(output->config_slots[inactive].config.cycle_paths);
+        output->config_slots[inactive].config.cycle_paths = NULL;
+        output->config_slots[inactive].config.cycle_count = 0;
     }
 
-    /* Copy configuration (shallow copy for now, will handle cycle_paths and channel_paths separately) */
-    memcpy(&output->config, config, sizeof(struct wallpaper_config));
+    /* Copy new config to inactive slot */
+    memcpy(&output->config_slots[inactive].config, config, sizeof(struct wallpaper_config));
     
-    log_debug("After memcpy - output->config.transition=%d, output->config.transition_duration=%u",
-              output->config.transition, output->config.transition_duration);
+    log_debug("After memcpy to slot %d - transition=%d, duration=%u",
+              inactive,
+              output->config_slots[inactive].config.transition, 
+              output->config_slots[inactive].config.transition_duration);
     
     /* Deep copy channel_paths array if present */
-    output->config.channel_paths = NULL;
-    output->config.channel_count = 0;
+    output->config_slots[inactive].config.channel_paths = NULL;
+    output->config_slots[inactive].config.channel_count = 0;
     if (config->channel_paths && config->channel_count > 0) {
-        output->config.channel_paths = calloc(config->channel_count, sizeof(char *));
-        if (output->config.channel_paths) {
-            output->config.channel_count = config->channel_count;
+        output->config_slots[inactive].config.channel_paths = calloc(config->channel_count, sizeof(char *));
+        if (output->config_slots[inactive].config.channel_paths) {
+            output->config_slots[inactive].config.channel_count = config->channel_count;
             for (size_t i = 0; i < config->channel_count; i++) {
                 if (config->channel_paths[i]) {
-                    output->config.channel_paths[i] = strdup(config->channel_paths[i]);
-                    if (!output->config.channel_paths[i]) {
+                    output->config_slots[inactive].config.channel_paths[i] = strdup(config->channel_paths[i]);
+                    if (!output->config_slots[inactive].config.channel_paths[i]) {
                         log_error("Failed to duplicate channel path %zu", i);
                         /* Clean up already allocated paths */
                         for (size_t j = 0; j < i; j++) {
-                            free(output->config.channel_paths[j]);
+                            free(output->config_slots[inactive].config.channel_paths[j]);
                         }
-                        free(output->config.channel_paths);
-                        output->config.channel_paths = NULL;
-                        output->config.channel_count = 0;
+                        free(output->config_slots[inactive].config.channel_paths);
+                        output->config_slots[inactive].config.channel_paths = NULL;
+                        output->config_slots[inactive].config.channel_count = 0;
                         break;
                     }
                 }
@@ -896,32 +929,32 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     }
     
     /* Deep copy cycle_paths array if present */
-    output->config.cycle_paths = NULL;
-    output->config.cycle_count = 0;
+    output->config_slots[inactive].config.cycle_paths = NULL;
+    output->config_slots[inactive].config.cycle_count = 0;
     if (config->cycle && config->cycle_paths && config->cycle_count > 0) {
-        output->config.cycle_paths = calloc(config->cycle_count, sizeof(char *));
-        if (output->config.cycle_paths) {
-            output->config.cycle_count = config->cycle_count;
+        output->config_slots[inactive].config.cycle_paths = calloc(config->cycle_count, sizeof(char *));
+        if (output->config_slots[inactive].config.cycle_paths) {
+            output->config_slots[inactive].config.cycle_count = config->cycle_count;
             for (size_t i = 0; i < config->cycle_count; i++) {
                 if (config->cycle_paths[i]) {
-                    output->config.cycle_paths[i] = strdup(config->cycle_paths[i]);
-                    if (!output->config.cycle_paths[i]) {
+                    output->config_slots[inactive].config.cycle_paths[i] = strdup(config->cycle_paths[i]);
+                    if (!output->config_slots[inactive].config.cycle_paths[i]) {
                         log_error("Failed to duplicate cycle path %zu", i);
                         /* Clean up already allocated paths */
                         for (size_t j = 0; j < i; j++) {
-                            free(output->config.cycle_paths[j]);
+                            free(output->config_slots[inactive].config.cycle_paths[j]);
                         }
-                        free(output->config.cycle_paths);
-                        output->config.cycle_paths = NULL;
-                        output->config.cycle_count = 0;
-                        output->config.cycle = false;
+                        free(output->config_slots[inactive].config.cycle_paths);
+                        output->config_slots[inactive].config.cycle_paths = NULL;
+                        output->config_slots[inactive].config.cycle_count = 0;
+                        output->config_slots[inactive].config.cycle = false;
                         break;
                     }
                 }
             }
         } else {
             log_error("Failed to allocate memory for cycle_paths array");
-            output->config.cycle = false;
+            output->config_slots[inactive].config.cycle = false;
         }
     }
 
@@ -951,9 +984,9 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
             char **dir_paths = load_images_from_directory(config->path, &dir_count);
 
             if (dir_paths && dir_count > 0) {
-                output->config.cycle = true;
-                output->config.cycle_count = dir_count;
-                output->config.cycle_paths = dir_paths;
+                output->config_slots[inactive].config.cycle = true;
+                output->config_slots[inactive].config.cycle_count = dir_count;
+                output->config_slots[inactive].config.cycle_paths = dir_paths;
                 log_info("Auto-loaded %zu images from directory", dir_count);
             }
         }
@@ -961,36 +994,36 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
 
     /* Allocate and copy cycle paths if present */
     if (config->cycle && config->cycle_count > 0 && config->cycle_paths) {
-        output->config.cycle_paths = calloc(config->cycle_count, sizeof(char *));
-        if (!output->config.cycle_paths) {
+        output->config->cycle_paths = calloc(config->cycle_count, sizeof(char *));
+        if (!output->config->cycle_paths) {
             log_error("Failed to allocate cycle paths array");
             return false;
         }
 
         for (size_t i = 0; i < config->cycle_count; i++) {
-            output->config.cycle_paths[i] = strdup(config->cycle_paths[i]);
-            if (!output->config.cycle_paths[i]) {
+            output->config->cycle_paths[i] = strdup(config->cycle_paths[i]);
+            if (!output->config->cycle_paths[i]) {
                 log_error("Failed to duplicate cycle path");
                 /* Clean up already allocated paths */
                 for (size_t j = 0; j < i; j++) {
-                    free(output->config.cycle_paths[j]);
+                    free(output->config->cycle_paths[j]);
                 }
-                free(output->config.cycle_paths);
-                output->config.cycle_paths = NULL;
+                free(output->config->cycle_paths);
+                output->config->cycle_paths = NULL;
                 return false;
             }
         }
     }
 
     /* Restore cycle index from previous state if cycling */
-    if (output->config.cycle && output->config.cycle_count > 0) {
+    if (output->config_slots[inactive].config.cycle && output->config_slots[inactive].config.cycle_count > 0) {
         int restored_index = restore_cycle_index_from_state(output->model[0] ? output->model : "unknown");
-        if (restored_index >= 0 && restored_index < (int)output->config.cycle_count) {
-            output->config.current_cycle_index = (size_t)restored_index;
+        if (restored_index >= 0 && restored_index < (int)output->config_slots[inactive].config.cycle_count) {
+            output->config_slots[inactive].config.current_cycle_index = (size_t)restored_index;
             log_info("Restored cycle index %d for output %s", restored_index, 
                      output->model[0] ? output->model : "unknown");
         } else {
-            output->config.current_cycle_index = 0;
+            output->config_slots[inactive].config.current_cycle_index = 0;
         }
     }
 
@@ -1000,9 +1033,9 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         const char *initial_shader = config->shader_path;
         bool is_shader_with_image_cycling = false;
         
-        if (output->config.cycle && output->config.cycle_count > 0 && output->config.cycle_paths) {
+        if (output->config_slots[inactive].config.cycle && output->config_slots[inactive].config.cycle_count > 0 && output->config_slots[inactive].config.cycle_paths) {
             /* Check if this is shader + image cycling mode */
-            const char *first_cycle_path = output->config.cycle_paths[0];
+            const char *first_cycle_path = output->config_slots[inactive].config.cycle_paths[0];
             const char *ext = strrchr(first_cycle_path, '.');
             
             if (ext && (strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 || 
@@ -1011,10 +1044,10 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
                 /* Cycle paths contain images - this is shader + image cycling mode */
                 is_shader_with_image_cycling = true;
                 log_info("Detected shader + image cycling mode: shader='%s', cycling through %zu images",
-                         initial_shader, output->config.cycle_count);
+                         initial_shader, output->config_slots[inactive].config.cycle_count);
             } else {
                 /* Cycle paths contain shaders - use the shader at restored index */
-                initial_shader = output->config.cycle_paths[output->config.current_cycle_index];
+                initial_shader = output->config_slots[inactive].config.cycle_paths[output->config_slots[inactive].config.current_cycle_index];
             }
         }
         
@@ -1025,7 +1058,7 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
                 
                 /* If shader + image cycling mode, load the first image into iChannel0 */
                 if (is_shader_with_image_cycling) {
-                    const char *initial_image = output->config.cycle_paths[output->config.current_cycle_index];
+                    const char *initial_image = output->config_slots[inactive].config.cycle_paths[output->config_slots[inactive].config.current_cycle_index];
                     log_info("Loading initial image into iChannel0: %s", initial_image);
                     
                     if (!render_update_channel_texture(output, 0, initial_image)) {
@@ -1041,9 +1074,9 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     } else {
         /* Load image wallpaper */
         const char *initial_path = config->path;
-        if (output->config.cycle && output->config.cycle_count > 0 && output->config.cycle_paths) {
+        if (output->config_slots[inactive].config.cycle && output->config_slots[inactive].config.cycle_count > 0 && output->config_slots[inactive].config.cycle_paths) {
             /* Use the image at restored index */
-            initial_path = output->config.cycle_paths[output->config.current_cycle_index];
+            initial_path = output->config_slots[inactive].config.cycle_paths[output->config_slots[inactive].config.current_cycle_index];
         }
 
         if (initial_path[0] != '\0') {
@@ -1068,6 +1101,25 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         }
     }
 
+    /* Mark inactive slot as valid */
+    output->config_slots[inactive].valid = true;
+    pthread_mutex_unlock(&output->config_slots[inactive].lock);
+    
+    /* Atomically swap slots and update config pointer */
+    swap_config_slot(output, inactive);
+    
+    log_info("Config applied and swapped for %s (now using slot %d)", 
+             output->model[0] ? output->model : "unknown", inactive);
+
+    /* Update state file with new config (after swap so output->config points to new slot) */
+    const char *state_path = (config->type == WALLPAPER_SHADER) ? 
+                             output->config->shader_path : output->config->path;
+    const char *mode_str = wallpaper_mode_to_string(output->config->mode);
+    write_wallpaper_state(output->model, state_path, mode_str,
+                         output->config->current_cycle_index,
+                         output->config->cycle_count,
+                         "active");
+
     return true;
 }
 
@@ -1085,26 +1137,26 @@ void output_apply_deferred_config(struct output_state *output) {
     }
 
     /* Check if there's a deferred config to apply */
-    if (output->config.type == WALLPAPER_SHADER && output->config.shader_path[0] != '\0') {
+    if (output->config->type == WALLPAPER_SHADER && output->config->shader_path[0] != '\0') {
         /* Check if shader is not yet loaded */
         if (output->live_shader_program == 0) {
             log_info("Applying deferred shader config to output %s: %s",
                      output->model[0] ? output->model : "unknown",
-                     output->config.shader_path);
-            output_set_shader(output, output->config.shader_path);
+                     output->config->shader_path);
+            output_set_shader(output, output->config->shader_path);
         }
-    } else if (output->config.type == WALLPAPER_IMAGE && output->config.path[0] != '\0') {
+    } else if (output->config->type == WALLPAPER_IMAGE && output->config->path[0] != '\0') {
         /* Check if wallpaper is not yet loaded */
         if (!output->current_image && output->texture == 0) {
             log_info("Applying deferred wallpaper config to output %s: %s",
                      output->model[0] ? output->model : "unknown",
-                     output->config.path);
-            output_set_wallpaper(output, output->config.path);
+                     output->config->path);
+            output_set_wallpaper(output, output->config->path);
         }
-    } else if (output->config.cycle && output->config.cycle_count > 0 && output->config.cycle_paths) {
+    } else if (output->config->cycle && output->config->cycle_count > 0 && output->config->cycle_paths) {
         /* Handle cycling mode */
         if (!output->current_image && output->texture == 0 && output->live_shader_program == 0) {
-            const char *initial_path = output->config.cycle_paths[output->config.current_cycle_index];
+            const char *initial_path = output->config->cycle_paths[output->config->current_cycle_index];
             log_info("Applying deferred cycle config to output %s: %s",
                      output->model[0] ? output->model : "unknown",
                      initial_path);

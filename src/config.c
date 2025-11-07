@@ -11,6 +11,7 @@
 #include <dirent.h>
 #include "vibe.h"
 #include "neowall.h"
+#include "config_access.h"
 
 /* ============================================================================
  * CONFIGURATION PHILOSOPHY
@@ -1526,22 +1527,22 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         struct output_state *summary_output = state->outputs;
         while (summary_output) {
             output_count++;
-            if (summary_output->config.type == WALLPAPER_SHADER) {
+            if (summary_output->config->type == WALLPAPER_SHADER) {
                 shader_count++;
                 log_info("  Output %s: SHADER mode - %s (speed=%.1fx)", 
                          summary_output->model[0] ? summary_output->model : "unknown",
-                         summary_output->config.shader_path,
-                         summary_output->config.shader_speed);
+                         summary_output->config->shader_path,
+                         summary_output->config->shader_speed);
             } else {
                 image_count++;
                 log_info("  Output %s: IMAGE mode - %s (mode=%s)", 
                          summary_output->model[0] ? summary_output->model : "unknown",
-                         summary_output->config.path,
-                         wallpaper_mode_to_string(summary_output->config.mode));
+                         summary_output->config->path,
+                         wallpaper_mode_to_string(summary_output->config->mode));
             }
-            if (summary_output->config.cycle && summary_output->config.cycle_count > 1) {
+            if (summary_output->config->cycle && summary_output->config->cycle_count > 1) {
                 log_info("    -> Cycling through %zu items, duration=%.0fs", 
-                         summary_output->config.cycle_count, summary_output->config.duration);
+                         summary_output->config->cycle_count, summary_output->config->duration);
             }
             summary_output = summary_output->next;
         }
@@ -1649,24 +1650,24 @@ void config_reload(struct neowall_state *state) {
             size_t idx = 0;
             while (backup_output && idx < backup_count) {
                 /* Deep copy config (paths need to be duplicated) */
-                memcpy(&backup_configs[idx], &backup_output->config, sizeof(struct wallpaper_config));
+                memcpy(&backup_configs[idx], backup_output->config, sizeof(struct wallpaper_config));
                 
                 /* Duplicate cycle paths array if present */
-                if (backup_output->config.cycle_paths && backup_output->config.cycle_count > 0) {
-                    backup_configs[idx].cycle_paths = malloc(sizeof(char*) * backup_output->config.cycle_count);
+                if (backup_output->config->cycle_paths && backup_output->config->cycle_count > 0) {
+                    backup_configs[idx].cycle_paths = malloc(sizeof(char*) * backup_output->config->cycle_count);
                     if (backup_configs[idx].cycle_paths) {
-                        for (size_t i = 0; i < backup_output->config.cycle_count; i++) {
-                            backup_configs[idx].cycle_paths[i] = strdup(backup_output->config.cycle_paths[i]);
+                        for (size_t i = 0; i < backup_output->config->cycle_count; i++) {
+                            backup_configs[idx].cycle_paths[i] = strdup(backup_output->config->cycle_paths[i]);
                         }
                     }
                 }
                 
                 /* Duplicate channel paths array if present */
-                if (backup_output->config.channel_paths && backup_output->config.channel_count > 0) {
-                    backup_configs[idx].channel_paths = malloc(sizeof(char*) * backup_output->config.channel_count);
+                if (backup_output->config->channel_paths && backup_output->config->channel_count > 0) {
+                    backup_configs[idx].channel_paths = malloc(sizeof(char*) * backup_output->config->channel_count);
                     if (backup_configs[idx].channel_paths) {
-                        for (size_t i = 0; i < backup_output->config.channel_count; i++) {
-                            backup_configs[idx].channel_paths[i] = strdup(backup_output->config.channel_paths[i]);
+                        for (size_t i = 0; i < backup_output->config->channel_count; i++) {
+                            backup_configs[idx].channel_paths[i] = strdup(backup_output->config->channel_paths[i]);
                         }
                     }
                 }
@@ -1882,9 +1883,9 @@ void config_reload(struct neowall_state *state) {
     /* STEP 2: Free wallpaper config data (cycle paths, etc) */
     output = state->outputs;
     while (output) {
-        config_free_wallpaper(&output->config);
+        config_free_wallpaper(output->config);
         /* Initialize config to safe defaults */
-        init_wallpaper_config_defaults(&output->config);
+        init_wallpaper_config_defaults(output->config);
         output = output->next;
     }
     
@@ -1921,7 +1922,7 @@ void config_reload(struct neowall_state *state) {
         
         while (restore_output && idx < backup_count) {
             /* Free any partial config that might have been set */
-            config_free_wallpaper(&restore_output->config);
+            config_free_wallpaper(restore_output->config);
             
             /* Restore backup */
             memcpy(&restore_output->config, &backup_configs[idx], sizeof(struct wallpaper_config));
@@ -1962,18 +1963,18 @@ void config_reload(struct neowall_state *state) {
         }
         
         /* CRITICAL: Verify shader actually loaded for SHADER type outputs */
-        if (output->config.type == WALLPAPER_SHADER) {
+        if (output->config->type == WALLPAPER_SHADER) {
             if (output->live_shader_program == 0) {
                 log_error("CRITICAL: Output %s has SHADER config but no shader program loaded!", 
                          output->model);
-                log_error("         Shader path in config: '%s'", output->config.shader_path);
+                log_error("         Shader path in config: '%s'", output->config->shader_path);
                 log_error("         This indicates shader loading failed during config_load()");
                 
                 /* Attempt to load shader explicitly */
-                if (output->config.shader_path[0] != '\0') {
+                if (output->config->shader_path[0] != '\0') {
                     log_info("Attempting explicit shader load for %s: %s", 
-                            output->model, output->config.shader_path);
-                    output_set_shader(output, output->config.shader_path);
+                            output->model, output->config->shader_path);
+                    output_set_shader(output, output->config->shader_path);
                     
                     if (output->live_shader_program == 0) {
                         log_error("FAILED: Shader still not loaded after explicit attempt");

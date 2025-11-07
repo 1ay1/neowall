@@ -11,6 +11,7 @@
 #include <time.h>
 #include <sys/signalfd.h>
 #include "neowall.h"
+#include "config_access.h"
 #include "constants.h"
 #include "egl/egl_core.h"
 
@@ -425,13 +426,13 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
                 if (pthread_rwlock_tryrdlock(&state->output_list_lock) == 0) {
                     struct output_state *output = state->outputs;
                     while (output) {
-                        if (output->config.type == WALLPAPER_SHADER) {
+                        if (output->config->type == WALLPAPER_SHADER) {
                             pthread_mutex_lock(&state->state_mutex);
-                            output->config.shader_speed += 1.0f;
+                            output->config->shader_speed += 1.0f;
                             pthread_mutex_unlock(&state->state_mutex);
                             
                             log_info("Increased shader speed to %.1fx for output %s",
-                                     output->config.shader_speed,
+                                     output->config->shader_speed,
                                      output->model[0] ? output->model : "unknown");
                         }
                         output = output->next;
@@ -444,16 +445,16 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
                 if (pthread_rwlock_tryrdlock(&state->output_list_lock) == 0) {
                     struct output_state *output = state->outputs;
                     while (output) {
-                        if (output->config.type == WALLPAPER_SHADER) {
+                        if (output->config->type == WALLPAPER_SHADER) {
                             pthread_mutex_lock(&state->state_mutex);
-                            output->config.shader_speed -= 1.0f;
-                            if (output->config.shader_speed < 0.1f) {
-                                output->config.shader_speed = 0.1f;
+                            output->config->shader_speed -= 1.0f;
+                            if (output->config->shader_speed < 0.1f) {
+                                output->config->shader_speed = 0.1f;
                             }
                             pthread_mutex_unlock(&state->state_mutex);
                             
                             log_info("Decreased shader speed to %.1fx for output %s",
-                                     output->config.shader_speed,
+                                     output->config->shader_speed,
                                      output->model[0] ? output->model : "unknown");
                         }
                         output = output->next;

@@ -93,6 +93,13 @@ struct wallpaper_config {
     size_t channel_count;               /* Number of configured channels */
 };
 
+/* Double-buffered config slot for race-free hot-reload */
+typedef struct {
+    struct wallpaper_config config;
+    pthread_mutex_t lock;
+    bool valid;  /* Is this slot initialized? */
+} config_slot_t;
+
 /* Output (monitor) state */
 struct output_state {
     struct wl_output *output;
@@ -115,7 +122,13 @@ struct output_state {
 
     struct neowall_state *state;  /* Back-pointer to global state */
 
-    struct wallpaper_config config;
+    /* Double-buffered config for race-free hot-reload */
+    config_slot_t config_slots[2];
+    atomic_int_t active_slot;  /* 0 or 1 - which slot is currently active */
+    
+    /* Convenience pointer that always points to active config (for backward compatibility) */
+    struct wallpaper_config *config;
+    
     struct image_data *current_image;
     struct image_data *next_image;      /* For transitions */
 

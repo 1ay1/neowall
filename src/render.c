@@ -4,6 +4,7 @@
 #include <math.h>
 #include <GLES2/gl2.h>
 #include "neowall.h"
+#include "config_access.h"
 #include "constants.h"
 #include "transitions.h"
 #include "shader.h"
@@ -637,7 +638,7 @@ bool render_frame_shader(struct output_state *output) {
     float time = (current_time - start_time) / (float)MS_PER_SECOND;
     
     /* Apply shader speed multiplier */
-    float shader_speed = output->config.shader_speed > 0.0f ? output->config.shader_speed : 1.0f;
+    float shader_speed = output->config->shader_speed > 0.0f ? output->config->shader_speed : 1.0f;
     time *= shader_speed;
 
     /* Cache shader uniform locations on first use to eliminate per-frame lookups */
@@ -800,7 +801,7 @@ bool render_frame_shader(struct output_state *output) {
                 }
                 
                 /* Reload iChannel textures for the new shader (config may have changed) */
-                if (!render_load_channel_textures(output, &output->config)) {
+                if (!render_load_channel_textures(output, output->config)) {
                     log_error("Failed to reload iChannel textures for new shader: %s", output->pending_shader_path);
                     /* Continue anyway - shader may work without textures */
                 }
@@ -837,15 +838,18 @@ bool render_frame_shader(struct output_state *output) {
                     }
                     
                     /* Update config with new shader path */
-                    strncpy(output->config.shader_path, output->pending_shader_path, 
-                            sizeof(output->config.shader_path) - 1);
-                    output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
+                    #pragma GCC diagnostic push
+                    #pragma GCC diagnostic ignored "-Wstringop-truncation"
+                    strncpy(output->config->shader_path, output->pending_shader_path, 
+                            sizeof(output->config->shader_path) - 1);
+                    #pragma GCC diagnostic pop
+                    output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
                     
                     /* Write state to file */
-                    const char *mode_str = wallpaper_mode_to_string(output->config.mode);
+                    const char *mode_str = wallpaper_mode_to_string(output->config->mode);
                     write_wallpaper_state(output->model, output->pending_shader_path, mode_str,
-                                         output->config.current_cycle_index,
-                                         output->config.cycle_count,
+                                         output->config->current_cycle_index,
+                                         output->config->cycle_count,
                                          "active");
                     
                     log_info("Shader switched during cross-fade: %s", output->pending_shader_path);
@@ -959,7 +963,7 @@ bool render_frame(struct output_state *output) {
     }
 
     /* Check if this is a shader wallpaper */
-    if (output->config.type == WALLPAPER_SHADER) {
+    if (output->config->type == WALLPAPER_SHADER) {
         /* Check if shader loading has permanently failed */
         if (output->shader_load_failed) {
             /* Permanently failed - don't spam logs, just return false silently */
@@ -983,8 +987,8 @@ bool render_frame(struct output_state *output) {
                 last_reload_attempt_time = current_time;
                 
                 /* Try to load the shader if we have a path */
-                if (output->config.shader_path[0] != '\0') {
-                    output_set_shader(output, output->config.shader_path);
+                if (output->config->shader_path[0] != '\0') {
+                    output_set_shader(output, output->config->shader_path);
                     if (output->live_shader_program == 0) {
                         consecutive_failures++;
                         log_error("Failed to reload shader (attempt %d/3), skipping frame", consecutive_failures);
@@ -993,7 +997,7 @@ bool render_frame(struct output_state *output) {
                             log_error("╔═══════════════════════════════════════════════════════════════╗");
                             log_error("║ CRITICAL: Shader failed to load after 3 attempts             ║");
                             log_error("╠═══════════════════════════════════════════════════════════════╣");
-                            log_error("║ Config has bad shader path: '%s'", output->config.shader_path);
+                            log_error("║ Config has bad shader path: '%s'", output->config->shader_path);
                             log_error("║                                                               ║");
                             log_error("║ FIX YOUR CONFIG:                                              ║");
                             log_error("║   1. Edit: ~/.config/neowall/config.vibe                      ║");
@@ -1033,12 +1037,12 @@ bool render_frame(struct output_state *output) {
 
     /* Check if we're in a transition */
     if (output->transition_start_time > 0 && 
-        output->config.transition != TRANSITION_NONE &&
+        output->config->transition != TRANSITION_NONE &&
         output->next_image && output->next_texture) {
         log_debug("Using transition render: start_time=%llu, progress=%.2f, type=%d",
                  (unsigned long long)output->transition_start_time,
                  output->transition_progress,
-                 output->config.transition);
+                 output->config->transition);
         /* Use transition rendering */
         return render_frame_transition(output, output->transition_progress);
     }
@@ -1093,7 +1097,7 @@ bool render_frame(struct output_state *output) {
     }
 
     /* Handle tile mode texture wrapping - only change when needed */
-    if (output->config.mode == MODE_TILE) {
+    if (output->config->mode == MODE_TILE) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     } else {
@@ -1150,10 +1154,10 @@ bool render_frame_transition(struct output_state *output, float progress) {
     }
 
     log_debug("Calling transition_render: type=%d, progress=%.2f, duration=%ums",
-             output->config.transition, progress, output->config.transition_duration);
+             output->config->transition, progress, output->config->transition_duration);
 
     /* Dispatch to modular transition renderer */
-    bool result = transition_render(output, output->config.transition, progress);
+    bool result = transition_render(output, output->config->transition, progress);
     
     if (!result) {
         log_error("transition_render failed, falling back to normal render");

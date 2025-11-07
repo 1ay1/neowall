@@ -9,6 +9,7 @@
 #include <sys/eventfd.h>
 #include <sys/signalfd.h>
 #include "neowall.h"
+#include "config_access.h"
 #include "constants.h"
 
 /* Forward declaration for signal handler from main.c */
@@ -31,10 +32,10 @@ static void update_cycle_timer(struct neowall_state *state) {
     bool paused = atomic_load_explicit(&state->paused, memory_order_acquire);
     struct output_state *output = state->outputs;
     while (output) {
-        if (!paused && output->config.cycle && output->config.duration > 0.0f &&
-            output->config.cycle_count > 1 && output->current_image) {
+        if (!paused && output->config->cycle && output->config->duration > 0.0f &&
+            output->config->cycle_count > 1 && output->current_image) {
             uint64_t elapsed_ms = now - output->last_cycle_time;
-            uint64_t duration_ms = (uint64_t)(output->config.duration * 1000.0f);  /* Convert seconds to milliseconds */
+            uint64_t duration_ms = (uint64_t)(output->config->duration * 1000.0f);  /* Convert seconds to milliseconds */
             
             if (elapsed_ms >= duration_ms) {
                 /* Should cycle now */
@@ -109,7 +110,7 @@ static void render_outputs(struct neowall_state *state) {
         struct output_state *check_output = state->outputs;
         while (check_output) {
             total_outputs++;
-            if (check_output->config.cycle && check_output->config.cycle_count > 0) {
+            if (check_output->config->cycle && check_output->config->cycle_count > 0) {
                 has_cycleable_output = true;
             }
             check_output = check_output->next;
@@ -119,7 +120,7 @@ static void render_outputs(struct neowall_state *state) {
     struct output_state *output = state->outputs;
     while (output) {
         /* Handle next wallpaper request - ONE total per frame (ensures each change is actually rendered) */
-        if (next_count > 0 && !processed_next && output->config.cycle && output->config.cycle_count > 0) {
+        if (next_count > 0 && !processed_next && output->config->cycle && output->config->cycle_count > 0) {
             log_debug("Cycling to next wallpaper for output %s (%d requests remaining)",
                      output->model[0] ? output->model : "unknown", next_count - 1);
             output_cycle_wallpaper(output);
@@ -130,7 +131,7 @@ static void render_outputs(struct neowall_state *state) {
         }
         
         /* Check if we should cycle wallpaper (timer-driven) */
-        if (!state->paused && output->config.cycle && output->config.duration > 0.0f) {
+        if (!state->paused && output->config->cycle && output->config->duration > 0.0f) {
             if (output_should_cycle(output, current_time)) {
                 output_cycle_wallpaper(output);
                 current_time = get_time_ms();
@@ -155,9 +156,9 @@ static void render_outputs(struct neowall_state *state) {
 
             /* Handle image transitions */
             if (output->transition_start_time > 0 &&
-                output->config.transition != TRANSITION_NONE) {
+                output->config->transition != TRANSITION_NONE) {
                 uint64_t elapsed = current_time - output->transition_start_time;
-                uint64_t transition_duration_ms = (uint64_t)(output->config.transition_duration * 1000.0f);
+                uint64_t transition_duration_ms = (uint64_t)(output->config->transition_duration * 1000.0f);
                 float progress = (float)elapsed / (float)transition_duration_ms;
 
                 if (progress >= 1.0f) {
@@ -227,8 +228,8 @@ static void render_outputs(struct neowall_state *state) {
                     
                     /* Reset needs_redraw unless we're in a transition or using a shader wallpaper */
                     if ((output->transition_start_time == 0 || 
-                         output->config.transition == TRANSITION_NONE) &&
-                        output->config.type != WALLPAPER_SHADER) {
+                         output->config->transition == TRANSITION_NONE) &&
+                        output->config->type != WALLPAPER_SHADER) {
                         output->needs_redraw = false;
                     }
                 }
@@ -326,11 +327,11 @@ void event_loop_run(struct neowall_state *state) {
     pthread_rwlock_rdlock(&state->output_list_lock);
     struct output_state *output = state->outputs;
     while (output) {
-        if (output->config.cycle && output->config.duration > 0.0f) {
+        if (output->config->cycle && output->config->duration > 0.0f) {
             log_info("Output %s: cycling enabled with %zu images, duration %.2fs",
                      output->model[0] ? output->model : "unknown",
-                     output->config.cycle_count,
-                     output->config.duration);
+                     output->config->cycle_count,
+                     output->config->duration);
         }
         output = output->next;
     }
@@ -424,7 +425,7 @@ void event_loop_run(struct neowall_state *state) {
         int shader_count = 0;
         while (output) {
             /* Only count shader as active if it loaded successfully and hasn't failed */
-            if (output->config.type == WALLPAPER_SHADER && 
+            if (output->config->type == WALLPAPER_SHADER && 
                 !output->shader_load_failed && 
                 output->live_shader_program != 0) {
                 shader_count++;
@@ -436,8 +437,8 @@ void event_loop_run(struct neowall_state *state) {
                 }
             }
             if ((output->transition_start_time > 0 && 
-                 output->config.transition != TRANSITION_NONE) ||
-                (output->config.type == WALLPAPER_SHADER && 
+                 output->config->transition != TRANSITION_NONE) ||
+                (output->config->type == WALLPAPER_SHADER && 
                  !output->shader_load_failed && 
                  output->live_shader_program != 0)) {
                 timeout_ms = FRAME_TIME_MS;
@@ -559,9 +560,9 @@ void event_loop_run(struct neowall_state *state) {
                     output_apply_deferred_config(output);
                     
                     /* Check if shader failed to load for SHADER type outputs */
-                    if (output->config.type == WALLPAPER_SHADER && output->live_shader_program == 0) {
+                    if (output->config->type == WALLPAPER_SHADER && output->live_shader_program == 0) {
                         log_error("Output %s: Shader failed to load from '%s'", 
-                                 output->model, output->config.shader_path);
+                                 output->model, output->config->shader_path);
                         all_outputs_ok = false;
                     }
                     
@@ -618,12 +619,12 @@ void event_loop_run(struct neowall_state *state) {
         while (output) {
             /* Keep redrawing during transitions */
             if (output->transition_start_time > 0 && 
-                output->config.transition != TRANSITION_NONE) {
+                output->config->transition != TRANSITION_NONE) {
                 output->needs_redraw = true;
             }
             /* Keep redrawing for shader wallpapers (continuous animation) 
              * but only if shader loaded successfully and hasn't failed */
-            if (output->config.type == WALLPAPER_SHADER && 
+            if (output->config->type == WALLPAPER_SHADER && 
                 !output->shader_load_failed && 
                 output->live_shader_program != 0) {
                 output->needs_redraw = true;
