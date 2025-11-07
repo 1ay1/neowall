@@ -3,6 +3,9 @@
 
 #include "neowall.h"
 
+/* Function declarations */
+void config_reload(struct neowall_state *state);
+
 /* ============================================================================
  * SAFE CONFIG ACCESS MACROS
  * ============================================================================

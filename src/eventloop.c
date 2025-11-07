@@ -12,8 +12,9 @@
 #include "config_access.h"
 #include "constants.h"
 
-/* Forward declaration for signal handler from main.c */
+/* Forward declarations */
 extern void handle_signal_from_fd(struct neowall_state *state, int signum);
+extern void config_reload(struct neowall_state *state);
 
 static struct neowall_state *event_loop_state = NULL;
 
@@ -94,8 +95,9 @@ static void render_outputs(struct neowall_state *state) {
     
     /* BUG FIX #3: Check if config reload is in progress */
     /* If reload is active, skip rendering to avoid use-after-free of GL resources */
-    bool reload_in_progress = atomic_load_explicit(&state->reload_requested, memory_order_acquire);
-    if (reload_in_progress) {
+    extern atomic_bool reload_in_progress;  /* Defined in config.c */
+    if (atomic_load_explicit(&reload_in_progress, memory_order_acquire) ||
+        atomic_load_explicit(&state->reload_requested, memory_order_acquire)) {
         log_debug("Config reload in progress, skipping render frame to avoid resource race");
         /* Don't process next requests either during reload */
         return;
@@ -570,75 +572,21 @@ void event_loop_run(struct neowall_state *state) {
             }
         }
 
-        /* Config reload - exactly like startup */
-        static atomic_bool reload_in_progress = ATOMIC_VAR_INIT(false);
+        /* Config reload - delegate to comprehensive config_reload() function */
         bool reload_flag = atomic_load_explicit(&state->reload_requested, memory_order_acquire);
         
         if (reload_flag) {
-            /* Prevent concurrent reloads */
-            bool expected = false;
-            if (!atomic_compare_exchange_strong(&reload_in_progress, &expected, true)) {
-                log_debug("Reload already in progress, skipping duplicate request");
-                atomic_store_explicit(&state->reload_requested, false, memory_order_release);
-            } else {
-                log_info("Config changed, reloading...");
-                atomic_store_explicit(&state->reload_requested, false, memory_order_release);
-                
-                /* Step 1: Clear old resources for all outputs */
-                pthread_rwlock_wrlock(&state->output_list_lock);
-                struct output_state *output = state->outputs;
-                while (output) {
-                    /* Destroy old shader program before loading new one */
-                    if (output->live_shader_program != 0) {
-                        glDeleteProgram(output->live_shader_program);
-                        output->live_shader_program = 0;
-                    }
-                    /* Reset failure flags to allow retry */
-                    output->shader_load_failed = false;
-                    output = output->next;
-                }
-                pthread_rwlock_unlock(&state->output_list_lock);
-                
-                /* Step 2: Reload config file (this updates output configs) */
-                bool reload_ok = config_load(state, state->config_path);
-                
-                /* Step 3: Apply to all outputs and trigger re-initialization */
-                pthread_rwlock_wrlock(&state->output_list_lock);
-                output = state->outputs;
-                bool all_outputs_ok = true;
-                while (output) {
-                    /* Apply deferred config (loads shaders/images) */
-                    output_apply_deferred_config(output);
-                    
-                    /* Check if shader failed to load for SHADER type outputs */
-                    if (output->config->type == WALLPAPER_SHADER && output->live_shader_program == 0) {
-                        log_error("Output %s: Shader failed to load from '%s'", 
-                                 output->model, output->config->shader_path);
-                        all_outputs_ok = false;
-                    }
-                    
-                    /* Force redraw */
-                    output->needs_redraw = true;
-                    
-                    output = output->next;
-                }
-                pthread_rwlock_unlock(&state->output_list_lock);
-                
-                if (reload_ok && all_outputs_ok) {
-                    log_info("╔═══════════════════════════════════════════════════════════════╗");
-                    log_info("║ ✓ Config reloaded successfully!                              ║");
-                    log_info("║   Wallpapers/shaders have been updated                        ║");
-                    log_info("╚═══════════════════════════════════════════════════════════════╝");
-                } else {
-                    log_error("╔═══════════════════════════════════════════════════════════════╗");
-                    log_error("║ ✗ Config reload failed - check errors above                  ║");
-                    log_error("║   Fix config and save - hot-reload will retry automatically  ║");
-                    log_error("╚═══════════════════════════════════════════════════════════════╝");
-                }
-                
-                /* Release reload lock */
-                atomic_store(&reload_in_progress, false);
-            }
+            log_info("Config reload requested via signal, delegating to config_reload()...");
+            atomic_store_explicit(&state->reload_requested, false, memory_order_release);
+            
+            /* Use the comprehensive config_reload() function which handles:
+             * - Proper OpenGL context management
+             * - Complete resource cleanup (textures, VBOs, etc.)
+             * - Backup and rollback on failure
+             * - Thread-safe operations
+             * - Prevents race conditions with file watcher
+             */
+            config_reload(state);
         }
 
         /* Dispatch any events that were read */

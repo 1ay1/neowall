@@ -1616,7 +1616,8 @@ bool config_has_changed(struct neowall_state *state) {
 }
 
 /* Global flag to track if config reload is in progress
- * Used by both config_reload() and config watcher thread to prevent reload storms */
+ * Used by both config_reload() and config watcher thread to prevent reload storms
+ * Also referenced from eventloop.c to coordinate with signal-based reloads */
 atomic_bool reload_in_progress = ATOMIC_VAR_INIT(false);
 
 void config_reload(struct neowall_state *state) {
