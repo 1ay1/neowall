@@ -270,6 +270,12 @@ static void render_outputs(struct neowall_state *state) {
                         image_free(output->next_image);
                         output->next_image = NULL;
                     }
+                    
+                    /* Preload next wallpaper after transition completes */
+                    if (output->config->cycle && output->config->cycle_count > 1 && 
+                        output->config->type == WALLPAPER_IMAGE) {
+                        output_preload_next_wallpaper(output);
+                    }
                 }
                 
                 /* Reset needs_redraw unless we're in a transition or using a shader wallpaper */

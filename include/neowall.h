@@ -135,6 +135,12 @@ struct output_state {
     GLuint texture;
     GLuint next_texture;                /* For transitions */
     
+    /* Preloaded texture for smooth transitions (eliminates jitter) */
+    GLuint preload_texture;             /* Next texture to transition to */
+    struct image_data *preload_image;   /* Image data for preloaded texture */
+    char preload_path[MAX_PATH_LENGTH]; /* Path of preloaded image */
+    bool preload_ready;                 /* Is preload_texture ready for use? */
+    
     /* iChannel textures for shader inputs (dynamic count) */
     GLuint *channel_textures;           /* Dynamic array of channel textures */
     size_t channel_count;               /* Number of allocated channels */
@@ -304,6 +310,7 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
 void output_apply_deferred_config(struct output_state *output);
 void output_cycle_wallpaper(struct output_state *output);
 bool output_should_cycle(struct output_state *output, uint64_t current_time);
+void output_preload_next_wallpaper(struct output_state *output);
 
 /* Rendering */
 bool render_init_output(struct output_state *output);

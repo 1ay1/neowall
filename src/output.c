@@ -34,6 +34,12 @@ struct output_state *output_create(struct neowall_state *state,
     out->configured = false;
     out->needs_redraw = true;
     out->state = state;
+    
+    /* Initialize preload state */
+    out->preload_texture = 0;
+    out->preload_image = NULL;
+    out->preload_path[0] = '\0';
+    out->preload_ready = false;
 
     /* Create Wayland surface */
     out->surface = wl_compositor_create_surface(state->compositor);
@@ -121,6 +127,17 @@ void output_destroy(struct output_state *output) {
         image_free(output->next_image);
         output->next_image = NULL;
     }
+    
+    /* Free preload data */
+    if (output->preload_texture) {
+        render_destroy_texture(output->preload_texture);
+        output->preload_texture = 0;
+    }
+    
+    if (output->preload_image) {
+        image_free(output->preload_image);
+        output->preload_image = NULL;
+    }
 
     /* Destroy EGL surface */
     if (output->egl_surface != EGL_NO_SURFACE && output->state && output->state->egl_display != EGL_NO_DISPLAY) {
@@ -197,6 +214,99 @@ bool output_create_egl_surface(struct output_state *output) {
     return true;
 }
 
+/* Preload the next wallpaper texture to eliminate jitter during transitions */
+void output_preload_next_wallpaper(struct output_state *output) {
+    if (!output || !output->config) {
+        return;
+    }
+    
+    /* Only preload for cycling image wallpapers */
+    if (!output->config->cycle || output->config->cycle_count <= 1 || 
+        output->config->type != WALLPAPER_IMAGE) {
+        return;
+    }
+    
+    /* Calculate next index */
+    size_t next_index = (output->config->current_cycle_index + 1) % output->config->cycle_count;
+    
+    /* Get next path - protect with state mutex */
+    pthread_mutex_lock(&output->state->state_mutex);
+    if (!output->config->cycle_paths || next_index >= output->config->cycle_count) {
+        pthread_mutex_unlock(&output->state->state_mutex);
+        return;
+    }
+    
+    const char *next_path = output->config->cycle_paths[next_index];
+    
+    /* Check if already preloaded */
+    if (output->preload_ready && strcmp(output->preload_path, next_path) == 0) {
+        pthread_mutex_unlock(&output->state->state_mutex);
+        log_debug("Next wallpaper already preloaded: %s", next_path);
+        return;
+    }
+    
+    /* Copy path before releasing mutex */
+    char path_copy[MAX_PATH_LENGTH];
+    strncpy(path_copy, next_path, sizeof(path_copy) - 1);
+    path_copy[sizeof(path_copy) - 1] = '\0';
+    pthread_mutex_unlock(&output->state->state_mutex);
+    
+    log_debug("Preloading next wallpaper for output %s: %s",
+              output->model[0] ? output->model : "unknown", path_copy);
+    
+    /* Clean up old preload if exists */
+    if (output->preload_texture) {
+        render_destroy_texture(output->preload_texture);
+        output->preload_texture = 0;
+    }
+    if (output->preload_image) {
+        image_free(output->preload_image);
+        output->preload_image = NULL;
+    }
+    output->preload_ready = false;
+    
+    /* Load image with display-aware scaling */
+    struct image_data *new_image = image_load(path_copy, output->width, output->height, output->config->mode);
+    if (!new_image) {
+        log_error("Failed to preload wallpaper image: %s", path_copy);
+        return;
+    }
+    
+    /* Check EGL context is available */
+    if (!output->state || output->state->egl_display == EGL_NO_DISPLAY || 
+        output->state->egl_context == EGL_NO_CONTEXT || 
+        output->egl_surface == EGL_NO_SURFACE) {
+        log_debug("EGL not ready for preload, deferring");
+        image_free(new_image);
+        return;
+    }
+    
+    /* Make EGL context current before creating texture */
+    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
+                       output->egl_surface, output->state->egl_context)) {
+        log_error("Failed to make EGL context current for preload");
+        image_free(new_image);
+        return;
+    }
+    
+    /* Create GPU texture */
+    GLuint new_texture = render_create_texture(new_image);
+    if (new_texture == 0) {
+        log_error("Failed to create preload texture");
+        image_free(new_image);
+        return;
+    }
+    
+    /* Store preloaded texture and image */
+    output->preload_texture = new_texture;
+    output->preload_image = new_image;
+    strncpy(output->preload_path, path_copy, sizeof(output->preload_path) - 1);
+    output->preload_path[sizeof(output->preload_path) - 1] = '\0';
+    output->preload_ready = true;
+    
+    log_info("Preloaded next wallpaper: %s (texture=%u)", path_copy, new_texture);
+}
+
 void output_set_wallpaper(struct output_state *output, const char *path) {
     if (!output || !path) {
         log_error("Invalid parameters for output_set_wallpaper");
@@ -206,11 +316,35 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     log_info("Setting wallpaper for output %s: %s",
              output->model[0] ? output->model : "unknown", path);
 
-    /* Load new image with display-aware scaling */
-    struct image_data *new_image = image_load(path, output->width, output->height, output->config->mode);
-    if (!new_image) {
-        log_error("Failed to load wallpaper image: %s", path);
-        return;
+    /* Check if we have a preloaded texture for this path */
+    struct image_data *new_image = NULL;
+    GLuint new_texture = 0;
+    bool used_preload = false;
+    
+    if (output->preload_ready && strcmp(output->preload_path, path) == 0) {
+        /* Use preloaded texture - no blocking I/O! */
+        log_info("Using preloaded texture for %s (eliminates jitter)", path);
+        new_image = output->preload_image;
+        new_texture = output->preload_texture;
+        used_preload = true;
+        
+        /* Clear preload state (we're taking ownership) */
+        output->preload_image = NULL;
+        output->preload_texture = 0;
+        output->preload_ready = false;
+        output->preload_path[0] = '\0';
+    } else {
+        /* No preload available, load synchronously (may cause jitter) */
+        if (output->preload_ready) {
+            log_debug("Preloaded texture mismatch: wanted '%s', have '%s'", path, output->preload_path);
+        }
+        
+        /* Load new image with display-aware scaling */
+        new_image = image_load(path, output->width, output->height, output->config->mode);
+        if (!new_image) {
+            log_error("Failed to load wallpaper image: %s", path);
+            return;
+        }
     }
 
     /* Defensive checks before any EGL/GL operations */
@@ -284,7 +418,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         output->next_image = output->current_image;
         output->current_image = new_image;
 
-        /* Start transition */
+        /* Start transition - NOW with preloaded texture already in GPU! */
         output->transition_start_time = get_time_ms();
         output->transition_progress = 0.0f;
 
@@ -293,13 +427,20 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
             render_destroy_texture(output->next_texture);
         }
         output->next_texture = output->texture;
-        output->texture = render_create_texture(new_image);
         
-        log_info("Transition started: %s -> %s (type=%d '%s', duration=%.2fs)",
+        /* Use preloaded texture if available, otherwise create it now */
+        if (used_preload) {
+            output->texture = new_texture;
+        } else {
+            output->texture = render_create_texture(new_image);
+        }
+        
+        log_info("Transition started: %s -> %s (type=%d '%s', duration=%.2fs)%s",
                   output->config->path, path,
                   output->config->transition, 
                   transition_type_to_string(output->config->transition),
-                  output->config->transition_duration);
+                  output->config->transition_duration,
+                  used_preload ? " [PRELOADED]" : "");
     } else {
         /* No transition, just replace */
         if (output->current_image) {
@@ -307,13 +448,20 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         }
         output->current_image = new_image;
 
-        /* Recreate texture */
+        /* Use preloaded texture if available, otherwise create it now */
         if (output->texture) {
             render_destroy_texture(output->texture);
         }
-        output->texture = render_create_texture(new_image);
-        log_info("Wallpaper texture created successfully (texture=%u) for output %s", 
-                 output->texture, output->model[0] ? output->model : "unknown");
+        
+        if (used_preload) {
+            output->texture = new_texture;
+        } else {
+            output->texture = render_create_texture(new_image);
+        }
+        
+        log_info("Wallpaper texture created successfully (texture=%u) for output %s%s", 
+                 output->texture, output->model[0] ? output->model : "unknown",
+                 used_preload ? " [PRELOADED]" : "");
     }
 
     /* Update config path */
@@ -334,6 +482,11 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
 
     /* Mark for redraw */
     output->needs_redraw = true;
+    
+    /* Preload next wallpaper if cycling is enabled */
+    if (output->config->cycle && output->config->cycle_count > 1) {
+        output_preload_next_wallpaper(output);
+    }
 }
 
 /* Set live shader wallpaper */
