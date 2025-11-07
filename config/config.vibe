@@ -1,4 +1,4 @@
 default {
-  shader matrix_real.glsl
-  shader_speed 1.0
+  shader retro_wave.glsl
+  shader_speed 0.5
 }
