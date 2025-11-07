@@ -5,8 +5,7 @@
 #include <unistd.h>
 #include <time.h>
 #include "neowall.h"
-#include "../protocols/wlr-layer-shell-unstable-v1-client-protocol.h"
-#include "../protocols/xdg-shell-client-protocol.h"
+#include "compositor.h"
 
 /* Maximum retries and delay when waiting for compositor to be ready */
 #define COMPOSITOR_READY_MAX_RETRIES 5
@@ -123,15 +122,13 @@ static bool wait_for_outputs_configured(struct neowall_state *state) {
 }
 
 /* Layer surface listener callbacks */
-static void layer_surface_configure(void *data,
-                                    struct zwlr_layer_surface_v1 *layer_surface,
-                                    uint32_t serial, uint32_t width, uint32_t height) {
-    struct output_state *output = data;
-
-    zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
-
+/* Compositor surface configure callback */
+static void output_on_configure_callback(struct compositor_surface *surface,
+                                        int32_t width, int32_t height) {
+    struct output_state *output = surface->user_data;
+    
     bool dimensions_changed = false;
-    if (output->width != (int32_t)width || output->height != (int32_t)height) {
+    if (output->width != width || output->height != height) {
         output->width = width;
         output->height = height;
         output->needs_redraw = true;
@@ -141,8 +138,8 @@ static void layer_surface_configure(void *data,
                  output->model[0] ? output->model : "unknown", width, height);
 
         /* Recreate EGL surface with new dimensions */
-        if (output->egl_window) {
-            wl_egl_window_resize(output->egl_window, width, height, 0, 0);
+        if (output->compositor_surface && output->compositor_surface->egl_window) {
+            compositor_surface_resize_egl(output->compositor_surface, width, height);
             log_debug("Resized EGL window for output %s", output->model);
         } else {
             log_debug("No EGL window to resize for output %s, will be created later", output->model);
@@ -150,19 +147,20 @@ static void layer_surface_configure(void *data,
     }
 
     /* Apply deferred configuration if surface just became ready */
-    if (dimensions_changed && output->egl_surface != EGL_NO_SURFACE && output->egl_window) {
+    if (dimensions_changed && output->compositor_surface && 
+        output->compositor_surface->egl_surface != EGL_NO_SURFACE && 
+        output->compositor_surface->egl_window) {
         log_debug("Surface ready after configuration, applying deferred config for output %s",
                   output->model[0] ? output->model : "unknown");
         output_apply_deferred_config(output);
     }
 }
 
-static void layer_surface_closed(void *data,
-                                 struct zwlr_layer_surface_v1 *layer_surface) {
-    struct output_state *output = data;
-    (void)layer_surface;
+/* Compositor surface closed callback */
+static void output_on_closed_callback(struct compositor_surface *surface) {
+    struct output_state *output = surface->user_data;
 
-    log_info("Layer surface closed for output %s", output->model);
+    log_info("Compositor surface closed for output %s", output->model);
     
     /* CRITICAL: Must acquire write lock before destroying output and modifying list */
     struct neowall_state *state = output->state;
@@ -206,10 +204,7 @@ static void layer_surface_closed(void *data,
     }
 }
 
-static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
-    .configure = layer_surface_configure,
-    .closed = layer_surface_closed,
-};
+
 
 /* Registry listener callbacks */
 static void registry_handle_global(void *data, struct wl_registry *registry,
@@ -247,11 +242,8 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
             log_error("Failed to create output state");
             wl_output_destroy(output_obj);
         }
-    } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
-        state->layer_shell = wl_registry_bind(registry, name,
-                                             &zwlr_layer_shell_v1_interface, 1);
-        log_info("Bound to wlr-layer-shell");
     }
+    /* Note: wlr-layer-shell binding now handled by compositor abstraction layer */
 }
 
 static void registry_handle_global_remove(void *data, struct wl_registry *registry,
@@ -336,20 +328,24 @@ bool wayland_init(struct neowall_state *state) {
         return false;
     }
 
-    if (!state->layer_shell) {
-        log_error("wlr-layer-shell protocol not available");
-        log_error("Your compositor must support wlr-layer-shell-unstable-v1");
-        log_error("Supported compositors: Sway, Hyprland, river, etc.");
+    /* Initialize compositor abstraction layer */
+    log_debug("Initializing compositor backend...");
+    state->compositor_backend = compositor_backend_init(state);
+    if (!state->compositor_backend) {
+        log_error("Failed to initialize compositor backend");
+        log_error("No suitable backend found for your compositor");
         wayland_cleanup(state);
         return false;
     }
 
-    /* Configure layer surfaces for all outputs - use read lock for safe traversal */
+    log_info("Compositor backend initialized: %s", state->compositor_backend->name);
+
+    /* Configure compositor surfaces for all outputs - use read lock for safe traversal */
     pthread_rwlock_rdlock(&state->output_list_lock);
     struct output_state *output = state->outputs;
     while (output) {
-        if (!output_configure_layer_surface(output)) {
-            log_error("Failed to configure layer surface for output %s", output->model);
+        if (!output_configure_compositor_surface(output)) {
+            log_error("Failed to configure compositor surface for output %s", output->model);
         }
         output = output->next;
     }
@@ -385,12 +381,14 @@ void wayland_cleanup(struct neowall_state *state) {
     state->output_count = 0;
     pthread_rwlock_unlock(&state->output_list_lock);
 
-    /* Destroy Wayland objects */
-    if (state->layer_shell) {
-        zwlr_layer_shell_v1_destroy(state->layer_shell);
-        state->layer_shell = NULL;
+    /* Cleanup compositor backend */
+    if (state->compositor_backend) {
+        log_debug("Cleaning up compositor backend: %s", state->compositor_backend->name);
+        compositor_backend_cleanup(state->compositor_backend);
+        state->compositor_backend = NULL;
     }
 
+    /* Destroy Wayland objects */
     if (state->shm) {
         wl_shm_destroy(state->shm);
         state->shm = NULL;
@@ -414,49 +412,55 @@ void wayland_cleanup(struct neowall_state *state) {
     log_debug("Wayland cleanup complete");
 }
 
-/* Configure layer surface for an output */
-bool output_configure_layer_surface(struct output_state *output) {
-    if (!output || !output->surface) {
-        log_error("Invalid output or surface");
+/* Configure compositor surface for an output using abstraction layer */
+bool output_configure_compositor_surface(struct output_state *output) {
+    if (!output) {
+        log_error("Invalid output for surface configuration");
         return false;
     }
 
     struct neowall_state *state = output->state;
-
-    /* Create layer surface */
-    output->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-        state->layer_shell,
-        output->surface,
-        output->output,
-        ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
-        "neowall"
-    );
-
-    if (!output->layer_surface) {
-        log_error("Failed to create layer surface");
+    
+    if (!state->compositor_backend) {
+        log_error("No compositor backend available");
         return false;
     }
 
-    /* Configure layer surface */
-    zwlr_layer_surface_v1_set_size(output->layer_surface, 0, 0);
-    zwlr_layer_surface_v1_set_anchor(output->layer_surface,
-        ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
-        ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
-        ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
-        ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
-    zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, -1);
+    /* Create compositor surface using abstraction layer */
+    compositor_surface_config_t config = {
+        .layer = COMPOSITOR_LAYER_BACKGROUND,
+        .anchor = COMPOSITOR_ANCHOR_FILL,
+        .exclusive_zone = -1,
+        .keyboard_interactivity = false,
+        .width = 0,   /* Auto-size from compositor */
+        .height = 0,  /* Auto-size from compositor */
+        .output = output->output,
+    };
 
-    /* Add listener */
-    zwlr_layer_surface_v1_add_listener(output->layer_surface,
-                                       &layer_surface_listener, output);
+    output->compositor_surface = compositor_surface_create(state->compositor_backend, &config);
+    
+    if (!output->compositor_surface) {
+        log_error("Failed to create compositor surface for output %s", 
+                  output->model[0] ? output->model : "unknown");
+        return false;
+    }
+
+    /* Set callbacks for compositor events */
+    compositor_surface_set_callbacks(
+        output->compositor_surface,
+        output_on_configure_callback,
+        output_on_closed_callback,
+        output
+    );
 
     /* Commit surface to trigger configure event */
-    wl_surface_commit(output->surface);
+    compositor_surface_commit(output->compositor_surface);
     
     /* Force immediate flush to compositor - critical for autostart timing */
     wl_display_flush(state->display);
 
-    log_info("Layer surface configured and committed for output %s", output->model);
+    log_info("Compositor surface configured and committed for output %s", 
+             output->model[0] ? output->model : "unknown");
 
     return true;
 }

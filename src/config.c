@@ -12,6 +12,7 @@
 #include "vibe.h"
 #include "neowall.h"
 #include "config_access.h"
+#include "compositor.h"
 
 /* ============================================================================
  * CONFIGURATION PHILOSOPHY
@@ -1736,11 +1737,12 @@ void config_reload(struct neowall_state *state) {
     bool context_made_current = false;
     struct output_state *first_valid_output = state->outputs;
     while (first_valid_output) {
-        if (first_valid_output->egl_surface != EGL_NO_SURFACE &&
+        if (first_valid_output->compositor_surface &&
+            first_valid_output->compositor_surface->egl_surface != EGL_NO_SURFACE &&
             state->egl_display != EGL_NO_DISPLAY &&
             state->egl_context != EGL_NO_CONTEXT) {
-            if (eglMakeCurrent(state->egl_display, first_valid_output->egl_surface,
-                              first_valid_output->egl_surface, state->egl_context)) {
+            if (eglMakeCurrent(state->egl_display, first_valid_output->compositor_surface->egl_surface,
+                              first_valid_output->compositor_surface->egl_surface, state->egl_context)) {
                 context_made_current = true;
                 log_debug("Made EGL context current on %s for cleanup operations",
                          first_valid_output->model[0] ? first_valid_output->model : "unknown");
@@ -1763,10 +1765,11 @@ void config_reload(struct neowall_state *state) {
          * If it fails, skip GL operations for this output */
         bool can_do_gl_ops = context_made_current;  /* Use global context if available */
         
-        if (!context_made_current && output->egl_surface != EGL_NO_SURFACE) {
+        if (!context_made_current && output->compositor_surface &&
+            output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
             /* Try to make this specific output's context current */
-            if (eglMakeCurrent(state->egl_display, output->egl_surface,
-                              output->egl_surface, state->egl_context)) {
+            if (eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
+                              output->compositor_surface->egl_surface, state->egl_context)) {
                 can_do_gl_ops = true;
             } else {
                 log_error("Failed to make EGL context current for %s: 0x%x", 

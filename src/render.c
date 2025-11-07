@@ -9,6 +9,7 @@
 #include "transitions.h"
 #include "shader.h"
 #include "textures.h"
+#include "compositor.h"
 
 /* Note: Each transition manages its own shader sources in src/transitions/ */
 
@@ -521,8 +522,8 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
     }
     
     /* CRITICAL: Ensure EGL context is current before GL operations */
-    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                       output->egl_surface, output->state->egl_context)) {
+    if (!output->compositor_surface || !eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
+                       output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for texture update");
         return false;
     }
@@ -610,14 +611,14 @@ bool render_frame_shader(struct output_state *output) {
         return false;
     }
     
-    if (output->egl_surface == EGL_NO_SURFACE) {
+    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         log_error("EGL surface not available for shader rendering (display may be disconnected)");
         return false;
     }
     
     /* CRITICAL: Ensure EGL context is current on this thread before any GL operations */
-    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                       output->egl_surface, output->state->egl_context)) {
+    if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
+                       output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for shader rendering");
         return false;
     }
@@ -789,9 +790,9 @@ bool render_frame_shader(struct output_state *output) {
             /* Phase 2: Switch shader at blackout point, then fade in */
             if (output->pending_shader_path[0] != '\0') {
                 /* Ensure EGL context is current before compiling shader */
-                if (output->egl_surface != EGL_NO_SURFACE && output->state) {
-                    if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                                       output->egl_surface, output->state->egl_context)) {
+                if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE && output->state) {
+                    if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
+                                       output->compositor_surface->egl_surface, output->state->egl_context)) {
                         log_error("Failed to make EGL context current during shader swap: 0x%x", eglGetError());
                         output->shader_fade_start_time = 0;
                         output->pending_shader_path[0] = '\0';
@@ -942,9 +943,9 @@ bool render_frame(struct output_state *output) {
     
     /* CRITICAL: Ensure EGL context is current before any GL operations */
     if (output->state && output->state->egl_display != EGL_NO_DISPLAY &&
-        output->egl_surface != EGL_NO_SURFACE) {
-        if (!eglMakeCurrent(output->state->egl_display, output->egl_surface,
-                           output->egl_surface, output->state->egl_context)) {
+        output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+        if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
+                           output->compositor_surface->egl_surface, output->state->egl_context)) {
             log_error("Failed to make EGL context current for rendering");
             return false;
         }
@@ -957,7 +958,7 @@ bool render_frame(struct output_state *output) {
         return false;
     }
     
-    if (output->egl_surface == EGL_NO_SURFACE) {
+    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         log_error("EGL surface not available for rendering (display may be disconnected)");
         return false;
     }
