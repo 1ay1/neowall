@@ -632,16 +632,35 @@ static bool create_config_directory(void) {
         snprintf(config_dir, sizeof(config_dir), "%s/.config/neowall", home);
     }
 
-    struct stat st;
-    if (stat(config_dir, &st) == -1) {
-        if (mkdir(config_dir, 0755) == -1) {
-            log_error("Failed to create config directory %s: %s",
-                     config_dir, strerror(errno));
-            return false;
+    /* Create directories recursively */
+    char tmp[MAX_PATH_LENGTH];
+    char *p = NULL;
+    snprintf(tmp, sizeof(tmp), "%s", config_dir);
+
+    for (p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(tmp, 0755) == -1 && errno != EEXIST) {
+                log_error("Failed to create directory %s: %s", tmp, strerror(errno));
+                return false;
+            }
+            *p = '/';
         }
-        log_info("Created config directory: %s", config_dir);
     }
 
+    struct stat st;
+    bool created_final_dir = false;
+    if (stat(config_dir, &st) == -1) {
+        if (mkdir(tmp, 0755) == -1) {
+            log_error("Failed to create config directory %s: %s", tmp, strerror(errno));
+            return false;
+        }
+        created_final_dir = true;
+    }
+
+    if (created_final_dir) {
+        log_info("Created config directory: %s", config_dir);
+    }
     return true;
 }
 

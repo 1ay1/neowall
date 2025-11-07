@@ -357,23 +357,23 @@ DESTDIR ?=
 install: $(TARGET)
 	@echo "Installing NeoWall..."
 	install -Dm755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/$(PROJECT)
-	install -Dm644 config/config.vibe $(DESTDIR)/usr/share/$(PROJECT)/config.vibe
-	install -Dm644 config/neowall.vibe $(DESTDIR)/usr/share/$(PROJECT)/neowall.vibe
-	@mkdir -p $(DESTDIR)/usr/share/$(PROJECT)/shaders
+	install -Dm644 config/config.vibe $(DESTDIR)$(PREFIX)/share/$(PROJECT)/config.vibe
+	install -Dm644 config/neowall.vibe $(DESTDIR)$(PREFIX)/share/$(PROJECT)/neowall.vibe
+	@mkdir -p $(DESTDIR)$(PREFIX)/share/$(PROJECT)/shaders
 	@for shader in examples/shaders/*.glsl; do \
-		install -Dm644 $$shader $(DESTDIR)/usr/share/$(PROJECT)/shaders/$$(basename $$shader); \
+		install -Dm644 $$shader $(DESTDIR)$(PREFIX)/share/$(PROJECT)/shaders/$$(basename $$shader); \
 	done
 	@echo "Installation complete"
 	@echo "Installed to: $(DESTDIR)$(PREFIX)/bin/$(PROJECT)"
-	@echo "Config files: /usr/share/$(PROJECT)/"
-	@echo "Shaders: /usr/share/$(PROJECT)/shaders/"
+	@echo "Config files: $(PREFIX)/share/$(PROJECT)/"
+	@echo "Shaders: $(PREFIX)/share/$(PROJECT)/shaders/"
 	@echo "On first run, files will be copied to ~/.config/neowall/"
 
 # Uninstall
 uninstall:
 	@echo "Uninstalling NeoWall..."
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(PROJECT)
-	rm -rf /usr/share/$(PROJECT)
+	rm -rf $(DESTDIR)$(PREFIX)/share/$(PROJECT)
 	@echo "Uninstalled"
 
 # ============================================================================
