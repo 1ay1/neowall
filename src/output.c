@@ -1161,15 +1161,77 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         }
     }
 
-    /* Restore cycle index from previous state if cycling */
+    /* Synchronize cycle index with other outputs that have the same configuration */
     if (output->config_slots[inactive].config.cycle && output->config_slots[inactive].config.cycle_count > 0) {
-        int restored_index = restore_cycle_index_from_state(output->model[0] ? output->model : "unknown");
-        if (restored_index >= 0 && restored_index < (int)output->config_slots[inactive].config.cycle_count) {
-            output->config_slots[inactive].config.current_cycle_index = (size_t)restored_index;
-            log_info("Restored cycle index %d for output %s", restored_index, 
-                     output->model[0] ? output->model : "unknown");
-        } else {
+        bool index_set = false;
+        
+        /* PRIORITY 1: Check if another output with same config exists to synchronize with */
+        struct output_state *sync_output = output->state->outputs;
+        while (sync_output && !index_set) {
+            /* Skip self */
+            if (sync_output == output) {
+                sync_output = sync_output->next;
+                continue;
+            }
+            
+            /* Check both active and inactive slots of other outputs for matching config */
+            for (int check_slot = 0; check_slot < 2 && !index_set; check_slot++) {
+                struct wallpaper_config *check_config = &sync_output->config_slots[check_slot].config;
+                
+                /* Skip if slot is not valid */
+                if (!sync_output->config_slots[check_slot].valid) {
+                    continue;
+                }
+                
+                /* Check if this slot has the same cycle configuration */
+                if (check_config->cycle && 
+                    check_config->cycle_count == output->config_slots[inactive].config.cycle_count &&
+                    check_config->cycle_paths && 
+                    output->config_slots[inactive].config.cycle_paths) {
+                    
+                    /* Verify all paths match */
+                    bool same_config = true;
+                    for (size_t i = 0; i < output->config_slots[inactive].config.cycle_count && same_config; i++) {
+                        if (strcmp(check_config->cycle_paths[i], 
+                                   output->config_slots[inactive].config.cycle_paths[i]) != 0) {
+                            same_config = false;
+                        }
+                    }
+                    
+                    if (same_config) {
+                        /* Synchronize with this config's current index */
+                        output->config_slots[inactive].config.current_cycle_index = check_config->current_cycle_index;
+                        log_info("Synchronized cycle index %zu for output %s with %s slot %d (same config)",
+                                output->config_slots[inactive].config.current_cycle_index,
+                                output->model[0] ? output->model : "unknown",
+                                sync_output->model[0] ? sync_output->model : "unknown",
+                                check_slot);
+                        index_set = true;
+                        break;
+                    }
+                }
+            }
+            
+            sync_output = sync_output->next;
+        }
+        
+        /* PRIORITY 2: If no sync found, try to restore from saved state */
+        if (!index_set) {
+            int restored_index = restore_cycle_index_from_state(output->model[0] ? output->model : "unknown");
+            if (restored_index >= 0 && restored_index < (int)output->config_slots[inactive].config.cycle_count) {
+                output->config_slots[inactive].config.current_cycle_index = (size_t)restored_index;
+                log_info("Restored cycle index %d for output %s from state file", 
+                         restored_index, 
+                         output->model[0] ? output->model : "unknown");
+                index_set = true;
+            }
+        }
+        
+        /* PRIORITY 3: If still not set, default to 0 */
+        if (!index_set) {
             output->config_slots[inactive].config.current_cycle_index = 0;
+            log_info("Starting cycle at index 0 for output %s (no previous state or sync)",
+                     output->model[0] ? output->model : "unknown");
         }
     }
 

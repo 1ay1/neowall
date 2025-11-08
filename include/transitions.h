@@ -17,7 +17,24 @@ struct transition {
 void transitions_init(void);
 bool transition_render(struct output_state *output, enum transition_type type, float progress);
 
-/* Common transition helper functions (DRY) */
+/* Transition context for managing OpenGL state across draws */
+typedef struct {
+    struct output_state *output;
+    GLuint program;
+    GLint pos_attrib;
+    GLint tex_attrib;
+    float vertices[16];
+    bool blend_enabled;
+    bool error_occurred;
+} transition_context_t;
+
+/* High-level transition API - abstracts OpenGL state management */
+bool transition_begin(transition_context_t *ctx, struct output_state *output, GLuint program);
+bool transition_draw_textured_quad(transition_context_t *ctx, GLuint texture, 
+                                    float alpha, const float *custom_vertices);
+void transition_end(transition_context_t *ctx);
+
+/* Low-level helper functions (for advanced use) */
 void transition_setup_fullscreen_quad(GLuint vbo, float vertices[16]);
 void transition_bind_texture_for_transition(GLuint texture, GLenum texture_unit);
 void transition_setup_common_attributes(GLuint program, GLuint vbo);

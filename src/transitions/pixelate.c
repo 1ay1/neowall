@@ -141,6 +141,9 @@ bool transition_pixelate_render(struct output_state *output, float progress) {
     log_debug("Pixelate transition rendering: progress=%.2f, program=%u", 
              progress, output->pixelate_program);
 
+    /* Clear any previous OpenGL errors */
+    while (glGetError() != GL_NO_ERROR);
+
     /* Set viewport */
     glViewport(0, 0, output->width, output->height);
 

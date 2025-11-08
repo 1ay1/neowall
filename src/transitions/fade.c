@@ -49,9 +49,9 @@ bool shader_create_fade_program(GLuint *program) {
 /**
  * Fade Transition
  * 
- * Smoothly crossfades between old and new wallpapers using alpha blending.
- * Renders old image at full opacity, then renders new image on top with
- * increasing alpha based on transition progress.
+ * Classic crossfade effect where the new wallpaper gradually appears
+ * over the old wallpaper. Both images maintain their display mode
+ * throughout the transition.
  * 
  * @param output Output state containing images and textures
  * @param progress Transition progress (0.0 to 1.0)
@@ -77,91 +77,31 @@ bool transition_fade_render(struct output_state *output, float progress) {
     log_debug("Fade transition rendering: progress=%.2f, program=%u", 
              progress, output->program);
 
-    /* Set viewport */
-    glViewport(0, 0, output->width, output->height);
-
-    /* Clear screen */
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    /* Use shader program */
-    glUseProgram(output->program);
-
-    /* Get uniform locations */
-    GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
-    GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
-
-    /* Enable blending */
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    /* Setup fullscreen quad using DRY helper */
-    float vertices[16];
-    transition_setup_fullscreen_quad(output->vbo, vertices);
-    
-    /* Setup vertex attributes using DRY helper */
-    transition_setup_common_attributes(output->program, output->vbo);
-
-    /* Bind old texture (transitioning from) using DRY helper */
-    transition_bind_texture_for_transition(output->next_texture, GL_TEXTURE0);
-    if (tex_uniform >= 0) {
-        glUniform1i(tex_uniform, 0);
+    /* Initialize transition context - handles all OpenGL state setup */
+    transition_context_t ctx;
+    if (!transition_begin(&ctx, output, output->program)) {
+        return false;
     }
 
-    /* Set old image to full opacity */
-    if (alpha_uniform >= 0) {
-        glUniform1f(alpha_uniform, 1.0f);
+    /* Draw old image at full opacity */
+    if (!transition_draw_textured_quad(&ctx, output->next_texture, 1.0f, NULL)) {
+        transition_end(&ctx);
+        return false;
     }
 
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-    /* Bind new texture (transitioning to) using DRY helper */
-    transition_bind_texture_for_transition(output->texture, GL_TEXTURE0);
-    
-    if (tex_uniform >= 0) {
-        glUniform1i(tex_uniform, 0);
-    }
-
-    /* Set new image alpha based on transition progress */
-    if (alpha_uniform >= 0) {
-        glUniform1f(alpha_uniform, progress);
+    /* Draw new image with alpha based on progress (crossfade effect) */
+    if (!transition_draw_textured_quad(&ctx, output->texture, progress, NULL)) {
+        transition_end(&ctx);
+        return false;
     }
 
     /* Disable alpha channel writes - force opaque output */
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-    /* Re-enable alpha channel writes */
+    /* Re-enable alpha channel writes after transition */
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-    /* Clean up */
-    glDisable(GL_BLEND);
-    
-    /* Disable vertex attributes */
-    GLint pos_attrib_cleanup = glGetAttribLocation(output->program, "position");
-    GLint tex_attrib_cleanup = glGetAttribLocation(output->program, "texcoord");
-    
-    if (pos_attrib_cleanup >= 0) {
-        glDisableVertexAttribArray(pos_attrib_cleanup);
-    }
-    if (tex_attrib_cleanup >= 0) {
-        glDisableVertexAttribArray(tex_attrib_cleanup);
-    }
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glUseProgram(0);
-
-    /* Check for errors */
-    GLenum error = glGetError();
-    if (error != GL_NO_ERROR) {
-        log_error("OpenGL error during fade transition: 0x%x", error);
-        return false;
-    }
-
-    log_debug("Fade transition frame rendered successfully");
-    output->needs_redraw = true;
-    output->frames_rendered++;
-
+    /* Clean up and return - handles all OpenGL state cleanup */
+    transition_end(&ctx);
     return true;
 }

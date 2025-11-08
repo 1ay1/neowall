@@ -248,7 +248,18 @@ const char *get_state_file_path(void) {
     return state_path;
 }
 
-/* Write current wallpaper state */
+/* Structure to hold output state data */
+typedef struct {
+    char output_name[256];
+    char wallpaper_path[MAX_PATH_LENGTH];
+    char mode[64];
+    int cycle_index;
+    int cycle_total;
+    char status[128];
+    long timestamp;
+} output_state_entry_t;
+
+/* Write current wallpaper state for multi-monitor support */
 bool write_wallpaper_state(const char *output_name, const char *wallpaper_path, 
                            const char *mode, int cycle_index, int cycle_total,
                            const char *status) {
@@ -288,23 +299,123 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
         }
     }
     
-    FILE *fp = fopen(state_path, "w");
+    /* Read existing states from file */
+    output_state_entry_t states[MAX_OUTPUTS];
+    int state_count = 0;
+    bool found_output = false;
     
-    if (!fp) {
+    FILE *fp_read = fopen(state_path, "r");
+    if (fp_read) {
+        char line[MAX_PATH_LENGTH];
+        output_state_entry_t current_entry = {0};
+        bool reading_entry = false;
+        
+        while (fgets(line, sizeof(line), fp_read)) {
+            line[strcspn(line, "\n")] = 0;
+            
+            if (strncmp(line, "[output]", 8) == 0) {
+                /* Save previous entry if exists */
+                if (reading_entry && current_entry.output_name[0] != '\0') {
+                    if (state_count < MAX_OUTPUTS) {
+                        states[state_count++] = current_entry;
+                    }
+                }
+                /* Start new entry */
+                memset(&current_entry, 0, sizeof(current_entry));
+                reading_entry = true;
+            } else if (reading_entry) {
+                if (strncmp(line, "name=", 5) == 0) {
+                    size_t len = strlen(line + 5);
+                    if (len > sizeof(current_entry.output_name) - 1) len = sizeof(current_entry.output_name) - 1;
+                    memcpy(current_entry.output_name, line + 5, len);
+                    current_entry.output_name[len] = '\0';
+                } else if (strncmp(line, "wallpaper=", 10) == 0) {
+                    size_t len = strlen(line + 10);
+                    if (len > sizeof(current_entry.wallpaper_path) - 1) len = sizeof(current_entry.wallpaper_path) - 1;
+                    memcpy(current_entry.wallpaper_path, line + 10, len);
+                    current_entry.wallpaper_path[len] = '\0';
+                } else if (strncmp(line, "mode=", 5) == 0) {
+                    size_t len = strlen(line + 5);
+                    if (len > sizeof(current_entry.mode) - 1) len = sizeof(current_entry.mode) - 1;
+                    memcpy(current_entry.mode, line + 5, len);
+                    current_entry.mode[len] = '\0';
+                } else if (strncmp(line, "cycle_index=", 12) == 0) {
+                    current_entry.cycle_index = atoi(line + 12);
+                } else if (strncmp(line, "cycle_total=", 12) == 0) {
+                    current_entry.cycle_total = atoi(line + 12);
+                } else if (strncmp(line, "status=", 7) == 0) {
+                    size_t len = strlen(line + 7);
+                    if (len > sizeof(current_entry.status) - 1) len = sizeof(current_entry.status) - 1;
+                    memcpy(current_entry.status, line + 7, len);
+                    current_entry.status[len] = '\0';
+                } else if (strncmp(line, "timestamp=", 10) == 0) {
+                    current_entry.timestamp = atol(line + 10);
+                }
+            }
+        }
+        
+        /* Save last entry */
+        if (reading_entry && current_entry.output_name[0] != '\0') {
+            if (state_count < MAX_OUTPUTS) {
+                states[state_count++] = current_entry;
+            }
+        }
+        
+        fclose(fp_read);
+    }
+    
+    /* Update or add the current output's state */
+    for (int i = 0; i < state_count; i++) {
+        if (output_name && strcmp(states[i].output_name, output_name) == 0) {
+            /* Update existing entry */
+            strncpy(states[i].wallpaper_path, wallpaper_path ? wallpaper_path : "none", 
+                    sizeof(states[i].wallpaper_path) - 1);
+            strncpy(states[i].mode, mode ? mode : "fill", sizeof(states[i].mode) - 1);
+            states[i].cycle_index = cycle_index;
+            states[i].cycle_total = cycle_total;
+            strncpy(states[i].status, status ? status : "active", sizeof(states[i].status) - 1);
+            states[i].timestamp = (long)time(NULL);
+            found_output = true;
+            break;
+        }
+    }
+    
+    /* Add new entry if not found */
+    if (!found_output && state_count < MAX_OUTPUTS) {
+        strncpy(states[state_count].output_name, output_name ? output_name : "unknown", 
+                sizeof(states[state_count].output_name) - 1);
+        strncpy(states[state_count].wallpaper_path, wallpaper_path ? wallpaper_path : "none", 
+                sizeof(states[state_count].wallpaper_path) - 1);
+        strncpy(states[state_count].mode, mode ? mode : "fill", sizeof(states[state_count].mode) - 1);
+        states[state_count].cycle_index = cycle_index;
+        states[state_count].cycle_total = cycle_total;
+        strncpy(states[state_count].status, status ? status : "active", 
+                sizeof(states[state_count].status) - 1);
+        states[state_count].timestamp = (long)time(NULL);
+        state_count++;
+    }
+    
+    /* Write all states back to file */
+    FILE *fp_write = fopen(state_path, "w");
+    if (!fp_write) {
         log_error("Failed to write state file %s: %s", state_path, strerror(errno));
         pthread_mutex_unlock(&state_file_mutex);
         return false;
     }
     
-    fprintf(fp, "output=%s\n", output_name ? output_name : "unknown");
-    fprintf(fp, "wallpaper=%s\n", wallpaper_path ? wallpaper_path : "none");
-    fprintf(fp, "mode=%s\n", mode ? mode : "fill");
-    fprintf(fp, "cycle_index=%d\n", cycle_index);
-    fprintf(fp, "cycle_total=%d\n", cycle_total);
-    fprintf(fp, "status=%s\n", status ? status : "active");
-    fprintf(fp, "timestamp=%ld\n", (long)time(NULL));
+    for (int i = 0; i < state_count; i++) {
+        fprintf(fp_write, "[output]\n");
+        fprintf(fp_write, "name=%s\n", states[i].output_name);
+        fprintf(fp_write, "wallpaper=%s\n", states[i].wallpaper_path);
+        fprintf(fp_write, "mode=%s\n", states[i].mode);
+        fprintf(fp_write, "cycle_index=%d\n", states[i].cycle_index);
+        fprintf(fp_write, "cycle_total=%d\n", states[i].cycle_total);
+        fprintf(fp_write, "status=%s\n", states[i].status);
+        fprintf(fp_write, "timestamp=%ld\n", states[i].timestamp);
+        fprintf(fp_write, "\n");
+    }
     
-    fclose(fp);
+    fclose(fp_write);
     pthread_mutex_unlock(&state_file_mutex);
     return true;
 }
@@ -320,29 +431,37 @@ int restore_cycle_index_from_state(const char *output_name) {
     }
     
     char line[MAX_PATH_LENGTH];
-    char saved_output[256] = "";
+    char current_output[256] = "";
     int cycle_index = 0;
+    bool in_matching_output = false;
     
     while (fgets(line, sizeof(line), fp)) {
         /* Remove newline */
         line[strcspn(line, "\n")] = 0;
         
-        if (strncmp(line, "output=", 7) == 0) {
-            size_t len = strlen(line + 7);
-            if (len >= sizeof(saved_output)) {
-                len = sizeof(saved_output) - 1;
+        if (strncmp(line, "[output]", 8) == 0) {
+            /* Start of new output section */
+            in_matching_output = false;
+            current_output[0] = '\0';
+        } else if (strncmp(line, "name=", 5) == 0) {
+            /* Check if this is the output we're looking for */
+            size_t len = strlen(line + 5);
+            if (len > sizeof(current_output) - 1) len = sizeof(current_output) - 1;
+            memcpy(current_output, line + 5, len);
+            current_output[len] = '\0';
+            if (output_name && strcmp(current_output, output_name) == 0) {
+                in_matching_output = true;
             }
-            memcpy(saved_output, line + 7, len);
-            saved_output[len] = '\0';
-        } else if (strncmp(line, "cycle_index=", 12) == 0) {
+        } else if (in_matching_output && strncmp(line, "cycle_index=", 12) == 0) {
             cycle_index = atoi(line + 12);
+            /* Found it, can stop reading */
+            break;
         }
     }
     
     fclose(fp);
     
-    /* Only restore index if output matches */
-    if (output_name && saved_output[0] != '\0' && strcmp(output_name, saved_output) == 0) {
+    if (in_matching_output) {
         log_info("Restored cycle index %d for output %s from state", cycle_index, output_name);
         return cycle_index;
     }
@@ -350,7 +469,7 @@ int restore_cycle_index_from_state(const char *output_name) {
     return 0;
 }
 
-/* Read and display current wallpaper state */
+/* Read and display current wallpaper state for all outputs */
 bool read_wallpaper_state(void) {
     const char *state_path = get_state_file_path();
     FILE *fp = fopen(state_path, "r");
@@ -362,60 +481,96 @@ bool read_wallpaper_state(void) {
     }
     
     char line[MAX_PATH_LENGTH];
-    char output[256] = "unknown";
-    char wallpaper[MAX_PATH_LENGTH] = "none";
-    char mode[64] = "unknown";
-    char status[256] = "unknown";
-    int cycle_index = 0;
-    int cycle_total = 0;
-    long timestamp = 0;
+    output_state_entry_t current_entry = {0};
+    bool reading_entry = false;
+    int output_count = 0;
+    
+    printf("Current wallpaper state:\n");
     
     while (fgets(line, sizeof(line), fp)) {
         /* Remove newline */
         line[strcspn(line, "\n")] = 0;
         
-        if (strncmp(line, "output=", 7) == 0) {
-            strncpy(output, line + 7, sizeof(output) - 1);
-            output[sizeof(output) - 1] = '\0';
-        } else if (strncmp(line, "wallpaper=", 10) == 0) {
-            strncpy(wallpaper, line + 10, sizeof(wallpaper) - 1);
-            wallpaper[sizeof(wallpaper) - 1] = '\0';
-        } else if (strncmp(line, "mode=", 5) == 0) {
-            strncpy(mode, line + 5, sizeof(mode) - 1);
-            mode[sizeof(mode) - 1] = '\0';
-        } else if (strncmp(line, "cycle_index=", 12) == 0) {
-            cycle_index = atoi(line + 12);
-        } else if (strncmp(line, "cycle_total=", 12) == 0) {
-            cycle_total = atoi(line + 12);
-        } else if (strncmp(line, "status=", 7) == 0) {
-            strncpy(status, line + 7, sizeof(status) - 1);
-            status[sizeof(status) - 1] = '\0';
-        } else if (strncmp(line, "timestamp=", 10) == 0) {
-            timestamp = atol(line + 10);
+        if (strncmp(line, "[output]", 8) == 0) {
+            /* Display previous entry if exists */
+            if (reading_entry && current_entry.output_name[0] != '\0') {
+                printf("\n  Output:    %s\n", current_entry.output_name);
+                printf("  Wallpaper: %s\n", current_entry.wallpaper_path);
+                printf("  Mode:      %s\n", current_entry.mode);
+                printf("  Status:    %s\n", current_entry.status);
+                if (current_entry.cycle_total > 0) {
+                    printf("  Cycling:   %d/%d\n", current_entry.cycle_index + 1, current_entry.cycle_total);
+                }
+                if (current_entry.timestamp > 0) {
+                    char time_str[64];
+                    struct tm *tm_info = localtime(&current_entry.timestamp);
+                    if (tm_info) {
+                        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+                        printf("  Updated:   %s\n", time_str);
+                    }
+                }
+                output_count++;
+            }
+            /* Start new entry */
+            memset(&current_entry, 0, sizeof(current_entry));
+            reading_entry = true;
+        } else if (reading_entry) {
+            if (strncmp(line, "name=", 5) == 0) {
+                size_t len = strlen(line + 5);
+                if (len > sizeof(current_entry.output_name) - 1) len = sizeof(current_entry.output_name) - 1;
+                memcpy(current_entry.output_name, line + 5, len);
+                current_entry.output_name[len] = '\0';
+            } else if (strncmp(line, "wallpaper=", 10) == 0) {
+                size_t len = strlen(line + 10);
+                if (len > sizeof(current_entry.wallpaper_path) - 1) len = sizeof(current_entry.wallpaper_path) - 1;
+                memcpy(current_entry.wallpaper_path, line + 10, len);
+                current_entry.wallpaper_path[len] = '\0';
+            } else if (strncmp(line, "mode=", 5) == 0) {
+                size_t len = strlen(line + 5);
+                if (len > sizeof(current_entry.mode) - 1) len = sizeof(current_entry.mode) - 1;
+                memcpy(current_entry.mode, line + 5, len);
+                current_entry.mode[len] = '\0';
+            } else if (strncmp(line, "cycle_index=", 12) == 0) {
+                current_entry.cycle_index = atoi(line + 12);
+            } else if (strncmp(line, "cycle_total=", 12) == 0) {
+                current_entry.cycle_total = atoi(line + 12);
+            } else if (strncmp(line, "status=", 7) == 0) {
+                size_t len = strlen(line + 7);
+                if (len > sizeof(current_entry.status) - 1) len = sizeof(current_entry.status) - 1;
+                memcpy(current_entry.status, line + 7, len);
+                current_entry.status[len] = '\0';
+            } else if (strncmp(line, "timestamp=", 10) == 0) {
+                current_entry.timestamp = atol(line + 10);
+            }
         }
+    }
+    
+    /* Display last entry */
+    if (reading_entry && current_entry.output_name[0] != '\0') {
+        printf("\n  Output:    %s\n", current_entry.output_name);
+        printf("  Wallpaper: %s\n", current_entry.wallpaper_path);
+        printf("  Mode:      %s\n", current_entry.mode);
+        printf("  Status:    %s\n", current_entry.status);
+        if (current_entry.cycle_total > 0) {
+            printf("  Cycling:   %d/%d\n", current_entry.cycle_index + 1, current_entry.cycle_total);
+        }
+        if (current_entry.timestamp > 0) {
+            char time_str[64];
+            struct tm *tm_info = localtime(&current_entry.timestamp);
+            if (tm_info) {
+                strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+                printf("  Updated:   %s\n", time_str);
+            }
+        }
+        output_count++;
     }
     
     fclose(fp);
     
-    /* Display state */
-    printf("NeoWall Status:\n");
-    printf("  Output: %s\n", output);
-    printf("  Wallpaper: %s\n", wallpaper);
-    printf("  Mode: %s\n", mode);
-    if (cycle_total > 0) {
-        printf("  Cycling: %d/%d (%s)\n", cycle_index + 1, cycle_total, status);
+    if (output_count == 0) {
+        printf("\n  No outputs configured.\n");
     } else {
-        printf("  Cycling: disabled (single wallpaper)\n");
-        if (strcmp(status, "active") != 0 && strcmp(status, "unknown") != 0) {
-            printf("  Note: %s\n", status);
-        }
-    }
-    if (timestamp > 0) {
-        time_t ts = (time_t)timestamp;
-        char time_str[64];
-        struct tm *tm_info = localtime(&ts);
-        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
-        printf("  Last updated: %s\n", time_str);
+        printf("\nTotal outputs: %d\n", output_count);
     }
     
     return true;

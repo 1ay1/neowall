@@ -104,7 +104,7 @@ static void render_outputs(struct neowall_state *state) {
         return;
     }
     
-    /* Check if there are any pending next requests - process ONE globally per frame to ensure rendering */
+    /* Check if there are any pending next requests - cycle ALL outputs with matching configs */
     int next_count = atomic_load_explicit(&state->next_requested, memory_order_acquire);
     bool processed_next = false;
     bool has_cycleable_output = false;
@@ -133,14 +133,44 @@ static void render_outputs(struct neowall_state *state) {
 
     struct output_state *output = state->outputs;
     while (output) {
-        /* Handle next wallpaper request - ONE total per frame (ensures each change is actually rendered) */
+        /* Handle next wallpaper request - cycle ALL outputs with same config for synchronization */
         if (next_count > 0 && !processed_next && output->config->cycle && output->config->cycle_count > 0) {
-            log_debug("Cycling to next wallpaper for output %s (%d requests remaining)",
-                     output->model[0] ? output->model : "unknown", next_count - 1);
-            output_cycle_wallpaper(output);
+            /* Cycle this output and all others with matching configuration */
+            struct output_state *sync_output = output;
+            int cycled_count = 0;
+            
+            while (sync_output) {
+                /* Check if this output has the same cycle configuration */
+                bool same_config = (sync_output->config->cycle && 
+                                   sync_output->config->cycle_count == output->config->cycle_count);
+                
+                /* Also verify the paths match if both have cycle paths */
+                if (same_config && sync_output->config->cycle_paths && output->config->cycle_paths) {
+                    same_config = true;
+                    for (size_t i = 0; i < output->config->cycle_count && same_config; i++) {
+                        if (strcmp(sync_output->config->cycle_paths[i], output->config->cycle_paths[i]) != 0) {
+                            same_config = false;
+                        }
+                    }
+                }
+                
+                if (same_config) {
+                    log_debug("Cycling to next wallpaper for output %s (synchronized)",
+                             sync_output->model[0] ? sync_output->model : "unknown");
+                    output_cycle_wallpaper(sync_output);
+                    cycled_count++;
+                }
+                
+                sync_output = sync_output->next;
+            }
+            
             current_time = get_time_ms();
             processed_next = true;
-            /* Decrement counter immediately after processing */
+            
+            log_info("Cycled %d output(s) with matching configuration (%d requests remaining)",
+                     cycled_count, next_count - 1);
+            
+            /* Decrement counter after processing all synchronized outputs */
             atomic_fetch_sub_explicit(&state->next_requested, 1, memory_order_acq_rel);
         }
         

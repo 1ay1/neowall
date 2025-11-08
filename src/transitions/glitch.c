@@ -129,6 +129,9 @@ bool transition_glitch_render(struct output_state *output, float progress) {
     log_debug("Glitch transition rendering: progress=%.2f, program=%u", 
              progress, output->glitch_program);
 
+    /* Clear any previous OpenGL errors */
+    while (glGetError() != GL_NO_ERROR);
+
     /* Set viewport */
     glViewport(0, 0, output->width, output->height);
 

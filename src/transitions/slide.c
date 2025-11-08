@@ -63,113 +63,63 @@ static bool render_slide_transition(struct output_state *output, float progress,
         return false;
     }
 
-    /* Set viewport */
-    glViewport(0, 0, output->width, output->height);
-
-    /* Clear screen */
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    /* Use shader program */
-    glUseProgram(output->program);
-
-    /* Get attribute locations */
-    GLint pos_attrib = glGetAttribLocation(output->program, "position");
-    GLint tex_attrib = glGetAttribLocation(output->program, "texcoord");
-    GLint tex_uniform = glGetUniformLocation(output->program, "texture0");
-    GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
-
-    /* Enable blending */
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    /* Initialize transition context */
+    transition_context_t ctx;
+    if (!transition_begin(&ctx, output, output->program)) {
+        return false;
+    }
 
     /* Calculate slide offset */
     float offset = slide_left ? progress : -progress;
 
-    /* Setup fullscreen quad using DRY helper */
-    float vertices[16];
-    transition_setup_fullscreen_quad(output->vbo, vertices);
+    /* === DRAW OLD IMAGE (sliding out) === */
     
-    /* Adjust position based on slide direction for old image (sliding out) */
+    /* Create custom vertices for old image sliding out */
+    float old_vertices[16];
+    for (int i = 0; i < 16; i++) {
+        old_vertices[i] = ctx.vertices[i];
+    }
+    
+    /* Adjust X positions based on slide direction */
     for (int i = 0; i < 4; i++) {
-        vertices[i * 4] = vertices[i * 4] - (offset * 2.0f);
+        old_vertices[i * 4] = old_vertices[i * 4] - (offset * 2.0f);
     }
     
-    /* Upload modified vertices */
-    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
-
-    /* Setup vertex attributes using DRY helper */
-    transition_setup_common_attributes(output->program, output->vbo);
-
-    /* Bind old texture using DRY helper */
-    transition_bind_texture_for_transition(output->next_texture, GL_TEXTURE0);
-    if (tex_uniform >= 0) {
-        glUniform1i(tex_uniform, 0);
-    }
-    
-    glUniform1i(tex_uniform, 0);
-
-    if (alpha_uniform >= 0) {
-        glUniform1f(alpha_uniform, 1.0f);
-    }
-
-    /* Disable alpha channel writes - force opaque output */
+    /* Disable alpha channel writes - force opaque output for old image */
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+    
+    /* Draw old image */
+    if (!transition_draw_textured_quad(&ctx, output->next_texture, 1.0f, old_vertices)) {
+        transition_end(&ctx);
+        return false;
+    }
 
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-    /* Reset to fullscreen quad for new image (sliding in) */
-    transition_setup_fullscreen_quad(output->vbo, vertices);
+    /* === DRAW NEW IMAGE (sliding in) === */
+    
+    /* Create custom vertices for new image sliding in */
+    float new_vertices[16];
+    for (int i = 0; i < 16; i++) {
+        new_vertices[i] = ctx.vertices[i];
+    }
     
     /* Adjust position to slide in from opposite side */
     float slide_in_offset = slide_left ? (1.0f - progress) : -(1.0f - progress);
     
     for (int i = 0; i < 4; i++) {
-        vertices[i * 4] = vertices[i * 4] + (slide_in_offset * 2.0f);
-    }
-
-    /* Upload modified vertices */
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
-
-    /* Bind new texture using DRY helper */
-    transition_bind_texture_for_transition(output->texture, GL_TEXTURE0);
-    if (tex_uniform >= 0) {
-        glUniform1i(tex_uniform, 0);
+        new_vertices[i * 4] = new_vertices[i * 4] + (slide_in_offset * 2.0f);
     }
     
-    glUniform1i(tex_uniform, 0);
-
-    if (alpha_uniform >= 0) {
-        glUniform1f(alpha_uniform, 1.0f);
+    /* Draw new image */
+    if (!transition_draw_textured_quad(&ctx, output->texture, 1.0f, new_vertices)) {
+        transition_end(&ctx);
+        return false;
     }
-
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     /* Re-enable alpha channel writes */
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-    /* Clean up */
-    if (pos_attrib >= 0) {
-        glDisableVertexAttribArray(pos_attrib);
-    }
-    if (tex_attrib >= 0) {
-        glDisableVertexAttribArray(tex_attrib);
-    }
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glUseProgram(0);
-
-    /* Check for errors */
-    GLenum error = glGetError();
-    if (error != GL_NO_ERROR) {
-        log_error("OpenGL error during slide transition: 0x%x", error);
-        return false;
-    }
-
-    output->needs_redraw = true;
-    output->frames_rendered++;
-
+    /* Clean up and return */
+    transition_end(&ctx);
     return true;
 }
 
