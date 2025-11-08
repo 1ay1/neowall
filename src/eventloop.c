@@ -245,6 +245,16 @@ static void render_outputs(struct neowall_state *state) {
         struct output_state *output = swap->output;
         
         if (swap->render_success) {
+            /* CRITICAL: Make context current before swapping buffers
+             * The context must be current for the surface we're swapping */
+            if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
+                               output->compositor_surface->egl_surface, state->egl_context)) {
+                log_error("Failed to make context current before swap for output %s: 0x%x",
+                         output->model, eglGetError());
+                swap = swap->next;
+                continue;
+            }
+            
             /* Swap buffers - this can BLOCK waiting for vsync, so no locks must be held */
             if (!eglSwapBuffers(state->egl_display, output->compositor_surface->egl_surface)) {
                 log_error("Failed to swap buffers for output %s: 0x%x",

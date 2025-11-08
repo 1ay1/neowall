@@ -213,6 +213,16 @@ bool egl_core_init(struct neowall_state *state) {
     output = state->outputs;
     while (output) {
         if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+            /* CRITICAL: Make context current for THIS output before initializing rendering
+             * Each output needs its GL resources created with its own surface current */
+            if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
+                               output->compositor_surface->egl_surface, state->egl_context)) {
+                log_error("Failed to make context current for output %s: 0x%x",
+                         output->model[0] ? output->model : "unknown", eglGetError());
+                output = output->next;
+                continue;
+            }
+            
             if (!render_init_output(output)) {
                 log_error("Failed to initialize rendering for output %s",
                           output->model[0] ? output->model : "unknown");

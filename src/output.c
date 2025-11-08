@@ -170,6 +170,8 @@ bool output_create_egl_surface(struct output_state *output) {
         return false;
     }
 
+
+
     /* Check if EGL surface already exists */
     if (output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
         log_debug("EGL surface already exists for output %s, skipping creation",

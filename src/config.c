@@ -1528,6 +1528,13 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         struct output_state *summary_output = state->outputs;
         while (summary_output) {
             output_count++;
+            /* Safety check: ensure config pointer is valid */
+            if (!summary_output->config) {
+                log_error("Output %s has NULL config pointer, skipping summary",
+                         summary_output->model[0] ? summary_output->model : "unknown");
+                summary_output = summary_output->next;
+                continue;
+            }
             if (summary_output->config->type == WALLPAPER_SHADER) {
                 shader_count++;
                 log_info("  Output %s: SHADER mode - %s (speed=%.1fx)", 
