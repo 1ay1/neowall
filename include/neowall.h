@@ -102,6 +102,7 @@ typedef struct {
 /* Output (monitor) state */
 struct output_state {
     struct wl_output *output;
+    struct zxdg_output_v1 *xdg_output;  /* For getting connector name */
     struct compositor_surface *compositor_surface;  /* Compositor abstraction surface */
 
     uint32_t name;              /* Wayland output name/ID */
@@ -112,6 +113,7 @@ struct output_state {
 
     char make[64];
     char model[64];
+    char connector_name[64];    /* Connector name (e.g., HDMI-A-2, DP-1) from xdg-output */
 
     bool configured;
     bool needs_redraw;
@@ -200,6 +202,7 @@ struct neowall_state {
     struct wl_registry *registry;
     struct wl_compositor *compositor;
     struct wl_shm *shm;
+    struct zxdg_output_manager_v1 *xdg_output_manager;  /* For getting connector names */
 
     /* Compositor abstraction backend */
     struct compositor_backend *compositor_backend;

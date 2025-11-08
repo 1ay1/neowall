@@ -28,12 +28,14 @@ struct output_state *output_create(struct neowall_state *state,
 
     /* Initialize output state */
     out->output = output;
+    out->xdg_output = NULL;
     out->name = name;
     out->scale = 1;
     out->transform = WL_OUTPUT_TRANSFORM_NORMAL;
     out->configured = false;
     out->needs_redraw = true;
     out->state = state;
+    out->connector_name[0] = '\0';
     
     /* Initialize preload state */
     out->preload_texture = 0;

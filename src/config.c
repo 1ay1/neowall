@@ -1450,8 +1450,12 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         log_debug("No default configuration block found");
     }
 
-    /* Parse output-specific configurations */
-    VibeValue *outputs_obj = vibe_object_get(root->as_object, "outputs");
+    /* Parse output-specific configurations - accept both "output" and "outputs" */
+    VibeValue *outputs_obj = vibe_object_get(root->as_object, "output");
+    if (!outputs_obj) {
+        outputs_obj = vibe_object_get(root->as_object, "outputs");
+    }
+    
     if (outputs_obj && outputs_obj->type == VIBE_TYPE_OBJECT) {
         /* Iterate through all output names */
         for (size_t i = 0; i < outputs_obj->as_object->count; i++) {
@@ -1481,7 +1485,17 @@ bool config_load(struct neowall_state *state, const char *config_path) {
                 struct output_state *target = state->outputs;
                 bool found = false;
                 while (target) {
-                    if (strcmp(target->model, output_name) == 0) {
+                    /* Try connector name first (e.g., HDMI-A-2, DP-1), then fall back to model name */
+                    bool matches = false;
+                    if (target->connector_name[0] != '\0' && strcmp(target->connector_name, output_name) == 0) {
+                        matches = true;
+                        log_debug("Matched output by connector name: %s", output_name);
+                    } else if (strcmp(target->model, output_name) == 0) {
+                        matches = true;
+                        log_debug("Matched output by model name: %s", output_name);
+                    }
+                    
+                    if (matches) {
                         bool apply_result = output_apply_config(target, &output_config);
                         if (!apply_result) {
                             log_error("Failed to apply config to output '%s'", output_name);

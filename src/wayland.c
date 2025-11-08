@@ -6,10 +6,64 @@
 #include <time.h>
 #include "neowall.h"
 #include "compositor.h"
+#include "xdg-output-unstable-v1-client-protocol.h"
 
 /* Maximum retries and delay when waiting for compositor to be ready */
 #define COMPOSITOR_READY_MAX_RETRIES 5
 #define COMPOSITOR_READY_RETRY_DELAY_MS 200
+
+/* XDG Output listener callbacks */
+static void xdg_output_handle_logical_position(void *data,
+                                                 struct zxdg_output_v1 *xdg_output,
+                                                 int32_t x, int32_t y) {
+    (void)data;
+    (void)xdg_output;
+    (void)x;
+    (void)y;
+}
+
+static void xdg_output_handle_logical_size(void *data,
+                                            struct zxdg_output_v1 *xdg_output,
+                                            int32_t width, int32_t height) {
+    (void)data;
+    (void)xdg_output;
+    (void)width;
+    (void)height;
+}
+
+static void xdg_output_handle_done(void *data, struct zxdg_output_v1 *xdg_output) {
+    (void)data;
+    (void)xdg_output;
+}
+
+static void xdg_output_handle_name(void *data, struct zxdg_output_v1 *xdg_output,
+                                    const char *name) {
+    struct output_state *output = data;
+    (void)xdg_output;
+    
+    if (name) {
+        strncpy(output->connector_name, name, sizeof(output->connector_name) - 1);
+        output->connector_name[sizeof(output->connector_name) - 1] = '\0';
+        log_info("Output connector name: %s (model: %s)", 
+                 output->connector_name, output->model);
+    }
+}
+
+static void xdg_output_handle_description(void *data,
+                                           struct zxdg_output_v1 *xdg_output,
+                                           const char *description) {
+    (void)data;
+    (void)xdg_output;
+    (void)description;
+}
+
+static const struct zxdg_output_v1_listener xdg_output_listener = {
+    .logical_position = xdg_output_handle_logical_position,
+    .logical_size = xdg_output_handle_logical_size,
+    .done = xdg_output_handle_done,
+    .name = xdg_output_handle_name,
+    .description = xdg_output_handle_description,
+};
 
 /* Output listener callbacks */
 static void output_handle_geometry(void *data, struct wl_output *wl_output,
@@ -222,6 +276,10 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
     } else if (strcmp(interface, wl_shm_interface.name) == 0) {
         state->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
         log_info("Bound to shared memory");
+    } else if (strcmp(interface, zxdg_output_manager_v1_interface.name) == 0) {
+        state->xdg_output_manager = wl_registry_bind(registry, name,
+                                                      &zxdg_output_manager_v1_interface, 2);
+        log_debug("Bound to xdg_output_manager");
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
         struct wl_output *output_obj = wl_registry_bind(registry, name,
                                                          &wl_output_interface, 3);
@@ -233,6 +291,17 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 
         if (output) {
             wl_output_add_listener(output_obj, &output_listener, output);
+            
+            /* Get xdg_output for connector name if manager is available */
+            if (state->xdg_output_manager) {
+                output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
+                    state->xdg_output_manager, output_obj);
+                if (output->xdg_output) {
+                    zxdg_output_v1_add_listener(output->xdg_output, &xdg_output_listener, output);
+                    log_debug("Created xdg_output for output %u", name);
+                }
+            }
+            
             log_info("New output detected (name=%u, model=%s) - will initialize on configuration", 
                      name, output->model[0] ? output->model : "pending");
             /* Set flag to trigger initialization in event loop - use atomic */
