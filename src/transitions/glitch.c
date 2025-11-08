@@ -179,8 +179,14 @@ bool transition_glitch_render(struct output_state *output, float progress) {
         glUniform1f(time_uniform, time_value);
     }
 
+    /* Disable alpha channel writes - force opaque output */
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+
     /* Draw fullscreen quad */
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+    /* Re-enable alpha channel writes */
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     /* Clean up */
     if (pos_attrib >= 0) {

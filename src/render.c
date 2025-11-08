@@ -730,8 +730,14 @@ bool render_frame_shader(struct output_state *output) {
     glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(pos_attrib);
 
+    /* Disable alpha channel writes - force opaque output (prevents transparent shaders from showing white) */
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+
     /* Draw fullscreen quad */
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    /* Re-enable alpha channel writes */
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     
     /* Check for GL errors */
     GLenum gl_error = glGetError();
@@ -1105,12 +1111,18 @@ bool render_frame(struct output_state *output) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
-
-    /* Enable blending with state tracking */
+ 
+    /* Enable blending with state tracking (needed for images with transparency) */
     set_blend_state(output, true);
 
+    /* Disable alpha channel writes - force opaque output */
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+ 
     /* Draw quad */
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+     
+    /* Re-enable alpha channel writes */
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     
     /* Check for GL errors */
     GLenum gl_error = glGetError();

@@ -418,6 +418,17 @@ static void wlr_commit_surface(struct compositor_surface *surface) {
         return;
     }
     
+    /* Ensure opaque region is always set (prevents transparency) */
+    wlr_backend_data_t *backend_data = surface->backend->data;
+    if (backend_data && backend_data->state && backend_data->state->compositor) {
+        struct wl_region *opaque_region = wl_compositor_create_region(backend_data->state->compositor);
+        if (opaque_region) {
+            wl_region_add(opaque_region, 0, 0, INT32_MAX, INT32_MAX);
+            wl_surface_set_opaque_region(surface->wl_surface, opaque_region);
+            wl_region_destroy(opaque_region);
+        }
+    }
+    
     wl_surface_commit(surface->wl_surface);
 }
 

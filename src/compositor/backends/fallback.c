@@ -193,6 +193,15 @@ static struct compositor_surface *fallback_create_surface(void *data,
         return NULL;
     }
     
+    /* Set opaque region to cover entire surface (prevents transparency) */
+    struct wl_region *opaque_region = wl_compositor_create_region(backend_data->state->compositor);
+    if (opaque_region) {
+        wl_region_add(opaque_region, 0, 0, INT32_MAX, INT32_MAX);
+        wl_surface_set_opaque_region(surface->wl_surface, opaque_region);
+        wl_region_destroy(opaque_region);
+        log_debug("Set opaque region for fallback surface");
+    }
+    
     /* Try to create subsurface if available */
     if (backend_data->has_subsurface && backend_data->subcompositor) {
         /* For subsurface, we need a parent surface
@@ -319,6 +328,17 @@ static void fallback_commit_surface(struct compositor_surface *surface) {
     if (!surface || !surface->wl_surface) {
         log_error("Invalid surface for commit");
         return;
+    }
+    
+    /* Ensure opaque region is always set (prevents transparency) */
+    fallback_backend_data_t *backend_data = surface->backend->data;
+    if (backend_data && backend_data->state && backend_data->state->compositor) {
+        struct wl_region *opaque_region = wl_compositor_create_region(backend_data->state->compositor);
+        if (opaque_region) {
+            wl_region_add(opaque_region, 0, 0, INT32_MAX, INT32_MAX);
+            wl_surface_set_opaque_region(surface->wl_surface, opaque_region);
+            wl_region_destroy(opaque_region);
+        }
     }
     
     wl_surface_commit(surface->wl_surface);

@@ -221,7 +221,7 @@ EGLSurface compositor_surface_create_egl(struct compositor_surface *surface,
         return EGL_NO_SURFACE;
     }
     
-    /* Create EGL surface from EGL window */
+    /* Create EGL surface from EGL window (opaque region handles transparency) */
     EGLSurface egl_surface = eglCreateWindowSurface(egl_display, egl_config,
                                                     (EGLNativeWindowType)surface->egl_window,
                                                     NULL);

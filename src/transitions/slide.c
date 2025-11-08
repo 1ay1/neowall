@@ -114,6 +114,9 @@ static bool render_slide_transition(struct output_state *output, float progress,
         glUniform1f(alpha_uniform, 1.0f);
     }
 
+    /* Disable alpha channel writes - force opaque output */
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     /* Reset to fullscreen quad for new image (sliding in) */
@@ -142,6 +145,9 @@ static bool render_slide_transition(struct output_state *output, float progress,
     }
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+    /* Re-enable alpha channel writes */
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     /* Clean up */
     if (pos_attrib >= 0) {
