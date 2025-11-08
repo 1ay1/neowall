@@ -212,10 +212,14 @@ static struct compositor_surface *kde_create_surface(void *data,
         return NULL;
     }
     
-    /* Set role to desktop (background/wallpaper) */
+    /* Set role to panel (renders above wallpaper, below windows) */
     org_kde_plasma_surface_set_role(surface_data->plasma_surface,
-                                    ORG_KDE_PLASMA_SURFACE_ROLE_DESKTOP);
+                                    ORG_KDE_PLASMA_SURFACE_ROLE_PANEL);
     surface_data->role_set = true;
+    
+    /* Set panel behavior: windows_can_cover allows windows to render on top */
+    org_kde_plasma_surface_set_panel_behavior(surface_data->plasma_surface,
+                                              ORG_KDE_PLASMA_SURFACE_PANEL_BEHAVIOR_WINDOWS_CAN_COVER);
     
     /* Set position to (0, 0) for wallpaper */
     org_kde_plasma_surface_set_position(surface_data->plasma_surface, 0, 0);
@@ -293,7 +297,7 @@ static bool kde_configure_surface(struct compositor_surface *surface,
     /* Ensure role is set (should already be set during creation) */
     if (!surface_data->role_set) {
         org_kde_plasma_surface_set_role(surface_data->plasma_surface,
-                                        ORG_KDE_PLASMA_SURFACE_ROLE_DESKTOP);
+                                        ORG_KDE_PLASMA_SURFACE_ROLE_PANEL);
         surface_data->role_set = true;
     }
     
@@ -450,17 +454,19 @@ struct compositor_backend *compositor_backend_kde_plasma_init(struct neowall_sta
  *
  * This backend provides full KDE Plasma Shell protocol support:
  *
- * ✅ Desktop role for proper wallpaper placement
+ * ✅ Panel role with windows_can_cover behavior acts as wallpaper layer
  * ✅ Per-output surface management
  * ✅ Position control (always 0,0 for wallpapers)
  * ✅ Skip taskbar/switcher for clean desktop
  * ✅ EGL window support for GPU rendering
  * ✅ Multi-monitor support
  *
- * The backend creates surfaces with the ORG_KDE_PLASMA_SURFACE_ROLE_DESKTOP
- * role, which ensures they are rendered behind all windows as proper desktop
- * backgrounds. This provides optimal integration with KDE Plasma's window
- * management and compositor.
+ * The backend creates surfaces with the ORG_KDE_PLASMA_SURFACE_ROLE_PANEL
+ * role and PANEL_BEHAVIOR_WINDOWS_CAN_COVER behavior. This allows the surface
+ * to act as a wallpaper layer - it stays in place behind windows but above
+ * KDE's built-in wallpaper. This provides optimal integration with KDE Plasma's
+ * window management and compositor, allowing dynamic wallpapers to work
+ * alongside KDE's wallpaper system.
  *
  * References:
  * - Protocol: org.kde.plasma.shell (plasma-shell.xml)

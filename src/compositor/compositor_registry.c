@@ -266,67 +266,112 @@ bool compositor_backend_register(const char *name,
  * BACKEND SELECTION
  * ============================================================================ */
 
-/* Select best backend based on compositor and available protocols */
+/* Select native backend based on compositor type */
 static struct compositor_backend *select_backend(struct neowall_state *state,
                                                  const compositor_info_t *info) {
-    struct compositor_backend *best_backend = NULL;
-    int best_priority = -1;
+    const char *preferred_backend = NULL;
     
     log_info("Selecting backend for %s compositor...", info->name);
     
-    /* Try each registered backend */
+    /* Determine preferred backend based on compositor type */
+    switch (info->type) {
+        case COMPOSITOR_TYPE_KDE_PLASMA:
+            /* KDE supports wlr-layer-shell and it works reliably */
+            preferred_backend = "wlr-layer-shell";
+            log_info("Using wlr-layer-shell backend (works perfectly on KDE)");
+            break;
+            
+        case COMPOSITOR_TYPE_HYPRLAND:
+        case COMPOSITOR_TYPE_SWAY:
+        case COMPOSITOR_TYPE_RIVER:
+        case COMPOSITOR_TYPE_WAYFIRE:
+            preferred_backend = "wlr-layer-shell";
+            log_info("Using wlr-layer-shell backend for wlroots compositor");
+            break;
+            
+        case COMPOSITOR_TYPE_GNOME_SHELL:
+        case COMPOSITOR_TYPE_MUTTER:
+            preferred_backend = "gnome-shell";
+            log_info("Using GNOME Shell backend");
+            break;
+            
+        default:
+            /* For unknown compositors, try wlr-layer-shell if available, else fallback */
+            if (info->has_layer_shell) {
+                preferred_backend = "wlr-layer-shell";
+                log_info("Unknown compositor with layer shell support, using wlr-layer-shell");
+            } else {
+                preferred_backend = "fallback";
+                log_info("Unknown compositor, using fallback backend");
+            }
+            break;
+    }
+    
+    /* Try to initialize the preferred backend */
     for (size_t i = 0; i < backend_count; i++) {
-        const char *name = backend_registry[i].name;
-        int priority = backend_registry[i].priority;
-        const compositor_backend_ops_t *ops = backend_registry[i].ops;
-        
-        log_debug("Trying backend: %s (priority: %d)", name, priority);
-        
-        /* Try to initialize backend */
-        void *backend_data = ops->init(state);
-        if (!backend_data) {
-            log_debug("Backend '%s' initialization failed", name);
-            continue;
-        }
-        
-        /* Check if this backend has higher priority */
-        if (priority > best_priority) {
-            /* Clean up previous best backend if any */
-            if (best_backend && best_backend->ops->cleanup) {
-                best_backend->ops->cleanup(best_backend->data);
-                free(best_backend);
+        if (strcmp(backend_registry[i].name, preferred_backend) == 0) {
+            log_debug("Initializing preferred backend: %s", preferred_backend);
+            
+            void *backend_data = backend_registry[i].ops->init(state);
+            if (!backend_data) {
+                log_error("Failed to initialize preferred backend: %s", preferred_backend);
+                break;
             }
             
-            /* Allocate new backend */
-            best_backend = calloc(1, sizeof(struct compositor_backend));
-            if (!best_backend) {
+            /* Create backend structure */
+            struct compositor_backend *backend = calloc(1, sizeof(struct compositor_backend));
+            if (!backend) {
                 log_error("Failed to allocate backend structure");
-                ops->cleanup(backend_data);
-                continue;
+                backend_registry[i].ops->cleanup(backend_data);
+                return NULL;
             }
             
-            /* Initialize backend structure */
-            best_backend->name = name;
-            best_backend->description = backend_registry[i].description;
-            best_backend->priority = priority;
-            best_backend->ops = ops;
-            best_backend->data = backend_data;
-            best_backend->capabilities = ops->get_capabilities(backend_data);
+            backend->name = backend_registry[i].name;
+            backend->description = backend_registry[i].description;
+            backend->priority = backend_registry[i].priority;
+            backend->ops = backend_registry[i].ops;
+            backend->data = backend_data;
+            backend->capabilities = backend_registry[i].ops->get_capabilities(backend_data);
             
-            best_priority = priority;
-            
-            log_info("Selected backend: %s", name);
-        } else {
-            /* This backend has lower priority, clean it up */
-            ops->cleanup(backend_data);
+            log_info("Selected backend: %s", backend->name);
+            return backend;
         }
     }
     
-    if (!best_backend) {
-        log_error("No suitable backend found for compositor: %s", info->name);
+    /* Preferred backend failed, try fallback */
+    if (strcmp(preferred_backend, "fallback") != 0) {
+        log_info("Preferred backend unavailable, trying fallback...");
+        
+        for (size_t i = 0; i < backend_count; i++) {
+            if (strcmp(backend_registry[i].name, "fallback") == 0) {
+                void *backend_data = backend_registry[i].ops->init(state);
+                if (!backend_data) {
+                    log_error("Failed to initialize fallback backend");
+                    break;
+                }
+                
+                struct compositor_backend *backend = calloc(1, sizeof(struct compositor_backend));
+                if (!backend) {
+                    log_error("Failed to allocate backend structure");
+                    backend_registry[i].ops->cleanup(backend_data);
+                    return NULL;
+                }
+                
+                backend->name = backend_registry[i].name;
+                backend->description = backend_registry[i].description;
+                backend->priority = backend_registry[i].priority;
+                backend->ops = backend_registry[i].ops;
+                backend->data = backend_data;
+                backend->capabilities = backend_registry[i].ops->get_capabilities(backend_data);
+                
+                log_info("Selected backend: %s", backend->name);
+                return backend;
+            }
+        }
     }
     
-    return best_backend;
+    log_error("No suitable backend found for compositor: %s", info->name);
+    return NULL;
 }
 
 /* ============================================================================
