@@ -234,6 +234,14 @@ static struct compositor_surface *wlr_create_surface(void *data,
         return NULL;
     }
     
+    /* Set opaque region to cover entire surface (prevents transparency) */
+    struct wl_region *opaque_region = wl_compositor_create_region(backend_data->state->compositor);
+    if (opaque_region) {
+        wl_region_add(opaque_region, 0, 0, INT32_MAX, INT32_MAX);
+        wl_surface_set_opaque_region(surface->wl_surface, opaque_region);
+        wl_region_destroy(opaque_region);
+    }
+    
     /* Map layer value */
     enum zwlr_layer_shell_v1_layer layer;
     switch (config->layer) {
