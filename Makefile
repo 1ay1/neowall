@@ -228,14 +228,17 @@ ALL_OBJECTS = $(CORE_OBJECTS) $(EGL_OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJ
 WLR_LAYER_SHELL_XML = /usr/share/wayland-protocols/wlr-unstable/wlr-layer-shell-unstable-v1.xml
 XDG_SHELL_XML = /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml
 VIEWPORTER_XML = /usr/share/wayland-protocols/stable/viewporter/viewporter.xml
+PLASMA_SHELL_XML = $(PROTO_DIR)/plasma-shell.xml
 
 PROTO_HEADERS = $(PROTO_DIR)/wlr-layer-shell-unstable-v1-client-protocol.h \
                 $(PROTO_DIR)/xdg-shell-client-protocol.h \
-                $(PROTO_DIR)/viewporter-client-protocol.h
+                $(PROTO_DIR)/viewporter-client-protocol.h \
+                $(PROTO_DIR)/plasma-shell-client-protocol.h
 
 PROTO_SRCS = $(PROTO_DIR)/wlr-layer-shell-unstable-v1-client-protocol.c \
              $(PROTO_DIR)/xdg-shell-client-protocol.c \
-             $(PROTO_DIR)/viewporter-client-protocol.c
+             $(PROTO_DIR)/viewporter-client-protocol.c \
+             $(PROTO_DIR)/plasma-shell-client-protocol.c
 
 # ============================================================================
 # pkg-config Dependencies
@@ -318,6 +321,10 @@ $(PROTO_DIR)/%-client-protocol.h: | directories
 		echo "Generating viewporter header...$(COLOR_RESET)"; \
 		wayland-scanner client-header $(VIEWPORTER_XML) $(PROTO_DIR)/viewporter-client-protocol.h 2>/dev/null || echo "Warning: Could not generate viewporter header$(COLOR_RESET)"; \
 	fi
+	@if [ -f "$(PLASMA_SHELL_XML)" ]; then \
+		echo "Generating plasma-shell header...$(COLOR_RESET)"; \
+		wayland-scanner client-header $(PLASMA_SHELL_XML) $(PROTO_DIR)/plasma-shell-client-protocol.h 2>/dev/null || echo "Warning: Could not generate plasma-shell header$(COLOR_RESET)"; \
+	fi
 
 $(PROTO_DIR)/%-client-protocol.c: | directories
 	@if [ -f "$(WLR_LAYER_SHELL_XML)" ]; then \
@@ -331,6 +338,10 @@ $(PROTO_DIR)/%-client-protocol.c: | directories
 	@if [ -f "$(VIEWPORTER_XML)" ]; then \
 		echo "Generating viewporter code...$(COLOR_RESET)"; \
 		wayland-scanner private-code $(VIEWPORTER_XML) $(PROTO_DIR)/viewporter-client-protocol.c 2>/dev/null || echo "Warning: Could not generate viewporter code$(COLOR_RESET)"; \
+	fi
+	@if [ -f "$(PLASMA_SHELL_XML)" ]; then \
+		echo "Generating plasma-shell code...$(COLOR_RESET)"; \
+		wayland-scanner private-code $(PLASMA_SHELL_XML) $(PROTO_DIR)/plasma-shell-client-protocol.c 2>/dev/null || echo "Warning: Could not generate plasma-shell code$(COLOR_RESET)"; \
 	fi
 
 # Compile protocol objects

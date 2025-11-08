@@ -6,6 +6,8 @@ Watch fractals breathe, waves ripple, and neon cities pulse—all at silky 60 FP
 
 **For Wayland desktops that deserve better than static wallpapers.**
 
+**Multi-compositor support:** Native backends for KDE Plasma, Hyprland, Sway, River, and universal fallback for any Wayland compositor.
+
 [https://github.com/user-attachments/assets/386243d0-53ca-4287-9ab6-873265d3d53a](https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560)
 
 ## ✨ Why NeoWall?
@@ -38,7 +40,7 @@ neowall
 
 Your first run creates `~/.config/neowall/config.vibe` with a gorgeous retro synthwave shader.
 
-**Just works** on Hyprland, Sway, River, and most Wayland compositors.
+**Just works** on KDE Plasma, Hyprland, Sway, River, and any Wayland compositor.
 
 ## 🎨 Included Visual Experiences
 
