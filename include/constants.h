@@ -16,7 +16,7 @@
 
 /* Animation and transition timings */
 #define FPS_TARGET              60
-#define FRAME_TIME_MS           33        /* ~30 FPS (1000/30) - Better power efficiency */
+#define FRAME_TIME_MS           16        /* ~60 FPS (1000/60) - Smooth animations */
 #define DEFAULT_TRANSITION_MS   300
 #define SHADER_FADE_IN_MS       600
 #define SHADER_FADE_OUT_MS      400

@@ -41,6 +41,168 @@ static const char *color_fragment_shader =
 
 static GLuint color_overlay_program = 0;
 
+/* Simple 5x7 bitmap font for FPS display (digits 0-9, dot, space, and 'FPS') */
+static const uint8_t font_5x7[][7] = {
+    /* 0 */ {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E},
+    /* 1 */ {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E},
+    /* 2 */ {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F},
+    /* 3 */ {0x0E, 0x11, 0x01, 0x0E, 0x01, 0x11, 0x0E},
+    /* 4 */ {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02},
+    /* 5 */ {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E},
+    /* 6 */ {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E},
+    /* 7 */ {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08},
+    /* 8 */ {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E},
+    /* 9 */ {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C},
+    /* . */ {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C},
+    /* space */ {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    /* F */ {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10},
+    /* P */ {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10},
+    /* S */ {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E},
+};
+
+/* Draw a single character at screen position */
+static void draw_char_at(int char_index, float x, float y, float char_width, float char_height,
+                         int screen_width, int screen_height) {
+    if (char_index < 0 || char_index >= 15) return;
+    
+    const uint8_t *bitmap = font_5x7[char_index];
+    float pixel_width = char_width / 5.0f;
+    float pixel_height = char_height / 7.0f;
+    
+    /* Draw each pixel of the character */
+    for (int row = 0; row < 7; row++) {
+        uint8_t line = bitmap[row];
+        for (int col = 0; col < 5; col++) {
+            if (line & (1 << (4 - col))) {
+                /* Convert screen coords to NDC */
+                float px = x + col * pixel_width;
+                float py = y + row * pixel_height;
+                
+                float left = (px / screen_width) * 2.0f - 1.0f;
+                float right = ((px + pixel_width) / screen_width) * 2.0f - 1.0f;
+                float top = 1.0f - (py / screen_height) * 2.0f;
+                float bottom = 1.0f - ((py + pixel_height) / screen_height) * 2.0f;
+                
+                /* Draw pixel as quad */
+                float quad[8] = {
+                    left, top,
+                    right, top,
+                    left, bottom,
+                    right, bottom
+                };
+                
+                glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_DYNAMIC_DRAW);
+                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            }
+        }
+    }
+}
+
+/* Render FPS watermark overlay */
+static void render_fps_watermark(struct output_state *output) {
+    if (!output || !output->config->show_fps) return;
+    if (output->fps_current <= 0.0f) return;
+    
+    /* Format FPS text */
+    char fps_text[32];
+    snprintf(fps_text, sizeof(fps_text), "%.1f FPS", output->fps_current);
+    
+    /* Enable blending for semi-transparent background */
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    
+    /* Use color shader */
+    glUseProgram(color_overlay_program);
+    GLint pos_attrib = glGetAttribLocation(color_overlay_program, "position");
+    GLint color_uniform = glGetUniformLocation(color_overlay_program, "color");
+    
+    if (pos_attrib < 0 || color_uniform < 0) return;
+    
+    /* Create temporary VBO for text rendering */
+    GLuint text_vbo;
+    glGenBuffers(1, &text_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
+    
+    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(pos_attrib);
+    
+    /* Position at bottom-right corner to avoid taskbar/waybar */
+    float char_width = 12.0f;
+    float char_height = 18.0f;
+    float text_width = strlen(fps_text) * char_width;
+    float text_x = output->width - text_width - 10.0f;
+    float text_y = output->height - char_height - 10.0f;
+    
+    /* Draw black shadow/outline for visibility on any background */
+    glUniform4f(color_uniform, 0.0f, 0.0f, 0.0f, 1.0f);
+    
+    float cursor_x = text_x;
+    float cursor_y = text_y;
+    
+    /* Draw shadow at 1px offset */
+    for (size_t i = 0; i < strlen(fps_text); i++) {
+        char c = fps_text[i];
+        int char_idx = -1;
+        
+        if (c >= '0' && c <= '9') {
+            char_idx = c - '0';
+        } else if (c == '.') {
+            char_idx = 10;
+        } else if (c == ' ') {
+            char_idx = 11;
+        } else if (c == 'F') {
+            char_idx = 12;
+        } else if (c == 'P') {
+            char_idx = 13;
+        } else if (c == 'S') {
+            char_idx = 14;
+        }
+        
+        if (char_idx >= 0) {
+            draw_char_at(char_idx, cursor_x + 1, cursor_y + 1, char_width, char_height,
+                        output->width, output->height);
+        }
+        
+        cursor_x += char_width;
+    }
+    
+    /* Draw text in bright green */
+    glUniform4f(color_uniform, 0.0f, 1.0f, 0.0f, 1.0f);
+    
+    cursor_x = text_x;
+    cursor_y = text_y;
+    
+    for (size_t i = 0; i < strlen(fps_text); i++) {
+        char c = fps_text[i];
+        int char_idx = -1;
+        
+        if (c >= '0' && c <= '9') {
+            char_idx = c - '0';
+        } else if (c == '.') {
+            char_idx = 10;
+        } else if (c == ' ') {
+            char_idx = 11;
+        } else if (c == 'F') {
+            char_idx = 12;
+        } else if (c == 'P') {
+            char_idx = 13;
+        } else if (c == 'S') {
+            char_idx = 14;
+        }
+        
+        if (char_idx >= 0) {
+            draw_char_at(char_idx, cursor_x, cursor_y, char_width, char_height,
+                        output->width, output->height);
+        }
+        
+        cursor_x += char_width;
+    }
+    
+    glDisableVertexAttribArray(pos_attrib);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glDeleteBuffers(1, &text_vbo);
+}
+
 /* Global cache for default iChannel textures (generated once, reused forever) */
 static GLuint cached_default_channel_textures[5] = {0, 0, 0, 0, 0};
 static bool default_channels_initialized = false;
@@ -1056,6 +1218,9 @@ bool render_frame_shader(struct output_state *output) {
         return false;
     }
 
+    /* Render FPS watermark if enabled */
+    render_fps_watermark(output);
+
     /* Shader wallpapers need continuous redraw for animation */
     output->needs_redraw = true;
     output->frames_rendered++;
@@ -1300,6 +1465,9 @@ bool render_frame(struct output_state *output) {
         log_error("OpenGL error during rendering: 0x%x", error);
         return false;
     }
+
+    /* Render FPS watermark if enabled */
+    render_fps_watermark(output);
 
     output->needs_redraw = false;
     output->frames_rendered++;

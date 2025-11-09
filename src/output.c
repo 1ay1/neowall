@@ -77,6 +77,8 @@ struct output_state *output_create(struct neowall_state *state,
         out->config_slots[i].config.path[0] = '\0';
         out->config_slots[i].config.shader_path[0] = '\0';
         out->config_slots[i].config.shader_speed = 1.0f;
+        out->config_slots[i].config.shader_fps = 60;  /* Default 60 FPS */
+        out->config_slots[i].config.show_fps = false;  /* Default: no FPS watermark */
         out->config_slots[i].config.channel_paths = NULL;
         out->config_slots[i].config.channel_count = 0;
         
@@ -89,6 +91,11 @@ struct output_state *output_create(struct neowall_state *state,
     
     out->shader_fade_start_time = 0;
     out->pending_shader_path[0] = '\0';
+
+    /* Initialize FPS tracking */
+    out->fps_last_log_time = 0;
+    out->fps_frame_count = 0;
+    out->fps_current = 0.0f;
 
     /* Add to linked list - CALLER MUST HOLD WRITE LOCK */
     /* Note: List modification moved to caller (wayland.c) to ensure proper locking */
@@ -1383,6 +1390,30 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     
     log_info("Config applied and swapped for %s (now using slot %d)", 
              output->model[0] ? output->model : "unknown", inactive);
+
+    /* Configure vsync based on shader_fps setting:
+     * - shader_fps = 60 (default) → enable vsync for power efficiency
+     * - shader_fps != 60 → disable vsync to respect custom FPS target */
+    if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+        if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
+                           output->compositor_surface->egl_surface, output->state->egl_context)) {
+            log_error("Failed to make EGL context current for vsync config");
+        } else {
+            int swap_interval = (output->config->shader_fps == 60) ? 1 : 0;
+            if (!eglSwapInterval(output->state->egl_display, swap_interval)) {
+                EGLint err = eglGetError();
+                log_debug("Could not set swap interval to %d: 0x%x", swap_interval, err);
+            } else {
+                if (swap_interval == 1) {
+                    log_info("Enabled vsync for output %s (shader_fps=60, power efficient)", 
+                             output->model[0] ? output->model : "unknown");
+                } else {
+                    log_info("Disabled vsync for output %s (shader_fps=%d, custom frame rate)", 
+                             output->model[0] ? output->model : "unknown", output->config->shader_fps);
+                }
+            }
+        }
+    }
 
     /* Update state file with new config (after swap so output->config points to new slot) */
     const char *state_path = (config->type == WALLPAPER_SHADER) ? 
