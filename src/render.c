@@ -11,6 +11,16 @@
 #include "textures.h"
 #include "compositor.h"
 
+/* Helper function to get the preferred output identifier
+ * Prefers connector_name (e.g., "HDMI-A-2", "DP-1") over model name
+ * for consistent identification across reboots/reconnections */
+static inline const char *output_get_identifier(const struct output_state *output) {
+    if (output->connector_name[0] != '\0') {
+        return output->connector_name;
+    }
+    return output->model;
+}
+
 /* Note: Each transition manages its own shader sources in src/transitions/ */
 
 /* Simple color shader for overlay effects */
@@ -968,7 +978,7 @@ bool render_frame_shader(struct output_state *output) {
                     
                     /* Write state to file */
                     const char *mode_str = wallpaper_mode_to_string(output->config->mode);
-                    write_wallpaper_state(output->model, output->pending_shader_path, mode_str,
+                    write_wallpaper_state(output_get_identifier(output), output->pending_shader_path, mode_str,
                                          output->config->current_cycle_index,
                                          output->config->cycle_count,
                                          "active");

@@ -9,7 +9,15 @@
 #include "constants.h"
 #include "shader.h"
 
-
+/* Helper function to get the preferred output identifier
+ * Prefers connector_name (e.g., "HDMI-A-2", "DP-1") over model name
+ * for consistent identification across reboots/reconnections */
+static inline const char *output_get_identifier(const struct output_state *output) {
+    if (output->connector_name[0] != '\0') {
+        return output->connector_name;
+    }
+    return output->model;
+}
 
 
 
@@ -526,7 +534,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
 
     /* Write current state to file */
     const char *mode_str = wallpaper_mode_to_string(output->config->mode);
-    write_wallpaper_state(output->model, path, mode_str, 
+    write_wallpaper_state(output_get_identifier(output), path, mode_str, 
                          output->config->current_cycle_index,
                          output->config->cycle_count,
                          "active");
@@ -678,7 +686,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         
         /* Write state to file */
         const char *mode_str = wallpaper_mode_to_string(output->config->mode);
-        write_wallpaper_state(output->model, shader_path, mode_str,
+        write_wallpaper_state(output_get_identifier(output), shader_path, mode_str,
                              output->config->current_cycle_index,
                              output->config->cycle_count,
                              "active");
@@ -778,7 +786,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
 
     /* Write current state to file */
     const char *mode_str = wallpaper_mode_to_string(output->config->mode);
-    write_wallpaper_state(output->model, shader_path, mode_str, 
+    write_wallpaper_state(output_get_identifier(output), shader_path, mode_str, 
                          output->config->current_cycle_index,
                          output->config->cycle_count,
                          "active");
@@ -813,7 +821,7 @@ void output_cycle_wallpaper(struct output_state *output) {
         const char *current_path = output->config->type == WALLPAPER_SHADER ? 
                                    output->config->shader_path : output->config->path;
         const char *mode_str = wallpaper_mode_to_string(output->config->mode);
-        write_wallpaper_state(output->model, current_path, mode_str, 0, 0,
+        write_wallpaper_state(output_get_identifier(output), current_path, mode_str, 0, 0,
                              "cycling not enabled");
         
         return;
@@ -886,7 +894,7 @@ void output_cycle_wallpaper(struct output_state *output) {
         
         /* Write state to file */
         const char *mode_str = wallpaper_mode_to_string(output->config->mode);
-        write_wallpaper_state(output->model, output->config->shader_path, mode_str,
+        write_wallpaper_state(output_get_identifier(output), output->config->shader_path, mode_str,
                              output->config->current_cycle_index,
                              output->config->cycle_count,
                              "active");
@@ -1380,7 +1388,7 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     const char *state_path = (config->type == WALLPAPER_SHADER) ? 
                              output->config->shader_path : output->config->path;
     const char *mode_str = wallpaper_mode_to_string(output->config->mode);
-    write_wallpaper_state(output->model, state_path, mode_str,
+    write_wallpaper_state(output_get_identifier(output), state_path, mode_str,
                          output->config->current_cycle_index,
                          output->config->cycle_count,
                          "active");
