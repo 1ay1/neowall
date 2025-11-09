@@ -187,6 +187,21 @@ static void render_outputs(struct neowall_state *state) {
         /* Check if this output needs rendering */
         if (output->needs_redraw && output->compositor_surface &&
             output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+
+            int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : FPS_TARGET;
+
+            /* Throttle shader rendering according to shader_fps */
+            if (output->config->type == WALLPAPER_SHADER) {
+                uint64_t now_ms = get_time_ms();
+                uint64_t interval_ms = 1000 / target_fps;
+                /* If we have a valid last_frame_time and not enough time passed, skip rendering &
+                 * keep needs_redraw true so it will be retried later. */
+                if (output->last_frame_time != 0 && (now_ms - output->last_frame_time) < interval_ms) {
+                    output = output->next;
+                    continue;
+                }
+            }
+
             /* Make EGL context current for this output */
             if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
                                output->compositor_surface->egl_surface, state->egl_context)) {
@@ -281,7 +296,6 @@ static void render_outputs(struct neowall_state *state) {
                     float actual_fps = (float)output->fps_frame_count / ((float)elapsed / 1000.0f);
                     output->fps_current = actual_fps;
                     uint64_t frame_time = frame_end - frame_start;
-                    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : 60;
                     
                     log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums)", 
                              output->model, actual_fps, target_fps, frame_time);
@@ -612,6 +626,7 @@ void event_loop_run(struct neowall_state *state) {
                 shader_count++;
                 /* Use configured shader_fps or default to FRAME_TIME_MS */
                 int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : FPS_TARGET;
+
                 timeout_ms = 1000 / target_fps;
                 /* Only log shader detection once, not every frame */
                 if (!shader_mode_logged) {
