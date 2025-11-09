@@ -67,7 +67,8 @@ Want something specific? Browse [Shadertoy.com](https://shadertoy.com) for inspi
 # Live shader wallpaper
 default {
   shader retro_wave.glsl
-  shader_speed 1.2
+  shader_speed 1.2    # Animation speed multiplier (default: 1.0)
+  shader_fps 60       # Target FPS for rendering (default: 60, range: 1-240)
 }
 ```
 
@@ -85,9 +86,11 @@ default {
 output {
   eDP-1 {
     shader plasma.glsl
+    shader_fps 120      # Ultra-smooth 120 FPS on main display
   }
   HDMI-A-1 {
-    path ~/Pictures/nature.jpg
+    shader matrix_rain.glsl
+    shader_fps 30       # Power-saving 30 FPS on secondary display
   }
 }
 ```

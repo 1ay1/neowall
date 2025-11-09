@@ -264,7 +264,33 @@ static void render_outputs(struct neowall_state *state) {
             }
 
             /* Render frame */
+            uint64_t frame_start = get_time_ms();
             bool render_success = render_frame(output);
+            uint64_t frame_end = get_time_ms();
+            
+            /* FPS measurement for shaders */
+            if (render_success && output->config->type == WALLPAPER_SHADER) {
+                output->fps_frame_count++;
+                
+                if (output->fps_last_log_time == 0) {
+                    output->fps_last_log_time = frame_end;
+                }
+                
+                uint64_t elapsed = frame_end - output->fps_last_log_time;
+                if (elapsed >= 2000) {  /* Log every 2 seconds */
+                    float actual_fps = (float)output->fps_frame_count / ((float)elapsed / 1000.0f);
+                    output->fps_current = actual_fps;
+                    uint64_t frame_time = frame_end - frame_start;
+                    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : 60;
+                    
+                    log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums)", 
+                             output->model, actual_fps, target_fps, frame_time);
+                    
+                    output->fps_frame_count = 0;
+                    output->fps_last_log_time = frame_end;
+                }
+            }
+            
             if (!render_success) {
                 /* Only log if shader hasn't permanently failed (after 3 attempts, be silent) */
                 if (!output->shader_load_failed) {
@@ -584,10 +610,13 @@ void event_loop_run(struct neowall_state *state) {
                 !output->shader_load_failed && 
                 output->live_shader_program != 0) {
                 shader_count++;
-                timeout_ms = FRAME_TIME_MS; /* ~60 FPS for smooth transitions/animations */
+                /* Use configured shader_fps or default to FRAME_TIME_MS */
+                int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : FPS_TARGET;
+                timeout_ms = 1000 / target_fps;
                 /* Only log shader detection once, not every frame */
                 if (!shader_mode_logged) {
-                    log_info("Shader active on %s, rendering at 60 FPS", output->model);
+                    log_info("Shader active on %s, rendering at %d FPS (shader_fps=%d, timeout_ms=%d)", 
+                             output->model, target_fps, output->config->shader_fps, timeout_ms);
                     shader_mode_logged = true;
                 }
             }
@@ -596,7 +625,12 @@ void event_loop_run(struct neowall_state *state) {
                 (output->config->type == WALLPAPER_SHADER && 
                  !output->shader_load_failed && 
                  output->live_shader_program != 0)) {
-                timeout_ms = FRAME_TIME_MS;
+                /* Use configured shader_fps for shaders, otherwise use default FRAME_TIME_MS */
+                if (output->config->type == WALLPAPER_SHADER && output->config->shader_fps > 0) {
+                    timeout_ms = 1000 / output->config->shader_fps;
+                } else {
+                    timeout_ms = FRAME_TIME_MS;
+                }
                 break;
             }
             output = output->next;

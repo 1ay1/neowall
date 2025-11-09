@@ -82,6 +82,7 @@ struct wallpaper_config {
     enum transition_type transition;    /* Transition effect */
     float transition_duration;          /* Transition duration in seconds */
     float shader_speed;                 /* Shader animation speed multiplier (default 1.0) */
+    int shader_fps;                     /* Target FPS for shader rendering (default 60) */
     bool cycle;                         /* Enable wallpaper cycling */
     char **cycle_paths;                 /* Array of paths for cycling */
     size_t cycle_count;                 /* Number of wallpapers to cycle */
@@ -198,6 +199,11 @@ struct output_state {
     float transition_progress;
     uint64_t frames_rendered;
     bool shader_load_failed;            /* Set to true after 3 failed shader load attempts */
+    
+    /* FPS measurement */
+    uint64_t fps_last_log_time;         /* Last time we logged FPS */
+    uint64_t fps_frame_count;           /* Frames rendered since last FPS log */
+    float fps_current;                  /* Current measured FPS */
 
     struct output_state *next;
 };

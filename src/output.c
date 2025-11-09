@@ -77,6 +77,7 @@ struct output_state *output_create(struct neowall_state *state,
         out->config_slots[i].config.path[0] = '\0';
         out->config_slots[i].config.shader_path[0] = '\0';
         out->config_slots[i].config.shader_speed = 1.0f;
+        out->config_slots[i].config.shader_fps = 60;  /* Default 60 FPS */
         out->config_slots[i].config.channel_paths = NULL;
         out->config_slots[i].config.channel_count = 0;
         
@@ -89,6 +90,11 @@ struct output_state *output_create(struct neowall_state *state,
     
     out->shader_fade_start_time = 0;
     out->pending_shader_path[0] = '\0';
+
+    /* Initialize FPS tracking */
+    out->fps_last_log_time = 0;
+    out->fps_frame_count = 0;
+    out->fps_current = 0.0f;
 
     /* Add to linked list - CALLER MUST HOLD WRITE LOCK */
     /* Note: List modification moved to caller (wayland.c) to ensure proper locking */

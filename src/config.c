@@ -471,6 +471,7 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->transition = TRANSITION_FADE;
     config->transition_duration = 0.3f;  /* 0.3 seconds default transition */
     config->shader_speed = 1.0f;
+    config->shader_fps = 60;  /* Default 60 FPS for shaders */
     config->cycle = false;
     config->cycle_paths = NULL;
     config->cycle_count = 0;
@@ -744,6 +745,37 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         if (config->type != WALLPAPER_SHADER) {
             log_error("[%s] INVALID CONFIG: 'shader_speed' specified in IMAGE mode. "
                      "Shader speed only applies to GLSL shaders. This setting is invalid for images.", 
+                     context_name);
+            return false;
+        }
+    }
+    
+    /* Parse shader_fps (only relevant for shader mode) */
+    VibeValue *shader_fps_val = vibe_object_get(obj->as_object, "shader_fps");
+    if (shader_fps_val) {
+        int fps = 0;
+        
+        if (shader_fps_val->type == VIBE_TYPE_INTEGER) {
+            fps = (int)shader_fps_val->as_integer;
+        } else if (shader_fps_val->type == VIBE_TYPE_FLOAT) {
+            fps = (int)shader_fps_val->as_float;
+        } else {
+            log_error("[%s] 'shader_fps' must be a number", context_name);
+            return false;
+        }
+        
+        if (fps < 1 || fps > 240) {
+            log_error("[%s] Invalid shader_fps: %d (must be between 1 and 240)", 
+                     context_name, fps);
+            return false;
+        }
+        
+        config->shader_fps = fps;
+        log_info("[%s] Shader FPS set to: %d", context_name, fps);
+        
+        if (config->type != WALLPAPER_SHADER) {
+            log_error("[%s] INVALID CONFIG: 'shader_fps' specified in IMAGE mode. "
+                     "Shader FPS only applies to GLSL shaders. This setting is invalid for images.", 
                      context_name);
             return false;
         }

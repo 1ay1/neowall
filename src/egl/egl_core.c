@@ -185,7 +185,9 @@ bool egl_core_init(struct neowall_state *state) {
     if (output && output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
         /* Enable vsync to reduce GPU usage and prevent tearing */
         if (!eglSwapInterval(state->egl_display, 1)) {
-            log_error("Failed to set swap interval (vsync): 0x%x", eglGetError());
+            EGLint err = eglGetError();
+            log_debug("Could not set swap interval (vsync): 0x%x - continuing without vsync", err);
+            log_debug("This is normal on some compositors/drivers and won't affect functionality");
         } else {
             log_info("Enabled vsync (swap interval = 1) for power efficiency");
         }
