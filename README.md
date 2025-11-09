@@ -69,6 +69,7 @@ default {
   shader retro_wave.glsl
   shader_speed 1.2    # Animation speed multiplier (default: 1.0)
   shader_fps 60       # Target FPS for rendering (default: 60, range: 1-240)
+  show_fps true       # Display real-time FPS counter (default: false)
 }
 ```
 
@@ -161,6 +162,8 @@ sudo make install
 - **Multi-monitor**: Each display can run different content independently
 - **Transitions**: `glitch` and `pixelate` effects add serious style points
 - **Hot-reload**: Edit configs with live preview - no restarts
+- **Vsync control**: Automatically enabled at 60 FPS for power efficiency, disabled for custom frame rates (30 FPS or 120+ FPS)
+- **FPS monitoring**: Use `show_fps true` to display real-time frame rate in bottom-right corner
 
 ## 🤝 Contributing
 

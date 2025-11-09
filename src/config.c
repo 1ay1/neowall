@@ -472,6 +472,7 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->transition_duration = 0.3f;  /* 0.3 seconds default transition */
     config->shader_speed = 1.0f;
     config->shader_fps = 60;  /* Default 60 FPS for shaders */
+    config->show_fps = false;  /* Default: no FPS watermark */
     config->cycle = false;
     config->cycle_paths = NULL;
     config->cycle_count = 0;
@@ -779,6 +780,17 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
                      context_name);
             return false;
         }
+    }
+    
+    /* Parse show_fps */
+    VibeValue *show_fps_val = vibe_object_get(obj->as_object, "show_fps");
+    if (show_fps_val) {
+        if (show_fps_val->type != VIBE_TYPE_BOOLEAN) {
+            log_error("[%s] 'show_fps' must be a boolean (true or false)", context_name);
+            return false;
+        }
+        config->show_fps = show_fps_val->as_boolean;
+        log_info("[%s] FPS watermark: %s", context_name, config->show_fps ? "enabled" : "disabled");
     }
     
     /* Parse channels (only relevant for shader mode) */

@@ -83,6 +83,7 @@ struct wallpaper_config {
     float transition_duration;          /* Transition duration in seconds */
     float shader_speed;                 /* Shader animation speed multiplier (default 1.0) */
     int shader_fps;                     /* Target FPS for shader rendering (default 60) */
+    bool show_fps;                      /* Show FPS watermark on screen (default false) */
     bool cycle;                         /* Enable wallpaper cycling */
     char **cycle_paths;                 /* Array of paths for cycling */
     size_t cycle_count;                 /* Number of wallpapers to cycle */
