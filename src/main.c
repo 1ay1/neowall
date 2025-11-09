@@ -671,7 +671,7 @@ int main(int argc, char *argv[]) {
     struct neowall_state state = {0};
     char config_path[MAX_PATH_LENGTH] = {0};
     bool daemon_mode = true;  /* Default to daemon mode */
-    bool watch_config = true;  /* Enable by default for better UX */
+    bool watch_config = false;  /* Only enable when -w flag is provided */
     bool verbose = false;
     int opt;
 
