@@ -9,6 +9,8 @@ SRC_DIR = src
 EGL_DIR = $(SRC_DIR)/egl
 COMPOSITOR_DIR = $(SRC_DIR)/compositor
 COMPOSITOR_BACKEND_DIR = $(COMPOSITOR_DIR)/backends
+WAYLAND_BACKEND_DIR = $(COMPOSITOR_BACKEND_DIR)/wayland
+WAYLAND_COMPOSITOR_DIR = $(WAYLAND_BACKEND_DIR)/compositors
 INC_DIR = include
 EGL_INC_DIR = $(INC_DIR)/egl
 PROTO_DIR = protocols
@@ -16,7 +18,8 @@ BUILD_DIR = build
 OBJ_DIR = $(BUILD_DIR)/obj
 EGL_OBJ_DIR = $(OBJ_DIR)/egl
 COMPOSITOR_OBJ_DIR = $(OBJ_DIR)/compositor
-COMPOSITOR_BACKEND_OBJ_DIR = $(OBJ_DIR)/compositor/backends
+WAYLAND_BACKEND_OBJ_DIR = $(OBJ_DIR)/compositor/backends/wayland
+WAYLAND_COMPOSITOR_OBJ_DIR = $(WAYLAND_BACKEND_OBJ_DIR)/compositors
 BIN_DIR = $(BUILD_DIR)/bin
 ASSETS_DIR = assets
 
@@ -162,11 +165,14 @@ PROTO_SOURCES = $(wildcard $(PROTO_DIR)/*.c)
 COMPOSITOR_SOURCES = $(COMPOSITOR_DIR)/compositor_registry.c \
                      $(COMPOSITOR_DIR)/compositor_surface.c
 
-# Compositor backend sources
-COMPOSITOR_BACKEND_SOURCES = $(COMPOSITOR_BACKEND_DIR)/wlr_layer_shell.c \
-                             $(COMPOSITOR_BACKEND_DIR)/kde_plasma.c \
-                             $(COMPOSITOR_BACKEND_DIR)/gnome_shell.c \
-                             $(COMPOSITOR_BACKEND_DIR)/fallback.c
+# Wayland backend sources
+WAYLAND_BACKEND_SOURCES = $(WAYLAND_BACKEND_DIR)/wayland_core.c
+
+# Wayland compositor-specific backend sources
+WAYLAND_COMPOSITOR_SOURCES = $(WAYLAND_COMPOSITOR_DIR)/wlr_layer_shell.c \
+                             $(WAYLAND_COMPOSITOR_DIR)/kde_plasma.c \
+                             $(WAYLAND_COMPOSITOR_DIR)/gnome_shell.c \
+                             $(WAYLAND_COMPOSITOR_DIR)/fallback.c
 
 # EGL core (always compiled)
 EGL_CORE_SOURCES = $(EGL_DIR)/capability.c $(EGL_DIR)/egl_core.c
@@ -205,7 +211,7 @@ endif
 EGL_SOURCES = $(EGL_CORE_SOURCES) $(EGL_VERSION_SOURCES) $(GLES_SOURCES)
 
 # Combine all sources
-ALL_SOURCES = $(CORE_SOURCES) $(EGL_SOURCES) $(TRANSITION_SOURCES) $(TEXTURE_SOURCES) $(PROTO_SOURCES) $(COMPOSITOR_SOURCES) $(COMPOSITOR_BACKEND_SOURCES)
+ALL_SOURCES = $(CORE_SOURCES) $(EGL_SOURCES) $(TRANSITION_SOURCES) $(TEXTURE_SOURCES) $(PROTO_SOURCES) $(COMPOSITOR_SOURCES) $(WAYLAND_BACKEND_SOURCES) $(WAYLAND_COMPOSITOR_SOURCES)
 
 # ============================================================================
 # Object Files
@@ -217,9 +223,10 @@ TRANSITION_OBJECTS = $(TRANSITION_SOURCES:$(SRC_DIR)/transitions/%.c=$(OBJ_DIR)/
 TEXTURE_OBJECTS = $(TEXTURE_SOURCES:$(SRC_DIR)/textures/%.c=$(OBJ_DIR)/textures_%.o)
 PROTO_OBJECTS = $(PROTO_SOURCES:$(PROTO_DIR)/%.c=$(OBJ_DIR)/proto_%.o)
 COMPOSITOR_OBJECTS = $(COMPOSITOR_SOURCES:$(COMPOSITOR_DIR)/%.c=$(COMPOSITOR_OBJ_DIR)/%.o)
-COMPOSITOR_BACKEND_OBJECTS = $(COMPOSITOR_BACKEND_SOURCES:$(COMPOSITOR_BACKEND_DIR)/%.c=$(COMPOSITOR_BACKEND_OBJ_DIR)/%.o)
+WAYLAND_BACKEND_OBJECTS = $(WAYLAND_BACKEND_SOURCES:$(WAYLAND_BACKEND_DIR)/%.c=$(WAYLAND_BACKEND_OBJ_DIR)/%.o)
+WAYLAND_COMPOSITOR_OBJECTS = $(WAYLAND_COMPOSITOR_SOURCES:$(WAYLAND_COMPOSITOR_DIR)/%.c=$(WAYLAND_COMPOSITOR_OBJ_DIR)/%.o)
 
-ALL_OBJECTS = $(CORE_OBJECTS) $(EGL_OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJECTS) $(PROTO_OBJECTS) $(COMPOSITOR_OBJECTS) $(COMPOSITOR_BACKEND_OBJECTS)
+ALL_OBJECTS = $(CORE_OBJECTS) $(EGL_OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJECTS) $(PROTO_OBJECTS) $(COMPOSITOR_OBJECTS) $(WAYLAND_BACKEND_OBJECTS) $(WAYLAND_COMPOSITOR_OBJECTS)
 
 # ============================================================================
 # Wayland Protocol Files
@@ -306,7 +313,7 @@ endif
 
 # Create necessary directories
 directories:
-	@mkdir -p $(OBJ_DIR) $(EGL_OBJ_DIR) $(COMPOSITOR_OBJ_DIR) $(COMPOSITOR_BACKEND_OBJ_DIR) $(BIN_DIR) $(PROTO_DIR)
+	@mkdir -p $(OBJ_DIR) $(EGL_OBJ_DIR) $(COMPOSITOR_OBJ_DIR) $(WAYLAND_BACKEND_OBJ_DIR) $(WAYLAND_COMPOSITOR_OBJ_DIR) $(BIN_DIR) $(PROTO_DIR)
 
 # Generate Wayland protocol files
 protocols: $(PROTO_HEADERS) $(PROTO_SRCS)
@@ -385,9 +392,14 @@ $(COMPOSITOR_OBJ_DIR)/%.o: $(COMPOSITOR_DIR)/%.c | directories protocols
 	@echo "Compiling compositor: $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-# Compile compositor backend files
-$(COMPOSITOR_BACKEND_OBJ_DIR)/%.o: $(COMPOSITOR_BACKEND_DIR)/%.c | directories protocols
-	@echo "Compiling compositor backend: $<"
+# Compile Wayland backend core files
+$(WAYLAND_BACKEND_OBJ_DIR)/%.o: $(WAYLAND_BACKEND_DIR)/%.c | directories protocols
+	@echo "Compiling Wayland backend: $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+# Compile Wayland compositor-specific backend files
+$(WAYLAND_COMPOSITOR_OBJ_DIR)/%.o: $(WAYLAND_COMPOSITOR_DIR)/%.c | directories protocols
+	@echo "Compiling Wayland compositor: $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 # Link the binary
