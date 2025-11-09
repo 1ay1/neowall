@@ -1289,12 +1289,12 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         
         /* PRIORITY 2: If no sync found, try to restore from saved state */
         if (!index_set) {
-            int restored_index = restore_cycle_index_from_state(output->model[0] ? output->model : "unknown");
+            const char *output_id = output_get_identifier(output);
+            int restored_index = restore_cycle_index_from_state(output_id);
             if (restored_index >= 0 && restored_index < (int)output->config_slots[inactive].config.cycle_count) {
                 output->config_slots[inactive].config.current_cycle_index = (size_t)restored_index;
                 log_info("Restored cycle index %d for output %s from state file", 
-                         restored_index, 
-                         output->model[0] ? output->model : "unknown");
+                         restored_index, output_id);
                 index_set = true;
             }
         }
@@ -1303,7 +1303,7 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         if (!index_set) {
             output->config_slots[inactive].config.current_cycle_index = 0;
             log_info("Starting cycle at index 0 for output %s (no previous state or sync)",
-                     output->model[0] ? output->model : "unknown");
+                     output_get_identifier(output));
         }
     }
 
