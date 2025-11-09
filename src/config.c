@@ -843,7 +843,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     /* Warn about unknown keys */
     const char *known_keys[] = {
         "path", "shader", "mode", "duration", "transition", 
-        "transition_duration", "shader_speed", "channels"
+        "transition_duration", "shader_speed", "channels", "shader_fps", "show_fps"
     };
     size_t known_key_count = sizeof(known_keys) / sizeof(known_keys[0]);
     
