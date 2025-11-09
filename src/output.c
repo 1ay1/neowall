@@ -41,7 +41,13 @@ struct output_state *output_create(struct neowall_state *state,
     out->preload_texture = 0;
     out->preload_image = NULL;
     out->preload_path[0] = '\0';
-    out->preload_ready = false;
+    atomic_store(&out->preload_ready, false);
+    
+    /* Initialize background preload thread state */
+    pthread_mutex_init(&out->preload_mutex, NULL);
+    out->preload_decoded_image = NULL;
+    atomic_store(&out->preload_thread_active, false);
+    atomic_store(&out->preload_upload_pending, false);
 
     /* Compositor surface will be created later in output_configure_compositor_surface() */
     out->compositor_surface = NULL;
@@ -125,7 +131,15 @@ void output_destroy(struct output_state *output) {
         output->next_image = NULL;
     }
     
+    /* Cancel and wait for background preload thread if active */
+    if (atomic_load(&output->preload_thread_active)) {
+        pthread_cancel(output->preload_thread);
+        pthread_join(output->preload_thread, NULL);
+        atomic_store(&output->preload_thread_active, false);
+    }
+    
     /* Free preload data */
+    pthread_mutex_lock(&output->preload_mutex);
     if (output->preload_texture) {
         render_destroy_texture(output->preload_texture);
         output->preload_texture = 0;
@@ -135,6 +149,13 @@ void output_destroy(struct output_state *output) {
         image_free(output->preload_image);
         output->preload_image = NULL;
     }
+    
+    if (output->preload_decoded_image) {
+        image_free(output->preload_decoded_image);
+        output->preload_decoded_image = NULL;
+    }
+    pthread_mutex_unlock(&output->preload_mutex);
+    pthread_mutex_destroy(&output->preload_mutex);
 
     log_debug("Destroying output %s (name=%u)",
               output->model[0] ? output->model : "unknown", output->name);
@@ -210,7 +231,62 @@ bool output_create_egl_surface(struct output_state *output) {
     return true;
 }
 
-/* Preload the next wallpaper texture to eliminate jitter during transitions */
+/* Background thread function for async image decoding */
+struct preload_thread_args {
+    struct output_state *output;
+    char path[MAX_PATH_LENGTH];
+    int32_t width;
+    int32_t height;
+    enum wallpaper_mode mode;
+};
+
+static void *preload_thread_func(void *arg) {
+    struct preload_thread_args *args = (struct preload_thread_args *)arg;
+    struct output_state *output = args->output;
+    
+    /* Enable thread cancellation at any time */
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+    
+    log_debug("Background thread: decoding image %s (%dx%d, mode=%d)",
+              args->path, args->width, args->height, args->mode);
+    
+    /* Decode image in background (CPU-bound, no GL context needed) */
+    struct image_data *decoded_image = image_load(args->path, args->width, args->height, args->mode);
+    
+    if (!decoded_image) {
+        log_error("Background thread: failed to decode image: %s", args->path);
+        atomic_store(&output->preload_thread_active, false);
+        free(args);
+        return NULL;
+    }
+    
+    log_info("Background thread: decoded image %s (%ux%u) - ready for GPU upload",
+             args->path, decoded_image->width, decoded_image->height);
+    
+    /* Hand off decoded image to main thread for GPU upload */
+    pthread_mutex_lock(&output->preload_mutex);
+    
+    /* Clean up old decoded image if exists */
+    if (output->preload_decoded_image) {
+        image_free(output->preload_decoded_image);
+    }
+    
+    output->preload_decoded_image = decoded_image;
+    strncpy(output->preload_path, args->path, sizeof(output->preload_path) - 1);
+    output->preload_path[sizeof(output->preload_path) - 1] = '\0';
+    
+    pthread_mutex_unlock(&output->preload_mutex);
+    
+    /* Signal main thread that upload is pending */
+    atomic_store(&output->preload_upload_pending, true);
+    atomic_store(&output->preload_thread_active, false);
+    
+    free(args);
+    return NULL;
+}
+
+/* Start background preload of next wallpaper (non-blocking) */
 void output_preload_next_wallpaper(struct output_state *output) {
     if (!output || !output->config) {
         return;
@@ -219,6 +295,12 @@ void output_preload_next_wallpaper(struct output_state *output) {
     /* Only preload for cycling image wallpapers */
     if (!output->config->cycle || output->config->cycle_count <= 1 || 
         output->config->type != WALLPAPER_IMAGE) {
+        return;
+    }
+    
+    /* Don't start new preload if thread is already running */
+    if (atomic_load(&output->preload_thread_active)) {
+        log_debug("Preload thread already active, skipping");
         return;
     }
     
@@ -235,72 +317,45 @@ void output_preload_next_wallpaper(struct output_state *output) {
     const char *next_path = output->config->cycle_paths[next_index];
     
     /* Check if already preloaded */
-    if (output->preload_ready && strcmp(output->preload_path, next_path) == 0) {
+    if (atomic_load(&output->preload_ready) && strcmp(output->preload_path, next_path) == 0) {
         pthread_mutex_unlock(&output->state->state_mutex);
         log_debug("Next wallpaper already preloaded: %s", next_path);
         return;
     }
     
-    /* Copy path before releasing mutex */
-    char path_copy[MAX_PATH_LENGTH];
-    strncpy(path_copy, next_path, sizeof(path_copy) - 1);
-    path_copy[sizeof(path_copy) - 1] = '\0';
+    /* Prepare thread arguments */
+    struct preload_thread_args *args = malloc(sizeof(struct preload_thread_args));
+    if (!args) {
+        pthread_mutex_unlock(&output->state->state_mutex);
+        log_error("Failed to allocate preload thread args");
+        return;
+    }
+    
+    args->output = output;
+    strncpy(args->path, next_path, sizeof(args->path) - 1);
+    args->path[sizeof(args->path) - 1] = '\0';
+    args->width = output->width;
+    args->height = output->height;
+    args->mode = output->config->mode;
+    
     pthread_mutex_unlock(&output->state->state_mutex);
     
-    log_debug("Preloading next wallpaper for output %s: %s",
-              output->model[0] ? output->model : "unknown", path_copy);
+    log_debug("Starting background preload for output %s: %s",
+              output->model[0] ? output->model : "unknown", args->path);
     
-    /* Clean up old preload if exists */
-    if (output->preload_texture) {
-        render_destroy_texture(output->preload_texture);
-        output->preload_texture = 0;
-    }
-    if (output->preload_image) {
-        image_free(output->preload_image);
-        output->preload_image = NULL;
-    }
-    output->preload_ready = false;
-    
-    /* Load image with display-aware scaling */
-    struct image_data *new_image = image_load(path_copy, output->width, output->height, output->config->mode);
-    if (!new_image) {
-        log_error("Failed to preload wallpaper image: %s", path_copy);
+    /* Launch background thread */
+    atomic_store(&output->preload_thread_active, true);
+    if (pthread_create(&output->preload_thread, NULL, preload_thread_func, args) != 0) {
+        log_error("Failed to create preload thread");
+        atomic_store(&output->preload_thread_active, false);
+        free(args);
         return;
     }
     
-    /* Check EGL context is available */
-    if (!output->state || output->state->egl_display == EGL_NO_DISPLAY || 
-        output->state->egl_context == EGL_NO_CONTEXT || 
-        !output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
-        log_debug("EGL not ready for preload, deferring");
-        image_free(new_image);
-        return;
-    }
+    /* Detach thread so it cleans up automatically when done */
+    pthread_detach(output->preload_thread);
     
-    /* Make EGL context current before creating texture */
-    if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
-                       output->compositor_surface->egl_surface, output->state->egl_context)) {
-        log_error("Failed to make EGL context current for preload");
-        image_free(new_image);
-        return;
-    }
-    
-    /* Create GPU texture */
-    GLuint new_texture = render_create_texture(new_image);
-    if (new_texture == 0) {
-        log_error("Failed to create preload texture");
-        image_free(new_image);
-        return;
-    }
-    
-    /* Store preloaded texture and image */
-    output->preload_texture = new_texture;
-    output->preload_image = new_image;
-    strncpy(output->preload_path, path_copy, sizeof(output->preload_path) - 1);
-    output->preload_path[sizeof(output->preload_path) - 1] = '\0';
-    output->preload_ready = true;
-    
-    log_info("Preloaded next wallpaper: %s (texture=%u)", path_copy, new_texture);
+    log_info("Background preload thread started for: %s", args->path);
 }
 
 void output_set_wallpaper(struct output_state *output, const char *path) {
@@ -317,9 +372,9 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     GLuint new_texture = 0;
     bool used_preload = false;
     
-    if (output->preload_ready && strcmp(output->preload_path, path) == 0) {
+    if (atomic_load(&output->preload_ready) && strcmp(output->preload_path, path) == 0) {
         /* Use preloaded texture - no blocking I/O! */
-        log_info("Using preloaded texture for %s (eliminates jitter)", path);
+        log_info("Using preloaded texture for %s (ZERO-STALL transition!)", path);
         new_image = output->preload_image;
         new_texture = output->preload_texture;
         used_preload = true;
@@ -327,11 +382,11 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         /* Clear preload state (we're taking ownership) */
         output->preload_image = NULL;
         output->preload_texture = 0;
-        output->preload_ready = false;
+        atomic_store(&output->preload_ready, false);
         output->preload_path[0] = '\0';
     } else {
         /* No preload available, load synchronously (may cause jitter) */
-        if (output->preload_ready) {
+        if (atomic_load(&output->preload_ready)) {
             log_debug("Preloaded texture mismatch: wanted '%s', have '%s'", path, output->preload_path);
         }
         
@@ -436,7 +491,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
                   output->config->transition, 
                   transition_type_to_string(output->config->transition),
                   output->config->transition_duration,
-                  used_preload ? " [PRELOADED]" : "");
+                  used_preload ? " [ZERO-STALL PRELOAD]" : "");
     } else {
         /* No transition, just replace */
         if (output->current_image) {
@@ -457,7 +512,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         
         log_info("Wallpaper texture created successfully (texture=%u) for output %s%s", 
                  output->texture, output->model[0] ? output->model : "unknown",
-                 used_preload ? " [PRELOADED]" : "");
+                 used_preload ? " [ZERO-STALL]" : "");
     }
 
     /* Update config path */

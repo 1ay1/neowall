@@ -133,11 +133,18 @@ struct output_state {
     GLuint texture;
     GLuint next_texture;                /* For transitions */
     
-    /* Preloaded texture for smooth transitions (eliminates jitter) */
+    /* Double-buffered preload for zero-stall transitions */
     GLuint preload_texture;             /* Next texture to transition to */
     struct image_data *preload_image;   /* Image data for preloaded texture */
     char preload_path[MAX_PATH_LENGTH]; /* Path of preloaded image */
-    bool preload_ready;                 /* Is preload_texture ready for use? */
+    atomic_bool_t preload_ready;        /* Is preload_texture ready for use? */
+    
+    /* Background thread for async image loading */
+    pthread_t preload_thread;           /* Background preload thread */
+    atomic_bool_t preload_thread_active; /* Is background thread running? */
+    pthread_mutex_t preload_mutex;      /* Protects preload_image during thread handoff */
+    struct image_data *preload_decoded_image; /* Image decoded in background, ready for GPU upload */
+    atomic_bool_t preload_upload_pending; /* Background thread finished, main thread should upload */
     
     /* iChannel textures for shader inputs (dynamic count) */
     GLuint *channel_textures;           /* Dynamic array of channel textures */

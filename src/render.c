@@ -1069,6 +1069,15 @@ bool render_frame(struct output_state *output) {
             log_error("Failed to make EGL context current for rendering");
             return false;
         }
+        
+        /* CRITICAL: Invalidate GL state cache when switching contexts
+         * All outputs share the same EGL context but have different surfaces.
+         * When we switch surfaces, the GL state (bound textures, programs, etc.) 
+         * persists from the previous surface, but our cache is per-output.
+         * We must invalidate the cache to force rebinding. */
+        output->gl_state.bound_texture = 0;
+        output->gl_state.active_program = 0;
+        output->gl_state.blend_enabled = false;
     }
 
     /* Handle shader wallpapers */
@@ -1204,7 +1213,32 @@ bool render_frame(struct output_state *output) {
 
     /* Bind texture with state tracking */
     glActiveTexture(GL_TEXTURE0);
+    
+    /* Validate texture before binding */
+    if (output->texture == 0) {
+        log_error("Invalid texture ID (0) - cannot render");
+        return false;
+    }
+    
+    /* DEBUG: Log which texture is being used for this output */
+    static uint64_t last_log_time = 0;
+    uint64_t now = get_time_ms();
+    if (now - last_log_time > 2000) {
+        log_info("Rendering output %s with texture %u (image: %s)", 
+                 output->model[0] ? output->model : "unknown",
+                 output->texture,
+                 output->config->path);
+        last_log_time = now;
+    }
+    
     bind_texture_cached(output, output->texture);
+    
+    /* Check if bind succeeded */
+    GLenum bind_error = glGetError();
+    if (bind_error != GL_NO_ERROR) {
+        log_error("OpenGL error binding texture %u: 0x%x", output->texture, bind_error);
+        return false;
+    }
 
     /* Set texture unit uniform - use cached location */
     if (output->program_uniforms.tex_sampler >= 0) {

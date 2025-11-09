@@ -199,6 +199,54 @@ static void render_outputs(struct neowall_state *state) {
             /* Recalculate time for accurate transition timing */
             current_time = get_time_ms();
 
+            /* Check if background thread finished decoding - upload to GPU now */
+            if (atomic_load(&output->preload_upload_pending)) {
+                pthread_mutex_lock(&output->preload_mutex);
+                
+                if (output->preload_decoded_image) {
+                    /* Ensure EGL context is current for this output */
+                    if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+                        if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
+                                           output->compositor_surface->egl_surface, state->egl_context)) {
+                            log_error("Failed to make EGL context current for preload upload");
+                        } else {
+                            /* Upload decoded image to GPU (fast - just texture creation) */
+                            GLuint new_texture = render_create_texture(output->preload_decoded_image);
+                            if (new_texture != 0) {
+                                /* CRITICAL: Invalidate GL state cache after texture creation
+                                 * render_create_texture unbinds the texture (binds 0), which
+                                 * invalidates our cached state. Reset to force proper rebinding. */
+                                output->gl_state.bound_texture = 0;
+                                
+                                /* Clean up old preload texture if exists */
+                                if (output->preload_texture) {
+                                    render_destroy_texture(output->preload_texture);
+                                }
+                                if (output->preload_image) {
+                                    image_free(output->preload_image);
+                                }
+                                
+                                /* Store uploaded texture */
+                                output->preload_texture = new_texture;
+                                output->preload_image = output->preload_decoded_image;
+                                output->preload_decoded_image = NULL; /* Ownership transferred */
+                                atomic_store(&output->preload_ready, true);
+                                
+                                log_info("GPU upload complete: %s (texture=%u) - ZERO-STALL ready!",
+                                         output->preload_path, new_texture);
+                            } else {
+                                log_error("Failed to create preload texture from decoded image");
+                                image_free(output->preload_decoded_image);
+                                output->preload_decoded_image = NULL;
+                            }
+                        }
+                    }
+                }
+                
+                atomic_store(&output->preload_upload_pending, false);
+                pthread_mutex_unlock(&output->preload_mutex);
+            }
+            
             /* Handle image transitions */
             if (output->transition_start_time > 0 &&
                 output->config->transition != TRANSITION_NONE) {
