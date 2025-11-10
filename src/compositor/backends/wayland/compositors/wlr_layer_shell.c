@@ -17,6 +17,7 @@
  * zwlr_layer_shell_v1 protocol.
  *
  * SUPPORTED COMPOSITORS:
+ * - KDE Plasma (KWin) - Full support, recommended backend
  * - Hyprland
  * - Sway
  * - River
@@ -34,7 +35,7 @@
  */
 
 #define BACKEND_NAME "wlr-layer-shell"
-#define BACKEND_DESCRIPTION "wlroots layer shell protocol (Hyprland, Sway, River, etc.)"
+#define BACKEND_DESCRIPTION "wlroots layer shell protocol (KDE, Hyprland, Sway, River, etc.)"
 #define BACKEND_PRIORITY 100
 
 /* Backend-specific data */
