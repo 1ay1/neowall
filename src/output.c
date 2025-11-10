@@ -40,6 +40,7 @@ struct output_state *output_create(struct neowall_state *state,
     out->name = name;
     out->scale = 1;
     out->transform = WL_OUTPUT_TRANSFORM_NORMAL;
+    out->current_shader_path[0] = '\0';
     out->configured = false;
     out->needs_redraw = true;
     out->state = state;
@@ -665,10 +666,20 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         
         /* Destroy old shader */
         shader_destroy_program(output->live_shader_program);
-        
+
         /* Switch to new shader */
         output->live_shader_program = new_shader_program;
-        output->shader_start_time = get_time_ms();
+        uint64_t now = get_time_ms();
+        bool same_shader = (output->current_shader_path[0] != '\0' &&
+                            strcmp(output->current_shader_path, shader_path) == 0);
+        if (same_shader && output->shader_start_time > 0 && now >= output->shader_start_time) {
+            output->shader_time_accum_ms += now - output->shader_start_time;
+        } else if (!same_shader) {
+            output->shader_time_accum_ms = 0;
+        }
+        output->shader_start_time = now;
+        strncpy(output->current_shader_path, shader_path, sizeof(output->current_shader_path) - 1);
+        output->current_shader_path[sizeof(output->current_shader_path) - 1] = '\0';
         
         /* Reset shader uniform cache for new program */
         output->shader_uniforms.position = -2;
@@ -739,7 +750,15 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     }
     
     output->live_shader_program = new_shader_program;
-    output->shader_start_time = get_time_ms();
+    uint64_t initial_load_time = get_time_ms();
+    bool same_shader = (output->current_shader_path[0] != '\0' &&
+                        strcmp(output->current_shader_path, shader_path) == 0);
+    if (!same_shader) {
+        output->shader_time_accum_ms = 0;
+    }
+    output->shader_start_time = initial_load_time;
+    strncpy(output->current_shader_path, shader_path, sizeof(output->current_shader_path) - 1);
+    output->current_shader_path[sizeof(output->current_shader_path) - 1] = '\0';
     
     /* Reset shader uniform cache for new program */
     output->shader_uniforms.position = -2;
@@ -1082,8 +1101,10 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
             }
             /* Reset shader state */
             output->shader_start_time = 0;
+            output->shader_time_accum_ms = 0;
             output->shader_fade_start_time = 0;
             output->pending_shader_path[0] = '\0';
+            output->current_shader_path[0] = '\0';
         }
     }
 

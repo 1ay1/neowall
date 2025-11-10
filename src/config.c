@@ -1931,6 +1931,12 @@ void config_reload(struct neowall_state *state) {
         memset(&output->gl_state, 0, sizeof(output->gl_state));
         
         /* Reset all timing and state */
+        if (output->shader_start_time > 0) {
+            uint64_t now = get_time_ms();
+            if (now >= output->shader_start_time) {
+                output->shader_time_accum_ms += now - output->shader_start_time;
+            }
+        }
         output->transition_start_time = 0;
         output->transition_progress = 0.0f;
         output->shader_start_time = 0;
