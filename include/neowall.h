@@ -108,8 +108,14 @@ struct output_state {
     struct compositor_surface *compositor_surface;  /* Compositor abstraction surface */
 
     uint32_t name;              /* Wayland output name/ID */
+    /* width/height represent the current physical buffer in pixels */
     int32_t width;
     int32_t height;
+    /* cached logical + mode sizes to handle HiDPI resizes */
+    int32_t logical_width;
+    int32_t logical_height;
+    int32_t pixel_width;
+    int32_t pixel_height;
     int32_t scale;
     int32_t transform;
 

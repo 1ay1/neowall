@@ -38,6 +38,12 @@ struct output_state *output_create(struct neowall_state *state,
     out->output = output;
     out->xdg_output = NULL;
     out->name = name;
+    out->width = 0;
+    out->height = 0;
+    out->logical_width = 0;
+    out->logical_height = 0;
+    out->pixel_width = 0;
+    out->pixel_height = 0;
     out->scale = 1;
     out->transform = WL_OUTPUT_TRANSFORM_NORMAL;
     out->current_shader_path[0] = '\0';
