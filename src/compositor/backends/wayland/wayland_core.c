@@ -66,6 +66,10 @@ static const struct zxdg_output_v1_listener xdg_output_listener = {
 };
 
 /* Output listener callbacks */
+static bool output_apply_render_size(struct output_state *output,
+                                     const char *reason,
+                                     bool *out_changed);
+
 static void output_handle_geometry(void *data, struct wl_output *wl_output,
                                    int32_t x, int32_t y,
                                    int32_t physical_width, int32_t physical_height,
@@ -100,13 +104,14 @@ static void output_handle_mode(void *data, struct wl_output *wl_output,
     (void)refresh;
 
     if (flags & WL_OUTPUT_MODE_CURRENT) {
-        output->width = width;
-        output->height = height;
-        output->needs_redraw = true;
+        output->pixel_width = width;
+        output->pixel_height = height;
 
         log_info("Output %s: mode %dx%d @ %d mHz",
                  output->model[0] ? output->model : "unknown",
                  width, height, refresh);
+
+        output_apply_render_size(output, "mode event", NULL);
     }
 }
 
@@ -124,11 +129,22 @@ static void output_handle_scale(void *data, struct wl_output *wl_output,
     struct output_state *output = data;
     (void)wl_output;
 
-    output->scale = factor;
-    output->needs_redraw = true;
+    int32_t new_scale = factor > 0 ? factor : 1;
+    if (output->scale != new_scale) {
+        log_info("Output %s: scale factor %d",
+                 output->model[0] ? output->model : "unknown", new_scale);
+    } else {
+        log_debug("Output %s: scale factor %d",
+                  output->model[0] ? output->model : "unknown", new_scale);
+    }
 
-    log_debug("Output %s: scale factor %d",
-              output->model[0] ? output->model : "unknown", factor);
+    output->scale = new_scale;
+
+    if (output->compositor_surface) {
+        compositor_surface_set_scale(output->compositor_surface, new_scale);
+    }
+
+    output_apply_render_size(output, "scale event", NULL);
 }
 
 static const struct wl_output_listener output_listener = {
@@ -137,6 +153,87 @@ static const struct wl_output_listener output_listener = {
     .done = output_handle_done,
     .scale = output_handle_scale,
 };
+
+static inline const char *output_readable_name(const struct output_state *output) {
+    if (!output) {
+        return "(null)";
+    }
+    return output->connector_name[0] ? output->connector_name :
+           (output->model[0] ? output->model : "unknown");
+}
+
+static inline int32_t output_normalized_scale(const struct output_state *output) {
+    if (!output || output->scale <= 0) {
+        return 1;
+    }
+    return output->scale;
+}
+
+static bool output_apply_render_size(struct output_state *output,
+                                     const char *reason,
+                                     bool *out_changed) {
+    if (!output) {
+        return false;
+    }
+
+    int32_t scale = output_normalized_scale(output);
+    int32_t logical_w = output->logical_width;
+    int32_t logical_h = output->logical_height;
+    int32_t physical_w = 0;
+    int32_t physical_h = 0;
+
+    if (logical_w > 0 && logical_h > 0) {
+        physical_w = logical_w * scale;
+        physical_h = logical_h * scale;
+    } else if (output->pixel_width > 0 && output->pixel_height > 0) {
+        physical_w = output->pixel_width;
+        physical_h = output->pixel_height;
+
+        if (logical_w <= 0) {
+            logical_w = physical_w / scale;
+        }
+        if (logical_h <= 0) {
+            logical_h = physical_h / scale;
+        }
+    }
+
+    if (physical_w <= 0 || physical_h <= 0) {
+        if (out_changed) {
+            *out_changed = false;
+        }
+        log_debug("Output %s: waiting for complete geometry (reason=%s, logical=%dx%d, pixel=%dx%d, scale=%d)",
+                  output_readable_name(output), reason ? reason : "pending",
+                  logical_w, logical_h, output->pixel_width, output->pixel_height, scale);
+        return false;
+    }
+
+    if (output->width == physical_w && output->height == physical_h) {
+        if (out_changed) {
+            *out_changed = false;
+        }
+        return true;
+    }
+
+    output->width = physical_w;
+    output->height = physical_h;
+    output->needs_redraw = true;
+
+    if (out_changed) {
+        *out_changed = true;
+    }
+
+    log_info("Output %s: render buffer %dx%d (logical %dx%d @ scale %d) [%s]",
+             output_readable_name(output), physical_w, physical_h,
+             logical_w, logical_h, scale, reason ? reason : "update");
+
+    if (output->compositor_surface && output->compositor_surface->egl_window) {
+        compositor_surface_resize_egl(output->compositor_surface, physical_w, physical_h);
+        log_debug("Resized EGL window for output %s after %s",
+                  output_readable_name(output), reason ? reason : "update");
+    }
+
+    return true;
+}
 
 /* Wait for compositor outputs to be available with minimal retries
  * This is compositor-agnostic and works with any Wayland compositor */
@@ -180,25 +277,17 @@ static bool wait_for_outputs_configured(struct neowall_state *state) {
 static void output_on_configure_callback(struct compositor_surface *surface,
                                         int32_t width, int32_t height) {
     struct output_state *output = surface->user_data;
-    
-    bool dimensions_changed = false;
-    if (output->width != width || output->height != height) {
-        output->width = width;
-        output->height = height;
-        output->needs_redraw = true;
-        dimensions_changed = true;
 
-        log_info("Layer surface configured for output %s: %dx%d (reconnection detected)",
-                 output->model[0] ? output->model : "unknown", width, height);
+    log_info("Layer surface configured for output %s: logical %dx%d",
+             output->model[0] ? output->model : "unknown", width, height);
 
-        /* Recreate EGL surface with new dimensions */
-        if (output->compositor_surface && output->compositor_surface->egl_window) {
-            compositor_surface_resize_egl(output->compositor_surface, width, height);
-            log_debug("Resized EGL window for output %s", output->model);
-        } else {
-            log_debug("No EGL window to resize for output %s, will be created later", output->model);
-        }
+    if (width > 0 && height > 0) {
+        output->logical_width = width;
+        output->logical_height = height;
     }
+
+    bool dimensions_changed = false;
+    output_apply_render_size(output, "layer configure", &dimensions_changed);
 
     /* Apply deferred configuration if surface just became ready */
     if (dimensions_changed && output->compositor_surface && 
@@ -521,6 +610,10 @@ bool output_configure_compositor_surface(struct output_state *output) {
         output_on_closed_callback,
         output
     );
+
+    /* Ensure buffer scale matches the wl_output before first commit */
+    compositor_surface_set_scale(output->compositor_surface,
+                                 output_normalized_scale(output));
 
     /* Commit surface to trigger configure event */
     compositor_surface_commit(output->compositor_surface);
