@@ -786,7 +786,10 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     VibeValue *show_fps_val = vibe_object_get(obj->as_object, "show_fps");
     if (show_fps_val) {
         if (show_fps_val->type != VIBE_TYPE_BOOLEAN) {
-            log_error("[%s] 'show_fps' must be a boolean (true or false)", context_name);
+            log_error("[%s] 'show_fps' must be a boolean (true or false), got type: %d", 
+                     context_name, show_fps_val->type);
+            log_error("[%s] Invalid value for show_fps - use 'true' or 'false' only", context_name);
+            log_error("[%s] Config parsing failed due to invalid show_fps value", context_name);
             return false;
         }
         config->show_fps = show_fps_val->as_boolean;
