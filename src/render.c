@@ -836,10 +836,14 @@ bool render_frame_shader(struct output_state *output) {
         return false;
     }
 
-    /* Calculate elapsed time for animation (continuous time since shader loaded) */
+    /* Calculate elapsed time for animation (preserve continuity across reloads) */
     uint64_t current_time = get_time_ms();
+    uint64_t elapsed_ms = output->shader_time_accum_ms;
     uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : output->last_frame_time;
-    float time = (current_time - start_time) / (float)MS_PER_SECOND;
+    if (start_time > 0 && current_time >= start_time) {
+        elapsed_ms += current_time - start_time;
+    }
+    float time = elapsed_ms / (float)MS_PER_SECOND;
     
     /* Apply shader speed multiplier */
     float shader_speed = output->config->shader_speed > 0.0f ? output->config->shader_speed : 1.0f;
@@ -1113,7 +1117,18 @@ bool render_frame_shader(struct output_state *output) {
                     /* Destroy old shader and switch to new one */
                     shader_destroy_program(output->live_shader_program);
                     output->live_shader_program = new_shader_program;
+
+                    bool same_shader = (output->current_shader_path[0] != '\0' &&
+                                        strcmp(output->current_shader_path, output->pending_shader_path) == 0);
+                    if (same_shader && output->shader_start_time > 0 && current_time >= output->shader_start_time) {
+                        output->shader_time_accum_ms += current_time - output->shader_start_time;
+                    } else if (!same_shader) {
+                        output->shader_time_accum_ms = 0;
+                    }
                     output->shader_start_time = current_time;
+                    strncpy(output->current_shader_path, output->pending_shader_path,
+                            sizeof(output->current_shader_path) - 1);
+                    output->current_shader_path[sizeof(output->current_shader_path) - 1] = '\0';
                     
                     /* Reset shader uniform cache for new program */
                     output->shader_uniforms.position = -2;
