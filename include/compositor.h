@@ -124,6 +124,8 @@ struct compositor_surface {
     void *backend_data;                 /* Backend-specific data (opaque) */
     struct compositor_backend *backend; /* Back-pointer to backend */
     
+    struct wp_tearing_control_v1 *tearing_control; /* Tearing control for immediate presentation */
+    
     /* Callbacks */
     void (*on_configure)(struct compositor_surface *surface, 
                         int32_t width, int32_t height);

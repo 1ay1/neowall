@@ -798,52 +798,20 @@ bool render_frame_shader(struct output_state *output) {
     /* Set viewport */
     glViewport(0, 0, output->width, output->height);
     
-    /* Clear any previous OpenGL errors AFTER context is current (critical for multi-monitor) */
-    while (glGetError() != GL_NO_ERROR);
-    
-    /* Verify errors are cleared */
-    GLenum err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error still present after clearing: 0x%x", err);
-        return false;
-    }
-    
-    err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error after glViewport: 0x%x", err);
-        return false;
-    }
-
     /* Clear screen */
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    
-    err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error after glClear: 0x%x", err);
-        return false;
-    }
 
     /* CRITICAL: Always use glUseProgram for shader rendering (not cached) 
      * GL state is per-context, not per-output. When switching between outputs,
      * the cached state can be stale, causing GL_INVALID_OPERATION errors.
      * Shaders are performance-critical, so we can't afford stale state. */
     glUseProgram(output->live_shader_program);
-    
-    err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error after glUseProgram (program=%u): 0x%x", output->live_shader_program, err);
-        return false;
-    }
 
-    /* Calculate elapsed time for animation (preserve continuity across reloads) */
+    /* Calculate elapsed time for animation (continuous time since shader loaded) */
     uint64_t current_time = get_time_ms();
-    uint64_t elapsed_ms = output->shader_time_accum_ms;
     uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : output->last_frame_time;
-    if (start_time > 0 && current_time >= start_time) {
-        elapsed_ms += current_time - start_time;
-    }
-    float time = elapsed_ms / (float)MS_PER_SECOND;
+    float time = (current_time - start_time) / (float)MS_PER_SECOND;
     
     /* Apply shader speed multiplier */
     float shader_speed = output->config->shader_speed > 0.0f ? output->config->shader_speed : 1.0f;
@@ -884,105 +852,46 @@ bool render_frame_shader(struct output_state *output) {
         glUniform2f(output->shader_uniforms.u_resolution, (float)output->width, (float)output->height);
     }
     
-    err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error after cached uniforms: 0x%x", err);
-        return false;
+    /* Also try direct uniform names for non-Shadertoy shaders (cached on first use) */
+    static GLint time_loc_cached = -2;
+    static GLint resolution_loc_cached = -2;
+    static GLuint cached_program_id = 0;
+    
+    /* Re-cache if program changed */
+    if (cached_program_id != output->live_shader_program) {
+        time_loc_cached = glGetUniformLocation(output->live_shader_program, "time");
+        resolution_loc_cached = glGetUniformLocation(output->live_shader_program, "resolution");
+        cached_program_id = output->live_shader_program;
     }
     
-    /* Also try direct uniform names for non-Shadertoy shaders */
-    GLint time_loc = glGetUniformLocation(output->live_shader_program, "time");
-    err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error after glGetUniformLocation('time'): 0x%x", err);
-        return false;
+    if (time_loc_cached >= 0) {
+        glUniform1f(time_loc_cached, time);
     }
     
-    if (time_loc >= 0) {
-        glUniform1f(time_loc, time);
-        err = glGetError();
-        if (err != GL_NO_ERROR) {
-            log_error("OpenGL error after glUniform1f('time'): 0x%x", err);
-            return false;
-        }
+    if (resolution_loc_cached >= 0) {
+        glUniform2f(resolution_loc_cached, (float)output->width, (float)output->height);
     }
     
-    GLint resolution_loc = glGetUniformLocation(output->live_shader_program, "resolution");
-    err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error after glGetUniformLocation('resolution'): 0x%x", err);
-        return false;
+    /* Update iResolution uniform (Shadertoy vec3) - cache location */
+    static GLint iResolution_loc_cached = -2;
+    if (cached_program_id != output->live_shader_program || iResolution_loc_cached == -2) {
+        iResolution_loc_cached = glGetUniformLocation(output->live_shader_program, "iResolution");
     }
     
-    if (resolution_loc >= 0) {
-        glUniform2f(resolution_loc, (float)output->width, (float)output->height);
-        err = glGetError();
-        if (err != GL_NO_ERROR) {
-            log_error("OpenGL error after glUniform2f('resolution'): 0x%x", err);
-            return false;
-        }
-    }
-    
-    /* Update iResolution uniform (Shadertoy vec3) every frame in case resolution changes */
-    GLint iResolution_loc = glGetUniformLocation(output->live_shader_program, "iResolution");
-    err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error after glGetUniformLocation('iResolution'): 0x%x", err);
-        return false;
-    }
-    
-    if (iResolution_loc >= 0) {
+    if (iResolution_loc_cached >= 0) {
         float aspect = (float)output->width / (float)output->height;
-        glUniform3f(iResolution_loc, (float)output->width, (float)output->height, aspect);
-        err = glGetError();
-        if (err != GL_NO_ERROR) {
-            log_error("OpenGL error after glUniform3f('iResolution'): 0x%x", err);
-            return false;
-        }
+        glUniform3f(iResolution_loc_cached, (float)output->width, (float)output->height, aspect);
     }
 
     /* Bind iChannel textures if they exist */
     if (output->channel_textures && output->shader_uniforms.iChannel) {
-        static bool logged_once = false;
         for (size_t i = 0; i < output->channel_count; i++) {
             if (output->channel_textures[i] != 0 && output->shader_uniforms.iChannel[i] >= 0) {
                 glActiveTexture(GL_TEXTURE0 + (GLenum)i);
-                err = glGetError();
-                if (err != GL_NO_ERROR) {
-                    log_error("OpenGL error after glActiveTexture(GL_TEXTURE%zu): 0x%x", i, err);
-                    return false;
-                }
-                
                 glBindTexture(GL_TEXTURE_2D, output->channel_textures[i]);
-                err = glGetError();
-                if (err != GL_NO_ERROR) {
-                    log_error("OpenGL error after glBindTexture(iChannel%zu, ID=%u): 0x%x", i, output->channel_textures[i], err);
-                    return false;
-                }
-                
                 glUniform1i(output->shader_uniforms.iChannel[i], (GLint)i);
-                err = glGetError();
-                if (err != GL_NO_ERROR) {
-                    log_error("OpenGL error after glUniform1i(iChannel%zu): 0x%x", i, err);
-                    return false;
-                }
-                
-                if (!logged_once) {
-                    log_info("BINDING: iChannel%zu -> texture ID %u -> texture unit %d -> uniform location %d", 
-                             i, output->channel_textures[i], (int)i, output->shader_uniforms.iChannel[i]);
-                }
             }
         }
-        if (!logged_once) {
-            logged_once = true;
-        }
-    }
-    
-    /* Check for errors after uniform/texture setup */
-    err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error after uniform/texture setup: 0x%x", err);
-        return false;
     }
 
     /* Use cached position attribute location */
@@ -996,29 +905,10 @@ bool render_frame_shader(struct output_state *output) {
      * The fullscreen quad data is already in the VBO from render_init_output.
      * We just reinterpret it: first 2 floats of each vertex are positions. */
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-    
-    err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error after glBindBuffer (vbo=%u): 0x%x", output->vbo, err);
-        return false;
-    }
 
     /* Set up vertex attributes - stride of 4 floats to skip texcoords */
     glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-    
-    err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error after glVertexAttribPointer (attrib=%d): 0x%x", pos_attrib, err);
-        return false;
-    }
-    
     glEnableVertexAttribArray(pos_attrib);
-    
-    err = glGetError();
-    if (err != GL_NO_ERROR) {
-        log_error("OpenGL error after glEnableVertexAttribArray (attrib=%d): 0x%x", pos_attrib, err);
-        return false;
-    }
 
     /* Disable alpha channel writes - force opaque output (prevents transparent shaders from showing white) */
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
@@ -1028,13 +918,6 @@ bool render_frame_shader(struct output_state *output) {
     
     /* Re-enable alpha channel writes */
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    
-    /* Check for GL errors */
-    GLenum gl_error = glGetError();
-    if (gl_error != GL_NO_ERROR) {
-        log_error("OpenGL error after shader draw: 0x%x (display may be disconnected)", gl_error);
-        return false;
-    }
 
     /* Clean up */
     glDisableVertexAttribArray(pos_attrib);
@@ -1117,18 +1000,7 @@ bool render_frame_shader(struct output_state *output) {
                     /* Destroy old shader and switch to new one */
                     shader_destroy_program(output->live_shader_program);
                     output->live_shader_program = new_shader_program;
-
-                    bool same_shader = (output->current_shader_path[0] != '\0' &&
-                                        strcmp(output->current_shader_path, output->pending_shader_path) == 0);
-                    if (same_shader && output->shader_start_time > 0 && current_time >= output->shader_start_time) {
-                        output->shader_time_accum_ms += current_time - output->shader_start_time;
-                    } else if (!same_shader) {
-                        output->shader_time_accum_ms = 0;
-                    }
                     output->shader_start_time = current_time;
-                    strncpy(output->current_shader_path, output->pending_shader_path,
-                            sizeof(output->current_shader_path) - 1);
-                    output->current_shader_path[sizeof(output->current_shader_path) - 1] = '\0';
                     
                     /* Reset shader uniform cache for new program */
                     output->shader_uniforms.position = -2;

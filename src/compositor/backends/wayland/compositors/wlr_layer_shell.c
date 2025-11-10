@@ -7,6 +7,7 @@
 #include "compositor.h"
 #include "neowall.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "tearing-control-v1-client-protocol.h"
 
 /*
  * ============================================================================
@@ -322,6 +323,27 @@ static struct compositor_surface *wlr_create_surface(void *data,
     
     zwlr_layer_surface_v1_set_keyboard_interactivity(surface_data->layer_surface, kb_mode);
     
+    /* Enable tearing control for immediate presentation (bypasses compositor vsync) */
+    if (backend_data->state->tearing_control_manager) {
+        surface->tearing_control = wp_tearing_control_manager_v1_get_tearing_control(
+            backend_data->state->tearing_control_manager,
+            surface->wl_surface
+        );
+        
+        if (surface->tearing_control) {
+            /* Set presentation hint to async (immediate/tearing allowed) */
+            wp_tearing_control_v1_set_presentation_hint(
+                surface->tearing_control,
+                WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC
+            );
+            log_info("Enabled tearing control for immediate presentation (bypasses compositor FPS limits)");
+        } else {
+            log_error("Failed to create tearing control object");
+        }
+    } else {
+        log_debug("Tearing control manager not available - FPS may be limited by compositor");
+    }
+    
     log_debug("wlr layer surface created and configured successfully");
     
     return surface;
@@ -333,6 +355,12 @@ static void wlr_destroy_surface(struct compositor_surface *surface) {
     }
     
     log_debug("Destroying wlr layer surface");
+    
+    /* Destroy tearing control if it exists */
+    if (surface->tearing_control) {
+        wp_tearing_control_v1_destroy(surface->tearing_control);
+        surface->tearing_control = NULL;
+    }
     
     /* Destroy EGL window if it exists */
     if (surface->egl_window) {

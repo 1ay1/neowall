@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <strings.h>
 #include <dirent.h>
+#include "config.h"
 #include "vibe.h"
 #include "neowall.h"
 #include "config_access.h"
@@ -472,6 +473,7 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->transition_duration = 0.3f;  /* 0.3 seconds default transition */
     config->shader_speed = 1.0f;
     config->shader_fps = 60;  /* Default 60 FPS for shaders */
+    config->vsync = false;  /* Default: vsync off, use custom FPS with tearing control */
     config->show_fps = false;  /* Default: no FPS watermark */
     config->cycle = false;
     config->cycle_paths = NULL;
@@ -782,6 +784,30 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         }
     }
     
+    /* Parse vsync (only relevant for shader mode) */
+    VibeValue *vsync_val = vibe_object_get(obj->as_object, "vsync");
+    if (vsync_val) {
+        if (vsync_val->type != VIBE_TYPE_BOOLEAN) {
+            log_error("[%s] 'vsync' must be a boolean (true or false), got type: %d", 
+                     context_name, vsync_val->type);
+            return false;
+        }
+        config->vsync = vsync_val->as_boolean;
+        
+        if (config->vsync) {
+            log_info("[%s] Vsync: ENABLED (will sync to monitor refresh rate, shader_fps ignored)", context_name);
+        } else {
+            log_info("[%s] Vsync: disabled (using custom FPS with tearing control)", context_name);
+        }
+        
+        if (config->type != WALLPAPER_SHADER) {
+            log_error("[%s] INVALID CONFIG: 'vsync' specified in IMAGE mode. "
+                     "Vsync only applies to GLSL shaders. This setting is invalid for images.", 
+                     context_name);
+            return false;
+        }
+    }
+    
     /* Parse show_fps */
     VibeValue *show_fps_val = vibe_object_get(obj->as_object, "show_fps");
     if (show_fps_val) {
@@ -846,7 +872,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     /* Warn about unknown keys */
     const char *known_keys[] = {
         "path", "shader", "mode", "duration", "transition", 
-        "transition_duration", "shader_speed", "channels", "shader_fps", "show_fps"
+        "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps"
     };
     size_t known_key_count = sizeof(known_keys) / sizeof(known_keys[0]);
     
@@ -1930,13 +1956,6 @@ void config_reload(struct neowall_state *state) {
         /* Clear GL state cache */
         memset(&output->gl_state, 0, sizeof(output->gl_state));
         
-        /* Reset all timing and state */
-        if (output->shader_start_time > 0) {
-            uint64_t now = get_time_ms();
-            if (now >= output->shader_start_time) {
-                output->shader_time_accum_ms += now - output->shader_start_time;
-            }
-        }
         output->transition_start_time = 0;
         output->transition_progress = 0.0f;
         output->shader_start_time = 0;
