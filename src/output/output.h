@@ -73,6 +73,7 @@ struct wallpaper_config {
     float transition_duration;          /* Transition duration in seconds */
     float shader_speed;                 /* Shader animation speed multiplier (default 1.0) */
     int shader_fps;                     /* Target FPS for shader rendering (default 60) */
+    bool vsync;                         /* Enable vsync (sync to monitor refresh, ignores shader_fps) */
     bool show_fps;                      /* Show FPS watermark on screen (default false) */
     bool cycle;                         /* Enable wallpaper cycling */
     char **cycle_paths;                 /* Array of paths for cycling */
@@ -152,7 +153,6 @@ struct output_state {
     GLuint glitch_program;              /* Shader program for glitch transition */
     GLuint pixelate_program;            /* Shader program for pixelate transition */
     GLuint live_shader_program;         /* Shader program for live wallpaper */
-    char current_shader_path[OUTPUT_MAX_PATH_LENGTH];
     GLuint vbo;
 
     /* Cached uniform locations for performance */
@@ -191,8 +191,7 @@ struct output_state {
     uint64_t last_frame_time;
     uint64_t last_cycle_time;           /* Last time wallpaper was changed/cycled */
     uint64_t transition_start_time;
-    uint64_t shader_start_time;         /* Time when shader clock last restarted */
-    uint64_t shader_time_accum_ms;      /* Accumulated time preserved across reloads */
+    uint64_t shader_start_time;         /* Time when shader was loaded (for animation) */
     uint64_t shader_fade_start_time;    /* Time when shader fade started (for cross-fade) */
     char pending_shader_path[OUTPUT_MAX_PATH_LENGTH];  /* Next shader to load after fade-out */
     float transition_progress;

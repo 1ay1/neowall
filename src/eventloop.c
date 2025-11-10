@@ -281,10 +281,15 @@ static void render_outputs(struct neowall_state *state) {
                     float actual_fps = (float)output->fps_frame_count / ((float)elapsed / 1000.0f);
                     output->fps_current = actual_fps;
                     uint64_t frame_time = frame_end - frame_start;
-                    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : 60;
+                    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : FPS_TARGET;
                     
-                    log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums)", 
-                             output->model, actual_fps, target_fps, frame_time);
+                    if (output->config->vsync) {
+                        log_info("FPS [%s]: %.1f FPS (vsync: monitor sync, frame_time: %lums)", 
+                                 output->model, actual_fps, frame_time);
+                    } else {
+                        log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums)", 
+                                 output->model, actual_fps, target_fps, frame_time);
+                    }
                     
                     output->fps_frame_count = 0;
                     output->fps_last_log_time = frame_end;
@@ -794,7 +799,7 @@ void event_loop_run(struct neowall_state *state) {
         /* Throttle debug logging - only every 300 frames (~5 seconds at 60fps) */
         log_throttle_counter++;
         if (log_throttle_counter >= 300 && shader_count > 0) {
-            log_debug("Shader animation active: %d outputs rendering at ~60 FPS", shader_count);
+            log_debug("Shader animation active: %d output(s) rendering", shader_count);
             log_throttle_counter = 0;
         }
     }

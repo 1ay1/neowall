@@ -12,6 +12,8 @@
 #include <GLES2/gl2.h>
 #include "egl/capability.h"
 #include "../src/output/output.h"
+#include "../src/config/config.h"
+#include "../src/render/render.h"
 
 /* Thread-safe atomic types for flags accessed from multiple threads */
 typedef atomic_bool atomic_bool_t;
@@ -21,7 +23,6 @@ typedef atomic_int atomic_int_t;
 #define MAX_PATH_LENGTH OUTPUT_MAX_PATH_LENGTH  /* Compatibility alias */
 #define MAX_OUTPUTS 16
 #define MAX_WALLPAPERS 256
-#define CONFIG_WATCH_INTERVAL 1
 
 
 
@@ -37,6 +38,7 @@ struct neowall_state {
     struct wl_compositor *compositor;
     struct wl_shm *shm;
     struct zxdg_output_manager_v1 *xdg_output_manager;  /* For getting connector names */
+    struct wp_tearing_control_manager_v1 *tearing_control_manager;  /* For immediate presentation */
 
     /* Compositor abstraction backend */
     struct compositor_backend *compositor_backend;
@@ -108,14 +110,6 @@ struct neowall_state {
     uint64_t errors_count;
 };
 
-/* Configuration parsing */
-bool config_load(struct neowall_state *state, const char *config_path);
-bool config_parse_wallpaper(struct wallpaper_config *config, const char *output_name);
-void config_free_wallpaper(struct wallpaper_config *config);
-const char *config_get_default_path(void);
-char **load_images_from_directory(const char *dir_path, size_t *count);
-char **load_shaders_from_directory(const char *dir_path, size_t *count);
-
 /* Image loading */
 struct image_data *image_load(const char *path, int32_t display_width, int32_t display_height, enum wallpaper_mode mode);
 void image_free(struct image_data *img);
@@ -133,33 +127,9 @@ bool egl_init(struct neowall_state *state);
 void egl_cleanup(struct neowall_state *state);
 void detect_gl_capabilities(struct neowall_state *state);
 
-/* Rendering */
-bool render_init_output(struct output_state *output);
-void render_cleanup_output(struct output_state *output);
-bool render_frame(struct output_state *output);
-bool render_frame_shader(struct output_state *output);
-bool render_frame_transition(struct output_state *output, float progress);
-GLuint render_create_texture(struct image_data *img);
-void render_destroy_texture(GLuint texture);
-bool render_load_channel_textures(struct output_state *output, struct wallpaper_config *config);
-bool render_update_channel_texture(struct output_state *output, size_t channel_index, const char *image_path);
-
-/* GL shader programs */
-bool shader_create_program(GLuint *program);
-void shader_destroy_program(GLuint program);
-const char *get_glsl_version_string(struct neowall_state *state);
-char *adapt_shader_for_version(struct neowall_state *state, const char *shader_code, bool is_fragment_shader);
-char *adapt_vertex_shader(struct neowall_state *state, const char *shader_code);
-char *adapt_fragment_shader(struct neowall_state *state, const char *shader_code);
-
 /* Main loop */
 void event_loop_run(struct neowall_state *state);
 void event_loop_stop(struct neowall_state *state);
-
-/* Config watching */
-void *config_watch_thread(void *arg);
-bool config_has_changed(struct neowall_state *state);
-void config_reload(struct neowall_state *state);
 
 /* Utility functions */
 uint64_t get_time_ms(void);

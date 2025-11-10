@@ -20,6 +20,47 @@ static inline const char *output_get_identifier(const struct output_state *outpu
     return output->model;
 }
 
+/* Helper function to configure vsync (swap interval) for shader rendering
+ * DRY principle: Single source of truth for vsync configuration logic */
+static void output_configure_vsync(struct output_state *output) {
+    if (!output || !output->compositor_surface || 
+        output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
+        return;
+    }
+
+    /* Make EGL context current */
+    if (!eglMakeCurrent(output->state->egl_display, 
+                       output->compositor_surface->egl_surface,
+                       output->compositor_surface->egl_surface, 
+                       output->state->egl_context)) {
+        log_error("Failed to make EGL context current for vsync config");
+        return;
+    }
+
+    /* Configure vsync based on user preference:
+     * - vsync=true:  Enable vsync, sync to monitor refresh rate (ignores shader_fps)
+     * - vsync=false: Disable vsync, use tearing control for custom FPS (default) */
+    int swap_interval = output->config->vsync ? 1 : 0;
+    
+    if (!eglSwapInterval(output->state->egl_display, swap_interval)) {
+        EGLint err = eglGetError();
+        log_error("Failed to set swap interval to %d (error: 0x%x)", swap_interval, err);
+        if (!output->config->vsync) {
+            log_error("This may prevent achieving target FPS of %d", output->config->shader_fps);
+        }
+    } else {
+        if (output->config->vsync) {
+            log_info("Enabled vsync for output %s (will sync to monitor refresh rate)", 
+                     output->model[0] ? output->model : "unknown");
+        } else {
+            log_info("Disabled vsync for output %s (shader_fps=%d, target frame time: %.1fms)", 
+                     output->model[0] ? output->model : "unknown", 
+                     output->config->shader_fps,
+                     1000.0f / output->config->shader_fps);
+        }
+    }
+}
+
 
 
 struct output_state *output_create(struct neowall_state *state,
@@ -47,7 +88,6 @@ struct output_state *output_create(struct neowall_state *state,
     out->pixel_height = 0;
     out->scale = 1;
     out->transform = WL_OUTPUT_TRANSFORM_NORMAL;
-    out->current_shader_path[0] = '\0';
     out->configured = false;
     out->needs_redraw = true;
     out->state = state;
@@ -673,20 +713,10 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         
         /* Destroy old shader */
         shader_destroy_program(output->live_shader_program);
-
+        
         /* Switch to new shader */
         output->live_shader_program = new_shader_program;
-        uint64_t now = get_time_ms();
-        bool same_shader = (output->current_shader_path[0] != '\0' &&
-                            strcmp(output->current_shader_path, shader_path) == 0);
-        if (same_shader && output->shader_start_time > 0 && now >= output->shader_start_time) {
-            output->shader_time_accum_ms += now - output->shader_start_time;
-        } else if (!same_shader) {
-            output->shader_time_accum_ms = 0;
-        }
-        output->shader_start_time = now;
-        strncpy(output->current_shader_path, shader_path, sizeof(output->current_shader_path) - 1);
-        output->current_shader_path[sizeof(output->current_shader_path) - 1] = '\0';
+        output->shader_start_time = get_time_ms();
         
         /* Reset shader uniform cache for new program */
         output->shader_uniforms.position = -2;
@@ -719,6 +749,9 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         /* Mark for immediate redraw with new shader */
         output->needs_redraw = true;
         output->last_cycle_time = get_time_ms();
+        
+        /* Configure vsync for shader rendering */
+        output_configure_vsync(output);
         
         log_info("Shader switched successfully: %s", shader_path);
         return;
@@ -757,15 +790,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     }
     
     output->live_shader_program = new_shader_program;
-    uint64_t initial_load_time = get_time_ms();
-    bool same_shader = (output->current_shader_path[0] != '\0' &&
-                        strcmp(output->current_shader_path, shader_path) == 0);
-    if (!same_shader) {
-        output->shader_time_accum_ms = 0;
-    }
-    output->shader_start_time = initial_load_time;
-    strncpy(output->current_shader_path, shader_path, sizeof(output->current_shader_path) - 1);
-    output->current_shader_path[sizeof(output->current_shader_path) - 1] = '\0';
+    output->shader_start_time = get_time_ms();
     
     /* Reset shader uniform cache for new program */
     output->shader_uniforms.position = -2;
@@ -783,6 +808,17 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     }
     
     log_debug("Shader loaded (first): %s", shader_path);
+
+    /* Configure vsync based on shader_fps setting */
+    if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+        if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
+                           output->compositor_surface->egl_surface, output->state->egl_context)) {
+            log_error("Failed to make EGL context current for vsync config");
+        } else {
+            /* Configure vsync for shader rendering */
+            output_configure_vsync(output);
+        }
+    }
 
     /* Free any existing image data (shaders don't use images) */
     if (output->current_image) {
@@ -1108,10 +1144,8 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
             }
             /* Reset shader state */
             output->shader_start_time = 0;
-            output->shader_time_accum_ms = 0;
             output->shader_fade_start_time = 0;
             output->pending_shader_path[0] = '\0';
-            output->current_shader_path[0] = '\0';
         }
     }
 
@@ -1419,29 +1453,8 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     log_info("Config applied and swapped for %s (now using slot %d)", 
              output->model[0] ? output->model : "unknown", inactive);
 
-    /* Configure vsync based on shader_fps setting:
-     * - shader_fps = 60 (default) → enable vsync for power efficiency
-     * - shader_fps != 60 → disable vsync to respect custom FPS target */
-    if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-        if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
-                           output->compositor_surface->egl_surface, output->state->egl_context)) {
-            log_error("Failed to make EGL context current for vsync config");
-        } else {
-            int swap_interval = (output->config->shader_fps == 60) ? 1 : 0;
-            if (!eglSwapInterval(output->state->egl_display, swap_interval)) {
-                EGLint err = eglGetError();
-                log_debug("Could not set swap interval to %d: 0x%x", swap_interval, err);
-            } else {
-                if (swap_interval == 1) {
-                    log_info("Enabled vsync for output %s (shader_fps=60, power efficient)", 
-                             output->model[0] ? output->model : "unknown");
-                } else {
-                    log_info("Disabled vsync for output %s (shader_fps=%d, custom frame rate)", 
-                             output->model[0] ? output->model : "unknown", output->config->shader_fps);
-                }
-            }
-        }
-    }
+    /* Configure vsync for shader rendering */
+    output_configure_vsync(output);
 
     /* Update state file with new config (after swap so output->config points to new slot) */
     const char *state_path = (config->type == WALLPAPER_SHADER) ? 

@@ -7,6 +7,7 @@
 #include "neowall.h"
 #include "compositor.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
+#include "tearing-control-v1-client-protocol.h"
 
 /* Maximum retries and delay when waiting for compositor to be ready */
 #define COMPOSITOR_READY_MAX_RETRIES 5
@@ -365,6 +366,10 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
     } else if (strcmp(interface, wl_shm_interface.name) == 0) {
         state->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
         log_info("Bound to shared memory");
+    } else if (strcmp(interface, "wp_tearing_control_manager_v1") == 0) {
+        state->tearing_control_manager = wl_registry_bind(registry, name,
+                                                           &wp_tearing_control_manager_v1_interface, 1);
+        log_info("Bound to tearing control manager (immediate presentation support)");
     } else if (strcmp(interface, zxdg_output_manager_v1_interface.name) == 0) {
         state->xdg_output_manager = wl_registry_bind(registry, name,
                                                       &zxdg_output_manager_v1_interface, 2);

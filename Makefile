@@ -12,6 +12,8 @@ COMPOSITOR_BACKEND_DIR = $(COMPOSITOR_DIR)/backends
 WAYLAND_BACKEND_DIR = $(COMPOSITOR_BACKEND_DIR)/wayland
 WAYLAND_COMPOSITOR_DIR = $(WAYLAND_BACKEND_DIR)/compositors
 OUTPUT_DIR = $(SRC_DIR)/output
+CONFIG_DIR = $(SRC_DIR)/config
+RENDER_DIR = $(SRC_DIR)/render
 INC_DIR = include
 EGL_INC_DIR = $(INC_DIR)/egl
 PROTO_DIR = protocols
@@ -22,6 +24,8 @@ COMPOSITOR_OBJ_DIR = $(OBJ_DIR)/compositor
 WAYLAND_BACKEND_OBJ_DIR = $(OBJ_DIR)/compositor/backends/wayland
 WAYLAND_COMPOSITOR_OBJ_DIR = $(WAYLAND_BACKEND_OBJ_DIR)/compositors
 OUTPUT_OBJ_DIR = $(OBJ_DIR)/output
+CONFIG_OBJ_DIR = $(OBJ_DIR)/config
+RENDER_OBJ_DIR = $(OBJ_DIR)/render
 BIN_DIR = $(BUILD_DIR)/bin
 ASSETS_DIR = assets
 
@@ -162,6 +166,8 @@ CORE_SOURCES = $(filter-out $(SRC_DIR)/egl.c, $(wildcard $(SRC_DIR)/*.c))
 TRANSITION_SOURCES = $(wildcard $(SRC_DIR)/transitions/*.c)
 TEXTURE_SOURCES = $(wildcard $(SRC_DIR)/textures/*.c)
 OUTPUT_SOURCES = $(wildcard $(OUTPUT_DIR)/*.c)
+CONFIG_SOURCES = $(wildcard $(CONFIG_DIR)/*.c)
+RENDER_SOURCES = $(wildcard $(RENDER_DIR)/*.c)
 PROTO_SOURCES = $(wildcard $(PROTO_DIR)/*.c)
 
 # Compositor abstraction layer sources
@@ -214,7 +220,7 @@ endif
 EGL_SOURCES = $(EGL_CORE_SOURCES) $(EGL_VERSION_SOURCES) $(GLES_SOURCES)
 
 # Combine all sources
-ALL_SOURCES = $(CORE_SOURCES) $(EGL_SOURCES) $(TRANSITION_SOURCES) $(TEXTURE_SOURCES) $(OUTPUT_SOURCES) $(PROTO_SOURCES) $(COMPOSITOR_SOURCES) $(WAYLAND_BACKEND_SOURCES) $(WAYLAND_COMPOSITOR_SOURCES)
+ALL_SOURCES = $(CORE_SOURCES) $(EGL_SOURCES) $(TRANSITION_SOURCES) $(TEXTURE_SOURCES) $(OUTPUT_SOURCES) $(CONFIG_SOURCES) $(RENDER_SOURCES) $(PROTO_SOURCES) $(COMPOSITOR_SOURCES) $(WAYLAND_BACKEND_SOURCES) $(WAYLAND_COMPOSITOR_SOURCES)
 
 # ============================================================================
 # Object Files
@@ -225,12 +231,14 @@ EGL_OBJECTS = $(EGL_SOURCES:$(EGL_DIR)/%.c=$(EGL_OBJ_DIR)/%.o)
 TRANSITION_OBJECTS = $(TRANSITION_SOURCES:$(SRC_DIR)/transitions/%.c=$(OBJ_DIR)/transitions_%.o)
 TEXTURE_OBJECTS = $(TEXTURE_SOURCES:$(SRC_DIR)/textures/%.c=$(OBJ_DIR)/textures_%.o)
 OUTPUT_OBJECTS = $(OUTPUT_SOURCES:$(OUTPUT_DIR)/%.c=$(OUTPUT_OBJ_DIR)/%.o)
+CONFIG_OBJECTS = $(CONFIG_SOURCES:$(CONFIG_DIR)/%.c=$(CONFIG_OBJ_DIR)/%.o)
+RENDER_OBJECTS = $(RENDER_SOURCES:$(RENDER_DIR)/%.c=$(RENDER_OBJ_DIR)/%.o)
 PROTO_OBJECTS = $(PROTO_SOURCES:$(PROTO_DIR)/%.c=$(OBJ_DIR)/proto_%.o)
 COMPOSITOR_OBJECTS = $(COMPOSITOR_SOURCES:$(COMPOSITOR_DIR)/%.c=$(COMPOSITOR_OBJ_DIR)/%.o)
 WAYLAND_BACKEND_OBJECTS = $(WAYLAND_BACKEND_SOURCES:$(WAYLAND_BACKEND_DIR)/%.c=$(WAYLAND_BACKEND_OBJ_DIR)/%.o)
 WAYLAND_COMPOSITOR_OBJECTS = $(WAYLAND_COMPOSITOR_SOURCES:$(WAYLAND_COMPOSITOR_DIR)/%.c=$(WAYLAND_COMPOSITOR_OBJ_DIR)/%.o)
 
-ALL_OBJECTS = $(CORE_OBJECTS) $(EGL_OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJECTS) $(OUTPUT_OBJECTS) $(PROTO_OBJECTS) $(COMPOSITOR_OBJECTS) $(WAYLAND_BACKEND_OBJECTS) $(WAYLAND_COMPOSITOR_OBJECTS)
+ALL_OBJECTS = $(CORE_OBJECTS) $(EGL_OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJECTS) $(OUTPUT_OBJECTS) $(CONFIG_OBJECTS) $(RENDER_OBJECTS) $(PROTO_OBJECTS) $(COMPOSITOR_OBJECTS) $(WAYLAND_BACKEND_OBJECTS) $(WAYLAND_COMPOSITOR_OBJECTS)
 
 # ============================================================================
 # Wayland Protocol Files
@@ -317,7 +325,7 @@ endif
 
 # Create necessary directories
 directories:
-	@mkdir -p $(OBJ_DIR) $(EGL_OBJ_DIR) $(COMPOSITOR_OBJ_DIR) $(WAYLAND_BACKEND_OBJ_DIR) $(WAYLAND_COMPOSITOR_OBJ_DIR) $(OUTPUT_OBJ_DIR) $(BIN_DIR) $(PROTO_DIR)
+	@mkdir -p $(OBJ_DIR) $(EGL_OBJ_DIR) $(COMPOSITOR_OBJ_DIR) $(WAYLAND_BACKEND_OBJ_DIR) $(WAYLAND_COMPOSITOR_OBJ_DIR) $(OUTPUT_OBJ_DIR) $(CONFIG_OBJ_DIR) $(RENDER_OBJ_DIR) $(BIN_DIR) $(PROTO_DIR)
 
 # Generate Wayland protocol files
 protocols: $(PROTO_HEADERS) $(PROTO_SRCS)
@@ -394,6 +402,16 @@ $(OBJ_DIR)/textures_%.o: $(SRC_DIR)/textures/%.c | directories protocols
 # Compile output files
 $(OUTPUT_OBJ_DIR)/%.o: $(OUTPUT_DIR)/%.c | directories protocols
 	@echo "Compiling output: $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+# Compile config files
+$(CONFIG_OBJ_DIR)/%.o: $(CONFIG_DIR)/%.c | directories protocols
+	@echo "Compiling config: $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+# Compile render files
+$(RENDER_OBJ_DIR)/%.o: $(RENDER_DIR)/%.c | directories protocols
+	@echo "Compiling render: $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 # Compile compositor abstraction layer files
