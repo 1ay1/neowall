@@ -807,6 +807,14 @@ bool render_frame_shader(struct output_state *output) {
      * the cached state can be stale, causing GL_INVALID_OPERATION errors.
      * Shaders are performance-critical, so we can't afford stale state. */
     glUseProgram(output->live_shader_program);
+    
+    /* Validate program is actually linked and ready */
+    GLint link_status = 0;
+    glGetProgramiv(output->live_shader_program, GL_LINK_STATUS, &link_status);
+    if (link_status == GL_FALSE) {
+        log_error("Shader program %u not linked properly, skipping frame", output->live_shader_program);
+        return false;
+    }
 
     /* Calculate elapsed time for animation (continuous time since shader loaded) */
     uint64_t current_time = get_time_ms();
@@ -841,6 +849,18 @@ bool render_frame_shader(struct output_state *output) {
             }
             log_debug("Cached %zu iChannel uniform locations", output->channel_count);
         }
+    }
+    
+    /* BUGFIX: Re-cache iChannel uniforms if they were reset (e.g., after cycle)
+     * This can happen when channel textures are reloaded but position uniform is already cached */
+    if (output->shader_uniforms.iChannel && output->channel_count > 0 && 
+        output->shader_uniforms.iChannel[0] == -2) {
+        for (size_t i = 0; i < output->channel_count; i++) {
+            char sampler_name[32];
+            snprintf(sampler_name, sizeof(sampler_name), "iChannel%zu", i);
+            output->shader_uniforms.iChannel[i] = glGetUniformLocation(output->live_shader_program, sampler_name);
+        }
+        log_debug("Re-cached %zu iChannel uniform locations after reset", output->channel_count);
     }
 
     /* Set uniforms using cached locations */
@@ -885,13 +905,54 @@ bool render_frame_shader(struct output_state *output) {
 
     /* Bind iChannel textures if they exist */
     if (output->channel_textures && output->shader_uniforms.iChannel) {
+        /* Query max texture units to avoid GL_INVALID_OPERATION */
+        static GLint max_texture_units = -1;
+        if (max_texture_units == -1) {
+            glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_texture_units);
+            log_debug("GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS: %d", max_texture_units);
+        }
+        
+        /* Clear any pre-existing GL errors before texture binding */
+        while (glGetError() != GL_NO_ERROR) {
+            /* Drain error queue */
+        }
+        
         for (size_t i = 0; i < output->channel_count; i++) {
-            if (output->channel_textures[i] != 0 && output->shader_uniforms.iChannel[i] >= 0) {
-                glActiveTexture(GL_TEXTURE0 + (GLenum)i);
-                glBindTexture(GL_TEXTURE_2D, output->channel_textures[i]);
-                glUniform1i(output->shader_uniforms.iChannel[i], (GLint)i);
+            /* Skip if texture doesn't exist */
+            if (output->channel_textures[i] == 0) {
+                continue;
+            }
+            
+            /* Skip if uniform location is invalid */
+            if (output->shader_uniforms.iChannel[i] < 0) {
+                continue;
+            }
+            
+            /* Validate texture unit index */
+            if ((GLint)i >= max_texture_units) {
+                log_error("iChannel%zu exceeds max texture units (%d), skipping", i, max_texture_units);
+                break;
+            }
+            
+            glActiveTexture(GL_TEXTURE0 + (GLenum)i);
+            glBindTexture(GL_TEXTURE_2D, output->channel_textures[i]);
+            glUniform1i(output->shader_uniforms.iChannel[i], (GLint)i);
+        }
+        
+        /* Check for errors after all texture bindings */
+        GLenum tex_error = glGetError();
+        if (tex_error != GL_NO_ERROR) {
+            static uint64_t last_error_log = 0;
+            uint64_t now = get_time_ms();
+            /* Throttle error logging to once per second */
+            if (now - last_error_log > 1000) {
+                log_error("GL error after binding iChannel textures: 0x%x", tex_error);
+                last_error_log = now;
             }
         }
+        
+        /* Reset to texture unit 0 */
+        glActiveTexture(GL_TEXTURE0);
     }
 
     /* Use cached position attribute location */
