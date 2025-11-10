@@ -11,13 +11,14 @@
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 #include "egl/capability.h"
+#include "../src/output/output.h"
 
 /* Thread-safe atomic types for flags accessed from multiple threads */
 typedef atomic_bool atomic_bool_t;
 typedef atomic_int atomic_int_t;
 
 #define NEOWALL_VERSION "0.3.0"
-#define MAX_PATH_LENGTH 4096
+#define MAX_PATH_LENGTH OUTPUT_MAX_PATH_LENGTH  /* Compatibility alias */
 #define MAX_OUTPUTS 16
 #define MAX_WALLPAPERS 256
 #define CONFIG_WATCH_INTERVAL 1
@@ -26,75 +27,7 @@ typedef atomic_int atomic_int_t;
 
 /* Forward declarations */
 struct neowall_state;
-struct wallpaper_config;
 struct compositor_backend;
-
-/* Wallpaper display modes */
-enum wallpaper_mode {
-    MODE_CENTER,    /* Center the image without scaling */
-    MODE_STRETCH,   /* Stretch to fill entire screen */
-    MODE_FIT,       /* Scale to fit inside screen, maintain aspect ratio */
-    MODE_FILL,      /* Scale to fill screen, maintain aspect ratio, crop if needed */
-    MODE_TILE,      /* Tile the image */
-};
-
-/* Image format types */
-enum image_format {
-    FORMAT_PNG,
-    FORMAT_JPEG,
-    FORMAT_UNKNOWN,
-};
-
-/* Wallpaper transition types */
-enum transition_type {
-    TRANSITION_NONE,
-    TRANSITION_FADE,
-    TRANSITION_SLIDE_LEFT,
-    TRANSITION_SLIDE_RIGHT,
-    TRANSITION_GLITCH,
-    TRANSITION_PIXELATE,
-};
-
-/* Image data structure */
-struct image_data {
-    uint8_t *pixels;        /* RGBA pixel data */
-    uint32_t width;
-    uint32_t height;
-    uint32_t channels;      /* Number of channels (3 for RGB, 4 for RGBA) */
-    enum image_format format;
-    char path[MAX_PATH_LENGTH];
-};
-
-/* Wallpaper type */
-enum wallpaper_type {
-    WALLPAPER_IMAGE,    /* Static image file */
-    WALLPAPER_SHADER,   /* Live GLSL shader */
-};
-
-/* Wallpaper configuration for a specific output */
-struct wallpaper_config {
-    enum wallpaper_type type;           /* Wallpaper type (image or shader) */
-    char path[MAX_PATH_LENGTH];         /* Path to wallpaper image */
-    char shader_path[MAX_PATH_LENGTH];  /* Path to GLSL shader file */
-    enum wallpaper_mode mode;           /* Display mode */
-    float duration;                     /* Duration in seconds (for cycling) */
-    enum transition_type transition;    /* Transition effect */
-    float transition_duration;          /* Transition duration in seconds */
-    float shader_speed;                 /* Shader animation speed multiplier (default 1.0) */
-    int shader_fps;                     /* Target FPS for shader rendering (default 60) */
-    bool show_fps;                      /* Show FPS watermark on screen (default false) */
-    bool cycle;                         /* Enable wallpaper cycling */
-    char **cycle_paths;                 /* Array of paths for cycling */
-    size_t cycle_count;                 /* Number of wallpapers to cycle */
-    size_t current_cycle_index;         /* Current index in cycle */
-    
-    /* iChannel texture configuration */
-    char **channel_paths;               /* Array of texture paths/names for iChannels */
-    size_t channel_count;               /* Number of configured channels */
-};
-
-/* Include output module (needs wallpaper_config definition above) */
-#include "../src/output/output.h"
 
 /* Global application state */
 struct neowall_state {

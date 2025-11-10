@@ -8,16 +8,81 @@
 #include <wayland-client.h>
 #include <GLES2/gl2.h>
 
-/* Forward declarations */
+/* Constants */
+#define OUTPUT_MAX_PATH_LENGTH 4096
+
+/* Forward declarations for external types */
 struct neowall_state;
-struct wallpaper_config;
-struct image_data;
 struct compositor_surface;
 struct zxdg_output_v1;
 
 /* Thread-safe atomic types */
 typedef atomic_bool atomic_bool_t;
 typedef atomic_int atomic_int_t;
+
+/* Wallpaper display modes */
+enum wallpaper_mode {
+    MODE_CENTER,    /* Center the image without scaling */
+    MODE_STRETCH,   /* Stretch to fill entire screen */
+    MODE_FIT,       /* Scale to fit inside screen, maintain aspect ratio */
+    MODE_FILL,      /* Scale to fill screen, maintain aspect ratio, crop if needed */
+    MODE_TILE,      /* Tile the image */
+};
+
+/* Image format types */
+enum image_format {
+    FORMAT_PNG,
+    FORMAT_JPEG,
+    FORMAT_UNKNOWN,
+};
+
+/* Wallpaper transition types */
+enum transition_type {
+    TRANSITION_NONE,
+    TRANSITION_FADE,
+    TRANSITION_SLIDE_LEFT,
+    TRANSITION_SLIDE_RIGHT,
+    TRANSITION_GLITCH,
+    TRANSITION_PIXELATE,
+};
+
+/* Wallpaper type */
+enum wallpaper_type {
+    WALLPAPER_IMAGE,    /* Static image file */
+    WALLPAPER_SHADER,   /* Live GLSL shader */
+};
+
+/* Image data structure */
+struct image_data {
+    uint8_t *pixels;        /* RGBA pixel data */
+    uint32_t width;
+    uint32_t height;
+    uint32_t channels;      /* Number of channels (3 for RGB, 4 for RGBA) */
+    enum image_format format;
+    char path[OUTPUT_MAX_PATH_LENGTH];
+};
+
+/* Wallpaper configuration for a specific output */
+struct wallpaper_config {
+    enum wallpaper_type type;           /* Wallpaper type (image or shader) */
+    char path[OUTPUT_MAX_PATH_LENGTH];  /* Path to wallpaper image */
+    char shader_path[OUTPUT_MAX_PATH_LENGTH];  /* Path to GLSL shader file */
+    enum wallpaper_mode mode;           /* Display mode */
+    float duration;                     /* Duration in seconds (for cycling) */
+    enum transition_type transition;    /* Transition effect */
+    float transition_duration;          /* Transition duration in seconds */
+    float shader_speed;                 /* Shader animation speed multiplier (default 1.0) */
+    int shader_fps;                     /* Target FPS for shader rendering (default 60) */
+    bool show_fps;                      /* Show FPS watermark on screen (default false) */
+    bool cycle;                         /* Enable wallpaper cycling */
+    char **cycle_paths;                 /* Array of paths for cycling */
+    size_t cycle_count;                 /* Number of wallpapers to cycle */
+    size_t current_cycle_index;         /* Current index in cycle */
+    
+    /* iChannel texture configuration */
+    char **channel_paths;               /* Array of texture paths/names for iChannels */
+    size_t channel_count;               /* Number of configured channels */
+};
 
 /* Double-buffered config slot for race-free hot-reload */
 typedef struct {
@@ -69,7 +134,7 @@ struct output_state {
     /* Double-buffered preload for zero-stall transitions */
     GLuint preload_texture;             /* Next texture to transition to */
     struct image_data *preload_image;   /* Image data for preloaded texture */
-    char preload_path[4096];            /* Path of preloaded image */
+    char preload_path[OUTPUT_MAX_PATH_LENGTH];  /* Path of preloaded image */
     atomic_bool_t preload_ready;        /* Is preload_texture ready for use? */
     
     /* Background thread for async image loading */
@@ -87,7 +152,7 @@ struct output_state {
     GLuint glitch_program;              /* Shader program for glitch transition */
     GLuint pixelate_program;            /* Shader program for pixelate transition */
     GLuint live_shader_program;         /* Shader program for live wallpaper */
-    char current_shader_path[4096];
+    char current_shader_path[OUTPUT_MAX_PATH_LENGTH];
     GLuint vbo;
 
     /* Cached uniform locations for performance */
@@ -129,7 +194,7 @@ struct output_state {
     uint64_t shader_start_time;         /* Time when shader clock last restarted */
     uint64_t shader_time_accum_ms;      /* Accumulated time preserved across reloads */
     uint64_t shader_fade_start_time;    /* Time when shader fade started (for cross-fade) */
-    char pending_shader_path[4096];     /* Next shader to load after fade-out */
+    char pending_shader_path[OUTPUT_MAX_PATH_LENGTH];  /* Next shader to load after fade-out */
     float transition_progress;
     uint64_t frames_rendered;
     bool shader_load_failed;            /* Set to true after 3 failed shader load attempts */
