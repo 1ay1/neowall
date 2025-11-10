@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include "neowall.h"
+#include "output.h"
 #include "compositor.h"
 #include "config_access.h"
 #include "constants.h"
