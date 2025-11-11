@@ -225,7 +225,7 @@ bool egl_core_init(struct neowall_state *state) {
                 continue;
             }
             
-            if (!render_init_output(output)) {
+            if (!output_init_render(output)) {
                 log_error("Failed to initialize rendering for output %s",
                           output->model[0] ? output->model : "unknown");
             } else {

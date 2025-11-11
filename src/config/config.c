@@ -14,6 +14,7 @@
 #include "neowall.h"
 #include "config_access.h"
 #include "compositor.h"
+#include "shader.h"
 
 /* ============================================================================
  * CONFIGURATION PHILOSOPHY
@@ -1899,12 +1900,12 @@ void config_reload(struct neowall_state *state) {
         /* Clean up ALL textures */
         if (output->texture) {
             log_debug("Destroying main texture for %s", output->model);
-            render_destroy_texture(output->texture);
+            output_destroy_texture(output->texture);
             output->texture = 0;
         }
         if (output->next_texture) {
             log_debug("Destroying next texture for %s", output->model);
-            render_destroy_texture(output->next_texture);
+            output_destroy_texture(output->next_texture);
             output->next_texture = 0;
         }
         
@@ -1914,7 +1915,7 @@ void config_reload(struct neowall_state *state) {
                      output->channel_count, output->model);
             for (size_t i = 0; i < output->channel_count; i++) {
                 if (output->channel_textures[i]) {
-                    render_destroy_texture(output->channel_textures[i]);
+                    output_destroy_texture(output->channel_textures[i]);
                     output->channel_textures[i] = 0;
                 }
             }
@@ -2055,7 +2056,7 @@ void config_reload(struct neowall_state *state) {
     output = state->outputs;
     while (output) {
         /* Re-initialize the output's rendering resources */
-        if (!render_init_output(output)) {
+        if (!output_init_render(output)) {
             log_error("Failed to re-initialize rendering for output %s", output->model);
         }
         

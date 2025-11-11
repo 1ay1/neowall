@@ -1617,3 +1617,24 @@ void output_cleanup_transition(struct output_state *output) {
         output->next_image = NULL;
     }
 }
+
+/**
+ * Initialize rendering resources for an output
+ * Wrapper around render_init_output()
+ */
+bool output_init_render(struct output_state *output) {
+    if (!output) {
+        log_error("output_init_render: Invalid output parameter");
+        return false;
+    }
+    
+    return render_init_output(output);
+}
+
+/**
+ * Destroy a texture
+ * Wrapper around render_destroy_texture()
+ */
+void output_destroy_texture(GLuint texture) {
+    render_destroy_texture(texture);
+}

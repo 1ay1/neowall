@@ -224,5 +224,7 @@ void output_preload_next_wallpaper(struct output_state *output);
 bool output_render_frame(struct output_state *output);
 GLuint output_upload_preload_texture(struct output_state *output);
 void output_cleanup_transition(struct output_state *output);
+bool output_init_render(struct output_state *output);
+void output_destroy_texture(GLuint texture);
 
 #endif /* OUTPUT_H */
