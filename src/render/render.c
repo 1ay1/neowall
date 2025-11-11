@@ -4,6 +4,7 @@
 #include <math.h>
 #include <GLES2/gl2.h>
 #include "neowall.h"
+#include "../image/image.h"    /* Only for legacy wrapper functions */
 #include "config_access.h"
 #include "constants.h"
 #include "transitions.h"
@@ -411,6 +412,109 @@ void render_cleanup_output(struct output_state *output) {
     }
 }
 
+/**
+ * Create OpenGL texture from raw pixel data
+ * 
+ * This is the new clean API that doesn't depend on image_data struct.
+ * Render module should only handle GPU upload, not image file loading.
+ * 
+ * @param pixels Raw pixel data (RGB or RGBA)
+ * @param width Image width in pixels
+ * @param height Image height in pixels
+ * @param channels Number of channels (3 for RGB, 4 for RGBA)
+ * @return OpenGL texture ID, or 0 on failure
+ */
+GLuint render_create_texture_from_pixels(const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t channels) {
+    if (!pixels || width == 0 || height == 0 || (channels != 3 && channels != 4)) {
+        log_error("Invalid parameters for texture creation: pixels=%p, %ux%u, %u channels", 
+                 (void*)pixels, width, height, channels);
+        return 0;
+    }
+    
+    /* Note: Caller MUST ensure EGL context is current before calling this function */
+    
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    
+    /* Set texture parameters */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    
+    /* Upload texture data */
+    GLenum format = (channels == 4) ? GL_RGBA : GL_RGB;
+    glTexImage2D(GL_TEXTURE_2D, 0, format, width, height,
+                 0, format, GL_UNSIGNED_BYTE, pixels);
+    
+    glBindTexture(GL_TEXTURE_2D, 0);
+    
+    /* Check for errors */
+    GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        log_error("OpenGL error creating texture: 0x%x", error);
+        glDeleteTextures(1, &texture);
+        return 0;
+    }
+    
+    log_debug("Created texture %u from pixels (%ux%u, %u channels)",
+              texture, width, height, channels);
+    
+    return texture;
+}
+
+/**
+ * Create OpenGL texture from raw pixel data (vertically flipped)
+ * 
+ * Flips the image vertically to match OpenGL texture coordinates where (0,0)
+ * is at bottom-left, while image files typically have (0,0) at top-left.
+ * Used for shader iChannel textures.
+ * 
+ * @param pixels Raw pixel data (RGB or RGBA)
+ * @param width Image width in pixels
+ * @param height Image height in pixels
+ * @param channels Number of channels (3 for RGB, 4 for RGBA)
+ * @return OpenGL texture ID, or 0 on failure
+ */
+GLuint render_create_texture_from_pixels_flipped(const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t channels) {
+    if (!pixels || width == 0 || height == 0 || (channels != 3 && channels != 4)) {
+        log_error("Invalid parameters for flipped texture creation");
+        return 0;
+    }
+    
+    /* Allocate buffer for flipped image */
+    size_t row_size = width * channels;
+    size_t total_size = row_size * height;
+    uint8_t *flipped_pixels = malloc(total_size);
+    if (!flipped_pixels) {
+        log_error("Failed to allocate memory for flipped texture");
+        return 0;
+    }
+    
+    /* Flip image vertically */
+    for (uint32_t y = 0; y < height; y++) {
+        const uint8_t *src_row = pixels + (y * row_size);
+        uint8_t *dst_row = flipped_pixels + ((height - 1 - y) * row_size);
+        memcpy(dst_row, src_row, row_size);
+    }
+    
+    /* Create texture from flipped data */
+    GLuint texture = render_create_texture_from_pixels(flipped_pixels, width, height, channels);
+    
+    free(flipped_pixels);
+    
+    if (texture) {
+        log_debug("Created flipped texture %u (%ux%u)", texture, width, height);
+    }
+    
+    return texture;
+}
+
+/* ============================================================================
+ * LEGACY API - Deprecated, wraps new pixel-based API
+ * ============================================================================ */
+
 /* Create texture from image data
  * Optimized: Set immutable texture parameters only once at creation
  * Memory optimization: Frees pixel data after GPU upload to save RAM */
@@ -420,44 +524,19 @@ GLuint render_create_texture(struct image_data *img) {
         return 0;
     }
     
-    /* Note: Caller MUST ensure EGL context is current before calling this function */
-
-    GLuint texture;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    /* Set texture parameters once at creation - these rarely change
-     * Most textures use LINEAR filtering and CLAMP_TO_EDGE wrapping
-     * TILE mode textures update wrapping in render_frame as needed */
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    /* Upload texture data */
-    GLenum format = (img->channels == 4) ? GL_RGBA : GL_RGB;
-    glTexImage2D(GL_TEXTURE_2D, 0, format, img->width, img->height,
-                 0, format, GL_UNSIGNED_BYTE, img->pixels);
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    /* Check for errors */
-    GLenum error = glGetError();
-    if (error != GL_NO_ERROR) {
-        log_error("OpenGL error creating texture: 0x%x", error);
-        glDeleteTextures(1, &texture);
-        return 0;
+    /* Create texture using new pixel-based API */
+    GLuint texture = render_create_texture_from_pixels(
+        img->pixels, img->width, img->height, img->channels
+    );
+    
+    if (texture) {
+        /* Free pixel data after successful GPU upload - saves massive amounts of RAM!
+         * For 4K display: 3840x2160x4 = 33MB saved per image
+         * We keep the image_data struct for metadata (width, height, etc.) */
+        image_free_pixels(img);
+        log_debug("Freed pixel data for texture %u (memory optimization)", texture);
     }
-
-    log_debug("Created texture %u (%ux%u, %d channels)",
-              texture, img->width, img->height, img->channels);
-
-    /* Free pixel data after successful GPU upload - saves massive amounts of RAM!
-     * For 4K display: 3840x2160x4 = 33MB saved per image
-     * We keep the image_data struct for metadata (width, height, etc.) */
-    image_free_pixels(img);
-    log_debug("Freed pixel data for texture %u (memory optimization)", texture);
-
+    
     return texture;
 }
 
@@ -476,59 +555,17 @@ GLuint render_create_texture_flipped(struct image_data *img) {
         return 0;
     }
     
-    /* Note: Caller MUST ensure EGL context is current before calling this function */
-
-    /* Flip the image vertically for OpenGL texture coordinates */
-    size_t row_size = img->width * img->channels;
-    unsigned char *temp_row = malloc(row_size);
-    if (!temp_row) {
-        log_error("Failed to allocate memory for image flip");
-        return 0;
-    }
-
-    unsigned char *pixels = img->pixels;
-    for (uint32_t y = 0; y < img->height / 2; y++) {
-        unsigned char *row_top = pixels + y * row_size;
-        unsigned char *row_bottom = pixels + (img->height - 1 - y) * row_size;
-        
-        /* Swap rows */
-        memcpy(temp_row, row_top, row_size);
-        memcpy(row_top, row_bottom, row_size);
-        memcpy(row_bottom, temp_row, row_size);
+    /* Create texture using new pixel-based flipped API */
+    GLuint texture = render_create_texture_from_pixels_flipped(
+        img->pixels, img->width, img->height, img->channels
+    );
+    
+    if (texture) {
+        /* Free pixel data after successful GPU upload */
+        image_free_pixels(img);
+        log_debug("Freed pixel data for texture %u (memory optimization)", texture);
     }
     
-    free(temp_row);
-    log_debug("Flipped image vertically for OpenGL texture coordinates");
-
-    /* Now create texture normally */
-    GLuint texture;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    GLenum format = (img->channels == 4) ? GL_RGBA : GL_RGB;
-    glTexImage2D(GL_TEXTURE_2D, 0, format, img->width, img->height,
-                 0, format, GL_UNSIGNED_BYTE, img->pixels);
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    GLenum error = glGetError();
-    if (error != GL_NO_ERROR) {
-        log_error("OpenGL error creating texture: 0x%x", error);
-        glDeleteTextures(1, &texture);
-        return 0;
-    }
-
-    log_debug("Created flipped texture %u (%ux%u, %d channels) for shader use",
-              texture, img->width, img->height, img->channels);
-
-    image_free_pixels(img);
-    log_debug("Freed pixel data for texture %u (memory optimization)", texture);
-
     return texture;
 }
 

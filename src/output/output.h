@@ -7,6 +7,7 @@
 #include <stdatomic.h>
 #include <wayland-client.h>
 #include <GLES2/gl2.h>
+#include "../image/image.h"   /* For struct image_data and enum image_format */
 
 /* Constants */
 #define OUTPUT_MAX_PATH_LENGTH 4096
@@ -29,13 +30,6 @@ enum wallpaper_mode {
     MODE_TILE,      /* Tile the image */
 };
 
-/* Image format types */
-enum image_format {
-    FORMAT_PNG,
-    FORMAT_JPEG,
-    FORMAT_UNKNOWN,
-};
-
 /* Wallpaper transition types */
 enum transition_type {
     TRANSITION_NONE,
@@ -50,16 +44,6 @@ enum transition_type {
 enum wallpaper_type {
     WALLPAPER_IMAGE,    /* Static image file */
     WALLPAPER_SHADER,   /* Live GLSL shader */
-};
-
-/* Image data structure */
-struct image_data {
-    uint8_t *pixels;        /* RGBA pixel data */
-    uint32_t width;
-    uint32_t height;
-    uint32_t channels;      /* Number of channels (3 for RGB, 4 for RGBA) */
-    enum image_format format;
-    char path[OUTPUT_MAX_PATH_LENGTH];
 };
 
 /* Wallpaper configuration for a specific output */

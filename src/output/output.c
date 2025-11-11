@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include "neowall.h"
 #include "output.h"
+#include "../image/image.h"    /* For struct image_data definition */
 #include "compositor.h"
 #include "config_access.h"
 #include "constants.h"

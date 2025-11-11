@@ -7,9 +7,17 @@
 
 /* Forward declarations */
 struct output_state;
-struct image_data;
 struct wallpaper_config;
 struct neowall_state;
+
+/* Texture creation from raw pixel data - render module doesn't need to know about image_data */
+GLuint render_create_texture_from_pixels(const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t channels);
+GLuint render_create_texture_from_pixels_flipped(const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t channels);
+void render_destroy_texture(GLuint texture);
+
+/* Legacy API - deprecated, use render_create_texture_from_pixels() instead */
+struct image_data;  /* Only for legacy functions */
+GLuint render_create_texture(struct image_data *img);
 
 /* Rendering */
 bool render_init_output(struct output_state *output);

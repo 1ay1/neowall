@@ -6,12 +6,13 @@
 #include <stdint.h>
 #include <png.h>
 #include <jpeglib.h>
+#include "image.h"
 #include "neowall.h"
 #include "constants.h"
 
 /* Forward declarations */
 static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 
-                                                   int32_t display_height, enum wallpaper_mode mode);
+                                                   int32_t display_height, int mode);
 static struct image_data *image_scale_bilinear(struct image_data *img, uint32_t new_width, uint32_t new_height);
 
 /* Expand path with tilde */
@@ -390,7 +391,7 @@ struct image_data *image_load_jpeg(const char *path) {
 
 /* Load image from file (auto-detect format) with display-aware scaling */
 struct image_data *image_load(const char *path, int32_t display_width, 
-                              int32_t display_height, enum wallpaper_mode mode) {
+                              int32_t display_height, int mode) {
     if (!path) {
         log_error("Invalid path for image_load");
         return NULL;
@@ -668,7 +669,7 @@ static struct image_data *image_center_crop(struct image_data *img, uint32_t cro
 
 /* Scale image to optimal size for display mode */
 static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 
-                                                   int32_t display_height, enum wallpaper_mode mode) {
+                                                   int32_t display_height, int mode) {
     if (!img || !img->pixels) {
         return img;
     }
