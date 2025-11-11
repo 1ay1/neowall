@@ -220,4 +220,11 @@ void output_cycle_wallpaper(struct output_state *output);
 bool output_should_cycle(struct output_state *output, uint64_t current_time);
 void output_preload_next_wallpaper(struct output_state *output);
 
+/* Rendering wrappers - hide render module from eventloop */
+bool output_render_frame(struct output_state *output);
+GLuint output_upload_preload_texture(struct output_state *output);
+void output_cleanup_transition(struct output_state *output);
+bool output_init_render(struct output_state *output);
+void output_destroy_texture(GLuint texture);
+
 #endif /* OUTPUT_H */
