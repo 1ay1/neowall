@@ -12,6 +12,7 @@
 #include "config.h"
 #include "vibe.h"
 #include "neowall.h"
+#include "../image/image.h"    /* For image_free() */
 #include "config_access.h"
 #include "compositor.h"
 #include "shader.h"

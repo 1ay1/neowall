@@ -109,16 +109,6 @@ struct neowall_state {
     uint64_t errors_count;
 };
 
-/* Image loading */
-struct image_data *image_load(const char *path, int32_t display_width, int32_t display_height, enum wallpaper_mode mode);
-void image_free(struct image_data *img);
-void image_free_pixels(struct image_data *img);  /* Free pixel data only (after GPU upload) */
-enum image_format image_detect_format(const char *path);
-
-/* Image loaders for specific formats */
-struct image_data *image_load_png(const char *path);
-struct image_data *image_load_jpeg(const char *path);
-
 /* Wayland/EGL initialization */
 bool wayland_init(struct neowall_state *state);
 void wayland_cleanup(struct neowall_state *state);
