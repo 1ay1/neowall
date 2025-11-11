@@ -211,33 +211,9 @@ static void render_outputs(struct neowall_state *state) {
                             log_error("Failed to make EGL context current for preload upload");
                         } else {
                             /* Upload decoded image to GPU (fast - just texture creation) */
-                            GLuint new_texture = render_create_texture(output->preload_decoded_image);
-                            if (new_texture != 0) {
-                                /* CRITICAL: Invalidate GL state cache after texture creation
-                                 * render_create_texture unbinds the texture (binds 0), which
-                                 * invalidates our cached state. Reset to force proper rebinding. */
-                                output->gl_state.bound_texture = 0;
-                                
-                                /* Clean up old preload texture if exists */
-                                if (output->preload_texture) {
-                                    render_destroy_texture(output->preload_texture);
-                                }
-                                if (output->preload_image) {
-                                    image_free(output->preload_image);
-                                }
-                                
-                                /* Store uploaded texture */
-                                output->preload_texture = new_texture;
-                                output->preload_image = output->preload_decoded_image;
-                                output->preload_decoded_image = NULL; /* Ownership transferred */
-                                atomic_store(&output->preload_ready, true);
-                                
-                                log_info("GPU upload complete: %s (texture=%u) - ZERO-STALL ready!",
-                                         output->preload_path, new_texture);
-                            } else {
-                                log_error("Failed to create preload texture from decoded image");
-                                image_free(output->preload_decoded_image);
-                                output->preload_decoded_image = NULL;
+                            GLuint new_texture = output_upload_preload_texture(output);
+                            if (new_texture == 0) {
+                                log_error("Failed to upload preload texture");
                             }
                         }
                     }
@@ -265,7 +241,7 @@ static void render_outputs(struct neowall_state *state) {
 
             /* Render frame */
             uint64_t frame_start = get_time_ms();
-            bool render_success = render_frame(output);
+            bool render_success = output_render_frame(output);
             uint64_t frame_end = get_time_ms();
             
             /* FPS measurement for shaders */
@@ -383,16 +359,8 @@ static void render_outputs(struct neowall_state *state) {
                     output->transition_progress >= 1.0f) {
                     output->transition_start_time = 0;
                     
-                    /* Clean up old texture */
-                    if (output->next_texture) {
-                        render_destroy_texture(output->next_texture);
-                        output->next_texture = 0;
-                    }
-                    
-                    if (output->next_image) {
-                        image_free(output->next_image);
-                        output->next_image = NULL;
-                    }
+                    /* Clean up old texture via output module */
+                    output_cleanup_transition(output);
                     
                     /* Preload next wallpaper after transition completes */
                     if (output->config->cycle && output->config->cycle_count > 1 && 

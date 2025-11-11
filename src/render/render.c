@@ -21,6 +21,9 @@ static inline const char *output_get_identifier(const struct output_state *outpu
     return output->model;
 }
 
+/* Forward declarations */
+static bool render_frame_transition(struct output_state *output, float progress);
+
 /* Note: Each transition manages its own shader sources in src/transitions/ */
 
 /* Simple color shader for overlay effects */

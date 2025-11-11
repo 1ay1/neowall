@@ -9,6 +9,7 @@
 #include "config_access.h"
 #include "constants.h"
 #include "shader.h"
+#include "../render/render.h"  /* Only output.c includes render.h */
 
 /* Helper function to get the preferred output identifier
  * Prefers connector_name (e.g., "HDMI-A-2", "DP-1") over model name
@@ -1538,5 +1539,81 @@ void output_foreach(struct neowall_state *state,
         struct output_state *next = output->next;
         callback(output, userdata);
         output = next;
+    }
+}
+
+/* ============================================================================
+ * Rendering Wrappers - Hide render module from eventloop
+ * ============================================================================ */
+
+/* Render a frame for this output */
+bool output_render_frame(struct output_state *output) {
+    if (!output) {
+        return false;
+    }
+    return render_frame(output);
+}
+
+/* Upload preloaded image to GPU and return texture ID */
+GLuint output_upload_preload_texture(struct output_state *output) {
+    if (!output || !output->preload_decoded_image) {
+        return 0;
+    }
+    
+    /* Make EGL context current */
+    if (!eglMakeCurrent(output->state->egl_display,
+                       output->compositor_surface->egl_surface,
+                       output->compositor_surface->egl_surface,
+                       output->state->egl_context)) {
+        log_error("Failed to make EGL context current for preload upload");
+        return 0;
+    }
+    
+    /* Upload decoded image to GPU */
+    GLuint new_texture = render_create_texture(output->preload_decoded_image);
+    if (new_texture != 0) {
+        /* Invalidate GL state cache after texture creation */
+        output->gl_state.bound_texture = 0;
+        
+        /* Clean up old preload texture if exists */
+        if (output->preload_texture) {
+            render_destroy_texture(output->preload_texture);
+        }
+        if (output->preload_image) {
+            image_free(output->preload_image);
+        }
+        
+        /* Store uploaded texture */
+        output->preload_texture = new_texture;
+        output->preload_image = output->preload_decoded_image;
+        output->preload_decoded_image = NULL;
+        atomic_store(&output->preload_ready, true);
+        
+        log_info("GPU upload complete: %s (texture=%u) - ZERO-STALL ready!",
+                 output->preload_path, new_texture);
+    } else {
+        log_error("Failed to create preload texture from decoded image");
+        image_free(output->preload_decoded_image);
+        output->preload_decoded_image = NULL;
+    }
+    
+    return new_texture;
+}
+
+/* Clean up transition resources after transition completes */
+void output_cleanup_transition(struct output_state *output) {
+    if (!output) {
+        return;
+    }
+    
+    /* Clean up old texture */
+    if (output->next_texture) {
+        render_destroy_texture(output->next_texture);
+        output->next_texture = 0;
+    }
+    
+    if (output->next_image) {
+        image_free(output->next_image);
+        output->next_image = NULL;
     }
 }
