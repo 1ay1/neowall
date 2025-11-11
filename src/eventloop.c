@@ -498,7 +498,11 @@ void event_loop_run(struct neowall_state *state) {
         return;
     }
 
-    struct pollfd fds[4];
+    /* Base file descriptors - always polled */
+    #define BASE_FD_COUNT 4
+    #define MAX_POLL_FDS (BASE_FD_COUNT + MAX_OUTPUTS)
+    
+    struct pollfd fds[MAX_POLL_FDS];
     fds[0].fd = wl_fd;
     fds[0].events = POLLIN;
     fds[1].fd = state->timer_fd;
@@ -507,6 +511,8 @@ void event_loop_run(struct neowall_state *state) {
     fds[2].events = POLLIN;
     fds[3].fd = state->signal_fd;
     fds[3].events = POLLIN;
+    
+    int num_fds = BASE_FD_COUNT;  /* Will be increased dynamically for frame timers */
 
     /* Initial render for all outputs - use read lock */
     pthread_rwlock_rdlock(&state->output_list_lock);
@@ -573,39 +579,50 @@ void event_loop_run(struct neowall_state *state) {
          * (Ctrl+C, neowall kill, etc.) because poll wouldn't return until a Wayland event arrived */
         int timeout_ms = 1000; /* 1 second max - ensures signals checked regularly */
         
-        /* Check if any output has active transitions or shader wallpapers - use read lock */
+        /* Collect frame timer fds for outputs using vsync-off shaders - use read lock */
         pthread_rwlock_rdlock(&state->output_list_lock);
         output = state->outputs;
         int shader_count = 0;
+        num_fds = BASE_FD_COUNT;  /* Reset to base fds */
+        
         while (output) {
+            /* Check for active frame timer (vsync disabled shaders) */
+            int frame_fd = output_get_frame_timer_fd(output);
+            if (frame_fd >= 0) {
+                /* Add frame timer to poll set */
+                if (num_fds < MAX_POLL_FDS) {
+                    fds[num_fds].fd = frame_fd;
+                    fds[num_fds].events = POLLIN;
+                    num_fds++;
+                }
+                /* With frame timers, use long timeout - timers will wake us */
+                timeout_ms = 1000;
+            }
+            
             /* Only count shader as active if it loaded successfully and hasn't failed */
             if (output->config->type == WALLPAPER_SHADER && 
                 !output->shader_load_failed && 
                 output->live_shader_program != 0) {
                 shader_count++;
-                /* Use configured shader_fps or default to FRAME_TIME_MS */
-                int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : FPS_TARGET;
-                timeout_ms = 1000 / target_fps;
                 /* Only log shader detection once, not every frame */
                 if (!shader_mode_logged) {
-                    log_info("Shader active on %s, rendering at %d FPS (shader_fps=%d, timeout_ms=%d)", 
-                             output->model, target_fps, output->config->shader_fps, timeout_ms);
+                    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : FPS_TARGET;
+                    if (output->config->vsync) {
+                        log_info("Shader active on %s with vsync (monitor refresh rate)", output->model);
+                    } else {
+                        log_info("Shader active on %s, rendering at %d FPS (shader_fps=%d, high-precision frame timer)",
+                                 output->model, target_fps, output->config->shader_fps);
+                    }
                     shader_mode_logged = true;
                 }
             }
-            if ((output->transition_start_time > 0 && 
-                 output->config->transition != TRANSITION_NONE) ||
-                (output->config->type == WALLPAPER_SHADER && 
-                 !output->shader_load_failed && 
-                 output->live_shader_program != 0)) {
-                /* Use configured shader_fps for shaders, otherwise use default FRAME_TIME_MS */
-                if (output->config->type == WALLPAPER_SHADER && output->config->shader_fps > 0) {
-                    timeout_ms = 1000 / output->config->shader_fps;
-                } else {
-                    timeout_ms = FRAME_TIME_MS;
-                }
-                break;
+            
+            /* Check for transitions */
+            if (output->transition_start_time > 0 && 
+                output->config->transition != TRANSITION_NONE) {
+                timeout_ms = FRAME_TIME_MS;  /* Fast polling during transitions */
             }
+            
             output = output->next;
         }
         pthread_rwlock_unlock(&state->output_list_lock);
@@ -621,7 +638,7 @@ void event_loop_run(struct neowall_state *state) {
         }
         
         /* Poll for events */
-        int ret = poll(fds, 4, timeout_ms);
+        int ret = poll(fds, num_fds, timeout_ms);
 
         if (ret < 0) {
             if (errno == EINTR) {
@@ -693,6 +710,18 @@ void event_loop_run(struct neowall_state *state) {
                 if (s == sizeof(fdsi)) {
                     log_debug("Received signal %d via signalfd", fdsi.ssi_signo);
                     handle_signal_from_fd(state, fdsi.ssi_signo);
+                }
+            }
+            
+            /* Check frame timer fds - high-precision frame pacing for vsync-off shaders */
+            for (int i = BASE_FD_COUNT; i < num_fds; i++) {
+                if (fds[i].revents & POLLIN) {
+                    uint64_t expirations;
+                    ssize_t s = read(fds[i].fd, &expirations, sizeof(expirations));
+                    if (s == sizeof(expirations) && expirations > 1) {
+                        log_debug("Frame timer expired %lu times (frame overrun)", expirations);
+                    }
+                    /* render_outputs() will be called below */
                 }
             }
         }

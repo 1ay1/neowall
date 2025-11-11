@@ -3,6 +3,8 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <sys/timerfd.h>
+#include <unistd.h>
 #include "neowall.h"
 #include "output.h"
 #include "../image/image.h"    /* For struct image_data definition */
@@ -61,6 +63,65 @@ static void output_configure_vsync(struct output_state *output) {
                      1000.0f / output->config->shader_fps);
         }
     }
+}
+
+/* Helper function to configure high-precision frame timer for vsync-off mode
+ * Uses timerfd for kernel-level precision instead of poll() timeout */
+static bool output_configure_frame_timer(struct output_state *output) {
+    if (!output) {
+        return false;
+    }
+    
+    /* If vsync is enabled, we don't need a frame timer - eglSwapBuffers handles pacing */
+    if (output->config->vsync) {
+        if (output->frame_timer_fd >= 0) {
+            close(output->frame_timer_fd);
+            output->frame_timer_fd = -1;
+            log_debug("Closed frame timer for output %s (vsync enabled)", output_get_identifier(output));
+        }
+        return true;
+    }
+    
+    /* For shaders with vsync disabled, set up precise frame timer */
+    if (output->config->type != WALLPAPER_SHADER) {
+        if (output->frame_timer_fd >= 0) {
+            close(output->frame_timer_fd);
+            output->frame_timer_fd = -1;
+        }
+        return true;
+    }
+    
+    /* Create timerfd if not already created */
+    if (output->frame_timer_fd < 0) {
+        output->frame_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+        if (output->frame_timer_fd < 0) {
+            log_error("Failed to create frame timer for output %s: %s", 
+                     output_get_identifier(output), strerror(errno));
+            return false;
+        }
+        log_debug("Created frame timer fd=%d for output %s", 
+                 output->frame_timer_fd, output_get_identifier(output));
+    }
+    
+    /* Configure timer for target FPS */
+    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : 60;
+    long interval_ns = 1000000000L / target_fps;
+    
+    struct itimerspec timer_spec = {
+        .it_interval = { .tv_sec = 0, .tv_nsec = interval_ns },  /* Recurring */
+        .it_value = { .tv_sec = 0, .tv_nsec = interval_ns }      /* Initial expiration */
+    };
+    
+    if (timerfd_settime(output->frame_timer_fd, 0, &timer_spec, NULL) < 0) {
+        log_error("Failed to set frame timer for output %s: %s",
+                 output_get_identifier(output), strerror(errno));
+        return false;
+    }
+    
+    log_debug("Configured frame timer for %d FPS (interval: %ld ns) on output %s",
+             target_fps, interval_ns, output_get_identifier(output));
+    
+    return true;
 }
 
 
@@ -146,6 +207,9 @@ struct output_state *output_create(struct neowall_state *state,
     out->fps_last_log_time = 0;
     out->fps_frame_count = 0;
     out->fps_current = 0.0f;
+    
+    /* Initialize frame timer for precise pacing when vsync is disabled */
+    out->frame_timer_fd = -1;  /* Will be created when needed */
 
     /* Add to linked list - CALLER MUST HOLD WRITE LOCK */
     /* Note: List modification moved to caller (wayland.c) to ensure proper locking */
@@ -208,6 +272,12 @@ void output_destroy(struct output_state *output) {
     if (output->preload_texture) {
         render_destroy_texture(output->preload_texture);
         output->preload_texture = 0;
+    }
+    
+    /* Close frame timer */
+    if (output->frame_timer_fd >= 0) {
+        close(output->frame_timer_fd);
+        output->frame_timer_fd = -1;
     }
     
     if (output->preload_image) {
@@ -755,6 +825,9 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         /* Configure vsync for shader rendering */
         output_configure_vsync(output);
         
+        /* Configure frame timer for precise pacing when vsync is disabled */
+        output_configure_frame_timer(output);
+        
         log_debug("Shader switched successfully: %s", shader_path);
         return;
     }
@@ -819,6 +892,9 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         } else {
             /* Configure vsync for shader rendering */
             output_configure_vsync(output);
+            
+            /* Configure frame timer for precise pacing when vsync is disabled */
+            output_configure_frame_timer(output);
         }
     }
 
@@ -1457,6 +1533,9 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
 
     /* Configure vsync for shader rendering */
     output_configure_vsync(output);
+    
+    /* Configure frame timer for precise pacing when vsync is disabled */
+    output_configure_frame_timer(output);
 
     /* Update state file with new config (after swap so output->config points to new slot) */
     const char *state_path = (config->type == WALLPAPER_SHADER) ? 
@@ -1638,4 +1717,15 @@ bool output_init_render(struct output_state *output) {
  */
 void output_destroy_texture(GLuint texture) {
     render_destroy_texture(texture);
+}
+
+/**
+ * Get frame timer file descriptor for precise frame pacing
+ * Returns -1 if timer not active (vsync enabled or not a shader)
+ */
+int output_get_frame_timer_fd(struct output_state *output) {
+    if (!output) {
+        return -1;
+    }
+    return output->frame_timer_fd;
 }

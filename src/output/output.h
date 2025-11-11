@@ -186,6 +186,9 @@ struct output_state {
     uint64_t fps_last_log_time;         /* Last time we logged FPS */
     uint64_t fps_frame_count;           /* Frames rendered since last FPS log */
     float fps_current;                  /* Current measured FPS */
+    
+    /* High-precision frame pacing for vsync-off mode */
+    int frame_timer_fd;                 /* timerfd for precise frame timing when vsync is disabled */
 
     struct output_state *next;
 };
@@ -210,5 +213,8 @@ GLuint output_upload_preload_texture(struct output_state *output);
 void output_cleanup_transition(struct output_state *output);
 bool output_init_render(struct output_state *output);
 void output_destroy_texture(GLuint texture);
+
+/* Frame timing */
+int output_get_frame_timer_fd(struct output_state *output);
 
 #endif /* OUTPUT_H */
