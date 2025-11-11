@@ -746,7 +746,7 @@ void shadertoy_analyze_shader(const char *source) {
         return;
     }
     
-    log_info("=== Intelligent Shader Analysis ===");
+    log_debug("=== Intelligent Shader Analysis ===");
     
     // Feature detection
     bool has_channels = uses_texture_channels(source);
@@ -807,51 +807,51 @@ void shadertoy_analyze_shader(const char *source) {
     }
     
     // Report features
-    log_info("Shader Statistics:");
-    log_info("  - Lines: %d", line_count);
-    log_info("  - Size: %zu bytes", source_len);
-    log_info("  - Functions: ~%d", function_count);
-    log_info("  - Loops: %d", loop_count);
+    log_debug("Shader Statistics:");
+    log_debug("  - Lines: %d", line_count);
+    log_debug("  - Size: %zu bytes", source_len);
+    log_debug("  - Functions: ~%d", function_count);
+    log_debug("  - Loops: %d", loop_count);
     
-    log_info("Features Detected:");
+    log_debug("Features Detected:");
     
     if (has_channels) {
-        log_info("  + Texture Channels: %d channel%s", 
+        log_debug("  + Texture Channels: %d channel%s", 
                  channel_count, channel_count != 1 ? "s" : "");
-        log_info("    -> Will use noise-based fallbacks");
+        log_debug("    -> Will use noise-based fallbacks");
     }
     
     if (has_mouse) {
-        log_info("  + Mouse Input (iMouse)");
-        log_info("    -> Currently fixed at (0,0,0,0)");
+        log_debug("  + Mouse Input (iMouse)");
+        log_debug("    -> Currently fixed at (0,0,0,0)");
     }
     
     if (has_time_delta) {
-        log_info("  + Frame Delta (iTimeDelta)");
-        log_info("    -> Fixed at ~16.67ms (60fps)");
+        log_debug("  + Frame Delta (iTimeDelta)");
+        log_debug("    -> Fixed at ~16.67ms (60fps)");
     }
     
     if (has_frame) {
-        log_info("  + Frame Counter (iFrame)");
-        log_info("    -> Currently fixed at 0");
+        log_debug("  + Frame Counter (iFrame)");
+        log_debug("    -> Currently fixed at 0");
     }
     
     if (has_date) {
-        log_info("  + Date/Time (iDate)");
-        log_info("    -> Static fallback value");
+        log_debug("  + Date/Time (iDate)");
+        log_debug("    -> Static fallback value");
     }
     
     if (has_custom_noise) {
-        log_info("  + Custom Noise Functions");
-        log_info("    -> Shader provides its own noise");
+        log_debug("  + Custom Noise Functions");
+        log_debug("    -> Shader provides its own noise");
     }
     
     // Compatibility notes
     if (has_mod || has_mul || has_saturate) {
-        log_info("Compatibility Features:");
-        if (has_mod) log_info("  + GLSL mod() function");
-        if (has_mul) log_info("  + HLSL-style mul() detected");
-        if (has_saturate) log_info("  + HLSL-style saturate() detected");
+        log_debug("Compatibility Features:");
+        if (has_mod) log_debug("  + GLSL mod() function");
+        if (has_mul) log_debug("  + HLSL-style mul() detected");
+        if (has_saturate) log_debug("  + HLSL-style saturate() detected");
     }
     
     // Performance estimation
@@ -861,32 +861,32 @@ void shadertoy_analyze_shader(const char *source) {
     complexity_score += (function_count > 30) ? 3 : (function_count > 15) ? 2 : 1;
     complexity_score += (source_len > 10000) ? 2 : (source_len > 5000) ? 1 : 0;
     
-    log_info("Performance Estimate:");
+    log_debug("Performance Estimate:");
     if (complexity_score <= 3) {
-        log_info("  -> Simple shader - should run very smoothly");
+        log_debug("  -> Simple shader - should run very smoothly");
     } else if (complexity_score <= 6) {
-        log_info("  -> Moderate complexity - good performance expected");
+        log_debug("  -> Moderate complexity - good performance expected");
     } else if (complexity_score <= 10) {
-        log_info("  -> Complex shader - may impact performance on lower-end GPUs");
+        log_debug("  -> Complex shader - may impact performance on lower-end GPUs");
     } else {
-        log_info("  -> Very complex shader - performance may vary");
-        log_info("  -> Consider simplifying or reducing quality if needed");
+        log_debug("  -> Very complex shader - performance may vary");
+        log_debug("  -> Consider simplifying or reducing quality if needed");
     }
     
     // Optimization suggestions
     if (loop_count > 5) {
-        log_info("Tip: Shader has %d loops - consider reducing iterations if performance is low", loop_count);
+        log_debug("Tip: Shader has %d loops - consider reducing iterations if performance is low", loop_count);
     }
     
     if (channel_count > 2) {
-        log_info("Tip: Shader uses %d texture channels - noise fallbacks may not look identical", channel_count);
-        log_info("     Original Shadertoy shaders often look different without real texture data");
+        log_debug("Tip: Shader uses %d texture channels - noise fallbacks may not look identical", channel_count);
+        log_debug("     Original Shadertoy shaders often look different without real texture data");
     }
     
     if (channel_count > 0) {
-        log_info("Note: This shader expects texture input which neowall doesn't support yet");
-        log_info("      Using procedural noise as fallback - visuals will differ from Shadertoy");
+        log_debug("Note: This shader expects texture input which neowall doesn't support yet");
+        log_debug("      Using procedural noise as fallback - visuals will differ from Shadertoy");
     }
     
-    log_info("=================================");
+    log_debug("=================================");
 }

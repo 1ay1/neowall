@@ -232,7 +232,7 @@ struct image_data *image_load_png(const char *path) {
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
     fclose(fp);
 
-    log_info("Loaded PNG image: %s (%ux%u)", expanded_path, width, height);
+    log_debug("Loaded PNG image: %s (%ux%u)", expanded_path, width, height);
 
     return img;
 }
@@ -384,7 +384,7 @@ struct image_data *image_load_jpeg(const char *path) {
     jpeg_destroy_decompress(&cinfo);
     fclose(fp);
 
-    log_info("Loaded JPEG image: %s (%ux%u)", expanded_path, width, height);
+    log_debug("Loaded JPEG image: %s (%ux%u)", expanded_path, width, height);
 
     return img;
 }
@@ -616,7 +616,7 @@ static struct image_data *image_tile_to_size(struct image_data *img, uint32_t ta
     img->width = target_width;
     img->height = target_height;
     
-    log_info("Image tiled to %ux%u", target_width, target_height);
+    log_debug("Image tiled to %ux%u", target_width, target_height);
     return img;
 }
 
@@ -695,7 +695,7 @@ static struct image_data *image_scale_to_display(struct image_data *img, int32_t
         }
     }
     
-    log_info("Scaling image from %ux%u to %ux%u for %dx%d display (mode=%d)",
+    log_debug("Scaling image from %ux%u to %ux%u for %dx%d display (mode=%d)",
              img->width, img->height, target_width, target_height, 
              display_width, display_height, mode);
     

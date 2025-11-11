@@ -721,45 +721,45 @@ static uint32_t detect_shader_conflicts(const char *source) {
     /* Check for reserved neowall uniform declarations */
     if (has_uniform_declaration(source, "_neowall_time")) {
         conflicts |= (1 << 0);
-        log_info("Shader declares '_neowall_time' uniform (neowall provides this)");
+        log_debug("Shader declares '_neowall_time' uniform (neowall provides this)");
     }
     
     if (has_uniform_declaration(source, "_neowall_resolution")) {
         conflicts |= (1 << 1);
-        log_info("Shader declares '_neowall_resolution' uniform (neowall provides this)");
+        log_debug("Shader declares '_neowall_resolution' uniform (neowall provides this)");
     }
     
     /* Check for Shadertoy standard uniforms that we provide via macros */
     if (has_uniform_declaration(source, "iTime")) {
         conflicts |= (1 << 2);
-        log_info("Shader declares 'iTime' uniform (neowall provides this via macro)");
+        log_debug("Shader declares 'iTime' uniform (neowall provides this via macro)");
     }
     
     if (has_uniform_declaration(source, "iResolution")) {
         conflicts |= (1 << 3);
-        log_info("Shader declares 'iResolution' uniform (neowall provides this)");
+        log_debug("Shader declares 'iResolution' uniform (neowall provides this)");
     }
     
     /* Check for assignments to uniforms (which are read-only) */
     if (has_uniform_assignment(source, "_neowall_time")) {
         conflicts |= (1 << 4);
-        log_info("Shader attempts to assign to '_neowall_time' (uniforms are read-only)");
+        log_debug("Shader attempts to assign to '_neowall_time' (uniforms are read-only)");
     }
     
     if (has_uniform_assignment(source, "iTime")) {
         conflicts |= (1 << 5);
-        log_info("Shader attempts to assign to 'iTime' (expands to uniform, read-only)");
+        log_debug("Shader attempts to assign to 'iTime' (expands to uniform, read-only)");
     }
     
     /* Check for global variable shadowing (variables that would conflict with our macros) */
     if (has_global_variable_declaration(source, "time")) {
         conflicts |= (1 << 6);
-        log_info("Shader declares global variable 'time' (conflicts with neowall macro)");
+        log_debug("Shader declares global variable 'time' (conflicts with neowall macro)");
     }
     
     if (has_global_variable_declaration(source, "resolution")) {
         conflicts |= (1 << 7);
-        log_info("Shader declares global variable 'resolution' (conflicts with neowall macro)");
+        log_debug("Shader declares global variable 'resolution' (conflicts with neowall macro)");
     }
     
     return conflicts;
@@ -897,7 +897,7 @@ static char *strip_global_variables(const char *source) {
                 if (*read_ptr == '\n') read_ptr++;
                 
                 removed_count++;
-                log_info("Removed conflicting global variable: %s", found_var);
+                log_debug("Removed conflicting global variable: %s", found_var);
             } else {
                 /* Skip to next line */
                 const char *newline = strchr(read_ptr, '\n');
@@ -926,7 +926,7 @@ static char *strip_global_variables(const char *source) {
     *write_ptr = '\0';
     
     if (removed_count > 0) {
-        log_info("Automatically removed %d conflicting global variable(s)", removed_count);
+        log_debug("Automatically removed %d conflicting global variable(s)", removed_count);
     }
     
     return result;
@@ -1001,7 +1001,7 @@ static char *strip_conflicting_uniforms(const char *source) {
                 if (*read_ptr == '\n') read_ptr++;
                 
                 removed_count++;
-                log_info("Removed conflicting uniform declaration: %s", found_uniform);
+                log_debug("Removed conflicting uniform declaration: %s", found_uniform);
             } else {
                 /* No semicolon found - just skip the line */
                 const char *newline = strchr(read_ptr, '\n');
@@ -1025,7 +1025,7 @@ static char *strip_conflicting_uniforms(const char *source) {
     *write_ptr = '\0';
     
     if (removed_count > 0) {
-        log_info("Automatically removed %d conflicting uniform declaration(s)", removed_count);
+        log_debug("Automatically removed %d conflicting uniform declaration(s)", removed_count);
     }
     
     return result;
@@ -1145,7 +1145,7 @@ static char *fix_uniform_assignments(const char *source) {
                 }
                 
                 fix_count++;
-                log_info("Removed assignment to read-only uniform: %s", found_var);
+                log_debug("Removed assignment to read-only uniform: %s", found_var);
             } else {
                 /* No semicolon - skip whole line */
                 const char *newline = strchr(read_ptr, '\n');
@@ -1169,7 +1169,7 @@ static char *fix_uniform_assignments(const char *source) {
     *write_ptr = '\0';
     
     if (fix_count > 0) {
-        log_info("Fixed %d assignment(s) to read-only uniforms", fix_count);
+        log_debug("Fixed %d assignment(s) to read-only uniforms", fix_count);
     }
     
     return result;
@@ -1228,18 +1228,18 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
     bool needs_cleanup = false;
     
     if (conflicts) {
-        log_info("╔══════════════════════════════════════════════════════════════╗");
-        log_info("║ Shader Conflict Detected - Applying Automatic Fixes         ║");
-        log_info("╚══════════════════════════════════════════════════════════════╝");
+        log_debug("╔══════════════════════════════════════════════════════════════╗");
+        log_debug("║ Shader Conflict Detected - Applying Automatic Fixes         ║");
+        log_debug("╚══════════════════════════════════════════════════════════════╝");
         
         /* Fix 1: Remove conflicting uniform declarations */
         if (conflicts & ((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3))) {
-            log_info("» Removing conflicting uniform declarations...");
+            log_debug("» Removing conflicting uniform declarations...");
             cleaned_source = strip_conflicting_uniforms(source_body);
             if (cleaned_source) {
                 source_body = cleaned_source;
                 needs_cleanup = true;
-                log_info("✓ Successfully removed conflicting uniforms");
+                log_debug("✓ Successfully removed conflicting uniforms");
             } else {
                 log_error("✗ Failed to clean conflicting uniforms");
                 return NULL;
@@ -1248,7 +1248,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
         
         /* Fix 2: Remove conflicting global variable declarations */
         if (conflicts & ((1 << 6) | (1 << 7))) {
-            log_info("» Removing conflicting global variables...");
+            log_debug("» Removing conflicting global variables...");
             char *cleaned_vars = strip_global_variables(source_body);
             if (cleaned_vars) {
                 if (needs_cleanup) {
@@ -1257,14 +1257,14 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
                 source_body = cleaned_vars;
                 cleaned_source = cleaned_vars;
                 needs_cleanup = true;
-                log_info("✓ Successfully removed conflicting global variables");
+                log_debug("✓ Successfully removed conflicting global variables");
                 
                 /* After removing global variables, check for orphaned assignments */
                 /* Example: "float time = 0;" was removed, but "time = iTime;" remains */
                 /* This will expand to "_neowall_time = iTime" which is an assignment to uniform */
                 if (has_uniform_assignment(source_body, "time") || 
                     has_uniform_assignment(source_body, "resolution")) {
-                    log_info("» Detected orphaned assignments after removing global variables");
+                    log_debug("» Detected orphaned assignments after removing global variables");
                     conflicts |= (1 << 4);  /* Set assignment conflict flag */
                 }
             } else {
@@ -1278,7 +1278,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
         
         /* Fix 3: Replace assignments to read-only uniforms */
         if (conflicts & ((1 << 4) | (1 << 5))) {
-            log_info("» Fixing assignments to read-only uniforms...");
+            log_debug("» Fixing assignments to read-only uniforms...");
             char *fixed_source = fix_uniform_assignments(source_body);
             if (fixed_source) {
                 if (needs_cleanup) {
@@ -1287,21 +1287,21 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
                 source_body = fixed_source;
                 cleaned_source = fixed_source;
                 needs_cleanup = true;
-                log_info("✓ Successfully fixed uniform assignments");
+                log_debug("✓ Successfully fixed uniform assignments");
             } else {
                 log_error("✗ Could not fix uniform assignments automatically");
             }
         }
         
-        log_info("╔══════════════════════════════════════════════════════════════╗");
-        log_info("║ Conflict Resolution Complete                                 ║");
-        log_info("╠══════════════════════════════════════════════════════════════╣");
-        log_info("║ Your shader has been automatically modified to work with     ║");
-        log_info("║ neowall. Conflicting declarations have been removed.         ║");
-        log_info("║                                                               ║");
-        log_info("║ If you see compilation errors, please check:                 ║");
-        log_info("║   /tmp/neowall_shader_debug.glsl                              ║");
-        log_info("╚══════════════════════════════════════════════════════════════╝");
+        log_debug("╔══════════════════════════════════════════════════════════════╗");
+        log_debug("║ Conflict Resolution Complete                                 ║");
+        log_debug("╠══════════════════════════════════════════════════════════════╣");
+        log_debug("║ Your shader has been automatically modified to work with     ║");
+        log_debug("║ neowall. Conflicting declarations have been removed.         ║");
+        log_debug("║                                                               ║");
+        log_debug("║ If you see compilation errors, please check:                 ║");
+        log_debug("║   /tmp/neowall_shader_debug.glsl                              ║");
+        log_debug("╚══════════════════════════════════════════════════════════════╝");
     }
     
     /* Build dynamic iChannel declarations */

@@ -52,10 +52,10 @@ static void output_configure_vsync(struct output_state *output) {
         }
     } else {
         if (output->config->vsync) {
-            log_info("Enabled vsync for output %s (will sync to monitor refresh rate)", 
+            log_debug("Enabled vsync for output %s (will sync to monitor refresh rate)", 
                      output->model[0] ? output->model : "unknown");
         } else {
-            log_info("Disabled vsync for output %s (shader_fps=%d, target frame time: %.1fms)", 
+            log_debug("Disabled vsync for output %s (shader_fps=%d, target frame time: %.1fms)", 
                      output->model[0] ? output->model : "unknown", 
                      output->config->shader_fps,
                      1000.0f / output->config->shader_fps);
@@ -289,7 +289,7 @@ bool output_create_egl_surface(struct output_state *output) {
     log_debug("Created EGL surface for output %s",
               output->model[0] ? output->model : "unknown");
 
-    log_info("Created EGL surface for output %s: %dx%d",
+    log_debug("Created EGL surface for output %s: %dx%d",
              output->model[0] ? output->model : "unknown",
              output->width, output->height);
 
@@ -326,7 +326,7 @@ static void *preload_thread_func(void *arg) {
         return NULL;
     }
     
-    log_info("Background thread: decoded image %s (%ux%u) - ready for GPU upload",
+    log_debug("Background thread: decoded image %s (%ux%u) - ready for GPU upload",
              args->path, decoded_image->width, decoded_image->height);
     
     /* Hand off decoded image to main thread for GPU upload */
@@ -420,7 +420,7 @@ void output_preload_next_wallpaper(struct output_state *output) {
     /* Detach thread so it cleans up automatically when done */
     pthread_detach(output->preload_thread);
     
-    log_info("Background preload thread started for: %s", args->path);
+    log_debug("Background preload thread started for: %s", args->path);
 }
 
 void output_set_wallpaper(struct output_state *output, const char *path) {
@@ -575,7 +575,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
             output->texture = render_create_texture(new_image);
         }
         
-        log_info("Wallpaper texture created successfully (texture=%u) for output %s%s", 
+        log_debug("Wallpaper texture created successfully (texture=%u) for output %s%s", 
                  output->texture, output->model[0] ? output->model : "unknown",
                  used_preload ? " [ZERO-STALL]" : "");
     }
@@ -696,7 +696,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
             return;
         }
         
-        log_info("Compiling new shader: %s", shader_path);
+        log_debug("Compiling new shader: %s", shader_path);
         
         /* Compile new shader immediately (before switching) to avoid stutter */
         GLuint new_shader_program = 0;
@@ -711,7 +711,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         }
         
         /* Successfully compiled - now switch immediately */
-        log_info("Switching to new shader: %s", shader_path);
+        log_debug("Switching to new shader: %s", shader_path);
         
         /* Destroy old shader */
         shader_destroy_program(output->live_shader_program);
@@ -755,7 +755,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         /* Configure vsync for shader rendering */
         output_configure_vsync(output);
         
-        log_info("Shader switched successfully: %s", shader_path);
+        log_debug("Shader switched successfully: %s", shader_path);
         return;
     }
     
@@ -862,7 +862,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
                          output->config->cycle_count,
                          "active");
 
-    log_info("Live shader wallpaper loaded successfully");
+    log_debug("Live shader wallpaper loaded successfully");
 }
 
 /* Cycle to next wallpaper in the cycle list */
@@ -949,7 +949,7 @@ void output_cycle_wallpaper(struct output_state *output) {
 
     if (is_shader_with_image_cycling) {
         /* Shader + Image Cycling mode: Update iChannel0 with the next image */
-        log_info("Cycling image for shader on output %s: index %zu->%zu (%zu/%zu): %s",
+        log_debug("Cycling image for shader on output %s: index %zu->%zu (%zu/%zu): %s",
                  output->model[0] ? output->model : "unknown",
                  old_index,
                  output->config->current_cycle_index,
@@ -970,7 +970,7 @@ void output_cycle_wallpaper(struct output_state *output) {
                              output->config->cycle_count,
                              "active");
         
-        log_info("Image cycled through shader successfully");
+        log_debug("Image cycled through shader successfully");
     } else {
         /* Normal cycling mode: change the wallpaper or shader entirely */
         const char *type_str = (output->config->type == WALLPAPER_SHADER) ? "shader" : "wallpaper";
