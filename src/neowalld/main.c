@@ -371,7 +371,7 @@ static void print_usage(const char *program_name) {
     printf("Options:\n");
     printf("  -c, --config PATH     Path to configuration file\n");
     printf("  -f, --foreground      Run in foreground (for debugging)\n");
-    printf("  -w, --watch           Watch config file for changes and reload\n");
+
     printf("  -v, --verbose         Enable verbose logging\n");
     printf("  -h, --help            Show this help message\n");
     printf("  -V, --version         Show version information\n");
@@ -736,7 +736,7 @@ int main(int argc, char *argv[]) {
     struct neowall_state state = {0};
     char config_path[MAX_PATH_LENGTH] = {0};
     bool daemon_mode = true;  /* Default to daemon mode */
-    bool watch_config = false;  /* Only enable when -w flag is provided */
+
     bool verbose = false;
     int opt;
 
@@ -782,7 +782,6 @@ int main(int argc, char *argv[]) {
     static struct option long_options[] = {
         {"config",     required_argument, 0, 'c'},
         {"foreground", no_argument,       0, 'f'},
-        {"watch",      no_argument,       0, 'w'},
         {"verbose",    no_argument,       0, 'v'},
         {"help",       no_argument,       0, 'h'},
         {"version",    no_argument,       0, 'V'},
@@ -790,16 +789,13 @@ int main(int argc, char *argv[]) {
     };
 
     /* Parse command line arguments */
-    while ((opt = getopt_long(argc, argv, "c:fwvhV", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:fvhV", long_options, NULL)) != -1) {
         switch (opt) {
             case 'c':
                 strncpy(config_path, optarg, sizeof(config_path) - 1);
                 break;
             case 'f':
                 daemon_mode = false;  /* Explicit foreground */
-                break;
-            case 'w':
-                watch_config = true;
                 break;
             case 'v':
                 /* Verbose mode - enable debug logging */
@@ -895,9 +891,7 @@ int main(int argc, char *argv[]) {
     pthread_rwlock_init(&state.output_list_lock, NULL);
     pthread_mutex_init(&state.state_file_lock, NULL);
 
-    /* BUG FIX #5: Initialize watch thread condition variable */
-    // watch_mutex removed
-    // watch_cond removed
+
 
     /* Set up signalfd for race-free signal handling */
     state.signal_fd = setup_signalfd();
@@ -965,11 +959,7 @@ int main(int argc, char *argv[]) {
         log_error("Failed to write ready marker, but continuing anyway");
     }
 
-    /* Start config watcher thread if requested */
-    if (watch_config) {
-        log_info("Starting configuration file watcher...");
-        // pthread_create(&state.watch_thread_removed, NULL, config_watch_thread, &state);
-    }
+
 
     /* Set flag to protect PID file from accidental removal during operation */
     event_loop_running = true;
@@ -988,14 +978,7 @@ int main(int argc, char *argv[]) {
     /* Set alarm as last resort - force exit after 2 seconds if cleanup hangs */
     alarm(2);
 
-    if (watch_config) {
-        /* During shutdown, just cancel and detach the watch thread for fast exit
-         * The OS will clean up the resources when the process exits */
-        log_debug("Canceling config watch thread for fast shutdown...");
-        // watch_thread removed
-        // watch_thread removed
-        log_debug("Config watch thread detached");
-    }
+
 
     /* Quick cleanup - don't spend too much time on this during shutdown */
 

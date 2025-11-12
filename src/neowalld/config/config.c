@@ -1708,8 +1708,8 @@ bool config_has_changed(struct neowall_state *state) {
 }
 
 /* Global flag to track if config reload is in progress
- * Used by both config_reload() and config watcher thread to prevent reload storms
- * Also referenced from eventloop.c to coordinate with signal-based reloads */
+ * Used to prevent reload storms and coordinate with signal-based reloads
+ * Also referenced from eventloop.c */
 atomic_bool reload_in_progress = ATOMIC_VAR_INIT(false);
 
 void config_reload(struct neowall_state *state) {
@@ -1799,12 +1799,9 @@ void config_reload(struct neowall_state *state) {
         return;
     }
 
-    /* CRITICAL: Update config_mtime IMMEDIATELY to prevent reload loops
-     * If we wait until after reload completes, the watcher thread will keep
-     * detecting the "same" change over and over during slow reloads */
-    log_debug("Updating config_mtime from %ld to %ld before reload starts",
-             0L, (long)st.st_mtime);
-    /* config_mtime removed - hot reload disabled */
+    /* Note: Proceeding with configuration reload */
+    log_debug("Starting config reload from file: %s (mtime=%ld)",
+             state->config_path, (long)st.st_mtime);
 
     if (!S_ISREG(st.st_mode)) {
         log_error("Config file is not a regular file (mode=0%o), aborting reload", st.st_mode);
@@ -2037,10 +2034,10 @@ void config_reload(struct neowall_state *state) {
 
     if (reload_success) {
         log_info("[OK] Configuration reloaded successfully");
-        /* Note: config_mtime already updated at start of reload to prevent detection loops */
+        /* Config reloaded successfully */
     } else {
         log_info("[ERROR] Configuration reload failed, built-in defaults applied");
-        /* Note: config_mtime still updated to prevent re-detecting the same bad config */
+        /* Note: Reload failed but continuing with existing config */
     }
 
     /* STEP 5: Re-acquire locks for output re-initialization
@@ -2116,112 +2113,7 @@ void config_reload(struct neowall_state *state) {
     log_info("=== CONFIG RELOAD COMPLETE ===");
 }
 
-void *config_watch_thread(void *arg) {
-    struct neowall_state *state = (struct neowall_state *)arg;
-    if (!state) {
-        log_error("config_watch_thread: state is NULL");
-        return NULL;
-    }
 
-    log_info("Configuration watcher thread started for: %s", state->config_path);
-
-    /* BUG FIX #5: Use pthread_cond_timedwait instead of sleep for interruptible wait
-     * This allows immediate shutdown without waiting for sleep() to complete */
-
-    while (atomic_load_explicit(&state->running, memory_order_acquire)) {
-        /* watch_mutex removed - hot reload disabled */
-
-        /* Calculate timeout (CONFIG_WATCH_INTERVAL seconds from now) */
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_sec += CONFIG_WATCH_INTERVAL;
-
-        /* Wait with timeout - can be interrupted by pthread_cond_signal */
-        sleep(5); /* Simple sleep instead of condition variable */
-        int wait_result = ETIMEDOUT;
-
-        /* watch_mutex removed - hot reload disabled */
-
-        /* Check if we should exit */
-        if (!atomic_load_explicit(&state->running, memory_order_acquire)) {
-            log_debug("Config watch thread detected shutdown signal");
-            break;
-        }
-
-        /* If we were signaled (not timeout), it's likely a shutdown signal
-         * Check running flag again and continue if still running */
-        if (wait_result == 0) {
-            /* We were signaled - check if it's shutdown or spurious wakeup */
-            if (!atomic_load_explicit(&state->running, memory_order_acquire)) {
-                log_debug("Config watch thread woken for shutdown");
-                break;
-            }
-            /* Spurious wakeup or explicit signal - continue to next iteration */
-            log_debug("Config watch thread spurious wakeup, continuing...");
-            continue;
-        }
-
-        /* Timeout occurred (wait_result == ETIMEDOUT) - check for config changes */
-        if (config_has_changed(state)) {
-            /* DEBOUNCE: Wait a bit to let editors finish writing (atomic renames, etc.) */
-            log_debug("Config change detected, waiting 200ms for editor to finish...");
-
-            struct timespec debounce_time = {0, 200000000}; /* 200ms */
-            nanosleep(&debounce_time, NULL);
-
-            /* Re-check: File might have been reverted or still being written */
-            struct stat verify_st;
-            if (stat(state->config_path, &verify_st) == -1) {
-                log_debug("Config file disappeared during debounce, ignoring");
-                continue;
-            }
-            if (verify_st.st_size == 0) {
-                log_debug("Config file is empty after debounce (still being written?), ignoring");
-                continue;
-            }
-            if (!config_has_changed(state)) {
-                log_debug("Config change disappeared after debounce (editor reverted?), ignoring");
-                continue;
-            }
-
-            /* Check if a reload is already pending or in progress (rapid successive edits) */
-            bool already_pending = false; /* reload_requested removed */
-            if (already_pending) {
-                log_debug("Reload already pending, skipping duplicate signal");
-                continue;
-            }
-
-            /* Also check if a reload is currently being processed */
-            extern atomic_bool reload_in_progress;  /* Defined in config_reload */
-            bool reload_active = atomic_load_explicit(&reload_in_progress, memory_order_acquire);
-            if (reload_active) {
-                log_debug("Reload currently in progress, skipping new signal (will detect changes on next poll)");
-                continue;
-            }
-
-            log_info("Configuration file changed (verified after debounce), signaling main thread to reload...");
-
-            /* Signal main thread to handle reload (config_reload does EGL operations
-             * which must happen on the main thread, not the watcher thread) */
-            /* reload_requested removed - hot reload disabled */
-
-            /* Wake up the event loop to process reload immediately */
-            if (state->wakeup_fd >= 0) {
-                uint64_t value = 1;
-                ssize_t s = write(state->wakeup_fd, &value, sizeof(value));
-                if (s != sizeof(value)) {
-                    log_error("Failed to wake event loop after config change: %s",
-                             strerror(errno));
-                } else {
-                    log_debug("Event loop woken to handle config reload");
-                }
-            }
-        }
-    }
-
-    log_info("Configuration watcher thread stopped cleanly");
-    return NULL;
-}
 
 /* Legacy wrapper for backward compatibility */
 bool config_parse_wallpaper(struct wallpaper_config *config, const char *output_name) {
