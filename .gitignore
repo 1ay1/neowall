@@ -1,10 +1,23 @@
 # Build artifacts
 build/
+builddir/
 *.o
 *.a
 *.so
 *.so.*
 staticwall
+neowalld
+neowall
+
+# Meson build files
+meson-private/
+meson-logs/
+meson-info/
+.ninja_*
+
+# Generated protocol files
+protocols/*-client-protocol.c
+protocols/*-client-protocol.h
 
 # Backup files
 *.old

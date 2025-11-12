@@ -11,8 +11,8 @@
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 #include "egl/capability.h"
-#include "../src/output/output.h"
-#include "../src/config/config.h"
+#include "output/output.h"
+#include "config/config.h"
 
 /* Thread-safe atomic types for flags accessed from multiple threads */
 typedef atomic_bool atomic_bool_t;
@@ -28,6 +28,7 @@ typedef atomic_int atomic_int_t;
 /* Forward declarations */
 struct neowall_state;
 struct compositor_backend;
+typedef struct ipc_server ipc_server_t;
 
 /* Global application state */
 struct neowall_state {
@@ -56,23 +57,23 @@ struct neowall_state {
 
     /* Configuration */
     char config_path[MAX_PATH_LENGTH];
-    time_t config_mtime;        /* Last modification time */
-    bool watch_config;          /* Watch for config changes */
 
     /* Runtime state - ALL flags must be atomic for thread safety */
     atomic_bool_t running;           /* Main loop running flag - accessed from signal handlers */
-    atomic_bool_t reload_requested;  /* Config reload request - set by watch thread, read by main */
     atomic_bool_t paused;            /* Pause wallpaper cycling - set by signal handlers */
     atomic_bool_t outputs_need_init; /* Flag when new outputs need initialization */
     atomic_int_t next_requested;     /* Counter for skip to next wallpaper requests */
-    pthread_t watch_thread;
+    atomic_int_t prev_requested;     /* Counter for skip to previous wallpaper requests */
+    
+    /* Shader animation control */
+    atomic_bool_t shader_paused;     /* Pause shader animations (freeze time) */
+    _Atomic float shader_speed;      /* Global shader speed multiplier (default 1.0) */
+    
     pthread_mutex_t state_mutex;     /* Protects output list and config data */
     pthread_rwlock_t output_list_lock; /* Read-write lock for output linked list traversal */
     pthread_mutex_t state_file_lock; /* Mutex for state file I/O operations */
     
-    /* BUG FIX #5: Condition variable for clean config watch thread shutdown */
-    pthread_mutex_t watch_mutex;     /* Mutex for watch condition variable */
-    pthread_cond_t watch_cond;       /* Condition variable to wake watch thread */
+
     
     /* BUG FIX #9: LOCK ORDERING POLICY (to prevent deadlock)
      * ========================================================
@@ -103,6 +104,9 @@ struct neowall_state {
     int timer_fd;               /* timerfd for next wallpaper cycle */
     int wakeup_fd;              /* eventfd for waking poll on internal events */
     int signal_fd;              /* signalfd for race-free signal handling */
+    
+    /* IPC server for client commands */
+    ipc_server_t *ipc_server;   /* IPC server for daemon/client communication */
 
     /* Statistics */
     uint64_t frames_rendered;
