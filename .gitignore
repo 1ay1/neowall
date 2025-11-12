@@ -6,8 +6,8 @@ builddir/
 *.so
 *.so.*
 staticwall
-neowalld
-neowall
+/neowalld
+/neowall
 
 # Meson build files
 meson-private/
