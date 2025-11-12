@@ -95,12 +95,20 @@ static pid_t read_daemon_pid(void) {
     if (!fp) return -1;
 
     pid_t pid = -1;
-    if (fscanf(fp, "%d", &pid) != 1) pid = -1;
+    if (fscanf(fp, "%d", &pid) != 1) {
+        fclose(fp);
+        return -1;
+    }
     fclose(fp);
 
-    /* Verify process exists */
+    /* Verify process exists - only remove PID file if process definitely doesn't exist */
     if (pid > 0 && kill(pid, 0) != 0) {
-        unlink(pid_path);  /* Stale PID file */
+        if (errno == ESRCH) {
+            /* Process not found - this is truly a stale PID file, safe to remove */
+            fprintf(stderr, "Note: Removing stale PID file (process %d not found)\n", pid);
+            unlink(pid_path);
+        }
+        /* For other errors (EPERM, etc), don't remove PID file - might still be running */
         return -1;
     }
 

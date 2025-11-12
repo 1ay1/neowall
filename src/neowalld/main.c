@@ -18,6 +18,7 @@
 #include "commands/commands.h"
 
 static struct neowall_state *global_state = NULL;
+static volatile bool event_loop_running = false;  /* Flag to protect PID file during operation */
 
 /* Forward declarations */
 static void handle_crash(int signum);
@@ -127,6 +128,13 @@ static const char *get_ready_marker_path(void) {
 
 /* Write ready marker file to signal successful initialization */
 static bool write_ready_marker(void) {
+    /* SAFETY: Verify PID file exists before creating ready marker */
+    const char *pid_path = get_pid_file_path();
+    if (access(pid_path, F_OK) != 0) {
+        log_error("CRITICAL: PID file missing before ready marker creation");
+        return false;
+    }
+
     const char *ready_path = get_ready_marker_path();
     FILE *fp = fopen(ready_path, "w");
 
@@ -152,6 +160,12 @@ static void remove_ready_marker(void) {
 
 /* Remove PID file */
 static void remove_pid_file(void) {
+    /* SAFETY: Never remove PID file while event loop is running */
+    if (event_loop_running) {
+        log_error("CRITICAL: Attempted to remove PID file while daemon is running - BLOCKED");
+        return;
+    }
+
     const char *pid_path = get_pid_file_path();
     if (unlink(pid_path) == 0) {
         log_debug("Removed PID file: %s", pid_path);
@@ -957,8 +971,16 @@ int main(int argc, char *argv[]) {
         // pthread_create(&state.watch_thread_removed, NULL, config_watch_thread, &state);
     }
 
+    /* Set flag to protect PID file from accidental removal during operation */
+    event_loop_running = true;
+    log_debug("Event loop protection enabled - PID file is now locked");
+
     /* Run event loop (blocks until shutdown) */
     event_loop_run(&state);
+
+    /* Clear flag - we're shutting down intentionally now */
+    event_loop_running = false;
+    log_debug("Event loop protection disabled - PID file can be removed");
 
     /* Cleanup */
     log_info("Shutting down...");
