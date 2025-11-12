@@ -216,8 +216,9 @@ int commands_dispatch(const ipc_request_t *req, ipc_response_t *resp, void *user
     /* Find command */
     const command_info_t *cmd = commands_find(req->command);
     if (!cmd) {
-        char error[256];
-        snprintf(error, sizeof(error), "Unknown command: %s", req->command);
+        char error[512];  /* Larger buffer to accommodate command name */
+        /* Use %.255s to limit command name length in formatted string */
+        snprintf(error, sizeof(error), "Unknown command: %.255s", req->command);
         commands_build_error(resp, CMD_ERROR_FAILED, error);
         return -1;
     }
@@ -665,37 +666,67 @@ static command_result_t cmd_current(struct neowall_state *state, const ipc_reque
     }
 
     /* Build current wallpaper info for all outputs */
-    char data[4096] = "{\"outputs\":[";
+    char data[8192] = "{\"outputs\":[";  /* Larger buffer to avoid truncation */
+    size_t data_len = strlen(data);
+    size_t data_remaining = sizeof(data) - data_len - 1;
 
     pthread_rwlock_rdlock(&state->output_list_lock);
     struct output_state *output = state->outputs;
     bool first = true;
 
-    while (output) {
-        if (!first) strcat(data, ",");
+    while (output && data_remaining > 100) {
+        if (!first) {
+            strncat(data, ",", data_remaining);
+            data_len = strlen(data);
+            data_remaining = sizeof(data) - data_len - 1;
+        }
         first = false;
 
-        char output_info[1024];
+        char output_info[4096];  /* Increased buffer size for long paths */
         const char *type = (output->config.type == WALLPAPER_SHADER) ? "shader" : "image";
         const char *path = (output->config.type == WALLPAPER_SHADER)
             ? output->config.shader_path
             : output->config.path;
 
+        /* Truncate path if it's too long to fit in JSON */
+        char safe_path[512];
+        size_t path_len = strlen(path);
+        if (path_len >= sizeof(safe_path)) {
+            snprintf(safe_path, sizeof(safe_path), "...%s", path + path_len - (sizeof(safe_path) - 4));
+        } else {
+            strncpy(safe_path, path, sizeof(safe_path) - 1);
+            safe_path[sizeof(safe_path) - 1] = '\0';
+        }
+
         snprintf(output_info, sizeof(output_info),
-                 "{\"name\":\"%s\",\"type\":\"%s\",\"path\":\"%s\",\"mode\":\"%d\",\"cycle_index\":%zu,\"cycle_total\":%zu}",
+                 "{\"name\":\"%.64s\",\"type\":\"%s\",\"path\":\"%s\",\"mode\":\"%d\",\"cycle_index\":%zu,\"cycle_total\":%zu}",
                  output->connector_name,
                  type,
-                 path,
+                 safe_path,
                  output->config.mode,
                  output->config.current_cycle_index,
                  output->config.cycle_count);
 
-        strcat(data, output_info);
+        size_t info_len = strlen(output_info);
+        if (info_len < data_remaining) {
+            strncat(data, output_info, data_remaining);
+            data_len = strlen(data);
+            data_remaining = sizeof(data) - data_len - 1;
+        } else {
+            log_error("Output info too large to fit in response buffer");
+            break;
+        }
+
         output = output->next;
     }
 
     pthread_rwlock_unlock(&state->output_list_lock);
-    strcat(data, "]}");
+
+    if (data_remaining > 2) {
+        strcat(data, "]}");
+    } else {
+        log_error("Insufficient buffer space for JSON closing");
+    }
 
     commands_build_success(resp, NULL, data);
     return CMD_SUCCESS;

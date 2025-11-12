@@ -107,7 +107,9 @@ static void render_outputs(struct neowall_state *state) {
 
     /* Check if there are any pending next requests - cycle ALL outputs with matching configs */
     int next_count = atomic_load_explicit(&state->next_requested, memory_order_acquire);
+    int prev_count = atomic_load_explicit(&state->prev_requested, memory_order_acquire);
     bool processed_next = false;
+    bool processed_prev = false;
     bool has_cycleable_output = false;
     int total_outputs = 0;
 
@@ -125,6 +127,34 @@ static void render_outputs(struct neowall_state *state) {
                 has_cycleable_output = true;
             }
             check_output = check_output->next;
+        }
+    }
+
+    if (prev_count > 0) {
+        log_debug("Processing prev request: %d pending in queue", prev_count);
+
+        /* First pass: check if any output can actually cycle */
+        if (total_outputs == 0) {  /* Only count if not already counted for next */
+            struct output_state *check_output = state->outputs;
+            while (check_output) {
+                total_outputs++;
+                if (check_output->config.cycle && check_output->config.cycle_count > 0) {
+                    has_cycleable_output = true;
+                }
+                check_output = check_output->next;
+            }
+        } else {
+            /* Already checked for next, just verify has_cycleable_output */
+            if (!has_cycleable_output) {
+                struct output_state *check_output = state->outputs;
+                while (check_output) {
+                    if (check_output->config.cycle && check_output->config.cycle_count > 0) {
+                        has_cycleable_output = true;
+                        break;
+                    }
+                    check_output = check_output->next;
+                }
+            }
         }
     }
 
@@ -173,6 +203,57 @@ static void render_outputs(struct neowall_state *state) {
 
             /* Decrement counter after processing all synchronized outputs */
             atomic_fetch_sub_explicit(&state->next_requested, 1, memory_order_acq_rel);
+        }
+
+        /* Handle prev wallpaper request - cycle backwards for ALL outputs with same config */
+        if (prev_count > 0 && !processed_prev && output->config.cycle && output->config.cycle_count > 0) {
+            /* Cycle backwards for this output and all others with matching configuration */
+            struct output_state *sync_output = output;
+            int cycled_count = 0;
+
+            while (sync_output) {
+                /* Check if this output has the same cycle configuration */
+                bool same_config = (sync_output->config.cycle &&
+                                   sync_output->config.cycle_count == output->config.cycle_count);
+
+                /* Also verify the paths match if both have cycle paths */
+                if (same_config && sync_output->config.cycle_paths && output->config.cycle_paths) {
+                    same_config = true;
+                    for (size_t i = 0; i < output->config.cycle_count && same_config; i++) {
+                        if (strcmp(sync_output->config.cycle_paths[i], output->config.cycle_paths[i]) != 0) {
+                            same_config = false;
+                        }
+                    }
+                }
+
+                if (same_config) {
+                    /* Cycle to previous wallpaper */
+                    if (sync_output->config.current_cycle_index == 0) {
+                        sync_output->config.current_cycle_index = sync_output->config.cycle_count - 1;
+                    } else {
+                        sync_output->config.current_cycle_index--;
+                    }
+
+                    log_debug("Cycling to previous wallpaper for output %s (synchronized, index now %zu)",
+                             sync_output->model[0] ? sync_output->model : "unknown",
+                             sync_output->config.current_cycle_index);
+
+                    /* Apply the wallpaper change */
+                    output_cycle_wallpaper(sync_output);
+                    cycled_count++;
+                }
+
+                sync_output = sync_output->next;
+            }
+
+            current_time = get_time_ms();
+            processed_prev = true;
+
+            log_info("Cycled backwards %d output(s) with matching configuration (%d requests remaining)",
+                     cycled_count, prev_count - 1);
+
+            /* Decrement counter after processing all synchronized outputs */
+            atomic_fetch_sub_explicit(&state->prev_requested, 1, memory_order_acq_rel);
         }
 
         /* Check if we should cycle wallpaper (timer-driven) */
@@ -406,6 +487,14 @@ static void render_outputs(struct neowall_state *state) {
         atomic_fetch_sub(&state->next_requested, 1);
     }
 
+    /* If we have pending prev requests but no cycleable outputs, clear them */
+    if (prev_count > 0 && !has_cycleable_output) {
+        log_info("Received prev request but no outputs are configured for cycling (clearing %d requests)", prev_count);
+
+        /* Decrement the counter since we can't fulfill the request */
+        atomic_fetch_sub(&state->prev_requested, 1);
+    }
+
     /* Update timer after rendering changes */
     update_cycle_timer(state);
 }
@@ -635,8 +724,9 @@ void event_loop_run(struct neowall_state *state) {
             shader_mode_logged = false;
         }
 
-        /* If next requests pending, wake immediately */
-        if (atomic_load_explicit(&state->next_requested, memory_order_acquire) > 0) {
+        /* If next or prev requests pending, wake immediately */
+        if (atomic_load_explicit(&state->next_requested, memory_order_acquire) > 0 ||
+            atomic_load_explicit(&state->prev_requested, memory_order_acquire) > 0) {
             timeout_ms = 0;
         }
 

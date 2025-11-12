@@ -33,6 +33,7 @@ void gles32_cleanup_rendering(struct output_state *output) {
 }
 
 void gles32_check_capabilities(gles_v32_caps_t *caps) {
+    (void)caps;  /* Unused - stub function for future capability checks */
 #ifndef HAVE_GLES32
 #else
     if (caps) {

@@ -121,6 +121,7 @@ static bool is_daemon_running(void) {
 }
 
 /* Get IPC socket path */
+static const char *get_ipc_socket_path(void) __attribute__((unused));
 static const char *get_ipc_socket_path(void) {
     static char path[256];
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
@@ -214,7 +215,12 @@ static bool send_ipc_command(const char *command, char *response_data, size_t da
     }
 
     if (response_data && data_size > 0 && resp.data[0]) {
-        strncpy(response_data, resp.data, data_size - 1);
+        size_t copy_len = data_size - 1;
+        if (copy_len > strlen(resp.data)) {
+            copy_len = strlen(resp.data);
+        }
+        memcpy(response_data, resp.data, copy_len);
+        response_data[copy_len] = '\0';
     }
 
     if (resp.message[0]) {
@@ -490,6 +496,8 @@ static int cmd_config(int argc, char *argv[]) {
 }
 
 static int cmd_tray(int argc, char *argv[]) {
+    (void)argc;  /* Unused - no arguments needed for tray command */
+
     if (!is_daemon_running()) {
         fprintf(stderr, "Warning: neowalld is not running\n");
         printf("Start daemon first? [Y/n] ");

@@ -861,9 +861,42 @@ bool render_frame_shader(struct output_state *output) {
     uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : output->last_frame_time;
     float time = (current_time - start_time) / (float)MS_PER_SECOND;
 
-    /* Apply shader speed multiplier */
+    /* Apply shader speed multiplier (per-output config) */
     float shader_speed = output->config.shader_speed > 0.0f ? output->config.shader_speed : 1.0f;
+
+    /* Apply global shader speed multiplier from state */
+    if (output->state) {
+        float global_speed = atomic_load(&output->state->shader_speed);
+        if (global_speed > 0.0f) {
+            shader_speed *= global_speed;
+        }
+    }
+
     time *= shader_speed;
+
+    /* Apply global shader pause - freeze time if paused */
+    static float frozen_time = 0.0f;
+    static uint64_t frozen_at_ms = 0;
+
+    if (output->state && atomic_load(&output->state->shader_paused)) {
+        /* Shader is paused - use frozen time */
+        if (frozen_at_ms == 0) {
+            /* Just paused - save current time */
+            frozen_time = time;
+            frozen_at_ms = current_time;
+        }
+        time = frozen_time;
+    } else {
+        /* Shader is running - reset frozen state */
+        if (frozen_at_ms != 0) {
+            /* Just resumed - adjust start time to account for pause duration */
+            uint64_t pause_duration_ms = current_time - frozen_at_ms;
+            if (output->shader_start_time > 0) {
+                output->shader_start_time += pause_duration_ms;
+            }
+            frozen_at_ms = 0;
+        }
+    }
 
     /* Cache shader uniform locations on first use to eliminate per-frame lookups */
     if (output->shader_uniforms.position == -2) {
