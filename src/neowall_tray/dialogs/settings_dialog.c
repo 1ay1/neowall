@@ -143,31 +143,16 @@ static gboolean load_current_config(SettingsWidgets *widgets) {
     char output[4096];
     int values_loaded = 0;
 
-    /* Load wallpaper path - try both 'path' (images) and 'shader' (shaders) */
-    char path[512] = {0};
-    gboolean path_loaded = FALSE;
-
-    /* Try default.path first (for image folders) */
+    /* Load wallpaper path */
     if (command_execute_with_output("get-config \"default.path\"", output, sizeof(output))) {
+        char path[512] = {0};
         if (parse_config_value(output, path, sizeof(path)) && path[0] != '\0') {
-            path_loaded = TRUE;
+            gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(widgets->folder_chooser), path);
+            strncpy(original_settings.folder, path, sizeof(original_settings.folder) - 1);
+            original_settings.folder[sizeof(original_settings.folder) - 1] = '\0';
+            TRAY_LOG_DEBUG(COMPONENT, "Loaded path: %s", path);
+            values_loaded++;
         }
-    }
-
-    /* If not found, try default.shader (for shader folders) */
-    if (!path_loaded && command_execute_with_output("get-config \"default.shader\"", output, sizeof(output))) {
-        if (parse_config_value(output, path, sizeof(path)) && path[0] != '\0') {
-            path_loaded = TRUE;
-        }
-    }
-
-    /* If we got a path, set it */
-    if (path_loaded && path[0] != '\0') {
-        gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(widgets->folder_chooser), path);
-        strncpy(original_settings.folder, path, sizeof(original_settings.folder) - 1);
-        original_settings.folder[sizeof(original_settings.folder) - 1] = '\0';
-        TRAY_LOG_DEBUG(COMPONENT, "Loaded path: %s", path);
-        values_loaded++;
     } else {
         TRAY_LOG_DEBUG(COMPONENT, "No wallpaper path set, using default");
     }
