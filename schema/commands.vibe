@@ -1,0 +1,582 @@
+# NeoWall IPC Commands Schema
+# Single source of truth for all daemon commands
+# Pure hierarchical structure using VIBE format
+
+meta {
+  version 1.0.0
+  description "Complete specification of all NeoWall IPC commands"
+  protocol_version 1
+}
+
+# ============================================================================
+# SYSTEM COMMANDS - Information and daemon control
+# ============================================================================
+system {
+  description "System information and daemon control"
+
+  ping {
+    description "Health check - verify daemon is responding"
+    handler cmd_ping
+    requires_state false
+    modifies_state false
+
+    returns {
+      type string
+      value pong
+    }
+
+    example {
+      request {"command":"ping"}
+      response {"status":"ok","message":"pong"}
+    }
+
+    since 0.1.0
+  }
+
+  version {
+    description "Get daemon version and protocol information"
+    handler cmd_version
+    requires_state false
+    modifies_state false
+
+    returns {
+      type object
+      fields {
+        version {
+          type string
+          description "Daemon version string"
+        }
+        protocol {
+          type integer
+          description "IPC protocol version"
+        }
+      }
+    }
+
+    example {
+      request {"command":"version"}
+      response {"status":"ok","data":{"version":"0.3.0","protocol":1}}
+    }
+
+    since 0.1.0
+  }
+
+  list {
+    description "List all available commands with metadata"
+    handler cmd_list
+    requires_state false
+    modifies_state false
+
+    returns {
+      type array
+      items {
+        name string
+        category string
+        description string
+      }
+    }
+
+    example {
+      request {"command":"list"}
+      response {"status":"ok","commands":[...]}
+    }
+
+    since 0.1.0
+  }
+
+  status {
+    description "Get comprehensive daemon status information"
+    handler cmd_status
+    requires_state true
+    modifies_state false
+
+    returns {
+      type object
+      fields {
+        daemon {
+          type string
+          values running stopped
+        }
+        pid {
+          type integer
+          description "Process ID"
+        }
+        outputs {
+          type integer
+          description "Number of active outputs"
+        }
+        paused {
+          type boolean
+          description "Is wallpaper cycling paused"
+        }
+        shader_paused {
+          type boolean
+          description "Is shader animation paused"
+        }
+        shader_speed {
+          type float
+          description "Global shader speed multiplier"
+          range 0.1 10.0
+        }
+      }
+    }
+
+    example {
+      request {"command":"status"}
+      response {"status":"ok","data":{"daemon":"running","pid":12345,"outputs":2,"paused":false,"shader_paused":false,"shader_speed":1.0}}
+    }
+
+    since 0.1.0
+  }
+}
+
+# ============================================================================
+# WALLPAPER COMMANDS - Navigation and information
+# ============================================================================
+wallpaper {
+  description "Wallpaper management and navigation"
+
+  next {
+    description "Switch to next wallpaper in cycle"
+    handler cmd_next
+    requires_state true
+    modifies_state true
+
+    returns {
+      type string
+      value "Switched to next wallpaper"
+    }
+
+    behavior {
+      synchronized true
+      note "Cycles ALL outputs with matching configuration"
+      atomic_operation next_requested
+      threading_model "Increments atomic counter"
+      boundary_handling "Wraps from cycle_count-1 to 0"
+    }
+
+    implementation {
+      event_loop_integration true
+      lock_requirements output_list_lock
+      state_modification "Increments current_cycle_index"
+    }
+
+    example {
+      request {"command":"next"}
+      response {"status":"ok","message":"Switched to next wallpaper"}
+    }
+
+    since 0.1.0
+  }
+
+  prev {
+    description "Switch to previous wallpaper in cycle"
+    handler cmd_prev
+    requires_state true
+    modifies_state true
+
+    returns {
+      type string
+      value "Switched to previous wallpaper"
+    }
+
+    behavior {
+      synchronized true
+      note "Cycles ALL outputs with matching configuration"
+      atomic_operation prev_requested
+      threading_model "Increments atomic counter"
+      boundary_handling "Wraps from 0 to cycle_count-1"
+    }
+
+    implementation {
+      event_loop_integration true
+      lock_requirements output_list_lock
+      state_modification "Decrements current_cycle_index"
+    }
+
+    example {
+      request {"command":"prev"}
+      response {"status":"ok","message":"Switched to previous wallpaper"}
+    }
+
+    since 0.3.0
+  }
+
+  current {
+    description "Get current wallpaper information for all outputs"
+    handler cmd_current
+    requires_state true
+    modifies_state false
+
+    returns {
+      type object
+      fields {
+        outputs {
+          type array
+          items {
+            name {
+              type string
+              description "Output connector name"
+              max_length 64
+            }
+            type {
+              type enum
+              values image shader
+            }
+            path {
+              type string
+              description "Path to wallpaper file"
+              max_length 4096
+            }
+            mode {
+              type integer
+              description "Display mode code"
+              range 0 4
+            }
+            cycle_index {
+              type integer
+              description "Current position in cycle"
+            }
+            cycle_total {
+              type integer
+              description "Total items in cycle"
+            }
+          }
+        }
+      }
+    }
+
+    implementation {
+      buffer_size 8192
+      path_truncation "...suffix if path too long"
+      lock_requirements output_list_lock
+    }
+
+    example {
+      request {"command":"current"}
+      response {"status":"ok","data":{"outputs":[{"name":"HDMI-A-1","type":"shader","path":"/path/to/shader.glsl","mode":3,"cycle_index":2,"cycle_total":10}]}}
+    }
+
+    since 0.2.0
+  }
+}
+
+# ============================================================================
+# CYCLING COMMANDS - Automatic wallpaper rotation control
+# ============================================================================
+cycling {
+  description "Automatic wallpaper cycling control"
+
+  pause {
+    description "Pause automatic wallpaper cycling"
+    handler cmd_pause
+    requires_state true
+    modifies_state true
+
+    returns {
+      type string
+      value "Wallpaper cycling paused"
+    }
+
+    behavior {
+      atomic_operation "Sets paused flag to true"
+      scope "Affects all outputs globally"
+      independence "Does not affect shader animations"
+      manual_override "Manual next/prev commands still work"
+    }
+
+    implementation {
+      state_field state.paused
+      atomic_type atomic_bool_t
+      memory_order memory_order_release
+    }
+
+    example {
+      request {"command":"pause"}
+      response {"status":"ok","message":"Wallpaper cycling paused"}
+    }
+
+    since 0.1.0
+  }
+
+  resume {
+    description "Resume automatic wallpaper cycling"
+    handler cmd_resume
+    requires_state true
+    modifies_state true
+
+    returns {
+      type string
+      value "Wallpaper cycling resumed"
+    }
+
+    behavior {
+      atomic_operation "Sets paused flag to false"
+      scope "Affects all outputs globally"
+      timing "Cycle timer resumes from where it left off"
+    }
+
+    implementation {
+      state_field state.paused
+      atomic_type atomic_bool_t
+      memory_order memory_order_release
+    }
+
+    example {
+      request {"command":"resume"}
+      response {"status":"ok","message":"Wallpaper cycling resumed"}
+    }
+
+    since 0.1.0
+  }
+}
+
+# ============================================================================
+# SHADER COMMANDS - Animation control
+# ============================================================================
+shader {
+  description "Shader animation control"
+
+  speed-up {
+    description "Increase global shader animation speed"
+    handler cmd_speed_up
+    requires_state true
+    modifies_state true
+
+    returns {
+      type object
+      fields {
+        shader_speed {
+          type float
+          description "New shader speed multiplier"
+        }
+      }
+    }
+
+    behavior {
+      operation increment
+      step 0.25
+      minimum 0.1
+      maximum 10.0
+      formula "effective_speed = config.shader_speed * state.shader_speed"
+      note "Multiplies with per-output shader_speed config"
+    }
+
+    implementation {
+      state_field state.shader_speed
+      atomic_type "_Atomic float"
+      clamping "Clamps to [0.1, 10.0] range"
+      renderer_integration "Applied in render_frame_shader()"
+    }
+
+    example {
+      request {"command":"speed-up"}
+      response {"status":"ok","data":{"shader_speed":1.25}}
+    }
+
+    since 0.3.0
+  }
+
+  speed-down {
+    description "Decrease global shader animation speed"
+    handler cmd_speed_down
+    requires_state true
+    modifies_state true
+
+    returns {
+      type object
+      fields {
+        shader_speed {
+          type float
+          description "New shader speed multiplier"
+        }
+      }
+    }
+
+    behavior {
+      operation decrement
+      step 0.25
+      minimum 0.1
+      maximum 10.0
+      formula "effective_speed = config.shader_speed * state.shader_speed"
+      note "Multiplies with per-output shader_speed config"
+    }
+
+    implementation {
+      state_field state.shader_speed
+      atomic_type "_Atomic float"
+      clamping "Clamps to [0.1, 10.0] range"
+      renderer_integration "Applied in render_frame_shader()"
+    }
+
+    example {
+      request {"command":"speed-down"}
+      response {"status":"ok","data":{"shader_speed":0.75}}
+    }
+
+    since 0.3.0
+  }
+
+  shader-pause {
+    description "Pause shader animations (freeze time)"
+    handler cmd_shader_pause
+    requires_state true
+    modifies_state true
+
+    returns {
+      type string
+      value "Shader animation paused"
+    }
+
+    behavior {
+      atomic_operation "Sets shader_paused flag to true"
+      effect "Freezes shader time uniform"
+      visual_result "Shader continues rendering but doesn't animate"
+      independence "Does not affect wallpaper cycling"
+    }
+
+    implementation {
+      state_field state.shader_paused
+      atomic_type atomic_bool_t
+      renderer_integration "Freezes time in render_frame_shader()"
+      time_tracking "Saves frozen_time and frozen_at_ms"
+    }
+
+    example {
+      request {"command":"shader-pause"}
+      response {"status":"ok","message":"Shader animation paused"}
+    }
+
+    since 0.3.0
+  }
+
+  shader-resume {
+    description "Resume shader animations"
+    handler cmd_shader_resume
+    requires_state true
+    modifies_state true
+
+    returns {
+      type string
+      value "Shader animation resumed"
+    }
+
+    behavior {
+      atomic_operation "Sets shader_paused flag to false"
+      effect "Resumes shader time updates"
+      time_adjustment "Compensates for pause duration"
+      visual_result "No visible time jump when resuming"
+    }
+
+    implementation {
+      state_field state.shader_paused
+      atomic_type atomic_bool_t
+      renderer_integration "Resumes time in render_frame_shader()"
+      time_compensation "Adjusts shader_start_time by pause_duration_ms"
+    }
+
+    example {
+      request {"command":"shader-resume"}
+      response {"status":"ok","message":"Shader animation resumed"}
+    }
+
+    since 0.3.0
+  }
+}
+
+# ============================================================================
+# CONFIG COMMANDS - Configuration management
+# ============================================================================
+config {
+  description "Configuration management"
+
+  reload {
+    description "Reload configuration (deprecated - requires daemon restart)"
+    handler cmd_reload
+    requires_state true
+    modifies_state false
+    deprecated true
+    deprecated_since 0.3.0
+
+    returns {
+      type error
+      code CMD_ERROR_ARGS
+      message "Reload not supported. Please restart the daemon: neowall restart"
+    }
+
+    rationale {
+      reason "Hot-reload removed for simplicity and reliability"
+      complexity "Config structure changes and double-buffering removed"
+      alternative "Use 'neowall restart' to apply config changes"
+      impact "Brief interruption (~100ms) is acceptable for config changes"
+      benefits "Simpler codebase, fewer bugs, easier maintenance"
+    }
+
+    implementation {
+      action returns_error
+      replacement_command "neowall restart"
+    }
+
+    example {
+      request {"command":"reload"}
+      response {"status":"error","message":"Reload not supported. Please restart the daemon: neowall restart"}
+    }
+
+    since 0.1.0
+  }
+}
+
+# ============================================================================
+# ERROR CODES - Used across all commands
+# ============================================================================
+errors {
+  CMD_SUCCESS {
+    code 0
+    description "Command executed successfully"
+  }
+
+  CMD_ERROR_FAILED {
+    code -1
+    description "Command execution failed"
+    usage "Generic failure, check message for details"
+  }
+
+  CMD_ERROR_STATE {
+    code -2
+    description "Daemon state not available"
+    usage "Command requires state but state pointer is NULL"
+  }
+
+  CMD_ERROR_ARGS {
+    code -3
+    description "Invalid arguments provided"
+    usage "Command arguments failed validation"
+  }
+}
+
+# ============================================================================
+# IMPLEMENTATION NOTES
+# ============================================================================
+implementation {
+  registry_file src/neowalld/commands/registry.c
+  header_file include/neowall.h
+
+  threading {
+    model "IPC thread sets flags, event loop reads and acts"
+    synchronization "Atomic operations for all command state"
+    lock_ordering "output_list_lock before state_mutex"
+  }
+
+  event_loop {
+    file src/neowalld/eventloop.c
+    integration "Commands set atomic counters/flags"
+    polling "Poll checks atomic flags each iteration"
+    execution "Event loop performs actual state changes"
+  }
+
+  state_management {
+    location "struct neowall_state in include/neowall.h"
+    atomic_fields next_requested prev_requested paused shader_paused shader_speed
+    thread_safety "All fields use atomic operations"
+  }
+}

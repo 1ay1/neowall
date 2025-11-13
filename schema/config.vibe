@@ -1,0 +1,644 @@
+# NeoWall Configuration Schema
+# Single source of truth - matches actual VIBE parser implementation
+# Structure mirrors how config.c actually parses the configuration
+
+meta {
+  version 1.0.0
+  format VIBE
+  parser src/neowalld/config/vibe.c
+  loader src/neowalld/config/config.c
+  structure_type hierarchical_objects
+  hot_reload false
+}
+
+# ============================================================================
+# TOP-LEVEL STRUCTURE
+# Root must be an object containing "default" and optionally "output"
+# ============================================================================
+root {
+  type object
+  required_sections default
+  optional_sections output
+}
+
+# ============================================================================
+# DEFAULT SECTION
+# Global wallpaper configuration applied to all outputs
+# ============================================================================
+default {
+  description "Global settings applied to all outputs unless overridden"
+  type object
+  required false
+
+  # Wallpaper source - MUTUALLY EXCLUSIVE
+  source {
+    rule "Exactly ONE of 'path' or 'shader' must be specified"
+    mutual_exclusion true
+
+    path {
+      type string
+      description "Path to image file or directory of images"
+      conflicts_with shader
+      max_length 4096
+
+      behavior {
+        single_file "Load one image wallpaper"
+        directory "Auto-detect if path is directory, load all images for cycling"
+        directory_syntax "Path ending with '/' treated as directory"
+        expansion "Directory expanded to all .png/.jpg/.jpeg files"
+        sorting "Files sorted alphabetically"
+      }
+
+      validation {
+        not_empty true
+        max_length 4096
+        must_exist_or_expand true
+      }
+
+      side_effects {
+        if_directory {
+          sets cycle true
+          sets cycle_count "number of images found"
+          sets cycle_paths "array of image paths"
+          sets path "first image in sorted list"
+        }
+        if_single_file {
+          sets type WALLPAPER_IMAGE
+          sets path "the file path"
+        }
+      }
+
+      examples {
+        single "path ~/Pictures/wallpaper.png"
+        directory "path ~/Pictures/wallpapers/"
+        implicit_dir "path ~/Pictures/wallpapers"
+      }
+    }
+
+    shader {
+      type string
+      description "Path to GLSL shader file or directory of shaders"
+      conflicts_with path
+      max_length 4096
+
+      behavior {
+        single_file "Load one shader wallpaper"
+        directory "Auto-detect if path is directory, load all shaders for cycling"
+        directory_syntax "Path ending with '/' treated as directory"
+        expansion "Directory expanded to all .glsl/.frag files"
+        sorting "Files sorted alphabetically"
+      }
+
+      validation {
+        not_empty true
+        max_length 4096
+        must_exist_or_expand true
+      }
+
+      side_effects {
+        if_directory {
+          sets cycle true
+          sets cycle_count "number of shaders found"
+          sets cycle_paths "array of shader paths"
+          sets shader_path "first shader in sorted list"
+        }
+        if_single_file {
+          sets type WALLPAPER_SHADER
+          sets shader_path "the file path"
+        }
+      }
+
+      examples {
+        single "shader matrix_real.glsl"
+        directory "shader ~/shaders/"
+        builtin "shader matrix_simple.glsl"
+      }
+    }
+  }
+
+  # Display mode - IMAGE MODE ONLY
+  mode {
+    type string
+    description "How to display image on screen"
+    default fill
+    applies_to_type WALLPAPER_IMAGE
+    error_if_used_with_shader "Display modes only apply to images, shaders always render fullscreen"
+
+    values {
+      center {
+        code 0
+        description "Center image without scaling"
+      }
+      stretch {
+        code 1
+        description "Stretch to fill screen (ignores aspect ratio)"
+      }
+      fit {
+        code 2
+        description "Scale to fit inside screen (maintains aspect ratio)"
+      }
+      fill {
+        code 3
+        description "Scale to fill screen (maintains aspect ratio, crops if needed)"
+      }
+      tile {
+        code 4
+        description "Tile image across screen"
+      }
+    }
+
+    parser_function wallpaper_mode_from_string
+
+    example "mode fill"
+  }
+
+  # Cycling control
+  cycling {
+    duration {
+      type float
+      description "Seconds to display each wallpaper before cycling"
+      default 0.0
+      min 0.0
+      max 86400.0
+      unit seconds
+
+      validation {
+        must_be_non_negative true
+        reasonable_max 86400.0
+      }
+
+      parser_accepts_integer true
+
+      behavior {
+        if_zero "No automatic cycling"
+        if_positive_and_cycle_false "Duration has no effect without cycle paths"
+        if_positive_and_cycle_true "Automatic cycling enabled"
+      }
+
+      example "duration 300"
+    }
+
+    cycle {
+      type boolean
+      description "Whether cycling is enabled (auto-set if directory loaded)"
+      default false
+      set_by_directory_loading true
+
+      behavior {
+        auto_set "Automatically set to true when directory is loaded"
+        manual_control "Can be paused/resumed via IPC commands"
+      }
+    }
+
+    cycle_paths {
+      type array_of_strings
+      description "Array of file paths to cycle through"
+      set_by_directory_loading true
+
+      behavior {
+        auto_populated "Automatically filled when directory is loaded"
+        sorting alphabetical
+        synchronized "All outputs with same cycle_paths are synchronized"
+      }
+    }
+
+    cycle_count {
+      type integer
+      description "Number of items in cycle"
+      set_by_directory_loading true
+      auto_calculated true
+    }
+
+    current_cycle_index {
+      type integer
+      description "Current position in cycle (0-based)"
+      default 0
+      runtime_state true
+      modified_by_commands next prev
+    }
+  }
+
+  # Transitions - IMAGE MODE ONLY
+  transitions {
+    transition {
+      type string
+      description "Transition effect between wallpapers"
+      default fade
+      applies_to_type WALLPAPER_IMAGE
+      error_if_used_with_shader "Transitions only apply to images"
+
+      values {
+        none {
+          code 0
+          description "Instant switch"
+        }
+        fade {
+          code 1
+          description "Smooth crossfade"
+        }
+        slide-left {
+          code 2
+          description "Slide in from right"
+          alias slide_left
+        }
+        slide-right {
+          code 3
+          description "Slide in from left"
+          alias slide_right
+        }
+        glitch {
+          code 4
+          description "Digital glitch effect"
+        }
+        pixelate {
+          code 5
+          description "Pixelation effect"
+        }
+      }
+
+      parser_function transition_type_from_string
+
+      example "transition fade"
+    }
+
+    transition_duration {
+      type float
+      description "Duration of transition in seconds"
+      default 0.3
+      min 0.0
+      max 10.0
+      unit seconds
+
+      validation {
+        must_be_non_negative true
+        reasonable_max 10.0
+      }
+
+      parser_accepts_integer true
+
+      example "transition_duration 0.5"
+    }
+  }
+
+  # Shader-specific settings - SHADER MODE ONLY
+  shader_settings {
+    shader_speed {
+      type float
+      description "Per-output shader animation speed multiplier"
+      default 1.0
+      min 0.001
+      max 100.0
+
+      validation {
+        must_be_positive true
+        reasonable_max 100.0
+      }
+
+      parser_accepts_integer true
+
+      behavior {
+        global_multiplier "Multiplied with state.shader_speed from IPC"
+        formula "effective_speed = config.shader_speed * state.shader_speed"
+      }
+
+      example "shader_speed 1.5"
+    }
+
+    shader_fps {
+      type integer
+      description "Target FPS for shader rendering"
+      default 60
+      min 1
+      max 240
+
+      behavior {
+        ignored_if_vsync_true "Has no effect when vsync is enabled"
+        uses_timerfd "Uses timerfd for precise frame timing"
+      }
+
+      example "shader_fps 30"
+    }
+
+    vsync {
+      type boolean
+      description "Sync to monitor refresh rate"
+      default false
+
+      behavior {
+        if_true "Uses eglSwapBuffers blocking, ignores shader_fps"
+        if_false "Uses timerfd with shader_fps for frame pacing"
+      }
+
+      example "vsync true"
+    }
+
+    show_fps {
+      type boolean
+      description "Show FPS counter on screen"
+      default false
+
+      behavior {
+        rendering "Green text with black shadow in top-left"
+        format "Shows current FPS measurement"
+      }
+
+      example "show_fps false"
+    }
+  }
+
+  # Shader texture channels (iChannel0-3)
+  channels {
+    description "Shader texture inputs for Shadertoy compatibility"
+
+    channel0 {
+      type string
+      description "Texture for iChannel0 uniform"
+      default null
+      max_length 4096
+
+      behavior {
+        builtin_textures "gray-noise, rgba-noise, blue-noise, wood, abstract"
+        custom_path "Path to PNG/JPEG texture file"
+      }
+
+      example "channel0 gray-noise"
+    }
+
+    channel1 {
+      type string
+      description "Texture for iChannel1 uniform"
+      default null
+      max_length 4096
+
+      example "channel1 rgba-noise"
+    }
+
+    channel2 {
+      type string
+      description "Texture for iChannel2 uniform"
+      default null
+      max_length 4096
+
+      example "channel2 ~/textures/pattern.png"
+    }
+
+    channel3 {
+      type string
+      description "Texture for iChannel3 uniform"
+      default null
+      max_length 4096
+
+      example "channel3 blue-noise"
+    }
+
+    built_in {
+      gray-noise {
+        size 256x256
+        format R8
+        generator generate_gray_noise_texture
+      }
+      rgba-noise {
+        size 256x256
+        format RGBA8
+        generator generate_rgba_noise_texture
+      }
+      blue-noise {
+        size 256x256
+        format R8
+        generator generate_blue_noise_texture
+      }
+      wood {
+        size 512x512
+        format RGB8
+        generator generate_wood_texture
+      }
+      abstract {
+        size 512x512
+        format RGB8
+        generator generate_abstract_texture
+      }
+    }
+  }
+}
+
+# ============================================================================
+# OUTPUT SECTION
+# Per-monitor overrides - each key is a connector name
+# ============================================================================
+output {
+  description "Per-monitor configuration overrides"
+  type object
+  required false
+
+  structure {
+    type map
+    key_type string
+    key_description "Output connector name (e.g., HDMI-A-1, eDP-1, DP-1)"
+    value_type object
+    value_inherits_from default
+  }
+
+  discovery {
+    hyprland "hyprctl monitors"
+    sway "swaymsg -t get_outputs"
+    generic "wlr-randr"
+  }
+
+  behavior {
+    inheritance "Each output inherits from default, then applies overrides"
+    fallback "Outputs without explicit config use default settings"
+    synchronization "Outputs with identical cycle_paths stay synchronized"
+  }
+
+  parsing {
+    foreach_key "Treat as output connector name"
+    foreach_value "Parse as wallpaper_config"
+    merge_with_default "Apply overrides on top of default config"
+  }
+
+  examples {
+    laptop_and_external {
+      config "output {\n  eDP-1 {\n    shader matrix_real.glsl\n    shader_speed 0.5\n  }\n  HDMI-A-1 {\n    path ~/Pictures/landscape.png\n    mode fill\n  }\n}"
+    }
+
+    triple_monitor {
+      config "output {\n  DP-1 {\n    path ~/Pictures/left.png\n  }\n  DP-2 {\n    shader matrix_real.glsl\n  }\n  DP-3 {\n    path ~/Pictures/right.png\n  }\n}"
+    }
+  }
+}
+
+# ============================================================================
+# VALIDATION RULES
+# ============================================================================
+validation {
+  mutual_exclusion {
+    path_vs_shader {
+      options path shader
+      rule "Exactly one must be specified"
+      error "Both 'path' and 'shader' specified - these are mutually exclusive"
+    }
+  }
+
+  type_restrictions {
+    mode_only_for_images {
+      option mode
+      allowed_types WALLPAPER_IMAGE
+      error "'mode' only applies to images, not shaders (shaders always fullscreen)"
+    }
+
+    transition_only_for_images {
+      option transition
+      allowed_types WALLPAPER_IMAGE
+      error "'transition' only applies to images, not shaders"
+    }
+  }
+
+  range_checks {
+    duration {
+      min 0.0
+      max 86400.0
+      error "Duration must be 0-86400 seconds (24 hours)"
+    }
+
+    shader_speed {
+      min 0.001
+      max 100.0
+      error "Shader speed must be 0.001-100.0"
+    }
+
+    transition_duration {
+      min 0.0
+      max 10.0
+      error "Transition duration must be 0-10 seconds"
+    }
+
+    shader_fps {
+      min 1
+      max 240
+      error "Shader FPS must be 1-240"
+    }
+  }
+
+  path_checks {
+    max_length {
+      limit 4096
+      error "Path too long (max 4096 characters)"
+    }
+
+    directory_expansion {
+      if_directory "Must find at least one matching file"
+      if_directory_syntax_but_no_files "Error if path ends with / but no files found"
+    }
+  }
+}
+
+# ============================================================================
+# PARSER IMPLEMENTATION DETAILS
+# ============================================================================
+parser {
+  file src/neowalld/config/vibe.c
+  functions {
+    vibe_parse_file "Parse VIBE file"
+    vibe_parse_string "Parse VIBE string"
+    vibe_object_get "Get value from object by key"
+  }
+
+  types {
+    VIBE_TYPE_NULL "Null value"
+    VIBE_TYPE_INTEGER "Integer value"
+    VIBE_TYPE_FLOAT "Float value"
+    VIBE_TYPE_BOOLEAN "Boolean value"
+    VIBE_TYPE_STRING "String value"
+    VIBE_TYPE_ARRAY "Array value"
+    VIBE_TYPE_OBJECT "Object/map value"
+  }
+
+  structure {
+    format "Curly-brace hierarchical"
+    nesting unlimited
+    comments "# for line comments"
+    whitespace flexible
+  }
+}
+
+# ============================================================================
+# LOADER IMPLEMENTATION DETAILS
+# ============================================================================
+loader {
+  file src/neowalld/config/config.c
+  entry_point config_load
+
+  flow {
+    step1 "Check if config file exists"
+    step2 "Create default if missing (config_create_default)"
+    step3 "Stat file for size and type validation"
+    step4 "Read entire file into memory"
+    step5 "Parse with VIBE parser"
+    step6 "Extract 'default' section"
+    step7 "Parse default with parse_wallpaper_config"
+    step8 "Apply default to all outputs"
+    step9 "Extract 'output' section"
+    step10 "For each output key, parse and override"
+    step11 "Free VIBE structures"
+  }
+
+  functions {
+    config_load "Main entry point"
+    config_create_default "Create default config file"
+    parse_wallpaper_config "Parse wallpaper config object"
+    init_wallpaper_config_defaults "Initialize with safe defaults"
+    apply_builtin_default_config "Fallback if parsing fails"
+    wallpaper_mode_from_string "Parse mode string to enum"
+    transition_type_from_string "Parse transition string to enum"
+    load_images_from_directory "Expand directory to image list"
+    load_shaders_from_directory "Expand directory to shader list"
+  }
+
+  error_handling {
+    parse_error "Log line/column, use built-in defaults"
+    file_not_found "Create default config"
+    invalid_structure "Use built-in defaults"
+    validation_failed "Log error, use built-in defaults"
+  }
+}
+
+# ============================================================================
+# STORAGE STRUCTURE
+# ============================================================================
+storage {
+  location include/output/output.h
+  struct wallpaper_config
+
+  fields {
+    type "enum wallpaper_type - WALLPAPER_IMAGE or WALLPAPER_SHADER"
+    path "char[4096] - image file path"
+    shader_path "char[4096] - shader file path"
+    mode "enum wallpaper_mode - display mode"
+    duration "float - cycle duration in seconds"
+    transition "enum transition_type - transition effect"
+    transition_duration "float - transition length in seconds"
+    shader_speed "float - animation speed multiplier"
+    shader_fps "int - target FPS"
+    vsync "bool - sync to refresh rate"
+    show_fps "bool - show FPS counter"
+    cycle "bool - cycling enabled"
+    cycle_paths "char** - array of paths"
+    cycle_count "size_t - number of paths"
+    current_cycle_index "size_t - current position"
+    channel_paths "char** - iChannel texture paths"
+    channel_count "size_t - number of channels"
+  }
+
+  lifecycle {
+    creation "Embedded in struct output_state"
+    initialization "init_wallpaper_config_defaults"
+    loading "parse_wallpaper_config"
+    cleanup "config_free_wallpaper"
+  }
+
+  threading {
+    protection output_list_lock
+    lock_type pthread_rwlock_t
+    access "Read lock for queries, write lock for modifications"
+  }
+}
