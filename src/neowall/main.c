@@ -80,10 +80,10 @@ static Command commands[] = {
     {"stop",               "Stop the neowalld daemon",               cmd_stop},
     {"restart",            "Restart the neowalld daemon",            cmd_restart},
     {"status",             "Show daemon status",                     cmd_status},
-    {"next",               "Switch to next wallpaper [output]",      cmd_next},
-    {"prev",               "Switch to previous wallpaper [output]",  cmd_prev},
-    {"pause",              "Pause wallpaper cycling [output]",       cmd_pause},
-    {"resume",             "Resume wallpaper cycling [output]",      cmd_resume},
+    {"next",               "Switch to next wallpaper (all outputs)", cmd_next},
+    {"prev",               "Switch to previous wallpaper (all outputs)", cmd_prev},
+    {"pause",              "Pause wallpaper cycling (all outputs)",  cmd_pause},
+    {"resume",             "Resume wallpaper cycling (all outputs)", cmd_resume},
     {"reload",             "Reload configuration",                   cmd_reload},
     {"current",            "Show current wallpaper [output]",        cmd_current},
     {"speed-up",           "Increase shader animation speed [output]", cmd_speed_up},
@@ -1007,31 +1007,17 @@ int cmd_status(int argc, char *argv[]) {
 
 /* BLAZING FAST IPC command wrappers - support optional output parameter */
 int cmd_next(int argc, char *argv[]) {
-    if (argc >= 2) {
-        /* Output specified: neowall next DP-1 */
-        char args[512];
-        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-        return send_ipc_command("next", args, strlen(args)) ? 0 : 1;
-    }
-    /* No output specified - global */
+    (void)argc; (void)argv; /* Global only - no arguments */
     return send_ipc_command("next", NULL, 0) ? 0 : 1;
 }
 
 int cmd_pause(int argc, char *argv[]) {
-    if (argc >= 2) {
-        char args[512];
-        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-        return send_ipc_command("pause", args, strlen(args)) ? 0 : 1;
-    }
+    (void)argc; (void)argv; /* Global only - no arguments */
     return send_ipc_command("pause", NULL, 0) ? 0 : 1;
 }
 
 int cmd_resume(int argc, char *argv[]) {
-    if (argc >= 2) {
-        char args[512];
-        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-        return send_ipc_command("resume", args, strlen(args)) ? 0 : 1;
-    }
+    (void)argc; (void)argv; /* Global only - no arguments */
     return send_ipc_command("resume", NULL, 0) ? 0 : 1;
 }
 
@@ -1086,13 +1072,7 @@ int cmd_shader_resume(int argc, char *argv[]) {
 }
 
 int cmd_prev(int argc, char *argv[]) {
-    if (argc >= 2) {
-        /* Output specified: neowall prev DP-1 */
-        char args[512];
-        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-        return send_ipc_command("prev", args, strlen(args)) ? 0 : 1;
-    }
-    /* No output specified - global */
+    (void)argc; (void)argv; /* Global only - no arguments */
     return send_ipc_command("prev", NULL, 0) ? 0 : 1;
 }
 
@@ -1202,92 +1182,78 @@ int cmd_output_info(int argc, char *argv[]) {
 }
 
 int cmd_next_output(int argc, char *argv[]) {
-    char args[256];
-
-    if (argc >= 2) {
-        /* Output specified - apply to specific output */
-        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-    } else {
-        /* No output specified - apply to all outputs */
-        args[0] = '\0';
+    if (argc < 2) {
+        fprintf(stderr, "Error: next-output requires output name\n");
+        fprintf(stderr, "Usage: neowall next-output <output-name>\n");
+        fprintf(stderr, "  Tip: Use 'neowall next' to affect all outputs\n");
+        return 1;
     }
 
+    char args[256];
+    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
     return send_ipc_command("next-output", args, strlen(args)) ? 0 : 1;
 }
 
 int cmd_prev_output(int argc, char *argv[]) {
-    char args[256];
-
-    if (argc >= 2) {
-        /* Output specified - apply to specific output */
-        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-    } else {
-        /* No output specified - apply to all outputs */
-        args[0] = '\0';
+    if (argc < 2) {
+        fprintf(stderr, "Error: prev-output requires output name\n");
+        fprintf(stderr, "Usage: neowall prev-output <output-name>\n");
+        fprintf(stderr, "  Tip: Use 'neowall prev' to affect all outputs\n");
+        return 1;
     }
 
+    char args[256];
+    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
     return send_ipc_command("prev-output", args, strlen(args)) ? 0 : 1;
 }
 
 int cmd_reload_output(int argc, char *argv[]) {
-    char args[512];
-
-    if (argc >= 2) {
-        /* Output specified - apply to specific output */
-        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-    } else {
-        /* No output specified - apply to all outputs */
-        args[0] = '\0';
+    if (argc < 2) {
+        fprintf(stderr, "Error: reload-output requires output name\n");
+        fprintf(stderr, "Usage: neowall reload-output <output-name>\n");
+        return 1;
     }
 
+    char args[512];
+    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
     return send_ipc_command("reload-output", args, strlen(args)) ? 0 : 1;
 }
 
 int cmd_pause_output(int argc, char *argv[]) {
-    char args[512];
-
-    if (argc >= 2) {
-        /* Output specified - apply to specific output */
-        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-    } else {
-        /* No output specified - apply to all outputs */
-        args[0] = '\0';
+    if (argc < 2) {
+        fprintf(stderr, "Error: pause-output requires output name\n");
+        fprintf(stderr, "Usage: neowall pause-output <output-name>\n");
+        fprintf(stderr, "  Tip: Use 'neowall pause' to affect all outputs\n");
+        return 1;
     }
 
+    char args[512];
+    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
     return send_ipc_command("pause-output", args, strlen(args)) ? 0 : 1;
 }
 
 int cmd_resume_output(int argc, char *argv[]) {
-    char args[512];
-
-    if (argc >= 2) {
-        /* Output specified - apply to specific output */
-        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-    } else {
-        /* No output specified - apply to all outputs */
-        args[0] = '\0';
+    if (argc < 2) {
+        fprintf(stderr, "Error: resume-output requires output name\n");
+        fprintf(stderr, "Usage: neowall resume-output <output-name>\n");
+        fprintf(stderr, "  Tip: Use 'neowall resume' to affect all outputs\n");
+        return 1;
     }
 
+    char args[512];
+    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
     return send_ipc_command("resume-output", args, strlen(args)) ? 0 : 1;
 }
 
 int cmd_jump_to_output(int argc, char *argv[]) {
-    char args[512];
-
-    if (argc < 2) {
-        fprintf(stderr, "Usage: neowall jump-to-output [output-name] <index>\n");
-        fprintf(stderr, "  If output-name is omitted, applies to all outputs\n");
+    if (argc < 3) {
+        fprintf(stderr, "Error: jump-to-output requires output name and index\n");
+        fprintf(stderr, "Usage: neowall jump-to-output <output-name> <index>\n");
         return 1;
     }
 
-    if (argc >= 3) {
-        /* Output and index specified */
-        snprintf(args, sizeof(args), "{\"output\":\"%s\",\"index\":%s}", argv[1], argv[2]);
-    } else {
-        /* Only index specified - apply to all outputs */
-        snprintf(args, sizeof(args), "{\"index\":%s}", argv[1]);
-    }
-
+    char args[512];
+    snprintf(args, sizeof(args), "{\"output\":\"%s\",\"index\":%s}", argv[1], argv[2]);
     return send_ipc_command("jump-to-output", args, strlen(args)) ? 0 : 1;
 }
 

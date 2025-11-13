@@ -17,12 +17,6 @@
 /* Forward declarations of command handlers */
 command_result_t cmd_list_outputs(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 command_result_t cmd_output_info(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_next_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_prev_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_reload_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_pause_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_resume_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_jump_to_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 
 /* Output command registry */
 static const command_info_t output_command_registry[] = {
@@ -35,42 +29,6 @@ static const command_info_t output_command_registry[] = {
                         CMD_CAP_REQUIRES_STATE,
                         "{\"output\": <string>}",
                         "{\"command\":\"output-info\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("next-output", cmd_next_output, "output",
-                        "Switch to next wallpaper (on specific output or all outputs if not specified)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>} (optional)",
-                        "{\"command\":\"next-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("prev-output", cmd_prev_output, "output",
-                        "Switch to previous wallpaper (on specific output or all outputs if not specified)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>} (optional)",
-                        "{\"command\":\"prev-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("reload-output", cmd_reload_output, "output",
-                        "Reload wallpaper (on specific output or all outputs if not specified)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>} (optional)",
-                        "{\"command\":\"reload-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("pause-output", cmd_pause_output, "output",
-                        "Pause cycling (on specific output or all outputs if not specified)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>} (optional)",
-                        "{\"command\":\"pause-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("resume-output", cmd_resume_output, "output",
-                        "Resume cycling (on specific output or all outputs if not specified)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>} (optional)",
-                        "{\"command\":\"resume-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("jump-to-output", cmd_jump_to_output, "output",
-                        "Jump to specific cycle index (on specific output or all outputs if not specified)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string> (optional), \"index\": <integer>}",
-                        "{\"command\":\"jump-to-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"index\\\":3}\"}"),
 
     COMMAND_SENTINEL
 };
@@ -106,30 +64,25 @@ static struct output_state *find_output_by_name(struct neowall_state *state, con
 }
 
 /**
- * Extract output name from args (optional - returns true with empty string if not present)
+ * Extract output name from args (required for -output commands)
  */
 static bool extract_output_name(const char *args, char *output_buf, size_t buf_size) {
     if (!output_buf || buf_size == 0) return false;
-
-    /* Default to empty string (means "all outputs") */
-    output_buf[0] = '\0';
-
-    /* If no args, apply to all outputs */
-    if (!args || strlen(args) == 0) return true;
+    if (!args || strlen(args) == 0) return false;
 
     /* Simple JSON parsing for "output" field */
     const char *output_start = strstr(args, "\"output\"");
-    if (!output_start) return true;  /* No output specified = all outputs */
+    if (!output_start) return false;
 
     output_start = strchr(output_start, ':');
-    if (!output_start) return true;
+    if (!output_start) return false;
 
     output_start = strchr(output_start, '"');
-    if (!output_start) return true;
+    if (!output_start) return false;
 
     output_start++;
     const char *output_end = strchr(output_start, '"');
-    if (!output_end) return true;
+    if (!output_end) return false;
 
     size_t len = output_end - output_start;
     if (len >= buf_size) return false;
@@ -274,45 +227,24 @@ command_result_t cmd_next_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    /* Extract output name (optional) */
+    /* Extract output name (required) */
     char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Invalid 'output' argument");
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    /* If output is specified, apply to that output only */
-    if (output_name[0] != '\0') {
-        struct output_state *output = find_output_by_name(state, output_name);
-        if (!output) {
-            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
-            return CMD_ERROR_NOT_FOUND;
-        }
-
-        output_cycle_wallpaper(output);
-
-        static char data[512];
-        snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"next\"}", output_name);
-        commands_build_success(resp, "Switched to next wallpaper", data);
-        return CMD_SUCCESS;
+    struct output_state *output = find_output_by_name(state, output_name);
+    if (!output) {
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
-    /* No output specified - apply to ALL outputs */
-    pthread_rwlock_rdlock(&state->output_list_lock);
-
-    int count = 0;
-    struct output_state *output = state->outputs;
-    while (output) {
-        output_cycle_wallpaper(output);
-        count++;
-        output = output->next;
-    }
-
-    pthread_rwlock_unlock(&state->output_list_lock);
+    output_cycle_wallpaper(output);
 
     static char data[512];
-    snprintf(data, sizeof(data), "{\"outputs_affected\":%d,\"action\":\"next\"}", count);
-    commands_build_success(resp, "Switched all outputs to next wallpaper", data);
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"next\"}", output_name);
+    commands_build_success(resp, "Switched to next wallpaper", data);
     return CMD_SUCCESS;
 }
 
@@ -324,64 +256,34 @@ command_result_t cmd_prev_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    /* Extract output name (optional) */
+    /* Extract output name (required) */
     char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Invalid 'output' argument");
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    /* If output is specified, apply to that output only */
-    if (output_name[0] != '\0') {
-        struct output_state *output = find_output_by_name(state, output_name);
-        if (!output) {
-            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
-            return CMD_ERROR_NOT_FOUND;
-        }
-
-        /* Cycle to previous wallpaper */
-        if (output->config.cycle && output->config.cycle_count > 0) {
-            if (output->config.current_cycle_index > 0) {
-                output->config.current_cycle_index--;
-            } else {
-                output->config.current_cycle_index = output->config.cycle_count - 1;
-            }
-
-            const char *wallpaper = output->config.cycle_paths[output->config.current_cycle_index];
-            output_set_wallpaper(output, wallpaper);
-        }
-
-        static char data[512];
-        snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"prev\"}", output_name);
-        commands_build_success(resp, "Switched to previous wallpaper", data);
-        return CMD_SUCCESS;
+    struct output_state *output = find_output_by_name(state, output_name);
+    if (!output) {
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
-    /* No output specified - apply to ALL outputs */
-    pthread_rwlock_rdlock(&state->output_list_lock);
-
-    int count = 0;
-    struct output_state *output = state->outputs;
-    while (output) {
-        if (output->config.cycle && output->config.cycle_count > 0) {
-            if (output->config.current_cycle_index > 0) {
-                output->config.current_cycle_index--;
-            } else {
-                output->config.current_cycle_index = output->config.cycle_count - 1;
-            }
-
-            const char *wallpaper = output->config.cycle_paths[output->config.current_cycle_index];
-            output_set_wallpaper(output, wallpaper);
+    /* Cycle to previous wallpaper */
+    if (output->config.cycle && output->config.cycle_count > 0) {
+        if (output->config.current_cycle_index > 0) {
+            output->config.current_cycle_index--;
+        } else {
+            output->config.current_cycle_index = output->config.cycle_count - 1;
         }
-        count++;
-        output = output->next;
-    }
 
-    pthread_rwlock_unlock(&state->output_list_lock);
+        const char *wallpaper = output->config.cycle_paths[output->config.current_cycle_index];
+        output_set_wallpaper(output, wallpaper);
+    }
 
     static char data[512];
-    snprintf(data, sizeof(data), "{\"outputs_affected\":%d,\"action\":\"prev\"}", count);
-    commands_build_success(resp, "Switched all outputs to previous wallpaper", data);
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"prev\"}", output_name);
+    commands_build_success(resp, "Switched to previous wallpaper", data);
     return CMD_SUCCESS;
 }
 
@@ -393,50 +295,27 @@ command_result_t cmd_reload_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    /* Extract output name (optional) */
+    /* Extract output name (required) */
     char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Invalid 'output' argument");
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    /* If output is specified, apply to that output only */
-    if (output_name[0] != '\0') {
-        struct output_state *output = find_output_by_name(state, output_name);
-        if (!output) {
-            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
-            return CMD_ERROR_NOT_FOUND;
-        }
-
-        /* Reload current wallpaper */
-        if (output->config.path[0]) {
-            output_set_wallpaper(output, output->config.path);
-        }
-
-        static char data[512];
-        snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"reload\"}", output_name);
-        commands_build_success(resp, "Reloaded wallpaper", data);
-        return CMD_SUCCESS;
+    struct output_state *output = find_output_by_name(state, output_name);
+    if (!output) {
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
-    /* No output specified - apply to ALL outputs */
-    pthread_rwlock_rdlock(&state->output_list_lock);
-
-    int count = 0;
-    struct output_state *output = state->outputs;
-    while (output) {
-        if (output->config.path[0]) {
-            output_set_wallpaper(output, output->config.path);
-        }
-        count++;
-        output = output->next;
+    /* Reload current wallpaper */
+    if (output->config.path[0]) {
+        output_set_wallpaper(output, output->config.path);
     }
-
-    pthread_rwlock_unlock(&state->output_list_lock);
 
     static char data[512];
-    snprintf(data, sizeof(data), "{\"outputs_affected\":%d,\"action\":\"reload\"}", count);
-    commands_build_success(resp, "Reloaded wallpaper on all outputs", data);
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"reload\"}", output_name);
+    commands_build_success(resp, "Reloaded wallpaper", data);
     return CMD_SUCCESS;
 }
 
@@ -448,45 +327,24 @@ command_result_t cmd_pause_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    /* Extract output name (optional) */
+    /* Extract output name (required) */
     char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Invalid 'output' argument");
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    /* If output is specified, apply to that output only */
-    if (output_name[0] != '\0') {
-        struct output_state *output = find_output_by_name(state, output_name);
-        if (!output) {
-            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
-            return CMD_ERROR_NOT_FOUND;
-        }
-
-        output->config.duration = 0.0f;  /* Pause by setting duration to 0 */
-
-        static char data[512];
-        snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"pause\"}", output_name);
-        commands_build_success(resp, "Paused cycling", data);
-        return CMD_SUCCESS;
+    struct output_state *output = find_output_by_name(state, output_name);
+    if (!output) {
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
-    /* No output specified - apply to ALL outputs */
-    pthread_rwlock_rdlock(&state->output_list_lock);
-
-    int count = 0;
-    struct output_state *output = state->outputs;
-    while (output) {
-        output->config.duration = 0.0f;  /* Pause by setting duration to 0 */
-        count++;
-        output = output->next;
-    }
-
-    pthread_rwlock_unlock(&state->output_list_lock);
+    output->config.duration = 0.0f;  /* Pause by setting duration to 0 */
 
     static char data[512];
-    snprintf(data, sizeof(data), "{\"outputs_affected\":%d,\"action\":\"pause\"}", count);
-    commands_build_success(resp, "Paused cycling on all outputs", data);
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"pause\"}", output_name);
+    commands_build_success(resp, "Paused cycling", data);
     return CMD_SUCCESS;
 }
 
@@ -498,63 +356,33 @@ command_result_t cmd_resume_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    /* Extract output name (optional) */
+    /* Extract output name (required) */
     char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Invalid 'output' argument");
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    /* If output is specified, apply to that output only */
-    if (output_name[0] != '\0') {
-        struct output_state *output = find_output_by_name(state, output_name);
-        if (!output) {
-            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
-            return CMD_ERROR_NOT_FOUND;
-        }
-
-        /* Resume by restoring duration - in a real implementation,
-         * we'd need to read the original duration from config */
-        if (output->config.duration == 0.0f) {
-            output->config.duration = 300.0f;  /* Default 5 minutes */
-        }
-
-        /* If shader animation was paused, resume it */
-        if (output->config.type == WALLPAPER_SHADER) {
-            output->shader_paused = false;
-        }
-
-        static char data[512];
-        snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"resume\"}", output_name);
-        commands_build_success(resp, "Resumed cycling", data);
-        return CMD_SUCCESS;
+    struct output_state *output = find_output_by_name(state, output_name);
+    if (!output) {
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
-    /* No output specified - apply to ALL outputs */
-    pthread_rwlock_rdlock(&state->output_list_lock);
-
-    int count = 0;
-    struct output_state *output = state->outputs;
-    while (output) {
-        /* Resume by restoring duration */
-        if (output->config.duration == 0.0f) {
-            output->config.duration = 300.0f;  /* Default 5 minutes */
-        }
-
-        /* If shader animation was paused, resume it */
-        if (output->config.type == WALLPAPER_SHADER) {
-            output->shader_paused = false;
-        }
-
-        count++;
-        output = output->next;
+    /* Resume by restoring duration - in a real implementation,
+     * we'd need to read the original duration from config */
+    if (output->config.duration == 0.0f) {
+        output->config.duration = 300.0f;  /* Default 5 minutes */
     }
 
-    pthread_rwlock_unlock(&state->output_list_lock);
+    /* If shader animation was paused, resume it */
+    if (output->config.type == WALLPAPER_SHADER) {
+        output->shader_paused = false;
+    }
 
     static char data[512];
-    snprintf(data, sizeof(data), "{\"outputs_affected\":%d,\"action\":\"resume\"}", count);
-    commands_build_success(resp, "Resumed cycling on all outputs", data);
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"resume\"}", output_name);
+    commands_build_success(resp, "Resumed cycling", data);
     return CMD_SUCCESS;
 }
 
@@ -566,10 +394,10 @@ command_result_t cmd_jump_to_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    /* Extract output name (optional) */
+    /* Extract output name (required) */
     char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Invalid 'output' argument");
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
@@ -580,60 +408,30 @@ command_result_t cmd_jump_to_output(struct neowall_state *state,
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    /* If output is specified, apply to that output only */
-    if (output_name[0] != '\0') {
-        struct output_state *output = find_output_by_name(state, output_name);
-        if (!output) {
-            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
-            return CMD_ERROR_NOT_FOUND;
-        }
-
-        /* Validate index */
-        if (!output->config.cycle || output->config.cycle_count == 0) {
-            commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "No cycle configured for this output");
-            return CMD_ERROR_INVALID_ARGS;
-        }
-
-        if (index < 0 || (size_t)index >= output->config.cycle_count) {
-            commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Index out of range");
-            return CMD_ERROR_INVALID_ARGS;
-        }
-
-        /* Jump to index */
-        output->config.current_cycle_index = index;
-        const char *wallpaper = output->config.cycle_paths[index];
-        output_set_wallpaper(output, wallpaper);
-
-        static char data[512];
-        snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"jump\",\"index\":%d}", output_name, index);
-        commands_build_success(resp, "Jumped to cycle index", data);
-        return CMD_SUCCESS;
+    struct output_state *output = find_output_by_name(state, output_name);
+    if (!output) {
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
-    /* No output specified - apply to ALL outputs */
-    pthread_rwlock_rdlock(&state->output_list_lock);
-
-    int count = 0;
-    int skipped = 0;
-    struct output_state *output = state->outputs;
-    while (output) {
-        if (output->config.cycle && output->config.cycle_count > 0 &&
-            index >= 0 && (size_t)index < output->config.cycle_count) {
-            output->config.current_cycle_index = index;
-            const char *wallpaper = output->config.cycle_paths[index];
-            output_set_wallpaper(output, wallpaper);
-            count++;
-        } else {
-            skipped++;
-        }
-        output = output->next;
+    /* Validate index */
+    if (!output->config.cycle || output->config.cycle_count == 0) {
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "No cycle configured for this output");
+        return CMD_ERROR_INVALID_ARGS;
     }
 
-    pthread_rwlock_unlock(&state->output_list_lock);
+    if (index < 0 || (size_t)index >= output->config.cycle_count) {
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Index out of range");
+        return CMD_ERROR_INVALID_ARGS;
+    }
+
+    /* Jump to index */
+    output->config.current_cycle_index = index;
+    const char *wallpaper = output->config.cycle_paths[index];
+    output_set_wallpaper(output, wallpaper);
 
     static char data[512];
-    snprintf(data, sizeof(data), "{\"outputs_affected\":%d,\"skipped\":%d,\"action\":\"jump\",\"index\":%d}",
-             count, skipped, index);
-    commands_build_success(resp, "Jumped all outputs to cycle index", data);
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"jump\",\"index\":%d}", output_name, index);
+    commands_build_success(resp, "Jumped to cycle index", data);
     return CMD_SUCCESS;
 }
