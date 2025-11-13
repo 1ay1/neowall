@@ -71,7 +71,17 @@ static void show_status(SettingsDialog *dlg, const char *message, gboolean is_er
 
 /* Parse config value from daemon JSON response */
 static gboolean parse_config_value(const char *output, char *value, size_t value_size) {
-    const char *value_start = strstr(output, "\"value\"");
+    /* Response format: {"data":{"message":"...","data":{"key":"...","value":"..."}}} */
+    /* We need to find the LAST occurrence of "value": which is the actual config value */
+    const char *value_start = NULL;
+    const char *pos = output;
+
+    /* Find all occurrences of "value": and use the last one */
+    while ((pos = strstr(pos, "\"value\"")) != NULL) {
+        value_start = pos;
+        pos += 7;  /* Move past "value" */
+    }
+
     if (!value_start) return FALSE;
 
     value_start = strchr(value_start, ':');
