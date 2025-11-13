@@ -17,6 +17,12 @@
 /* Forward declarations of command handlers */
 command_result_t cmd_list_outputs(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 command_result_t cmd_output_info(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_next_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_prev_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_reload_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_pause_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_resume_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_jump_to_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 
 /* Output command registry */
 static const command_info_t output_command_registry[] = {
@@ -29,6 +35,42 @@ static const command_info_t output_command_registry[] = {
                         CMD_CAP_REQUIRES_STATE,
                         "{\"output\": <string>}",
                         "{\"command\":\"output-info\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("next-output", cmd_next_output, "output",
+                        "Next wallpaper on specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>}",
+                        "{\"command\":\"next-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("prev-output", cmd_prev_output, "output",
+                        "Previous wallpaper on specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>}",
+                        "{\"command\":\"prev-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("reload-output", cmd_reload_output, "output",
+                        "Reload wallpaper on specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>}",
+                        "{\"command\":\"reload-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("pause-output", cmd_pause_output, "output",
+                        "Pause cycling on specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>}",
+                        "{\"command\":\"pause-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("resume-output", cmd_resume_output, "output",
+                        "Resume cycling on specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>}",
+                        "{\"command\":\"resume-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("jump-to-output", cmd_jump_to_output, "output",
+                        "Jump to cycle index on specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>, \"index\": <integer>}",
+                        "{\"command\":\"jump-to-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"index\\\":5}\"}"),
 
     COMMAND_SENTINEL
 };
