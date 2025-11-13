@@ -43,8 +43,6 @@ int cmd_pause(int argc, char *argv[]);
 int cmd_resume(int argc, char *argv[]);
 int cmd_reload(int argc, char *argv[]);
 int cmd_current(int argc, char *argv[]);
-int cmd_speed_up(int argc, char *argv[]);
-int cmd_speed_down(int argc, char *argv[]);
 int cmd_shader_pause(int argc, char *argv[]);
 int cmd_shader_resume(int argc, char *argv[]);
 int cmd_config(int argc, char *argv[]);
@@ -86,8 +84,6 @@ static Command commands[] = {
     {"cycle-resume",       "Resume wallpaper cycling (all outputs)", cmd_resume},
     {"reload",             "Reload configuration",                   cmd_reload},
     {"current",            "Show current wallpaper [output]",        cmd_current},
-    {"speed-up",           "Increase shader animation speed [output]", cmd_speed_up},
-    {"speed-down",         "Decrease shader animation speed [output]", cmd_speed_down},
     {"live-pause",         "Pause live wallpaper animation [output]", cmd_shader_pause},
     {"live-resume",        "Resume live wallpaper animation [output]", cmd_shader_resume},
 
@@ -1035,23 +1031,7 @@ int cmd_current(int argc, char *argv[]) {
     return cmd_status(argc, argv);
 }
 
-int cmd_speed_up(int argc, char *argv[]) {
-    if (argc >= 2) {
-        char args[512];
-        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-        return send_ipc_command("speed-up", args, strlen(args)) ? 0 : 1;
-    }
-    return send_ipc_command("speed-up", NULL, 0) ? 0 : 1;
-}
 
-int cmd_speed_down(int argc, char *argv[]) {
-    if (argc >= 2) {
-        char args[512];
-        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-        return send_ipc_command("speed-down", args, strlen(args)) ? 0 : 1;
-    }
-    return send_ipc_command("speed-down", NULL, 0) ? 0 : 1;
-}
 
 int cmd_shader_pause(int argc, char *argv[]) {
     if (argc >= 2) {
@@ -1415,8 +1395,6 @@ int cmd_help(int argc, char *argv[]) {
     printf("  list-config-keys                  List all configuration keys\n");
     printf("\n");
     printf("Shader Control:\n");
-    printf("  speed-up           Increase shader animation speed\n");
-    printf("  speed-down         Decrease shader animation speed\n");
     printf("  shader-pause       Pause shader animation\n");
     printf("  shader-resume      Resume shader animation\n");
     printf("\n");

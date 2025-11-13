@@ -39,18 +39,12 @@ typedef struct {
     bool check_cycle;           /* Whether to check if cycling is possible before sending signal */
 } DaemonCommand;
 
-/* Special signal numbers for shader speed control (runtime-initialized) */
-static int SHADER_SPEED_UP_SIGNAL = 0;
-static int SHADER_SPEED_DOWN_SIGNAL = 0;
-
 /* Centralized command registry - Single source of truth */
 static DaemonCommand daemon_commands[] = {
     {"next",              SIGUSR1,      "Skip to next wallpaper",                  "Skipping to next wallpaper...",      NULL,  false, true},   /* check_cycle = true */
     {"pause",             SIGUSR2,      "Pause wallpaper cycling",                 "Pausing wallpaper cycling...",       NULL,  false, false},
     {"resume",            SIGCONT,      "Resume wallpaper cycling",                "Resuming wallpaper cycling...",      NULL,  false, false},
     {"reload",            SIGHUP,       "Reload configuration",                    "Reloading configuration...",         NULL,  false, false},
-    {"shader_speed_up",   0,            "Increase shader animation speed by 1.0x", "Increasing shader speed...",         NULL,  false, false},  /* Initialized at runtime */
-    {"shader_speed_down", 0,            "Decrease shader animation speed by 1.0x", "Decreasing shader speed...",         NULL,  false, false},  /* Initialized at runtime */
     {"current",           0,            "Show current wallpaper",                  NULL,                                 NULL,  true,  false},
     {"status",            0,            "Show current wallpaper",                  NULL,                                 NULL,  true,  false},
     {NULL, 0, NULL, NULL, NULL, false, false}  /* Sentinel */
@@ -58,17 +52,7 @@ static DaemonCommand daemon_commands[] = {
 
 /* Initialize runtime signal values */
 static void init_command_signals(void) {
-    SHADER_SPEED_UP_SIGNAL = SIGRTMIN;
-    SHADER_SPEED_DOWN_SIGNAL = SIGRTMIN + 1;
-
-    /* Update command table with runtime values */
-    for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
-        if (strcmp(daemon_commands[i].name, "shader_speed_up") == 0) {
-            daemon_commands[i].signal = SHADER_SPEED_UP_SIGNAL;
-        } else if (strcmp(daemon_commands[i].name, "shader_speed_down") == 0) {
-            daemon_commands[i].signal = SHADER_SPEED_DOWN_SIGNAL;
-        }
-    }
+    /* No runtime signals needed anymore */
 }
 
 /* Get PID file path */
@@ -483,52 +467,7 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
             break;
 
         default:
-            /* Check if it's a shader speed signal */
-            if (signum == SHADER_SPEED_UP_SIGNAL) {
-                log_info("Increasing shader speed...");
-
-                /* Safe to use locking here - we're NOT in signal handler context */
-                if (pthread_rwlock_tryrdlock(&state->output_list_lock) == 0) {
-                    struct output_state *output = state->outputs;
-                    while (output) {
-                        if (output->config.type == WALLPAPER_SHADER) {
-                            pthread_mutex_lock(&state->state_mutex);
-                            output->config.shader_speed += 1.0f;
-                            pthread_mutex_unlock(&state->state_mutex);
-
-                            log_info("Increased shader speed to %.1fx for output %s",
-                                     output->config.shader_speed,
-                                     output->model[0] ? output->model : "unknown");
-                        }
-                        output = output->next;
-                    }
-                    pthread_rwlock_unlock(&state->output_list_lock);
-                }
-            } else if (signum == SHADER_SPEED_DOWN_SIGNAL) {
-                log_info("Decreasing shader speed...");
-
-                if (pthread_rwlock_tryrdlock(&state->output_list_lock) == 0) {
-                    struct output_state *output = state->outputs;
-                    while (output) {
-                        if (output->config.type == WALLPAPER_SHADER) {
-                            pthread_mutex_lock(&state->state_mutex);
-                            output->config.shader_speed -= 1.0f;
-                            if (output->config.shader_speed < 0.1f) {
-                                output->config.shader_speed = 0.1f;
-                            }
-                            pthread_mutex_unlock(&state->state_mutex);
-
-                            log_info("Decreased shader speed to %.1fx for output %s",
-                                     output->config.shader_speed,
-                                     output->model[0] ? output->model : "unknown");
-                        }
-                        output = output->next;
-                    }
-                    pthread_rwlock_unlock(&state->output_list_lock);
-                }
-            } else {
-                log_debug("Received signal: %d", signum);
-            }
+            log_debug("Received signal: %d", signum);
             break;
     }
 }
@@ -577,13 +516,7 @@ static int setup_signalfd(void) {
     sigaddset(&mask, SIGUSR2);
     sigaddset(&mask, SIGCONT);
 
-    /* Add runtime-determined signals */
-    if (SHADER_SPEED_UP_SIGNAL > 0) {
-        sigaddset(&mask, SHADER_SPEED_UP_SIGNAL);
-    }
-    if (SHADER_SPEED_DOWN_SIGNAL > 0) {
-        sigaddset(&mask, SHADER_SPEED_DOWN_SIGNAL);
-    }
+
 
     /* Block these signals for all threads */
     if (pthread_sigmask(SIG_BLOCK, &mask, NULL) != 0) {

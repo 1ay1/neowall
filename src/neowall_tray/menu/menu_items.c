@@ -98,22 +98,7 @@ static const MenuItemDef shader_items[] = {
         .submenu_id = MENU_ID_SHADER,
         .order = 3
     },
-    {
-        .label = MENU_LABEL_SPEED_UP,
-        .id = "speed_up",
-        .type = MENU_ITEM_TYPE_NORMAL,
-        .callback = G_CALLBACK(menu_callback_speed_up),
-        .submenu_id = MENU_ID_SHADER,
-        .order = 4
-    },
-    {
-        .label = MENU_LABEL_SPEED_DOWN,
-        .id = "speed_down",
-        .type = MENU_ITEM_TYPE_NORMAL,
-        .callback = G_CALLBACK(menu_callback_speed_down),
-        .submenu_id = MENU_ID_SHADER,
-        .order = 5
-    }
+
 };
 
 /* ============================================================================

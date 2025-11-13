@@ -56,17 +56,7 @@ void menu_callback_live_resume(GtkMenuItem *item, gpointer user_data) {
     command_execute("live-resume");
 }
 
-void menu_callback_speed_up(GtkMenuItem *item, gpointer user_data) {
-    (void)item;
-    (void)user_data;
-    command_execute("speed-up");
-}
 
-void menu_callback_speed_down(GtkMenuItem *item, gpointer user_data) {
-    (void)item;
-    (void)user_data;
-    command_execute("speed-down");
-}
 
 /* System control callbacks */
 void menu_callback_show_status(GtkMenuItem *item, gpointer user_data) {

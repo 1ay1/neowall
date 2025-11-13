@@ -20,8 +20,6 @@ static command_result_t cmd_next(struct neowall_state *state, const ipc_request_
 static command_result_t cmd_prev(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_cycle_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_cycle_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-static command_result_t cmd_speed_up(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-static command_result_t cmd_speed_down(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_live_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_live_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 
@@ -57,15 +55,7 @@ static const command_info_t command_registry_core[] = {
                   CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
     COMMAND_ENTRY_CUSTOM("cycle-resume", cmd_cycle_resume, "cycling", "Resume automatic wallpaper cycling on all outputs",
                   CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
-    COMMAND_ENTRY_CUSTOM("speed-up", cmd_speed_up, "shader",
-                        "Increase shader animation speed (optional: output name)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
-    COMMAND_ENTRY_CUSTOM("speed-down", cmd_speed_down, "shader",
-                        "Decrease shader animation speed (optional: output name)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
-
-    /* Live Wallpaper Control */
-    COMMAND_ENTRY_CUSTOM("live-pause", cmd_live_pause, "live",
+    COMMAND_ENTRY_CUSTOM("live-pause", cmd_live_pause, "shader",
                         "Pause live wallpaper animation (optional: output name)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
     COMMAND_ENTRY_CUSTOM("live-resume", cmd_live_resume, "live",
@@ -638,119 +628,7 @@ static command_result_t cmd_cycle_resume(struct neowall_state *state, const ipc_
 }
 
 
-static command_result_t cmd_speed_up(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    if (!state) {
-        commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
-        return CMD_ERROR_STATE;
-    }
 
-    char output_name[256] = {0};
-    bool has_output = extract_optional_output(req, output_name, sizeof(output_name));
-
-    if (has_output) {
-        /* Target specific output */
-        struct output_state *output = get_target_output(state, output_name);
-        if (!output) {
-            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
-            return CMD_ERROR_NOT_FOUND;
-        }
-
-        /* Increase shader speed by 0.25x for this output */
-        float new_speed = output->shader_speed + 0.25f;
-        if (new_speed > 10.0f) new_speed = 10.0f;
-        output->shader_speed = new_speed;
-
-        /* Force redraw to apply new speed immediately */
-        output->needs_redraw = true;
-
-        char data[256];
-        snprintf(data, sizeof(data), "{\"output\":\"%s\",\"speed\":%.2f}", output_name, new_speed);
-        commands_build_success(resp, "Increased shader speed", data);
-    } else {
-        /* Global shader speed increase */
-        float current_speed = atomic_load(&state->shader_speed);
-        float new_speed = current_speed + 0.25f;
-        if (new_speed > 5.0f) new_speed = 5.0f;
-        atomic_store(&state->shader_speed, new_speed);
-
-        /* Force redraw on all outputs with shaders */
-        pthread_rwlock_rdlock(&state->output_list_lock);
-        struct output_state *output = state->outputs;
-        while (output) {
-            if (output->config.type == WALLPAPER_SHADER) {
-                output->needs_redraw = true;
-            }
-            output = output->next;
-        }
-        pthread_rwlock_unlock(&state->output_list_lock);
-
-        /* Persist state to disk */
-        save_global_state(state);
-
-        static char data[256];
-        snprintf(data, sizeof(data), "{\"shader_speed\":%.2f}", new_speed);
-        commands_build_success(resp, "Shader speed increased", data);
-    }
-
-    return CMD_SUCCESS;
-}
-
-static command_result_t cmd_speed_down(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    if (!state) {
-        commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
-        return CMD_ERROR_STATE;
-    }
-
-    char output_name[256] = {0};
-    bool has_output = extract_optional_output(req, output_name, sizeof(output_name));
-
-    if (has_output) {
-        /* Target specific output */
-        struct output_state *output = get_target_output(state, output_name);
-        if (!output) {
-            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
-            return CMD_ERROR_NOT_FOUND;
-        }
-
-        /* Decrease shader speed by 0.25x for this output */
-        float new_speed = output->shader_speed - 0.25f;
-        if (new_speed < 0.1f) new_speed = 0.1f;
-        output->shader_speed = new_speed;
-
-        /* Force redraw to apply new speed immediately */
-        output->needs_redraw = true;
-
-        char data[256];
-        snprintf(data, sizeof(data), "{\"output\":\"%s\",\"speed\":%.2f}", output_name, new_speed);
-        commands_build_success(resp, "Decreased shader speed", data);
-    } else {
-        /* Global shader speed decrease */
-        float current_speed = atomic_load(&state->shader_speed);
-        float new_speed = current_speed - 0.25f;
-        if (new_speed < 0.1f) new_speed = 0.1f;
-        atomic_store(&state->shader_speed, new_speed);
-
-        /* Force redraw on all outputs with shaders */
-        pthread_rwlock_rdlock(&state->output_list_lock);
-        struct output_state *output = state->outputs;
-        while (output) {
-            if (output->config.type == WALLPAPER_SHADER) {
-                output->needs_redraw = true;
-            }
-            output = output->next;
-        }
-        pthread_rwlock_unlock(&state->output_list_lock);
-
-        /* Persist state to disk */
-        save_global_state(state);
-
-        static char data[256];
-        snprintf(data, sizeof(data), "{\"shader_speed\":%.2f}", new_speed);
-        commands_build_success(resp, "Shader speed decreased", data);
-    }
-
-    return CMD_SUCCESS;
-}
 
 static command_result_t cmd_live_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
     if (!state) {
