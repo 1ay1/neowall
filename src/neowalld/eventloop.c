@@ -841,6 +841,7 @@ void event_loop_run(struct neowall_state *state) {
             }
 
             /* Check frame timer fds - high-precision frame pacing for vsync-off shaders */
+            /* Check frame timers (shaders with vsync disabled) */
             for (int i = BASE_FD_COUNT; i < num_fds; i++) {
                 if (fds[i].revents & POLLIN) {
                     uint64_t expirations;

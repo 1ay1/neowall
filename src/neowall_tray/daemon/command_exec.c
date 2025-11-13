@@ -133,37 +133,34 @@ bool command_execute(const char *cmd) {
     TRAY_LOG_INFO(COMPONENT, "Executing command: %s", cmd);
 
     char *binary = find_neowall_binary();
-    TRAY_LOG_DEBUG(COMPONENT, "Using binary path: %s", binary);
 
-    pid_t pid = fork();
+    /* Build full command string for shell execution */
+    char command[2048];
+    snprintf(command, sizeof(command), "%s %s", binary, cmd);
 
-    if (pid == -1) {
-        TRAY_LOG_ERROR(COMPONENT, "Failed to fork for command '%s': %s", cmd, strerror(errno));
+    TRAY_LOG_DEBUG(COMPONENT, "Full command: %s", command);
+
+    /* Use system() to properly handle shell parsing of quoted arguments */
+    int result = system(command);
+
+    if (result == -1) {
+        TRAY_LOG_ERROR(COMPONENT, "Failed to execute command: %s", strerror(errno));
         return false;
     }
 
-    if (pid == 0) {
-        /* Child process */
-        TRAY_LOG_DEBUG(COMPONENT, "Child process executing: %s %s", binary, cmd);
-
-        char *args[] = {basename(binary), (char *)cmd, NULL};
-        execv(binary, args);
-
-        /* If execv returns, an error occurred */
-        TRAY_LOG_ERROR(COMPONENT, "Failed to execute %s %s: %s", binary, cmd, strerror(errno));
-
-        /* Try execvp as fallback */
-        char *args_fallback[] = {NEOWALL_BINARY, (char *)cmd, NULL};
-        execvp(NEOWALL_BINARY, args_fallback);
-
-        TRAY_LOG_ERROR(COMPONENT, "Failed to execute (fallback) %s %s: %s",
-                       NEOWALL_BINARY, cmd, strerror(errno));
-        exit(1);
+    if (WIFEXITED(result)) {
+        int exit_code = WEXITSTATUS(result);
+        if (exit_code == 0) {
+            TRAY_LOG_DEBUG(COMPONENT, "Command succeeded");
+            return true;
+        } else {
+            TRAY_LOG_ERROR(COMPONENT, "Command failed with exit code %d", exit_code);
+            return false;
+        }
     }
 
-    /* Parent process - don't wait, let it run async */
-    TRAY_LOG_DEBUG(COMPONENT, "Spawned child process PID %d for command: %s", pid, cmd);
-    return true;
+    TRAY_LOG_ERROR(COMPONENT, "Command terminated abnormally");
+    return false;
 }
 
 /* Execute a neowall command and capture its output */
@@ -177,9 +174,9 @@ bool command_execute_with_output(const char *cmd, char *output, size_t output_si
 
     char *binary = find_neowall_binary();
 
-    /* Build command string */
+    /* Build command string with --json flag for machine-readable output */
     char command[2048];
-    snprintf(command, sizeof(command), "%s %s 2>&1", binary, cmd);
+    snprintf(command, sizeof(command), "%s --json %s 2>&1", binary, cmd);
 
     TRAY_LOG_DEBUG(COMPONENT, "Full command: %s", command);
 

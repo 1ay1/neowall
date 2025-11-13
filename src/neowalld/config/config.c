@@ -501,30 +501,168 @@ static bool parse_wallpaper_config(struct neowall_state *state, VibeValue *obj,
     /* Initialize with safe defaults */
     init_wallpaper_config_defaults(config);
 
-    /* Check for 'path' and 'shader' - these are MUTUALLY EXCLUSIVE */
+    /* Check for explicit 'type' field (new unified format) */
+    VibeValue *type_val = vibe_object_get(obj->as_object, "type");
+
+    /* Check for 'path' and 'shader' - these are MUTUALLY EXCLUSIVE (legacy format) */
     VibeValue *path_val = vibe_object_get(obj->as_object, "path");
     VibeValue *shader_val = vibe_object_get(obj->as_object, "shader");
 
+    bool has_type = (type_val != NULL && type_val->type == VIBE_TYPE_STRING);
     bool has_path = (path_val != NULL && path_val->type == VIBE_TYPE_STRING);
     bool has_shader = (shader_val != NULL && shader_val->type == VIBE_TYPE_STRING);
 
-    /* RULE: path and shader are mutually exclusive */
-    if (has_path && has_shader) {
-        log_error("[%s] INVALID CONFIG: Both 'path' and 'shader' specified. "
-                 "These are mutually exclusive. Use EITHER 'path' for images "
-                 "OR 'shader' for GLSL shaders, not both.", context_name);
+    /* Determine which format is being used */
+    bool using_new_format = has_type;  /* New format: type + path */
+
+    /* RULE: If using new format (type field), path and shader keys are mutually exclusive */
+    if (using_new_format && has_shader) {
+        log_error("[%s] INVALID CONFIG: When using 'type' field, use 'path' only. "
+                 "Do not mix 'type'+'path' format with legacy 'shader' key.", context_name);
         return false;
     }
 
-    /* RULE: At least one must be specified */
-    if (!has_path && !has_shader) {
+    /* RULE: Legacy format - path and shader are mutually exclusive */
+    if (!using_new_format && has_path && has_shader) {
+        log_error("[%s] INVALID CONFIG: Both 'path' and 'shader' specified. "
+                 "These are mutually exclusive. Use EITHER 'path' for images "
+                 "OR 'shader' for GLSL shaders, or use the new format: type + path.", context_name);
+        return false;
+    }
+
+    /* RULE: Must specify either type+path, or path/shader (legacy) */
+    if (using_new_format && !has_path) {
+        log_error("[%s] INVALID CONFIG: 'type' specified but 'path' is missing. "
+                 "When using 'type' field, you must also specify 'path'.", context_name);
+        return false;
+    }
+
+    if (!using_new_format && !has_path && !has_shader) {
         log_error("[%s] INVALID CONFIG: Neither 'path' nor 'shader' specified. "
-                 "You must specify exactly one.", context_name);
+                 "You must specify exactly one, or use the new format: type + path.", context_name);
         return false;
     }
 
     /* ========================================================================
-     * IMAGE MODE: path is specified, shader is not
+     * NEW FORMAT: type + path (unified format)
+     * ======================================================================== */
+    if (using_new_format) {
+        const char *type_str = type_val->as_string;
+        const char *path_str = path_val->as_string;
+
+        /* Validate type value */
+        if (strcmp(type_str, "image") != 0 &&
+            strcmp(type_str, "shader") != 0 &&
+            strcmp(type_str, "gif") != 0 &&
+            strcmp(type_str, "video") != 0 &&
+            strcmp(type_str, "svg") != 0) {
+            log_error("[%s] INVALID CONFIG: 'type' must be one of: image, shader, gif, video, svg. Got '%s'",
+                     context_name, type_str);
+            return false;
+        }
+
+        /* Validate path */
+        ValidationResult path_validation = validate_path(path_str);
+        if (!path_validation.valid) {
+            log_error("[%s] Invalid path: %s", context_name,
+                     path_validation.error_message);
+            return false;
+        }
+
+        /* Set type based on explicit type field */
+        if (strcmp(type_str, "shader") == 0) {
+            config->type = WALLPAPER_SHADER;
+        } else if (strcmp(type_str, "gif") == 0) {
+            config->type = WALLPAPER_GIF;
+        } else if (strcmp(type_str, "video") == 0) {
+            config->type = WALLPAPER_VIDEO;
+        } else if (strcmp(type_str, "svg") == 0) {
+            config->type = WALLPAPER_SVG;
+        } else {
+            config->type = WALLPAPER_IMAGE;
+        }
+
+        /* Check if path is a directory (ends with /) or actually is a directory */
+        size_t path_len = strlen(path_str);
+        bool is_dir_syntax = (path_len > 0 && path_str[path_len - 1] == '/');
+
+        if (config->type == WALLPAPER_SHADER || config->type == WALLPAPER_GIF ||
+            config->type == WALLPAPER_VIDEO || config->type == WALLPAPER_SVG) {
+            /* For shader/gif/video/svg types - try to load directory or single file */
+            if (config->type == WALLPAPER_SHADER) {
+                /* Try to load as shader directory */
+                size_t shader_count = 0;
+                char **shader_paths = load_shaders_from_directory(path_str, &shader_count);
+
+                if (shader_paths && shader_count > 0) {
+                    /* It's a directory with shaders - enable cycling */
+                    config->cycle = true;
+                    config->cycle_count = shader_count;
+                    config->cycle_paths = shader_paths;
+
+                    /* Use first shader as initial path */
+                    strncpy(config->path, shader_paths[0], sizeof(config->path) - 1);
+                    config->path[sizeof(config->path) - 1] = '\0';
+
+                    log_info("[%s] SHADER MODE (new format): Loaded %zu shaders from directory for cycling",
+                            context_name, shader_count);
+                } else if (is_dir_syntax) {
+                    /* User specified directory syntax but no shaders found */
+                    log_error("[%s] Path ends with '/' indicating directory, "
+                             "but no shaders found in '%s'", context_name, path_str);
+                    return false;
+                } else {
+                    /* Single shader file */
+                    strncpy(config->path, path_str, sizeof(config->path) - 1);
+                    config->path[sizeof(config->path) - 1] = '\0';
+
+                    log_info("[%s] SHADER MODE (new format): Single shader '%s'", context_name, path_str);
+                }
+            } else {
+                /* GIF/Video/SVG - single file for now (TODO: add directory support) */
+                strncpy(config->path, path_str, sizeof(config->path) - 1);
+                config->path[sizeof(config->path) - 1] = '\0';
+
+                log_info("[%s] %s MODE (new format): File '%s'", context_name,
+                        type_str, path_str);
+            }
+        } else {
+            /* Image type - try to load as image directory */
+            size_t image_count = 0;
+            char **image_paths = load_images_from_directory(path_str, &image_count);
+
+            if (image_paths && image_count > 0) {
+                /* It's a directory with images - enable cycling */
+                config->cycle = true;
+                config->cycle_count = image_count;
+                config->cycle_paths = image_paths;
+
+                /* Use first image as initial path */
+                strncpy(config->path, image_paths[0], sizeof(config->path) - 1);
+                config->path[sizeof(config->path) - 1] = '\0';
+
+                log_info("[%s] IMAGE MODE (new format): Loaded %zu images from directory for cycling",
+                        context_name, image_count);
+            } else if (is_dir_syntax) {
+                /* User specified directory syntax but no images found */
+                log_error("[%s] Path ends with '/' indicating directory, "
+                         "but no images found in '%s'", context_name, path_str);
+                return false;
+            } else {
+                /* Single image file */
+                strncpy(config->path, path_str, sizeof(config->path) - 1);
+                config->path[sizeof(config->path) - 1] = '\0';
+
+                log_info("[%s] IMAGE MODE (new format): Single image '%s'", context_name, path_str);
+            }
+        }
+
+        /* Skip legacy format parsing */
+        goto parse_optional_params;
+    }
+
+    /* ========================================================================
+     * LEGACY FORMAT: IMAGE MODE - path is specified, shader is not
      * ======================================================================== */
     if (has_path) {
         const char *path_str = path_val->as_string;
@@ -573,7 +711,7 @@ static bool parse_wallpaper_config(struct neowall_state *state, VibeValue *obj,
     }
 
     /* ========================================================================
-     * SHADER MODE: shader is specified, path is not
+     * LEGACY FORMAT: SHADER MODE - shader is specified, path is not
      * ======================================================================== */
     if (has_shader) {
         const char *shader_str = shader_val->as_string;
@@ -621,8 +759,9 @@ static bool parse_wallpaper_config(struct neowall_state *state, VibeValue *obj,
         }
     }
 
+parse_optional_params:
     /* ========================================================================
-     * Parse optional parameters (valid for both modes)
+     * Parse optional parameters (valid for both formats and modes)
      * ======================================================================== */
 
     /* Parse mode */

@@ -54,10 +54,10 @@ static void output_configure_vsync(struct output_state *output) {
         }
     } else {
         if (output->config.vsync) {
-            log_debug("Enabled vsync for output %s (will sync to monitor refresh rate)",
+            log_info("✓ VSync ENABLED for output %s (syncing to monitor refresh rate, shader_fps ignored)",
                      output->model[0] ? output->model : "unknown");
         } else {
-            log_debug("Disabled vsync for output %s (shader_fps=%d, target frame time: %.1fms)",
+            log_info("✓ VSync DISABLED for output %s (using custom shader_fps=%d, target: %.1fms/frame)",
                      output->model[0] ? output->model : "unknown",
                      output->config.shader_fps,
                      1000.0f / output->config.shader_fps);
@@ -77,7 +77,7 @@ static bool output_configure_frame_timer(struct output_state *output) {
         if (output->frame_timer_fd >= 0) {
             close(output->frame_timer_fd);
             output->frame_timer_fd = -1;
-            log_debug("Closed frame timer for output %s (vsync enabled)", output_get_identifier(output));
+            log_info("Closed frame timer for output %s (vsync mode: monitor controls frame pacing)", output_get_identifier(output));
         }
         return true;
     }
@@ -118,8 +118,8 @@ static bool output_configure_frame_timer(struct output_state *output) {
         return false;
     }
 
-    log_debug("Configured frame timer for %d FPS (interval: %ld ns) on output %s",
-             target_fps, interval_ns, output_get_identifier(output));
+    log_debug("Configured frame timer for %d FPS (%.2fms interval) on output %s",
+             target_fps, interval_ns / 1000000.0, output_get_identifier(output));
 
     return true;
 }
@@ -1535,7 +1535,9 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     output_configure_vsync(output);
 
     /* Configure frame timer for precise pacing when vsync is disabled */
-    output_configure_frame_timer(output);
+    if (!output_configure_frame_timer(output) && output->config.type == WALLPAPER_SHADER && !output->config.vsync) {
+        log_error("Frame timer configuration failed - FPS control may not work!");
+    }
 
     /* Update state file with new config (after swap so output->config points to new slot) */
     const char *state_path = output->config.path;
