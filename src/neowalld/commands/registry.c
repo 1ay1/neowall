@@ -755,6 +755,7 @@ static command_result_t cmd_live_resume(struct neowall_state *state, const ipc_r
 
         /* Resume shader for this output */
         output->shader_paused = false;
+        output->needs_redraw = true;  /* Force redraw to restart rendering */
 
         char data[256];
         snprintf(data, sizeof(data), "{\"output\":\"%s\"}", output_name);
@@ -762,6 +763,18 @@ static command_result_t cmd_live_resume(struct neowall_state *state, const ipc_r
     } else {
         /* Global shader resume */
         atomic_store(&state->shader_paused, false);
+
+        /* Force redraw on all outputs to restart rendering */
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        struct output_state *output = state->outputs;
+        while (output) {
+            if (output->config.type == WALLPAPER_SHADER) {
+                output->needs_redraw = true;
+            }
+            output = output->next;
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
+
         commands_build_success(resp, "Resumed shader animation", NULL);
     }
 
