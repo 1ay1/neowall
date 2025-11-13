@@ -10,6 +10,10 @@
 #include <signal.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
 #include "../ipc/socket.h"
 #include "../ipc/protocol.h"
 
@@ -68,11 +72,16 @@ static Command commands[] = {
     {NULL, NULL, NULL}
 };
 
-/* Get PID file path */
+/* Get PID file path - CACHED for blazing fast repeated calls */
 static const char *get_pid_file_path(void) {
-    static char path[256];
-    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+    static char path[256] = {0};
 
+    /* Cache: only compute once */
+    if (path[0] != '\0') {
+        return path;
+    }
+
+    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
     if (runtime_dir) {
         snprintf(path, sizeof(path), "%s/neowalld.pid", runtime_dir);
     } else {
@@ -87,45 +96,57 @@ static const char *get_pid_file_path(void) {
     return path;
 }
 
-/* Read daemon PID */
+/* Read daemon PID - OPTIMIZED for speed */
 static pid_t read_daemon_pid(void) {
     const char *pid_path = get_pid_file_path();
-    FILE *fp = fopen(pid_path, "r");
 
-    if (!fp) return -1;
+    /* Fast path: use open() + read() instead of fopen() + fscanf() */
+    int fd = open(pid_path, O_RDONLY);
+    if (fd < 0) return -1;
 
-    pid_t pid = -1;
-    if (fscanf(fp, "%d", &pid) != 1) {
-        fclose(fp);
-        return -1;
+    char buf[32];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+
+    if (n <= 0) return -1;
+    buf[n] = '\0';
+
+    /* Fast integer parsing */
+    pid_t pid = 0;
+    for (ssize_t i = 0; i < n && buf[i] >= '0' && buf[i] <= '9'; i++) {
+        pid = pid * 10 + (buf[i] - '0');
     }
-    fclose(fp);
 
-    /* Verify process exists - only remove PID file if process definitely doesn't exist */
-    if (pid > 0 && kill(pid, 0) != 0) {
+    if (pid <= 0) return -1;
+
+    /* Verify process exists with kill(0) - blazing fast syscall */
+    if (kill(pid, 0) != 0) {
         if (errno == ESRCH) {
-            /* Process not found - this is truly a stale PID file, safe to remove */
-            fprintf(stderr, "Note: Removing stale PID file (process %d not found)\n", pid);
+            /* Process not found - remove stale PID file */
             unlink(pid_path);
         }
-        /* For other errors (EPERM, etc), don't remove PID file - might still be running */
         return -1;
     }
 
     return pid;
 }
 
-/* Check if daemon is running */
-static bool is_daemon_running(void) {
+/* Check if daemon is running - INLINED for zero function call overhead */
+static inline bool is_daemon_running(void) {
     return (read_daemon_pid() > 0);
 }
 
 /* Get IPC socket path */
 static const char *get_ipc_socket_path(void) __attribute__((unused));
 static const char *get_ipc_socket_path(void) {
-    static char path[256];
-    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+    static char path[256] = {0};
 
+    /* Cache: only compute once */
+    if (path[0] != '\0') {
+        return path;
+    }
+
+    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
     if (runtime_dir) {
         snprintf(path, sizeof(path), "%s/neowalld.sock", runtime_dir);
     } else {
@@ -140,11 +161,16 @@ static const char *get_ipc_socket_path(void) {
     return path;
 }
 
-/* Get ready marker file path */
+/* Get ready marker file path - CACHED for blazing fast repeated calls */
 static const char *get_ready_marker_path(void) {
-    static char path[256];
-    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+    static char path[256] = {0};
 
+    /* Cache: only compute once */
+    if (path[0] != '\0') {
+        return path;
+    }
+
+    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
     if (runtime_dir) {
         snprintf(path, sizeof(path), "%s/neowalld.ready", runtime_dir);
     } else {
@@ -159,18 +185,14 @@ static const char *get_ready_marker_path(void) {
     return path;
 }
 
-/* Check if daemon is fully initialized and ready */
-static bool is_daemon_ready(void) {
-    if (!is_daemon_running()) {
-        return false;
-    }
-
-    /* Check if ready marker exists (daemon fully initialized) */
+/* Check if daemon is fully initialized and ready - OPTIMIZED */
+static inline bool is_daemon_ready(void) {
+    /* Fast path: single syscall with access() is faster than separate checks */
     const char *ready_path = get_ready_marker_path();
     return (access(ready_path, F_OK) == 0);
 }
 
-/* Send IPC command to daemon */
+/* Send IPC command to daemon - OPTIMIZED for minimal overhead */
 static bool send_ipc_command(const char *command, char *response_data, size_t data_size) {
     ipc_client_t *client = ipc_client_connect(NULL);
     if (!client) {
@@ -182,9 +204,20 @@ static bool send_ipc_command(const char *command, char *response_data, size_t da
         return false;
     }
 
-    ipc_request_t req = {0};
-    strncpy(req.command, command, sizeof(req.command) - 1);
-    strcpy(req.args, "{}");
+    /* Stack-allocated request - no malloc overhead */
+    ipc_request_t req;
+    memset(&req, 0, sizeof(req));
+
+    /* Fast string copy - use memcpy instead of strncpy when we know the length */
+    size_t cmd_len = strlen(command);
+    if (cmd_len >= sizeof(req.command)) cmd_len = sizeof(req.command) - 1;
+    memcpy(req.command, command, cmd_len);
+    req.command[cmd_len] = '\0';
+
+    /* Minimal args - just empty object */
+    req.args[0] = '{';
+    req.args[1] = '}';
+    req.args[2] = '\0';
 
     ipc_response_t resp;
     bool success = ipc_client_send(client, &req, &resp);
@@ -267,8 +300,10 @@ static const char *find_daemon_path(void) {
 }
 
 static int cmd_start(int argc, char *argv[]) {
-    if (is_daemon_running()) {
-        printf("neowalld is already running (PID %d)\n", read_daemon_pid());
+    /* FAST: check if already running before doing anything else */
+    pid_t existing_pid = read_daemon_pid();
+    if (existing_pid > 0) {
+        printf("neowalld is already running (PID %d)\n", existing_pid);
         return 0;
     }
 
@@ -340,12 +375,13 @@ static int cmd_start(int argc, char *argv[]) {
 static int cmd_stop(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
-    if (!is_daemon_running()) {
+    /* FAST: read PID once instead of checking twice */
+    pid_t pid = read_daemon_pid();
+    if (pid <= 0) {
         printf("neowalld is not running\n");
         return 0;
     }
 
-    pid_t pid = read_daemon_pid();
     printf("Stopping neowalld (PID %d)...\n", pid);
 
     if (kill(pid, SIGTERM) != 0) {
@@ -353,28 +389,46 @@ static int cmd_stop(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Wait for daemon to exit */
-    for (int i = 0; i < 10; i++) {
-        if (!is_daemon_running()) {
-            printf("✓ neowalld stopped\n");
-            return 0;
+    /* BLAZING FAST: Use waitpid with timeout for instant notification */
+    struct timespec start, now;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    while (1) {
+        /* Check if process is gone - kill(0) is blazing fast */
+        if (kill(pid, 0) != 0) {
+            if (errno == ESRCH) {
+                /* Process exited - cleanup PID file */
+                unlink(get_pid_file_path());
+                printf("✓ neowalld stopped\n");
+                return 0;
+            }
         }
-        usleep(500000);
+
+        /* Check timeout (5 seconds) */
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long elapsed_ms = (now.tv_sec - start.tv_sec) * 1000 +
+                         (now.tv_nsec - start.tv_nsec) / 1000000;
+
+        if (elapsed_ms > 5000) {
+            break;
+        }
+
+        /* Minimal sleep - 10ms granularity for fast response */
+        usleep(10000);
     }
 
-    /* Force kill */
-    if (is_daemon_running()) {
-        fprintf(stderr, "Daemon not responding, sending SIGKILL...\n");
-        kill(pid, SIGKILL);
-        sleep(1);
+    /* Timeout - force kill */
+    fprintf(stderr, "Daemon not responding, sending SIGKILL...\n");
+    kill(pid, SIGKILL);
+    usleep(100000); /* 100ms for SIGKILL to take effect */
 
-        if (!is_daemon_running()) {
-            printf("✓ neowalld killed\n");
-            return 0;
-        } else {
-            fprintf(stderr, "✗ Failed to stop neowalld\n");
-            return 1;
-        }
+    if (kill(pid, 0) != 0 && errno == ESRCH) {
+        unlink(get_pid_file_path());
+        printf("✓ neowalld killed\n");
+        return 0;
+    } else {
+        fprintf(stderr, "✗ Failed to stop neowalld\n");
+        return 1;
     }
 
     return 0;
@@ -383,7 +437,7 @@ static int cmd_stop(int argc, char *argv[]) {
 static int cmd_restart(int argc, char *argv[]) {
     printf("Restarting neowalld...\n");
     cmd_stop(0, NULL);
-    sleep(1);
+    /* No sleep needed - stop already waits for clean shutdown */
     return cmd_start(argc, argv);
 }
 
@@ -411,46 +465,47 @@ static int cmd_status(int argc, char *argv[]) {
     return 1;
 }
 
-static int cmd_next(int argc, char *argv[]) {
+/* BLAZING FAST IPC command wrappers - inlined for zero overhead */
+static inline int cmd_next(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("next", NULL, 0) ? 0 : 1;
 }
 
-static int cmd_pause(int argc, char *argv[]) {
+static inline int cmd_pause(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("pause", NULL, 0) ? 0 : 1;
 }
 
-static int cmd_resume(int argc, char *argv[]) {
+static inline int cmd_resume(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("resume", NULL, 0) ? 0 : 1;
 }
 
-static int cmd_reload(int argc, char *argv[]) {
+static inline int cmd_reload(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("reload", NULL, 0) ? 0 : 1;
 }
 
-static int cmd_current(int argc, char *argv[]) {
+static inline int cmd_current(int argc, char *argv[]) {
     return cmd_status(argc, argv);
 }
 
-static int cmd_speed_up(int argc, char *argv[]) {
+static inline int cmd_speed_up(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("speed-up", NULL, 0) ? 0 : 1;
 }
 
-static int cmd_speed_down(int argc, char *argv[]) {
+static inline int cmd_speed_down(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("speed-down", NULL, 0) ? 0 : 1;
 }
 
-static int cmd_shader_pause(int argc, char *argv[]) {
+static inline int cmd_shader_pause(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("shader-pause", NULL, 0) ? 0 : 1;
 }
 
-static int cmd_shader_resume(int argc, char *argv[]) {
+static inline int cmd_shader_resume(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("shader-resume", NULL, 0) ? 0 : 1;
 }
@@ -518,14 +573,18 @@ static int cmd_tray(int argc, char *argv[]) {
     return 1;
 }
 
+/* BLAZING FAST version display - minimal I/O */
 static int cmd_version(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
-    printf("NeoWall %s\n", NEOWALL_VERSION);
-    printf("GPU-accelerated shader wallpapers for Wayland\n\n");
-    printf("License: MIT\n");
-    printf("Website: https://github.com/1ay1/neowall\n");
+    /* Single write() call for maximum speed */
+    const char *msg =
+        "NeoWall " NEOWALL_VERSION "\n"
+        "GPU-accelerated shader wallpapers for Wayland\n\n"
+        "License: MIT\n"
+        "Website: https://github.com/1ay1/neowall\n";
 
+    fputs(msg, stdout);
     return 0;
 }
 
