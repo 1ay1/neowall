@@ -67,7 +67,7 @@ static void show_status(SettingsWidgets *widgets, const char *message, gboolean 
 
 /* Parse config value from daemon output */
 static gboolean parse_config_value(const char *output, char *value, size_t value_size) {
-    /* Expected format: "value": "something" or "value": number */
+    /* Expected format: {"key":"...", "value":"something"} or {"key":"...", "value":123} */
     const char *value_start = strstr(output, "\"value\"");
     if (!value_start) return FALSE;
 
@@ -91,8 +91,8 @@ static gboolean parse_config_value(const char *output, char *value, size_t value
         strncpy(value, value_start, len);
         value[len] = '\0';
         return TRUE;
-    } else {
-        /* Number value */
+    } else if (isdigit(*value_start) || *value_start == '-' || *value_start == '.') {
+        /* Number value (integer or float) */
         const char *value_end = value_start;
         while (*value_end && (isdigit(*value_end) || *value_end == '.' || *value_end == '-')) {
             value_end++;
@@ -104,7 +104,19 @@ static gboolean parse_config_value(const char *output, char *value, size_t value
         strncpy(value, value_start, len);
         value[len] = '\0';
         return TRUE;
+    } else if (strncmp(value_start, "true", 4) == 0) {
+        /* Boolean true */
+        strncpy(value, "true", value_size - 1);
+        value[value_size - 1] = '\0';
+        return TRUE;
+    } else if (strncmp(value_start, "false", 5) == 0) {
+        /* Boolean false */
+        strncpy(value, "false", value_size - 1);
+        value[value_size - 1] = '\0';
+        return TRUE;
     }
+
+    return FALSE;
 }
 
 /* Load current configuration from daemon */
@@ -131,16 +143,31 @@ static gboolean load_current_config(SettingsWidgets *widgets) {
     char output[4096];
     int values_loaded = 0;
 
-    /* Load wallpaper path */
+    /* Load wallpaper path - try both 'path' (images) and 'shader' (shaders) */
+    char path[512] = {0};
+    gboolean path_loaded = FALSE;
+
+    /* Try default.path first (for image folders) */
     if (command_execute_with_output("get-config \"default.path\"", output, sizeof(output))) {
-        char path[512] = {0};
         if (parse_config_value(output, path, sizeof(path)) && path[0] != '\0') {
-            gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(widgets->folder_chooser), path);
-            strncpy(original_settings.folder, path, sizeof(original_settings.folder) - 1);
-            original_settings.folder[sizeof(original_settings.folder) - 1] = '\0';
-            TRAY_LOG_DEBUG(COMPONENT, "Loaded path: %s", path);
-            values_loaded++;
+            path_loaded = TRUE;
         }
+    }
+
+    /* If not found, try default.shader (for shader folders) */
+    if (!path_loaded && command_execute_with_output("get-config \"default.shader\"", output, sizeof(output))) {
+        if (parse_config_value(output, path, sizeof(path)) && path[0] != '\0') {
+            path_loaded = TRUE;
+        }
+    }
+
+    /* If we got a path, set it */
+    if (path_loaded && path[0] != '\0') {
+        gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(widgets->folder_chooser), path);
+        strncpy(original_settings.folder, path, sizeof(original_settings.folder) - 1);
+        original_settings.folder[sizeof(original_settings.folder) - 1] = '\0';
+        TRAY_LOG_DEBUG(COMPONENT, "Loaded path: %s", path);
+        values_loaded++;
     } else {
         TRAY_LOG_DEBUG(COMPONENT, "No wallpaper path set, using default");
     }
