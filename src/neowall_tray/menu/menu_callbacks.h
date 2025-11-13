@@ -16,14 +16,15 @@ void menu_callback_show_current(GtkMenuItem *item, gpointer user_data);
 void menu_callback_pause_cycling(GtkMenuItem *item, gpointer user_data);
 void menu_callback_resume_cycling(GtkMenuItem *item, gpointer user_data);
 
-/* Shader control callbacks */
-void menu_callback_shader_pause(GtkMenuItem *item, gpointer user_data);
-void menu_callback_shader_resume(GtkMenuItem *item, gpointer user_data);
+/* Live/Shader animation control callbacks */
+void menu_callback_live_pause(GtkMenuItem *item, gpointer user_data);
+void menu_callback_live_resume(GtkMenuItem *item, gpointer user_data);
 void menu_callback_speed_up(GtkMenuItem *item, gpointer user_data);
 void menu_callback_speed_down(GtkMenuItem *item, gpointer user_data);
 
 /* System control callbacks */
 void menu_callback_show_status(GtkMenuItem *item, gpointer user_data);
+void menu_callback_reload_config(GtkMenuItem *item, gpointer user_data);
 void menu_callback_edit_config(GtkMenuItem *item, gpointer user_data);
 void menu_callback_start_daemon(GtkMenuItem *item, gpointer user_data);
 void menu_callback_restart_daemon(GtkMenuItem *item, gpointer user_data);

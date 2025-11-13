@@ -56,15 +56,16 @@ typedef struct {
 #define MENU_LABEL_PAUSE_CYCLE      "  ⏸  Pause Cycling"
 #define MENU_LABEL_RESUME_CYCLE     "  ▶  Resume Cycling"
 
-/* Shader submenu */
-#define MENU_LABEL_SHADER           "✨  Shader Effects"
-#define MENU_LABEL_SHADER_PAUSE     "  ⏸  Pause Animation"
-#define MENU_LABEL_SHADER_RESUME    "  ▶  Resume Animation"
+/* Live/Shader animation submenu */
+#define MENU_LABEL_SHADER           "✨  Live Animation"
+#define MENU_LABEL_LIVE_PAUSE       "  ⏸  Pause Animation"
+#define MENU_LABEL_LIVE_RESUME      "  ▶  Resume Animation"
 #define MENU_LABEL_SPEED_UP         "  ⏫  Speed Up"
 #define MENU_LABEL_SPEED_DOWN       "  ⏬  Speed Down"
 
 /* System controls */
 #define MENU_LABEL_STATUS_FULL      "📊  Show Full Status"
+#define MENU_LABEL_RELOAD           "🔄  Reload Configuration"
 #define MENU_LABEL_CONFIG           "⚙  Edit Configuration"
 #define MENU_LABEL_START            "▶  Start Daemon"
 #define MENU_LABEL_RESTART          "🔄  Restart Daemon"
@@ -127,7 +128,7 @@ const MenuItemDef *menu_items_get_wallpaper_submenu(int *count);
 const MenuItemDef *menu_items_get_cycling_submenu(int *count);
 
 /**
- * Get shader submenu items
+ * Get live/shader animation submenu items
  * @param count Output parameter for number of items
  * @return Array of menu item definitions
  */

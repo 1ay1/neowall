@@ -33,26 +33,26 @@ void menu_callback_show_current(GtkMenuItem *item, gpointer user_data) {
 void menu_callback_pause_cycling(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
-    command_execute("pause");
+    command_execute("cycle-pause");
 }
 
 void menu_callback_resume_cycling(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
-    command_execute("resume");
+    command_execute("cycle-resume");
 }
 
-/* Shader control callbacks */
-void menu_callback_shader_pause(GtkMenuItem *item, gpointer user_data) {
+/* Live/Shader animation control callbacks */
+void menu_callback_live_pause(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
-    command_execute("shader-pause");
+    command_execute("live-pause");
 }
 
-void menu_callback_shader_resume(GtkMenuItem *item, gpointer user_data) {
+void menu_callback_live_resume(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
-    command_execute("shader-resume");
+    command_execute("live-resume");
 }
 
 void menu_callback_speed_up(GtkMenuItem *item, gpointer user_data) {
@@ -72,6 +72,21 @@ void menu_callback_show_status(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
     dialog_show_status();
+}
+
+void menu_callback_reload_config(GtkMenuItem *item, gpointer user_data) {
+    (void)item;
+    (void)user_data;
+
+    if (command_execute("reload")) {
+        dialog_show_info("Configuration Reloaded",
+                        "Configuration has been reloaded successfully.",
+                        2000);  /* Auto-close after 2 seconds */
+    } else {
+        dialog_show_error("Reload Failed",
+                         "Failed to reload configuration.\n"
+                         "Please check the configuration file for errors.");
+    }
 }
 
 void menu_callback_edit_config(GtkMenuItem *item, gpointer user_data) {

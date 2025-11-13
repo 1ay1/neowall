@@ -227,19 +227,46 @@ static void render_outputs(struct neowall_state *state) {
                 }
 
                 if (same_config) {
+                    /* Check if a shader cross-fade is in progress (don't cycle during transitions) */
+                    if (sync_output->config.type == WALLPAPER_SHADER &&
+                        sync_output->shader_fade_start_time > 0 &&
+                        sync_output->pending_shader_path[0] != '\0') {
+                        log_debug("Shader transition in progress on output %s, deferring prev request",
+                                 sync_output->model[0] ? sync_output->model : "unknown");
+                        sync_output = sync_output->next;
+                        continue;
+                    }
+
                     /* Cycle to previous wallpaper */
+                    size_t old_index = sync_output->config.current_cycle_index;
                     if (sync_output->config.current_cycle_index == 0) {
                         sync_output->config.current_cycle_index = sync_output->config.cycle_count - 1;
                     } else {
                         sync_output->config.current_cycle_index--;
                     }
 
-                    log_debug("Cycling to previous wallpaper for output %s (synchronized, index now %zu)",
+                    log_debug("Cycling to previous wallpaper for output %s (synchronized, index %zu->%zu)",
                              sync_output->model[0] ? sync_output->model : "unknown",
+                             old_index,
                              sync_output->config.current_cycle_index);
 
-                    /* Apply the wallpaper change */
-                    output_cycle_wallpaper(sync_output);
+                    /* Apply the wallpaper change directly without cycling the index again */
+                    pthread_mutex_lock(&sync_output->state->state_mutex);
+                    const char *prev_path = sync_output->config.cycle_paths[sync_output->config.current_cycle_index];
+                    char prev_path_copy[MAX_PATH_LENGTH];
+                    strncpy(prev_path_copy, prev_path, sizeof(prev_path_copy) - 1);
+                    prev_path_copy[sizeof(prev_path_copy) - 1] = '\0';
+                    pthread_mutex_unlock(&sync_output->state->state_mutex);
+
+                    /* Apply based on type */
+                    if (sync_output->config.type == WALLPAPER_SHADER) {
+                        output_set_shader(sync_output, prev_path_copy);
+                    } else {
+                        output_set_wallpaper(sync_output, prev_path_copy);
+                    }
+
+                    /* Mark for redraw */
+                    sync_output->needs_redraw = true;
                     cycled_count++;
                 }
 
