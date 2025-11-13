@@ -602,7 +602,10 @@ static command_result_t cmd_cycle_pause(struct neowall_state *state, const ipc_r
     }
 
     /* Global pause */
+    bool was_paused = atomic_load(&state->paused);
     atomic_store(&state->paused, true);
+
+    log_info("⏸️  Cycle pause requested (was: %s, now: PAUSED)", was_paused ? "PAUSED" : "ACTIVE");
 
     /* Persist state to disk */
     save_global_state(state);
@@ -621,7 +624,10 @@ static command_result_t cmd_cycle_resume(struct neowall_state *state, const ipc_
     }
 
     /* Global resume */
+    bool was_paused = atomic_load(&state->paused);
     atomic_store(&state->paused, false);
+
+    log_info("▶️  Cycle resume requested (was: %s, now: ACTIVE)", was_paused ? "PAUSED" : "ACTIVE");
 
     /* Persist state to disk */
     save_global_state(state);

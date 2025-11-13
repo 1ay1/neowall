@@ -1175,6 +1175,11 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
              config->transition,
              config->duration);
 
+    /* Save old path to check if it changed */
+    char old_path[MAX_PATH_LENGTH];
+    strncpy(old_path, output->config.path, sizeof(old_path) - 1);
+    old_path[sizeof(old_path) - 1] = '\0';
+
     /* Clean up old resources when switching modes */
     if (output->config.type != config->type) {
         log_info("Switching mode from %s to %s, cleaning up old resources",
@@ -1474,16 +1479,28 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         if (initial_shader[0] != '\0') {
             /* Check if output is ready for shader loading */
             if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE && output->compositor_surface->egl_window) {
-                output_set_shader(output, initial_shader);
+                /* Skip reload if shader path hasn't changed to prevent jarring snap during config reload */
+                bool shader_changed = (strcmp(old_path, initial_shader) != 0);
 
-                /* If shader + image cycling mode, load the first image into iChannel0 */
-                if (is_shader_with_image_cycling) {
-                    const char *initial_image = output->config.cycle_paths[output->config.current_cycle_index];
-                    log_info("Loading initial image into iChannel0: %s", initial_image);
+                if (shader_changed || output->live_shader_program == 0) {
+                    log_info("Loading shader for output %s: %s%s",
+                             output->model[0] ? output->model : "unknown",
+                             initial_shader,
+                             shader_changed ? " (changed)" : " (first load)");
+                    output_set_shader(output, initial_shader);
 
-                    if (!render_update_channel_texture(output, 0, initial_image)) {
-                        log_error("Failed to load initial image into iChannel0: %s", initial_image);
+                    /* If shader + image cycling mode, load the first image into iChannel0 */
+                    if (is_shader_with_image_cycling) {
+                        const char *initial_image = output->config.cycle_paths[output->config.current_cycle_index];
+                        log_info("Loading initial image into iChannel0: %s", initial_image);
+
+                        if (!render_update_channel_texture(output, 0, initial_image)) {
+                            log_error("Failed to load initial image into iChannel0: %s", initial_image);
+                        }
                     }
+                } else {
+                    log_info("Skipping shader reload for output %s - path unchanged: %s",
+                             output->model[0] ? output->model : "unknown", initial_shader);
                 }
             } else {
                 log_debug("Output %s not ready for shader load, storing config for later",
@@ -1502,11 +1519,21 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         if (initial_path[0] != '\0') {
             /* Check if output is ready for wallpaper loading */
             if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE && output->compositor_surface->egl_window) {
-                log_info("Loading wallpaper for output %s: %s",
-                         output->model[0] ? output->model : "unknown", initial_path);
-                output_set_wallpaper(output, initial_path);
-                log_info("Wallpaper load completed for output %s",
-                         output->model[0] ? output->model : "unknown");
+                /* Skip reload if path hasn't changed to prevent jarring snap during config reload */
+                bool path_changed = (strcmp(old_path, initial_path) != 0);
+
+                if (path_changed || !output->current_image || output->texture == 0) {
+                    log_info("Loading wallpaper for output %s: %s%s",
+                             output->model[0] ? output->model : "unknown",
+                             initial_path,
+                             path_changed ? " (changed)" : " (first load)");
+                    output_set_wallpaper(output, initial_path);
+                    log_info("Wallpaper load completed for output %s",
+                             output->model[0] ? output->model : "unknown");
+                } else {
+                    log_info("Skipping wallpaper reload for output %s - path unchanged: %s",
+                             output->model[0] ? output->model : "unknown", initial_path);
+                }
             } else {
                 log_error("Output %s not ready for wallpaper load (compositor_surface=%p)",
                           output->model[0] ? output->model : "unknown",

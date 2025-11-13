@@ -45,7 +45,10 @@ typedef struct {
 
     /* Original values for revert */
     int original_type_index;
+    int current_type_index;  /* Current active type (for folder switching) */
     char original_folder[512];
+    char last_image_folder[512];  /* Remember last image folder */
+    char last_shader_folder[512]; /* Remember last shader folder */
     double original_duration;
     int original_mode_index;
     double original_speed;
@@ -71,12 +74,13 @@ typedef struct {
     ScopeSettings scopes[MAX_OUTPUTS];
     int scope_count;
 
-    /* Global change tracking */
     gboolean has_any_changes;
+    gboolean loading_config;  /* Flag to prevent signal handling during reload */
 } SettingsDialog;
 
 /* Forward declarations */
 static void on_scope_setting_changed(GtkWidget *widget, gpointer user_data);
+static void on_folder_selected(GtkFileChooserButton *widget, gpointer user_data);
 
 /* Helper to show status message */
 static void show_status(SettingsDialog *dlg, const char *message, gboolean is_error) {
@@ -215,9 +219,15 @@ static void load_scope_config(ScopeSettings *scope) {
 
     TRAY_LOG_INFO(COMPONENT, "Loading config for scope: %s", scope->scope);
 
+    /* Note: Signal blocking removed - was causing Apply button to never activate.
+     * We'll just set has_changes = FALSE at the end instead. */
+
     /* Initialize original value defaults (will be overwritten if config exists) */
     scope->original_type_index = 0;
+    scope->current_type_index = 0;
     scope->original_duration = 60.0;
+    scope->last_image_folder[0] = '\0';
+    scope->last_shader_folder[0] = '\0';
     scope->original_mode_index = 0;
     scope->original_transition_index = 1; // fade
     scope->original_transition_duration = 0.3;
@@ -239,6 +249,7 @@ static void load_scope_config(ScopeSettings *scope) {
 
             gtk_combo_box_set_active(GTK_COMBO_BOX(scope->type_combo), type_idx);
             scope->original_type_index = type_idx;
+            scope->current_type_index = type_idx;
             gtk_combo_box_set_active(GTK_COMBO_BOX(scope->type_combo), type_idx);
 
             /* Update widget visibility based on type */
@@ -249,11 +260,13 @@ static void load_scope_config(ScopeSettings *scope) {
         } else {
             /* No type in config, use default */
             gtk_combo_box_set_active(GTK_COMBO_BOX(scope->type_combo), 0);
+            scope->current_type_index = 0;
             update_widgets_for_type(scope, 0);
         }
     } else {
         /* Failed to load, use default */
         gtk_combo_box_set_active(GTK_COMBO_BOX(scope->type_combo), 0);
+        scope->current_type_index = 0;
         update_widgets_for_type(scope, 0);
     }
 
@@ -436,6 +449,7 @@ static void load_scope_config(ScopeSettings *scope) {
         gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(scope->show_fps_check), scope->original_show_fps);
     }
 
+    /* Reset has_changes after loading - any subsequent changes will trigger it */
     scope->has_changes = FALSE;
 
     TRAY_LOG_INFO(COMPONENT, "[%s] Loaded %d config values", scope->scope, values_loaded);
@@ -471,6 +485,36 @@ static void on_vsync_changed(GtkToggleButton *toggle, gpointer user_data) {
     on_scope_setting_changed(GTK_WIDGET(toggle), user_data);
 }
 
+/* Callback for folder selection - save to appropriate last folder variable */
+static void on_folder_selected(GtkFileChooserButton *widget, gpointer user_data) {
+    SettingsDialog *dlg = (SettingsDialog *)user_data;
+
+    /* Find which scope this folder chooser belongs to */
+    for (int i = 0; i < dlg->scope_count; i++) {
+        ScopeSettings *scope = &dlg->scopes[i];
+        if (GTK_WIDGET(widget) == scope->folder_chooser) {
+            gchar *folder = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(widget));
+            if (folder) {
+                /* Save to the appropriate last folder based on current type */
+                if (scope->current_type_index == 0) {  /* Image type */
+                    strncpy(scope->last_image_folder, folder, sizeof(scope->last_image_folder) - 1);
+                    scope->last_image_folder[sizeof(scope->last_image_folder) - 1] = '\0';
+                    TRAY_LOG_DEBUG(COMPONENT, "[%s] Saved image folder: %s", scope->scope, folder);
+                } else if (scope->current_type_index == 1) {  /* Shader type */
+                    strncpy(scope->last_shader_folder, folder, sizeof(scope->last_shader_folder) - 1);
+                    scope->last_shader_folder[sizeof(scope->last_shader_folder) - 1] = '\0';
+                    TRAY_LOG_DEBUG(COMPONENT, "[%s] Saved shader folder: %s", scope->scope, folder);
+                }
+                g_free(folder);
+            }
+            break;
+        }
+    }
+
+    /* Call the generic change handler */
+    on_scope_setting_changed(GTK_WIDGET(widget), user_data);
+}
+
 /* Callback for type combo box change - update widget visibility */
 static void on_type_changed(GtkComboBox *combo, gpointer user_data) {
     SettingsDialog *dlg = (SettingsDialog *)user_data;
@@ -479,13 +523,47 @@ static void on_type_changed(GtkComboBox *combo, gpointer user_data) {
     for (int i = 0; i < dlg->scope_count; i++) {
         ScopeSettings *scope = &dlg->scopes[i];
         if (GTK_WIDGET(combo) == scope->type_combo) {
-            int type_idx = gtk_combo_box_get_active(combo);
-            update_widgets_for_type(scope, type_idx);
+            int old_type_idx = scope->current_type_index;
+            int new_type_idx = gtk_combo_box_get_active(combo);
+
+            /* Save current folder to the appropriate last folder variable */
+            gchar *current_folder = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(scope->folder_chooser));
+            if (current_folder) {
+                if (old_type_idx == 0) {  /* Was image type */
+                    strncpy(scope->last_image_folder, current_folder, sizeof(scope->last_image_folder) - 1);
+                    scope->last_image_folder[sizeof(scope->last_image_folder) - 1] = '\0';
+                    TRAY_LOG_DEBUG(COMPONENT, "[%s] Saved image folder: %s", scope->scope, current_folder);
+                } else if (old_type_idx == 1) {  /* Was shader type */
+                    strncpy(scope->last_shader_folder, current_folder, sizeof(scope->last_shader_folder) - 1);
+                    scope->last_shader_folder[sizeof(scope->last_shader_folder) - 1] = '\0';
+                    TRAY_LOG_DEBUG(COMPONENT, "[%s] Saved shader folder: %s", scope->scope, current_folder);
+                }
+                g_free(current_folder);
+            }
+
+            /* Restore folder for the new type */
+            const char *restore_folder = NULL;
+            if (new_type_idx == 0 && scope->last_image_folder[0] != '\0') {  /* Switching to image */
+                restore_folder = scope->last_image_folder;
+                TRAY_LOG_DEBUG(COMPONENT, "[%s] Restoring image folder: %s", scope->scope, restore_folder);
+            } else if (new_type_idx == 1 && scope->last_shader_folder[0] != '\0') {  /* Switching to shader */
+                restore_folder = scope->last_shader_folder;
+                TRAY_LOG_DEBUG(COMPONENT, "[%s] Restoring shader folder: %s", scope->scope, restore_folder);
+            }
+
+            if (restore_folder) {
+                gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(scope->folder_chooser), restore_folder);
+            }
+
+            /* Update current type tracker */
+            scope->current_type_index = new_type_idx;
+
+            update_widgets_for_type(scope, new_type_idx);
 
             /* Mark as changed */
             if (!scope->has_changes) {
                 scope->has_changes = TRUE;
-                TRAY_LOG_DEBUG(COMPONENT, "[%s] Type changed to %d", scope->scope, type_idx);
+                TRAY_LOG_DEBUG(COMPONENT, "[%s] Type changed to %d", scope->scope, new_type_idx);
             }
             break;
         }
@@ -497,10 +575,18 @@ static void on_type_changed(GtkComboBox *combo, gpointer user_data) {
 
 /* Mark that a scope has changes */
 static void on_scope_setting_changed(GtkWidget *widget, gpointer user_data) {
-    (void)widget;
     SettingsDialog *dlg = (SettingsDialog *)user_data;
 
+    /* Ignore signals during config reload */
+    if (dlg->loading_config) {
+        TRAY_LOG_DEBUG(COMPONENT, "Ignoring signal during config reload");
+        return;
+    }
+
+    TRAY_LOG_DEBUG(COMPONENT, "🔔 on_scope_setting_changed called, widget=%p", (void*)widget);
+
     /* Find which scope changed by checking the widget */
+    gboolean found = FALSE;
     for (int i = 0; i < dlg->scope_count; i++) {
         ScopeSettings *scope = &dlg->scopes[i];
         if (widget == scope->type_combo ||
@@ -514,12 +600,20 @@ static void on_scope_setting_changed(GtkWidget *widget, gpointer user_data) {
             widget == scope->vsync_check ||
             widget == scope->show_fps_check) {
 
+            found = TRUE;
+            TRAY_LOG_INFO(COMPONENT, "🔔 Widget matched for scope [%s], has_changes was %d",
+                         scope->scope, scope->has_changes);
+
             if (!scope->has_changes) {
                 scope->has_changes = TRUE;
-                TRAY_LOG_DEBUG(COMPONENT, "[%s] Settings modified", scope->scope);
+                TRAY_LOG_INFO(COMPONENT, "✅ [%s] Settings modified - has_changes now TRUE", scope->scope);
             }
             break;
         }
+    }
+
+    if (!found) {
+        TRAY_LOG_ERROR(COMPONENT, "⚠️  Widget %p not matched to any scope!", (void*)widget);
     }
 
     /* Check if any scope has changes */
@@ -527,14 +621,21 @@ static void on_scope_setting_changed(GtkWidget *widget, gpointer user_data) {
     for (int i = 0; i < dlg->scope_count; i++) {
         if (dlg->scopes[i].has_changes) {
             any_changes = TRUE;
+            TRAY_LOG_DEBUG(COMPONENT, "Scope [%s] has changes", dlg->scopes[i].scope);
             break;
         }
     }
+
+    TRAY_LOG_INFO(COMPONENT, "any_changes=%d, has_any_changes=%d, will %s Apply button",
+                 any_changes, dlg->has_any_changes,
+                 (any_changes != dlg->has_any_changes) ? "UPDATE" : "NOT UPDATE");
 
     if (any_changes != dlg->has_any_changes) {
         dlg->has_any_changes = any_changes;
         gtk_widget_set_sensitive(dlg->apply_button, any_changes);
         gtk_widget_set_sensitive(dlg->revert_button, any_changes);
+
+        TRAY_LOG_INFO(COMPONENT, "✅ Apply button set to: %s", any_changes ? "ENABLED" : "DISABLED");
 
         if (any_changes) {
             show_status(dlg, "Settings modified (not saved)", FALSE);
@@ -744,6 +845,7 @@ static gboolean apply_scope_settings(ScopeSettings *scope, char *error_msg, size
             scope->original_folder[len] = '\0';
         }
         scope->original_type_index = type_index;
+        scope->current_type_index = type_index;
         scope->original_duration = duration;
         scope->original_mode_index = mode_index;
         scope->original_transition_index = transition_index;
@@ -800,6 +902,9 @@ static gboolean apply_all_settings(SettingsDialog *dlg) {
             gtk_main_iteration();
         }
 
+        /* Block signal handling during config reload */
+        dlg->loading_config = TRUE;
+
         if (command_execute("reload")) {
             char success_msg[128];
             snprintf(success_msg, sizeof(success_msg),
@@ -809,6 +914,14 @@ static gboolean apply_all_settings(SettingsDialog *dlg) {
 
             dlg->has_any_changes = FALSE;
 
+            /* Reload config for all scopes to sync with daemon */
+            for (int i = 0; i < dlg->scope_count; i++) {
+                load_scope_config(&dlg->scopes[i]);
+            }
+
+            /* Unblock signal handling */
+            dlg->loading_config = FALSE;
+
             /* Re-enable UI */
             gtk_widget_set_sensitive(dlg->notebook, TRUE);
             gtk_widget_set_sensitive(dlg->apply_button, FALSE);
@@ -817,6 +930,9 @@ static gboolean apply_all_settings(SettingsDialog *dlg) {
             return TRUE;
         } else {
             show_status(dlg, "✗ Failed to reload configuration", TRUE);
+
+            /* Unblock signal handling even on failure */
+            dlg->loading_config = FALSE;
 
             /* Re-enable UI */
             gtk_widget_set_sensitive(dlg->notebook, TRUE);
@@ -893,7 +1009,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
         GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER
     );
     gtk_widget_set_tooltip_text(scope->folder_chooser, "Choose folder with images or .glsl shaders");
-    g_signal_connect(scope->folder_chooser, "file-set", G_CALLBACK(on_scope_setting_changed), dlg);
+    g_signal_connect(scope->folder_chooser, "file-set", G_CALLBACK(on_folder_selected), dlg);
     gtk_box_pack_start(GTK_BOX(box), scope->folder_chooser, FALSE, FALSE, 0);
 
     /* Duration */
@@ -1182,10 +1298,16 @@ void settings_dialog_show(void) {
 
     show_status(dlg, "Loading configuration...", FALSE);
 
+    /* Block signals during initial load */
+    dlg->loading_config = TRUE;
+
     /* Load config for all scopes */
     for (int i = 0; i < dlg->scope_count; i++) {
         load_scope_config(&dlg->scopes[i]);
     }
+
+    /* Unblock signals after initial load */
+    dlg->loading_config = FALSE;
 
     show_status(dlg, "Configuration loaded", FALSE);
 
