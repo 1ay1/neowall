@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Simple glow effect -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- "N" – Northwest (top-left quadrant) with cyan glow -->
+  <g filter="url(#glow)">
+    <text x="48" y="58"
+          font-family="Rajdhani, Orbitron, 'Arial Black', sans-serif"
+          font-weight="900"
+          font-size="64"
+          fill="#00ffff"
+          stroke="#00ffff"
+          stroke-width="2"
+          text-anchor="middle"
+          dominant-baseline="middle"
+          letter-spacing="-3">
+      N
+    </text>
+  </g>
+
+  <!-- "W" – Southeast (bottom-right quadrant) with magenta glow -->
+  <g filter="url(#glow)">
+    <text x="80" y="90"
+          font-family="Rajdhani, Orbitron, 'Arial Black', sans-serif"
+          font-weight="900"
+          font-size="64"
+          fill="#ff00ff"
+          stroke="#ff00ff"
+          stroke-width="2"
+          text-anchor="middle"
+          dominant-baseline="middle"
+          letter-spacing="-3">
+      W
+    </text>
+  </g>
+
+  <!-- Pulsing energy core at center (cyan) -->
+  <circle cx="64" cy="74" r="6" fill="#00ffff" opacity="0.9">
+    <animate attributeName="r" values="6;9;6" dur="1.6s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.9;0.5;0.9" dur="1.6s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Outer ring (magenta) -->
+  <circle cx="64" cy="74" r="14" fill="none" stroke="#ff00ff" stroke-width="2" opacity="0.6">
+    <animate attributeName="r" values="14;18;14" dur="1.6s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.6;0.3;0.6" dur="1.6s" repeatCount="indefinite"/>
+  </circle>
+</svg>

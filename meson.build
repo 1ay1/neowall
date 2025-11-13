@@ -108,6 +108,8 @@ run_command('mkdir', '-p', meson.project_build_root() / 'bin', check: false)
 subdir('src/ipc')
 subdir('src/neowalld')
 subdir('src/neowall')
+subdir('src/neowall_tray')
+subdir('data')
 
 # Summary
 summary({
@@ -123,5 +125,6 @@ summary({
 summary({
   'Daemon': 'neowalld',
   'Client': 'neowall',
+  'System Tray': 'neowall_tray',
   'IPC': 'Unix domain sockets (JSON)',
 }, section: 'Binaries')

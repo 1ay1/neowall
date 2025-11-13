@@ -1,43 +1,38 @@
-# Build artifacts
-build/
+# Build directories
 builddir/
+build/
+_build/
+
+# Compiled files
 *.o
-*.a
 *.so
-*.so.*
-staticwall
-/neowalld
-/neowall
+*.a
+*.la
+*.lo
+*.exe
 
-# Meson build files
-meson-private/
-meson-logs/
-meson-info/
-.ninja_*
+# Build artifacts
+*.d
+*.pc
+.deps/
+.libs/
 
-# Generated protocol files
-protocols/*-client-protocol.c
-protocols/*-client-protocol.h
-
-# Backup files
-*.old
-*.bak
+# Editor/IDE files
+*.swp
+*.swo
 *~
-.*.swp
-.*.swo
-
-# IDE files
 .vscode/
 .idea/
 *.sublime-*
 .DS_Store
 
-# Temporary files
-COMMIT_MSG.txt
-*.tmp
-*.log
+# Python
+__pycache__/
+*.pyc
+*.pyo
 
-# Core dumps
-core
-core.*
-vgcore.*
+# Test artifacts
+test_*.sh
+
+# Logs
+*.log

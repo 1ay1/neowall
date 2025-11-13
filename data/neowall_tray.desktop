@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=NeoWall System Tray
+GenericName=Wallpaper Manager Tray
+Comment=System tray control for NeoWall wallpaper daemon
+Icon=preferences-desktop-wallpaper
+Exec=neowall_tray
+Terminal=false
+Categories=Utility;System;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel
+Hidden=false
+NoDisplay=false

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Subtle animated wave (shader-like) -->
+    <filter id="wave">
+      <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="3" result="noise">
+        <animate attributeName="baseFrequency" values="0.03;0.036;0.03" dur="5s" repeatCount="indefinite"/>
+      </feTurbulence>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="6"/>
+    </filter>
+
+    <!-- High-intensity neon glow -->
+    <filter id="neonCyan">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feFlood flood-color="#00ffff" flood-opacity="1"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="neonMagenta">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feFlood flood-color="#ff00ff" flood-opacity="1"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Transparent background -->
+  <rect width="128" height="128" fill="none"/>
+
+  <!-- "N" – Northwest (top-left quadrant) -->
+  <g filter="url(#wave) url(#neonCyan)">
+    <text x="48" y="58"
+          font-family="Rajdhani, Orbitron, sans-serif"
+          font-weight="900"
+          font-size="64"
+          fill="#00ffff"
+          text-anchor="middle"
+          dominant-baseline="middle"
+          letter-spacing="-3">
+      N
+    </text>
+  </g>
+
+  <!-- "W" – Southeast (bottom-right quadrant) -->
+  <g filter="url(#wave) url(#neonMagenta)">
+    <text x="80" y="90"
+          font-family="Rajdhani, Orbitron, sans-serif"
+          font-weight="900"
+          font-size="64"
+          fill="#ff00ff"
+          text-anchor="middle"
+          dominant-baseline="middle"
+          letter-spacing="-3">
+      W
+    </text>
+  </g>
+
+  <!-- Pulsing energy core at center -->
+  <circle cx="64" cy="74" r="5" fill="#00ffff" opacity="0.9">
+    <animate attributeName="r" values="5;9;5" dur="1.6s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.9;0.5;0.9" dur="1.6s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="64" cy="74" r="12" fill="none" stroke="#ff00ff" stroke-width="1" opacity="0.4">
+    <animate attributeName="r" values="12;18;12" dur="1.6s" repeatCount="indefinite"/>
+  </circle>
+</svg>

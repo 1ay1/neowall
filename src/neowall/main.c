@@ -567,9 +567,9 @@ static int cmd_tray(int argc, char *argv[]) {
     }
 
     printf("Launching system tray application...\n");
-    execvp("neowall-tray", argv);
+    execvp("neowall_tray", argv);
 
-    fprintf(stderr, "Error: Failed to launch neowall-tray: %s\n", strerror(errno));
+    fprintf(stderr, "Error: Failed to launch neowall_tray: %s\n", strerror(errno));
     return 1;
 }
 
