@@ -107,8 +107,10 @@ neowall status            # Show daemon status
 ```bash
 neowall list-outputs                    # List all displays
 neowall next-output DP-1                # Next wallpaper on specific monitor
-neowall set-output-mode HDMI-1 fill     # Set wallpaper mode
-neowall set-output-interval DP-1 600    # Set cycle interval (seconds)
+neowall set-output-mode HDMI-1 fill     # Set wallpaper mode (matches config: output.mode)
+neowall set-output-duration DP-1 600    # Set cycle duration in seconds (matches config: output.duration)
+neowall set-output-path DP-1 ~/pic.jpg  # Set image wallpaper (matches config: output.path)
+neowall set-output-shader DP-1 matrix.glsl  # Set shader wallpaper (matches config: output.shader)
 ```
 
 ### Shader Control
@@ -139,17 +141,17 @@ neowall set-output-wallpaper DP-1 /usr/share/neowall/shaders/plasma.glsl
 
 **Matrix Rain** - Classic cyberpunk aesthetic
 ```bash
-neowall set-output-wallpaper DP-1 /usr/share/neowall/shaders/matrix_rain.glsl
+neowall set-output-shader DP-1 /usr/share/neowall/shaders/matrix_rain.glsl
 ```
 
 **Fractal Noise** - Organic, ever-changing patterns
 ```bash
-neowall set-output-wallpaper DP-1 /usr/share/neowall/shaders/fractal_noise.glsl
+neowall set-output-shader DP-1 /usr/share/neowall/shaders/fractal_noise.glsl
 ```
 
 **Cyberpunk Skyline** - Animated neon city
 ```bash
-neowall set-output-wallpaper DP-1 /usr/share/neowall/shaders/cyberpunk.glsl
+neowall set-output-shader DP-1 /usr/share/neowall/shaders/cyberpunk.glsl
 ```
 
 ## 🖥️ Supported Compositors
@@ -260,6 +262,7 @@ outputs {
 
 - [Build Instructions](BUILD.md) - Detailed compilation guide
 - [Command Reference](docs/commands/COMMANDS.md) - All available commands
+- [Config-to-Command Mapping](docs/CONFIG_COMMAND_MAPPING.md) - Config keys and their commands
 - [Command Registry Architecture](docs/COMMAND_REGISTRY_IMPROVEMENTS.md) - Technical deep-dive
 - [Compositor Integration](src/neowalld/compositor/README.md) - How NeoWall works with Wayland
 

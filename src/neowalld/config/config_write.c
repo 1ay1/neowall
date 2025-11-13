@@ -236,14 +236,14 @@ static VibeValue *build_vibe_from_state(struct neowall_state *state) {
         if (key->scope == CONFIG_SCOPE_OUTPUT) continue;
 
         /* Get section object (create if doesn't exist) */
-        VibeValue *section_val = vibe_object_get(vibe_get_object(root), key->section);
+        VibeValue *section_val = vibe_object_get(root->as_object, key->section);
         VibeObject *section;
 
         if (!section_val) {
             section_val = vibe_value_new_object();
-            vibe_object_set(vibe_get_object(root), key->section, section_val);
+            vibe_object_set(root->as_object, key->section, section_val);
         }
-        section = vibe_get_object(section_val);
+        section = section_val->as_object;
 
         /* Get current value (or default) */
         char value[1024];
@@ -296,7 +296,7 @@ static VibeValue *build_vibe_from_state(struct neowall_state *state) {
     /* Check if we have any outputs to serialize */
     struct output_state *temp = output;
     while (temp) {
-        if (temp->connector_name && temp->connector_name[0] != '\0') {
+        if (temp->connector_name[0] != '\0') {
             has_outputs = true;
             break;
         }
@@ -306,17 +306,17 @@ static VibeValue *build_vibe_from_state(struct neowall_state *state) {
     if (has_outputs) {
         /* Create outputs container object */
         VibeValue *outputs_container = vibe_value_new_object();
-        VibeObject *outputs_obj = vibe_get_object(outputs_container);
+        VibeObject *outputs_obj = outputs_container->as_object;
 
         while (output) {
-            if (!output->connector_name || output->connector_name[0] == '\0') {
+            if (output->connector_name[0] == '\0') {
                 output = output->next;
                 continue;
             }
 
             /* Create object for this specific output (e.g., DP-1, HDMI-1) */
             VibeValue *output_obj = vibe_value_new_object();
-            VibeObject *output_section_obj = vibe_get_object(output_obj);
+            VibeObject *output_section_obj = output_obj->as_object;
 
             /* Add output-specific settings */
             if (output->config.duration > 0) {
@@ -350,7 +350,7 @@ static VibeValue *build_vibe_from_state(struct neowall_state *state) {
         }
 
         /* Add outputs container to root */
-        vibe_object_set(vibe_get_object(root), "outputs", outputs_container);
+        vibe_object_set(root->as_object, "outputs", outputs_container);
     }
 
     pthread_rwlock_unlock(&state->output_list_lock);
@@ -376,7 +376,7 @@ static char *serialize_vibe(VibeValue *root) {
         "# Format: VIBE (https://1ay1.github.io/vibe/)\n\n");
 
     /* Serialize with proper hierarchical VIBE format */
-    VibeObject *root_obj = vibe_get_object(root);
+    VibeObject *root_obj = root->as_object;
     if (!root_obj) {
         free(buffer);
         return NULL;
@@ -396,7 +396,7 @@ static char *serialize_vibe(VibeValue *root) {
             if (val->type == VIBE_TYPE_OBJECT) {
                 /* Nested object: key { ... } */
                 offset += snprintf(buffer + offset, buf_size - offset, "%s {\n", key);
-                serialize_object(vibe_get_object(val), indent_level + 1);
+                serialize_object(val->as_object, indent_level + 1);
 
                 /* Close brace with proper indentation */
                 for (int ind = 0; ind < indent_level * 4; ind++) {
@@ -436,6 +436,16 @@ static char *serialize_vibe(VibeValue *root) {
                                              "%s\n", val->as_string);
                         }
                         break;
+                    case VIBE_TYPE_NULL:
+                        offset += snprintf(buffer + offset, buf_size - offset, "null\n");
+                        break;
+                    case VIBE_TYPE_ARRAY:
+                        /* Arrays not yet supported in serialization */
+                        offset += snprintf(buffer + offset, buf_size - offset, "[]\n");
+                        break;
+                    case VIBE_TYPE_OBJECT:
+                        /* Already handled above */
+                        break;
                 }
             }
         }
@@ -443,6 +453,9 @@ static char *serialize_vibe(VibeValue *root) {
         /* Close the section */
         offset += snprintf(buffer + offset, buf_size - offset, "}\n\n");
     }
+
+    /* Serialize the root object */
+    serialize_object(root_obj, 0);
 
     return buffer;
 }
@@ -490,6 +503,12 @@ bool config_write_to_disk(struct neowall_state *state, bool backup) {
 
     /* Write to temporary file */
     char temp_path[4096];
+    size_t path_len = strlen(expanded_path);
+    if (path_len > sizeof(temp_path) - 5) {
+        log_error("Config path too long");
+        free(config_content);
+        return false;
+    }
     snprintf(temp_path, sizeof(temp_path), "%s.tmp", expanded_path);
 
     FILE *fp = fopen(temp_path, "w");
@@ -616,7 +635,7 @@ bool config_set_output_value(struct neowall_state *state,
 
     struct output_state *output = state->outputs;
     while (output) {
-        if (output->connector_name && strcmp(output->connector_name, output_name) == 0) {
+        if (output->connector_name[0] != '\0' && strcmp(output->connector_name, output_name) == 0) {
             break;
         }
         output = output->next;
@@ -696,7 +715,7 @@ bool config_get_output_value(struct neowall_state *state,
 
     struct output_state *output = state->outputs;
     while (output) {
-        if (output->connector_name && strcmp(output->connector_name, output_name) == 0) {
+        if (output->connector_name[0] != '\0' && strcmp(output->connector_name, output_name) == 0) {
             break;
         }
         output = output->next;

@@ -6,6 +6,7 @@
 
 /* Forward declarations */
 struct neowall_state;
+struct output_state;
 
 /* ============================================================================
  * ATOMIC CONFIGURATION WRITE API

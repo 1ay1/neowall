@@ -48,7 +48,8 @@ compositor_sources = files(
 config_sources = files(
   'config/config.c',
   'config/vibe.c',
-  'config/config_schema.c',
+  # 'config/config_schema.c',  # Temporarily disabled due to macro issues
+  'config/config_schema_stub.c',  # Stub implementation
   'config/config_rules.c',
   'config/config_write.c',
 )
