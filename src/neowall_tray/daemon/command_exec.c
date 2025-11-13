@@ -26,9 +26,41 @@ static char *find_neowall_binary(void) {
         return binary_path;
     }
 
+    TRAY_LOG_DEBUG(COMPONENT, "Searching for neowall binary...");
+
+    /* First, try to find neowall relative to the tray binary location */
+    char tray_path[MAX_PATH];
+    ssize_t len = readlink("/proc/self/exe", tray_path, sizeof(tray_path) - 1);
+    if (len != -1) {
+        tray_path[len] = '\0';
+        char *dir = dirname(tray_path);
+
+        /* Try in same directory as tray binary */
+        char neowall_path[MAX_PATH];
+        snprintf(neowall_path, sizeof(neowall_path), "%s/neowall", dir);
+        struct stat st;
+        if (stat(neowall_path, &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & S_IXUSR)) {
+            if (realpath(neowall_path, binary_path) != NULL) {
+                TRAY_LOG_INFO(COMPONENT, "Found neowall binary relative to tray: %s", binary_path);
+                return binary_path;
+            }
+        }
+
+        /* Try ../neowall relative to tray binary (for build directory structure) */
+        snprintf(neowall_path, sizeof(neowall_path), "%s/../neowall/neowall", dir);
+        if (stat(neowall_path, &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & S_IXUSR)) {
+            if (realpath(neowall_path, binary_path) != NULL) {
+                TRAY_LOG_INFO(COMPONENT, "Found neowall binary in build tree: %s", binary_path);
+                return binary_path;
+            }
+        }
+    }
+
     /* List of paths to search */
     const char *search_paths[] = {
         /* Build directory paths */
+        "./",
+        "./build/src/neowall/neowall",
         "./builddir/bin/neowall",
         "../builddir/bin/neowall",
         "../../builddir/bin/neowall",
@@ -50,11 +82,9 @@ static char *find_neowall_binary(void) {
         snprintf(home_bin, sizeof(home_bin), "%s/.local/bin/neowall", home);
     }
 
-    TRAY_LOG_DEBUG(COMPONENT, "Searching for neowall binary...");
-
     /* Try each search path */
-    for (int i = 0; search_paths[i] != NULL || (i == 8 && home); i++) {
-        const char *path = (i == 8 && home) ? home_bin : search_paths[i];
+    for (int i = 0; search_paths[i] != NULL || (i == 9 && home); i++) {
+        const char *path = (i == 9 && home) ? home_bin : search_paths[i];
         if (!path) continue;
 
         struct stat st;
