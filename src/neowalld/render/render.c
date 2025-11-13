@@ -1242,8 +1242,10 @@ bool render_frame_shader(struct output_state *output) {
     /* Render FPS watermark if enabled */
     render_fps_watermark(output);
 
-    /* Shader wallpapers need continuous redraw for animation */
-    output->needs_redraw = true;
+    /* Shader wallpapers need continuous redraw for animation (unless paused) */
+    if (!output->shader_paused && !(output->state && atomic_load(&output->state->shader_paused))) {
+        output->needs_redraw = true;
+    }
     output->frames_rendered++;
 
     return true;
