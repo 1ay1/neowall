@@ -1202,70 +1202,92 @@ int cmd_output_info(int argc, char *argv[]) {
 }
 
 int cmd_next_output(int argc, char *argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "Error: next-output requires output name\n");
-        fprintf(stderr, "Usage: neowall next-output <output-name>\n");
-        return 1;
+    char args[256];
+
+    if (argc >= 2) {
+        /* Output specified - apply to specific output */
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+    } else {
+        /* No output specified - apply to all outputs */
+        args[0] = '\0';
     }
 
-    char args[256];
-    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
     return send_ipc_command("next-output", args, strlen(args)) ? 0 : 1;
 }
 
 int cmd_prev_output(int argc, char *argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "Error: prev-output requires output name\n");
-        fprintf(stderr, "Usage: neowall prev-output <output-name>\n");
-        return 1;
+    char args[256];
+
+    if (argc >= 2) {
+        /* Output specified - apply to specific output */
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+    } else {
+        /* No output specified - apply to all outputs */
+        args[0] = '\0';
     }
 
-    char args[256];
-    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
     return send_ipc_command("prev-output", args, strlen(args)) ? 0 : 1;
 }
 
 int cmd_reload_output(int argc, char *argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: neowall reload-output <output-name>\n");
-        return 1;
+    char args[512];
+
+    if (argc >= 2) {
+        /* Output specified - apply to specific output */
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+    } else {
+        /* No output specified - apply to all outputs */
+        args[0] = '\0';
     }
 
-    char args[512];
-    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
     return send_ipc_command("reload-output", args, strlen(args)) ? 0 : 1;
 }
 
 int cmd_pause_output(int argc, char *argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: neowall pause-output <output-name>\n");
-        return 1;
+    char args[512];
+
+    if (argc >= 2) {
+        /* Output specified - apply to specific output */
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+    } else {
+        /* No output specified - apply to all outputs */
+        args[0] = '\0';
     }
 
-    char args[512];
-    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
     return send_ipc_command("pause-output", args, strlen(args)) ? 0 : 1;
 }
 
 int cmd_resume_output(int argc, char *argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: neowall resume-output <output-name>\n");
-        return 1;
+    char args[512];
+
+    if (argc >= 2) {
+        /* Output specified - apply to specific output */
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+    } else {
+        /* No output specified - apply to all outputs */
+        args[0] = '\0';
     }
 
-    char args[512];
-    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
     return send_ipc_command("resume-output", args, strlen(args)) ? 0 : 1;
 }
 
 int cmd_jump_to_output(int argc, char *argv[]) {
-    if (argc < 3) {
-        fprintf(stderr, "Usage: neowall jump-to-output <output-name> <index>\n");
+    char args[512];
+
+    if (argc < 2) {
+        fprintf(stderr, "Usage: neowall jump-to-output [output-name] <index>\n");
+        fprintf(stderr, "  If output-name is omitted, applies to all outputs\n");
         return 1;
     }
 
-    char args[512];
-    snprintf(args, sizeof(args), "{\"output\":\"%s\",\"index\":%s}", argv[1], argv[2]);
+    if (argc >= 3) {
+        /* Output and index specified */
+        snprintf(args, sizeof(args), "{\"output\":\"%s\",\"index\":%s}", argv[1], argv[2]);
+    } else {
+        /* Only index specified - apply to all outputs */
+        snprintf(args, sizeof(args), "{\"index\":%s}", argv[1]);
+    }
+
     return send_ipc_command("jump-to-output", args, strlen(args)) ? 0 : 1;
 }
 

@@ -96,21 +96,38 @@ NeoWall features a powerful command system with **28 commands** across 6 categor
 
 ### Basic Control
 ```bash
-neowall next              # Switch to next wallpaper
-neowall prev              # Previous wallpaper
-neowall pause             # Pause automatic cycling
-neowall resume            # Resume cycling
+neowall next              # Switch to next wallpaper (all monitors)
+neowall prev              # Previous wallpaper (all monitors)
+neowall pause             # Pause automatic cycling (all monitors)
+neowall resume            # Resume cycling (all monitors)
 neowall status            # Show daemon status
 ```
 
 ### Multi-Monitor Control
+
+**Global vs Per-Output:** Most commands accept an optional output argument:
+- **With output**: Applies to specific monitor only
+- **Without output**: Applies to **ALL connected monitors**
+
 ```bash
+# List and inspect outputs
 neowall list-outputs                    # List all displays
-neowall next-output DP-1                # Next wallpaper on specific monitor
-neowall set-output-mode HDMI-1 fill     # Set wallpaper mode (matches config: output.mode)
-neowall set-output-duration DP-1 600    # Set cycle duration in seconds (matches config: output.duration)
-neowall set-output-path DP-1 ~/pic.jpg  # Set image wallpaper (matches config: output.path)
-neowall set-output-shader DP-1 matrix.glsl  # Set shader wallpaper (matches config: output.shader)
+neowall output-info DP-1                # Detailed info about specific monitor
+
+# Control specific monitor
+neowall next-output DP-1                # Next wallpaper on DP-1 only
+neowall pause-output HDMI-1             # Pause cycling on HDMI-1 only
+neowall reload-output DP-1              # Reload wallpaper on DP-1
+
+# Control ALL monitors at once
+neowall next-output                     # Next wallpaper on all displays
+neowall pause-output                    # Pause all displays
+neowall resume-output                   # Resume all displays
+neowall jump-to-output 5                # Jump all displays to index 5
+
+# Per-output configuration (persists to config file)
+neowall set-config output.DP-1.path ~/pic.jpg
+neowall set-config output.HDMI-1.mode fill
 ```
 
 ### Shader Control

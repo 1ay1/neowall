@@ -207,24 +207,39 @@ neowall speed-up HDMI-1
 
 ### 6. Output Commands (8 commands)
 
+**Global vs Per-Output Behavior:**  
+Most output commands accept an optional `[output]` argument:
+- **With output specified**: Command applies to that specific display only
+- **Without output**: Command applies to **ALL connected displays**
+
+This makes it easy to control all your monitors at once or target specific ones.
+
 | Command | Description |
 |---------|-------------|
 | `neowall list-outputs` | List all connected displays |
-| `neowall output-info <output>` | Detailed info about specific output |
-| `neowall next-output <output>` | Next wallpaper on specific output |
-| `neowall prev-output <output>` | Previous wallpaper on specific output |
-| `neowall reload-output <output>` | Reload current wallpaper |
-| `neowall pause-output <output>` | Pause cycling on specific output |
-| `neowall resume-output <output>` | Resume cycling on specific output |
-| `neowall jump-to-output <output> <index>` | Jump to cycle index |
+| `neowall output-info <output>` | Detailed info about specific output (required) |
+| `neowall next-output [output]` | Next wallpaper (all outputs if omitted) |
+| `neowall prev-output [output]` | Previous wallpaper (all outputs if omitted) |
+| `neowall reload-output [output]` | Reload current wallpaper (all outputs if omitted) |
+| `neowall pause-output [output]` | Pause cycling (all outputs if omitted) |
+| `neowall resume-output [output]` | Resume cycling (all outputs if omitted) |
+| `neowall jump-to-output [output] <index>` | Jump to cycle index (all outputs if omitted) |
 
 **Examples:**
 ```bash
 neowall list-outputs
 neowall output-info DP-1
+
+# Apply to specific output
 neowall next-output DP-1
 neowall reload-output DP-1
 neowall jump-to-output DP-1 5  # Jump to 6th wallpaper (0-indexed)
+
+# Apply to ALL outputs (omit output name)
+neowall next-output              # Next wallpaper on all displays
+neowall pause-output             # Pause all displays
+neowall resume-output            # Resume all displays
+neowall jump-to-output 3         # Jump all displays to index 3
 ```
 
 ### 7. Config Commands (4 commands) - **PERSISTENT**
@@ -718,6 +733,9 @@ neowall output-info DP-1
 
 # Reload specific output
 neowall reload-output DP-1
+
+# Reload ALL outputs
+neowall reload-output
 
 # Set output-specific config
 neowall set-config output.DP-1.path ~/wallpaper.jpg
