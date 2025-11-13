@@ -86,10 +86,10 @@ static Command commands[] = {
     {"resume",             "Resume wallpaper cycling [output]",      cmd_resume},
     {"reload",             "Reload configuration",                   cmd_reload},
     {"current",            "Show current wallpaper [output]",        cmd_current},
-    {"speed-up",           "Increase shader animation speed",        cmd_speed_up},
-    {"speed-down",         "Decrease shader animation speed",        cmd_speed_down},
-    {"shader-pause",       "Pause shader animation",                 cmd_shader_pause},
-    {"shader-resume",      "Resume shader animation",                cmd_shader_resume},
+    {"speed-up",           "Increase shader animation speed [output]", cmd_speed_up},
+    {"speed-down",         "Decrease shader animation speed [output]", cmd_speed_down},
+    {"shader-pause",       "Pause shader animation [output]",        cmd_shader_pause},
+    {"shader-resume",      "Resume shader animation [output]",       cmd_shader_resume},
 
     /* Output-specific commands */
     {"list-outputs",       "List all connected outputs",             cmd_list_outputs},
@@ -1050,22 +1050,38 @@ int cmd_current(int argc, char *argv[]) {
 }
 
 int cmd_speed_up(int argc, char *argv[]) {
-    (void)argc; (void)argv;
+    if (argc >= 2) {
+        char args[512];
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+        return send_ipc_command("speed-up", args, strlen(args)) ? 0 : 1;
+    }
     return send_ipc_command("speed-up", NULL, 0) ? 0 : 1;
 }
 
 int cmd_speed_down(int argc, char *argv[]) {
-    (void)argc; (void)argv;
+    if (argc >= 2) {
+        char args[512];
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+        return send_ipc_command("speed-down", args, strlen(args)) ? 0 : 1;
+    }
     return send_ipc_command("speed-down", NULL, 0) ? 0 : 1;
 }
 
 int cmd_shader_pause(int argc, char *argv[]) {
-    (void)argc; (void)argv;
+    if (argc >= 2) {
+        char args[512];
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+        return send_ipc_command("shader-pause", args, strlen(args)) ? 0 : 1;
+    }
     return send_ipc_command("shader-pause", NULL, 0) ? 0 : 1;
 }
 
 int cmd_shader_resume(int argc, char *argv[]) {
-    (void)argc; (void)argv;
+    if (argc >= 2) {
+        char args[512];
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+        return send_ipc_command("shader-resume", args, strlen(args)) ? 0 : 1;
+    }
     return send_ipc_command("shader-resume", NULL, 0) ? 0 : 1;
 }
 

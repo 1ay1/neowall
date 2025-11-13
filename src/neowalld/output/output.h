@@ -171,6 +171,10 @@ struct output_state {
     uint64_t frames_rendered;
     bool shader_load_failed;            /* Set to true after 3 failed shader load attempts */
     
+    /* Per-output shader control */
+    bool shader_paused;                 /* Shader animation paused for this output */
+    float shader_speed;                 /* Shader animation speed multiplier for this output */
+    
     /* FPS measurement */
     uint64_t fps_last_log_time;         /* Last time we logged FPS */
     uint64_t fps_frame_count;           /* Frames rendered since last FPS log */

@@ -58,18 +58,18 @@ static const command_info_t command_registry_core[] = {
     COMMAND_ENTRY(resume, "cycling", "Resume automatic wallpaper cycling (optional: output name)",
                   CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
     COMMAND_ENTRY_CUSTOM("speed-up", cmd_speed_up, "shader",
-                        "Increase shader animation speed (global)",
+                        "Increase shader animation speed (optional: output name)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
     COMMAND_ENTRY_CUSTOM("speed-down", cmd_speed_down, "shader",
-                        "Decrease shader animation speed (global)",
+                        "Decrease shader animation speed (optional: output name)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
 
     /* Shader Control */
     COMMAND_ENTRY_CUSTOM("shader-pause", cmd_shader_pause, "shader",
-                        "Pause shader animation (global)",
+                        "Pause shader animation (optional: output name)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
     COMMAND_ENTRY_CUSTOM("shader-resume", cmd_shader_resume, "shader",
-                        "Resume shader animation (global)",
+                        "Resume shader animation (optional: output name)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
 
     /* Status & Information */
@@ -726,71 +726,145 @@ static command_result_t cmd_resume(struct neowall_state *state, const ipc_reques
 
 
 static command_result_t cmd_speed_up(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    (void)req;
-
     if (!state) {
         commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
         return CMD_ERROR_STATE;
     }
 
-    /* Increase shader speed by 0.25x */
-    float current_speed = atomic_load(&state->shader_speed);
-    float new_speed = current_speed + 0.25f;
-    if (new_speed > 10.0f) new_speed = 10.0f;  /* Cap at 10x */
-    atomic_store(&state->shader_speed, new_speed);
+    char output_name[256] = {0};
+    bool has_output = extract_optional_output(req, output_name, sizeof(output_name));
 
-    char data[128];
-    snprintf(data, sizeof(data), "{\"shader_speed\":%.2f}", new_speed);
-    commands_build_success(resp, NULL, data);
+    if (has_output) {
+        /* Target specific output */
+        struct output_state *output = get_target_output(state, output_name);
+        if (!output) {
+            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+            return CMD_ERROR_NOT_FOUND;
+        }
+
+        /* Increase shader speed by 0.25x for this output */
+        float new_speed = output->shader_speed + 0.25f;
+        if (new_speed > 10.0f) new_speed = 10.0f;
+        output->shader_speed = new_speed;
+
+        char data[256];
+        snprintf(data, sizeof(data), "{\"output\":\"%s\",\"speed\":%.2f}", output_name, new_speed);
+        commands_build_success(resp, "Increased shader speed", data);
+    } else {
+        /* Global shader speed increase */
+        float current_speed = atomic_load(&state->shader_speed);
+        float new_speed = current_speed + 0.25f;
+        if (new_speed > 10.0f) new_speed = 10.0f;
+        atomic_store(&state->shader_speed, new_speed);
+
+        char data[128];
+        snprintf(data, sizeof(data), "{\"speed\":%.2f}", new_speed);
+        commands_build_success(resp, "Increased shader speed", data);
+    }
+
     return CMD_SUCCESS;
 }
 
 static command_result_t cmd_speed_down(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    (void)req;
-
     if (!state) {
         commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
         return CMD_ERROR_STATE;
     }
 
-    /* Decrease shader speed by 0.25x */
-    float current_speed = atomic_load(&state->shader_speed);
-    float new_speed = current_speed - 0.25f;
-    if (new_speed < 0.1f) new_speed = 0.1f;  /* Minimum 0.1x */
-    atomic_store(&state->shader_speed, new_speed);
+    char output_name[256] = {0};
+    bool has_output = extract_optional_output(req, output_name, sizeof(output_name));
 
-    char data[128];
-    snprintf(data, sizeof(data), "{\"shader_speed\":%.2f}", new_speed);
-    commands_build_success(resp, NULL, data);
+    if (has_output) {
+        /* Target specific output */
+        struct output_state *output = get_target_output(state, output_name);
+        if (!output) {
+            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+            return CMD_ERROR_NOT_FOUND;
+        }
+
+        /* Decrease shader speed by 0.25x for this output */
+        float new_speed = output->shader_speed - 0.25f;
+        if (new_speed < 0.1f) new_speed = 0.1f;
+        output->shader_speed = new_speed;
+
+        char data[256];
+        snprintf(data, sizeof(data), "{\"output\":\"%s\",\"speed\":%.2f}", output_name, new_speed);
+        commands_build_success(resp, "Decreased shader speed", data);
+    } else {
+        /* Global shader speed decrease */
+        float current_speed = atomic_load(&state->shader_speed);
+        float new_speed = current_speed - 0.25f;
+        if (new_speed < 0.1f) new_speed = 0.1f;
+        atomic_store(&state->shader_speed, new_speed);
+
+        char data[128];
+        snprintf(data, sizeof(data), "{\"speed\":%.2f}", new_speed);
+        commands_build_success(resp, "Decreased shader speed", data);
+    }
+
     return CMD_SUCCESS;
 }
 
 static command_result_t cmd_shader_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    (void)req;
-
     if (!state) {
         commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
         return CMD_ERROR_STATE;
     }
 
-    /* Shader pause is global only */
-    atomic_store(&state->shader_paused, true);
-    commands_build_success(resp, "Paused shader animation", NULL);
+    char output_name[256] = {0};
+    bool has_output = extract_optional_output(req, output_name, sizeof(output_name));
+
+    if (has_output) {
+        /* Target specific output */
+        struct output_state *output = get_target_output(state, output_name);
+        if (!output) {
+            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+            return CMD_ERROR_NOT_FOUND;
+        }
+
+        /* Pause shader for this output */
+        output->shader_paused = true;
+
+        char data[256];
+        snprintf(data, sizeof(data), "{\"output\":\"%s\"}", output_name);
+        commands_build_success(resp, "Paused shader animation", data);
+    } else {
+        /* Global shader pause */
+        atomic_store(&state->shader_paused, true);
+        commands_build_success(resp, "Paused shader animation", NULL);
+    }
 
     return CMD_SUCCESS;
 }
 
 static command_result_t cmd_shader_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    (void)req;
-
     if (!state) {
         commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
         return CMD_ERROR_STATE;
     }
 
-    /* Shader resume is global only */
-    atomic_store(&state->shader_paused, false);
-    commands_build_success(resp, "Resumed shader animation", NULL);
+    char output_name[256] = {0};
+    bool has_output = extract_optional_output(req, output_name, sizeof(output_name));
+
+    if (has_output) {
+        /* Target specific output */
+        struct output_state *output = get_target_output(state, output_name);
+        if (!output) {
+            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+            return CMD_ERROR_NOT_FOUND;
+        }
+
+        /* Resume shader for this output */
+        output->shader_paused = false;
+
+        char data[256];
+        snprintf(data, sizeof(data), "{\"output\":\"%s\"}", output_name);
+        commands_build_success(resp, "Resumed shader animation", data);
+    } else {
+        /* Global shader resume */
+        atomic_store(&state->shader_paused, false);
+        commands_build_success(resp, "Resumed shader animation", NULL);
+    }
 
     return CMD_SUCCESS;
 }
