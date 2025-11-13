@@ -6,6 +6,7 @@
 #include "menu_callbacks.h"
 #include "menu_items.h"
 #include "../daemon/daemon_check.h"
+#include "../ui/ui_utils.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -73,11 +74,20 @@ bool menu_builder_update_status(GtkWidget *menu) {
     const char *status_text = daemon_running ?
         MENU_LABEL_STATUS_RUNNING : MENU_LABEL_STATUS_STOPPED;
 
-    /* Update the label */
-    GtkWidget *label_widget = gtk_bin_get_child(GTK_BIN(g_status_item));
-    if (label_widget && GTK_IS_LABEL(label_widget)) {
-        gtk_label_set_text(GTK_LABEL(label_widget), status_text);
-        return true;
+    /* Update the label - it's wrapped in a box container now */
+    GtkWidget *container = gtk_bin_get_child(GTK_BIN(g_status_item));
+    if (container && GTK_IS_BOX(container)) {
+        /* Get the label from inside the box */
+        GList *children = gtk_container_get_children(GTK_CONTAINER(container));
+        if (children) {
+            GtkWidget *label_widget = GTK_WIDGET(children->data);
+            if (GTK_IS_LABEL(label_widget)) {
+                gtk_label_set_text(GTK_LABEL(label_widget), status_text);
+                g_list_free(children);
+                return true;
+            }
+            g_list_free(children);
+        }
     }
 
     return false;
@@ -87,6 +97,27 @@ bool menu_builder_update_status(GtkWidget *menu) {
 GtkWidget *menu_builder_add_item(GtkWidget *menu, const char *label,
                                    GCallback callback, gpointer user_data) {
     GtkWidget *item = gtk_menu_item_new_with_label(label);
+
+    /* Create a box container for padding */
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+
+    /* Get the label and reparent it into our box */
+    GtkWidget *label_widget = gtk_bin_get_child(GTK_BIN(item));
+    if (label_widget) {
+        g_object_ref(label_widget);
+        gtk_container_remove(GTK_CONTAINER(item), label_widget);
+        gtk_box_pack_start(GTK_BOX(box), label_widget, TRUE, TRUE, 0);
+        g_object_unref(label_widget);
+
+        /* Add padding using the box */
+        gtk_widget_set_margin_top(box, 8);
+        gtk_widget_set_margin_bottom(box, 8);
+        gtk_widget_set_margin_start(box, 12);
+        gtk_widget_set_margin_end(box, 12);
+    }
+
+    gtk_container_add(GTK_CONTAINER(item), box);
+
     if (callback) {
         g_signal_connect(item, "activate", callback, user_data);
     }
@@ -99,14 +130,25 @@ GtkWidget *menu_builder_add_disabled_item(GtkWidget *menu, const char *label) {
     GtkWidget *item = gtk_menu_item_new_with_label(label);
     gtk_widget_set_sensitive(item, FALSE);
 
-    /* Add padding to the label */
+    /* Create a box container for padding */
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+
+    /* Get the label and reparent it into our box */
     GtkWidget *label_widget = gtk_bin_get_child(GTK_BIN(item));
     if (label_widget) {
-        gtk_widget_set_margin_top(label_widget, 8);
-        gtk_widget_set_margin_bottom(label_widget, 8);
-        gtk_widget_set_margin_start(label_widget, 12);
-        gtk_widget_set_margin_end(label_widget, 12);
+        g_object_ref(label_widget);
+        gtk_container_remove(GTK_CONTAINER(item), label_widget);
+        gtk_box_pack_start(GTK_BOX(box), label_widget, TRUE, TRUE, 0);
+        g_object_unref(label_widget);
+
+        /* Add extra padding for status items */
+        gtk_widget_set_margin_top(box, 10);
+        gtk_widget_set_margin_bottom(box, 10);
+        gtk_widget_set_margin_start(box, 16);
+        gtk_widget_set_margin_end(box, 16);
     }
+
+    gtk_container_add(GTK_CONTAINER(item), box);
 
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
     return item;
@@ -115,6 +157,11 @@ GtkWidget *menu_builder_add_disabled_item(GtkWidget *menu, const char *label) {
 /* Add a separator to the menu */
 GtkWidget *menu_builder_add_separator(GtkWidget *menu) {
     GtkWidget *item = gtk_separator_menu_item_new();
+
+    /* Add vertical margin for better spacing */
+    gtk_widget_set_margin_top(item, 8);
+    gtk_widget_set_margin_bottom(item, 8);
+
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
     return item;
 }
@@ -123,6 +170,27 @@ GtkWidget *menu_builder_add_separator(GtkWidget *menu) {
 GtkWidget *menu_builder_add_submenu(GtkWidget *menu, const char *label) {
     GtkWidget *submenu = gtk_menu_new();
     GtkWidget *item = gtk_menu_item_new_with_label(label);
+
+    /* Create a box container for padding */
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+
+    /* Get the label and reparent it into our box */
+    GtkWidget *label_widget = gtk_bin_get_child(GTK_BIN(item));
+    if (label_widget) {
+        g_object_ref(label_widget);
+        gtk_container_remove(GTK_CONTAINER(item), label_widget);
+        gtk_box_pack_start(GTK_BOX(box), label_widget, TRUE, TRUE, 0);
+        g_object_unref(label_widget);
+
+        /* Add padding using the box */
+        gtk_widget_set_margin_top(box, 8);
+        gtk_widget_set_margin_bottom(box, 8);
+        gtk_widget_set_margin_start(box, 12);
+        gtk_widget_set_margin_end(box, 12);
+    }
+
+    gtk_container_add(GTK_CONTAINER(item), box);
+
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(item), submenu);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
     return submenu;

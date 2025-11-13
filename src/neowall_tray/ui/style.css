@@ -1,0 +1,320 @@
+/* NeoWall Tray - Minimal UI Stylesheet
+ * Respects system theme, improves spacing and layout only
+ */
+
+/* ========================================================================
+   GLOBAL SPACING & LAYOUT
+   ======================================================================== */
+
+* {
+    outline-style: none;
+}
+
+/* ========================================================================
+   WINDOW & DIALOG IMPROVEMENTS
+   ======================================================================== */
+
+window,
+dialog {
+    border-radius: 8px;
+}
+
+.dialog-vbox {
+    padding: 4px;
+}
+
+/* ========================================================================
+   SETTINGS DIALOG LAYOUT
+   ======================================================================== */
+
+/* Settings notebook - better spacing */
+notebook {
+    margin: 0;
+    padding: 0;
+}
+
+notebook > header {
+    padding: 8px 12px;
+    margin: 0;
+}
+
+notebook > header > tabs > tab {
+    padding: 12px 24px;
+    margin: 0 2px;
+    border-radius: 4px 4px 0 0;
+}
+
+notebook > stack {
+    padding: 0;
+}
+
+/* ========================================================================
+   FORM CONTROLS - SPACING ONLY
+   ======================================================================== */
+
+/* Better spacing for labels */
+label.setting-label {
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+label.help-text {
+    margin-top: 4px;
+    font-size: 0.9em;
+    opacity: 0.8;
+}
+
+/* Entry fields - better sizing */
+entry {
+    padding: 8px 12px;
+    min-height: 36px;
+    border-radius: 4px;
+}
+
+/* Spin buttons */
+spinbutton {
+    padding: 6px 10px;
+    border-radius: 4px;
+}
+
+spinbutton button {
+    padding: 4px;
+    margin: 2px;
+    border-radius: 3px;
+}
+
+/* Combo boxes */
+combobox button {
+    padding: 8px 12px;
+    min-height: 36px;
+    border-radius: 4px;
+}
+
+/* Checkboxes - better alignment */
+checkbutton,
+check {
+    min-height: 20px;
+    min-width: 20px;
+}
+
+checkbutton check,
+check {
+    min-height: 20px;
+    min-width: 20px;
+    border-radius: 4px;
+}
+
+checkbutton label {
+    padding-left: 8px;
+}
+
+/* Scales (sliders) */
+scale {
+    min-height: 20px;
+}
+
+scale trough {
+    min-height: 6px;
+    border-radius: 3px;
+}
+
+scale highlight {
+    border-radius: 3px;
+}
+
+scale slider {
+    min-height: 18px;
+    min-width: 18px;
+    border-radius: 50%;
+    margin: -6px;
+}
+
+/* File chooser button */
+filechooserbutton button {
+    padding: 8px 12px;
+    min-height: 36px;
+    border-radius: 4px;
+}
+
+/* ========================================================================
+   BUTTONS - SPACING & SIZING
+   ======================================================================== */
+
+button {
+    padding: 8px 16px;
+    min-height: 32px;
+    border-radius: 4px;
+}
+
+/* Slightly larger primary buttons */
+button.suggested-action,
+button.apply-button {
+    padding: 10px 20px;
+    min-height: 36px;
+    font-weight: 600;
+}
+
+/* ========================================================================
+   CONTAINERS & LAYOUT
+   ======================================================================== */
+
+.settings-section {
+    padding: 16px;
+    margin: 10px;
+    border-radius: 6px;
+}
+
+.settings-row {
+    padding: 10px 0;
+    margin: 4px 0;
+}
+
+separator {
+    min-height: 1px;
+    min-width: 1px;
+    margin: 8px 0;
+}
+
+/* ========================================================================
+   STATUS & FEEDBACK
+   ======================================================================== */
+
+.status-label {
+    padding: 10px 14px;
+    border-radius: 4px;
+    margin: 6px 0;
+}
+
+.status-success {
+    padding: 10px 14px;
+    border-radius: 4px;
+}
+
+.status-error {
+    padding: 10px 14px;
+    border-radius: 4px;
+}
+
+.status-info {
+    padding: 10px 14px;
+    border-radius: 4px;
+}
+
+.status-warning {
+    padding: 10px 14px;
+    border-radius: 4px;
+}
+
+/* ========================================================================
+   INFO BOXES
+   ======================================================================== */
+
+.info-box {
+    padding: 12px;
+    margin: 10px 0;
+    border-radius: 4px;
+}
+
+/* ========================================================================
+   SCROLLBARS
+   ======================================================================== */
+
+scrollbar {
+    border: none;
+}
+
+scrollbar trough {
+    border-radius: 6px;
+}
+
+scrollbar slider {
+    border-radius: 6px;
+    min-width: 10px;
+    min-height: 40px;
+}
+
+/* ========================================================================
+   PROGRESS BARS
+   ======================================================================== */
+
+progressbar trough {
+    border-radius: 4px;
+    min-height: 6px;
+}
+
+progressbar progress {
+    border-radius: 4px;
+}
+
+/* ========================================================================
+   MESSAGE DIALOGS
+   ======================================================================== */
+
+messagedialog .dialog-vbox {
+    padding: 20px;
+}
+
+messagedialog label {
+    padding: 6px 0;
+}
+
+messagedialog image {
+    min-width: 48px;
+    min-height: 48px;
+    padding: 10px;
+}
+
+/* ========================================================================
+   TOOLTIPS
+   ======================================================================== */
+
+tooltip {
+    border-radius: 4px;
+    padding: 6px 10px;
+}
+
+tooltip label {
+    font-size: 0.9em;
+}
+
+/* ========================================================================
+   MENU STYLING
+   ======================================================================== */
+
+/* Main menu container */
+menu {
+    padding: 4px 0;
+    border-radius: 8px;
+}
+
+/* Menu items */
+menuitem {
+    padding: 8px 16px;
+    min-height: 32px;
+}
+
+/* Menu item labels */
+menuitem label {
+    padding: 2px 0;
+}
+
+/* Submenu arrows */
+menuitem arrow {
+    min-width: 16px;
+    min-height: 16px;
+}
+
+/* Menu separators */
+separator.horizontal {
+    min-height: 1px;
+    margin: 6px 0;
+}
+
+/* Disabled menu items (status display) */
+menuitem:disabled {
+    padding: 10px 16px;
+}
+
+menuitem:disabled label {
+    padding: 4px 0;
+}

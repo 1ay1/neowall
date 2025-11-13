@@ -28,6 +28,10 @@ tray_sources = [
   # Dialogs component
   'dialogs/dialogs.c',
   'dialogs/settings_dialog.c',
+  'dialogs/about_dialog.c',
+
+  # UI component
+  'ui/ui_utils.c',
 ]
 
 # Include directories

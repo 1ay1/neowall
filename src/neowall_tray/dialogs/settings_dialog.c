@@ -6,6 +6,7 @@
 #include "../common/log.h"
 #include "../daemon/command_exec.h"
 #include "../daemon/daemon_check.h"
+#include "../ui/ui_utils.h"
 #include "dialogs.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -86,14 +87,9 @@ static void on_folder_selected(GtkFileChooserButton *widget, gpointer user_data)
 static void show_status(SettingsDialog *dlg, const char *message, gboolean is_error) {
     if (!dlg->status_label) return;
 
-    char markup[512];
-    if (is_error) {
-        snprintf(markup, sizeof(markup), "<span foreground='red'>✗ %s</span>", message);
-    } else {
-        snprintf(markup, sizeof(markup), "<span foreground='green'>✓ %s</span>", message);
-    }
-
-    gtk_label_set_markup(GTK_LABEL(dlg->status_label), markup);
+    /* Use UI utils for consistent status display */
+    ui_utils_update_status_label(dlg->status_label, message,
+                                  is_error ? UI_STATUS_ERROR : UI_STATUS_SUCCESS);
 }
 
 /* Parse config value from daemon JSON response */
@@ -1223,6 +1219,9 @@ void settings_dialog_show(void) {
     SettingsDialog *dlg = g_new0(SettingsDialog, 1);
     dlg->has_any_changes = FALSE;
 
+    /* Initialize UI theme */
+    ui_utils_init_theme();
+
     /* Create dialog */
     dlg->dialog = gtk_dialog_new_with_buttons(
         "NeoWall Settings",
@@ -1231,16 +1230,22 @@ void settings_dialog_show(void) {
         NULL, NULL
     );
 
-    /* Add buttons */
+    /* Set dialog icon */
+    ui_utils_set_window_icon(GTK_WINDOW(dlg->dialog));
+
+    /* Add buttons with styling */
     dlg->revert_button = gtk_dialog_add_button(GTK_DIALOG(dlg->dialog),
                                                "Revert", GTK_RESPONSE_NONE);
     gtk_widget_set_sensitive(dlg->revert_button, FALSE);
+    ui_utils_add_class(dlg->revert_button, "revert-button");
 
     gtk_dialog_add_button(GTK_DIALOG(dlg->dialog), "Close", GTK_RESPONSE_CLOSE);
 
     dlg->apply_button = gtk_dialog_add_button(GTK_DIALOG(dlg->dialog),
                                               "Apply", GTK_RESPONSE_APPLY);
     gtk_widget_set_sensitive(dlg->apply_button, FALSE);
+    ui_utils_add_class(dlg->apply_button, "suggested-action");
+    ui_utils_add_class(dlg->apply_button, "apply-button");
 
     gtk_window_set_default_size(GTK_WINDOW(dlg->dialog), 650, 550);
 
@@ -1248,8 +1253,8 @@ void settings_dialog_show(void) {
     GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dlg->dialog));
     gtk_container_set_border_width(GTK_CONTAINER(content_area), 10);
 
-    /* Status label */
-    dlg->status_label = gtk_label_new("");
+    /* Status label - styled with UI utils */
+    dlg->status_label = ui_utils_create_status_label("Ready", UI_STATUS_INFO);
     gtk_widget_set_halign(dlg->status_label, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(content_area), dlg->status_label, FALSE, FALSE, 5);
 
@@ -1296,7 +1301,7 @@ void settings_dialog_show(void) {
     /* Show and load config */
     gtk_widget_show_all(dlg->dialog);
 
-    show_status(dlg, "Loading configuration...", FALSE);
+    ui_utils_update_status_label(dlg->status_label, "⏳ Loading configuration...", UI_STATUS_INFO);
 
     /* Block signals during initial load */
     dlg->loading_config = TRUE;
@@ -1309,7 +1314,7 @@ void settings_dialog_show(void) {
     /* Unblock signals after initial load */
     dlg->loading_config = FALSE;
 
-    show_status(dlg, "Configuration loaded", FALSE);
+    ui_utils_update_status_label(dlg->status_label, "✓ Configuration loaded", UI_STATUS_SUCCESS);
 
     /* Run dialog */
     while (TRUE) {

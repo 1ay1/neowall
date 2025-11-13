@@ -14,6 +14,7 @@
 #include "menu/menu_callbacks.h"
 #include "indicator/indicator.h"
 #include "dialogs/dialogs.h"
+#include "ui/ui_utils.h"
 
 #define COMPONENT "MAIN"
 
@@ -189,6 +190,14 @@ int main(int argc, char *argv[]) {
     TRAY_LOG_INFO(COMPONENT, "Initializing GTK...");
     gtk_init(&argc, &argv);
     TRAY_LOG_DEBUG(COMPONENT, "GTK initialized successfully");
+
+    /* Initialize UI theme */
+    TRAY_LOG_INFO(COMPONENT, "Initializing UI theme...");
+    if (ui_utils_init_theme()) {
+        TRAY_LOG_DEBUG(COMPONENT, "UI theme initialized successfully");
+    } else {
+        TRAY_LOG_INFO(COMPONENT, "Warning: Failed to initialize UI theme, using defaults");
+    }
 
     /* Set up signal handlers for clean shutdown */
     TRAY_LOG_DEBUG(COMPONENT, "Setting up signal handlers");

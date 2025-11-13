@@ -7,6 +7,8 @@
 #include "../common/log.h"
 #include "../daemon/command_exec.h"
 #include "../daemon/daemon_check.h"
+#include "../ui/ui_utils.h"
+#include "about_dialog.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -124,6 +126,7 @@ void dialog_show_status(void) {
             "NeoWall Status"
         );
 
+        ui_utils_set_window_icon(GTK_WINDOW(dialog));
         gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", status_text);
         gtk_dialog_run(GTK_DIALOG(dialog));
         gtk_widget_destroy(dialog);
@@ -271,6 +274,7 @@ void dialog_show_status(void) {
         "NeoWall Status"
     );
 
+    ui_utils_set_window_icon(GTK_WINDOW(dialog));
     gtk_message_dialog_format_secondary_markup(GTK_MESSAGE_DIALOG(dialog), "%s", status_text);
     gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
@@ -299,6 +303,7 @@ void dialog_show_current_wallpaper(void) {
         "Current Wallpaper"
     );
 
+    ui_utils_set_window_icon(GTK_WINDOW(dialog));
     gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", output);
     gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
@@ -306,92 +311,8 @@ void dialog_show_current_wallpaper(void) {
 
 /* Show the about dialog */
 void dialog_show_about(void) {
-    GtkWidget *dialog = gtk_about_dialog_new();
-
-    /* Basic info - use central metadata */
-    gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dialog), NEOWALL_PROJECT_NAME);
-    gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(dialog), NEOWALL_VERSION);
-
-    /* Description - from central metadata */
-    gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(dialog), NEOWALL_PROJECT_DESCRIPTION);
-
-    /* Website - from central metadata */
-    gtk_about_dialog_set_website(GTK_ABOUT_DIALOG(dialog), NEOWALL_PROJECT_URL);
-    gtk_about_dialog_set_website_label(GTK_ABOUT_DIALOG(dialog), NEOWALL_PROJECT_URL_SHORT);
-
-    /* License - from central metadata */
-    gtk_about_dialog_set_license_type(GTK_ABOUT_DIALOG(dialog), GTK_LICENSE_MIT_X11);
-    gtk_about_dialog_set_license(GTK_ABOUT_DIALOG(dialog), NEOWALL_LICENSE_TEXT);
-    gtk_about_dialog_set_wrap_license(GTK_ABOUT_DIALOG(dialog), TRUE);
-
-    /* Copyright - from central metadata */
-    gtk_about_dialog_set_copyright(GTK_ABOUT_DIALOG(dialog), NEOWALL_PROJECT_COPYRIGHT);
-
-    /* Authors - from central metadata */
-    const gchar *authors[] = {
-        "Created by: " NEOWALL_PROJECT_AUTHOR,
-        "",
-        "Contributors:",
-        "• NeoWall Community",
-        "",
-        "Special Thanks:",
-        "• Wayland Community",
-        "• GLSL Shader Artists",
-        "• Open Source Contributors",
-        "",
-        "Features:",
-        "• Real-time GLSL shader effects",
-        "• Image cycling with smooth transitions",
-        "• Multi-monitor support",
-        "• GPU-accelerated rendering",
-        "• Wayland native",
-        "• Low resource usage",
-        "• System tray integration",
-        "• IPC control via JSON",
-        NULL
-    };
-    gtk_about_dialog_set_authors(GTK_ABOUT_DIALOG(dialog), authors);
-
-    /* Try to load SVG logo from multiple paths */
-    GdkPixbuf *logo = NULL;
-    GError *error = NULL;
-
-    const char *logo_paths[] = {
-        "/usr/share/pixmaps/neowall.svg",           /* Installed path */
-        "data/icons/neowall.svg",                   /* Build directory */
-        "../data/icons/neowall.svg",                /* From bin */
-        "neowall.svg",                              /* Current directory */
-        "../packaging/neowall.svg",                 /* Source tree */
-        "packaging/neowall.svg",                    /* Project root */
-        NULL
-    };
-
-    for (int i = 0; logo_paths[i] != NULL && !logo; i++) {
-        if (access(logo_paths[i], F_OK) == 0) {
-            /* Load SVG at a reasonable size (560px wide) */
-            logo = gdk_pixbuf_new_from_file_at_scale(logo_paths[i], 560, 160, TRUE, &error);
-            if (logo) {
-                TRAY_LOG_DEBUG(COMPONENT, "Loaded about logo from: %s", logo_paths[i]);
-                break;
-            }
-            if (error) {
-                g_error_free(error);
-                error = NULL;
-            }
-        }
-    }
-
-    if (logo) {
-        gtk_about_dialog_set_logo(GTK_ABOUT_DIALOG(dialog), logo);
-        g_object_unref(logo);
-    } else {
-        /* Fallback to icon name */
-        gtk_about_dialog_set_logo_icon_name(GTK_ABOUT_DIALOG(dialog), "preferences-desktop-wallpaper");
-        TRAY_LOG_DEBUG(COMPONENT, "Using fallback icon for about dialog");
-    }
-
-    gtk_dialog_run(GTK_DIALOG(dialog));
-    gtk_widget_destroy(dialog);
+    /* Use new modern about dialog */
+    about_dialog_show();
 }
 
 /* Show a confirmation dialog for stopping the daemon */
@@ -404,6 +325,7 @@ gint dialog_confirm_stop_daemon(void) {
         "Stop NeoWall Daemon?"
     );
 
+    ui_utils_set_window_icon(GTK_WINDOW(dialog));
     gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog),
         "This will stop the wallpaper daemon. The tray will remain open.");
 
@@ -424,6 +346,7 @@ void dialog_show_error(const char *title, const char *message) {
         title ? title : "Error"
     );
 
+    ui_utils_set_window_icon(GTK_WINDOW(dialog));
     if (message) {
         gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", message);
     }
@@ -461,11 +384,11 @@ void dialog_show_info(const char *title, const char *message, guint auto_close_m
         title ? title : "Information"
     );
 
+    ui_utils_set_window_icon(GTK_WINDOW(dialog));
     if (message) {
         gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", message);
     }
 
-    /* Show dialog non-blocking */
     gtk_widget_show_all(dialog);
 
     /* Schedule auto-close if requested */
@@ -485,6 +408,7 @@ void dialog_show_warning(const char *title, const char *message) {
         title ? title : "Warning"
     );
 
+    ui_utils_set_window_icon(GTK_WINDOW(dialog));
     if (message) {
         gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", message);
     }
@@ -556,10 +480,12 @@ GtkWidget *dialog_show_progress_auto_close(const char *title, const char *messag
         title ? title : "Progress"
     );
 
+    ui_utils_set_window_icon(GTK_WINDOW(dialog));
     if (message) {
         gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", message);
     }
 
+    gtk_widget_show_all(dialog);
     /* Create data structure for timer callback */
     ProgressDialogData *data = g_malloc0(sizeof(ProgressDialogData));
     data->dialog = dialog;
