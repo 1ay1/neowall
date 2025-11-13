@@ -80,12 +80,12 @@ static Command commands[] = {
     {"stop",               "Stop the neowalld daemon",               cmd_stop},
     {"restart",            "Restart the neowalld daemon",            cmd_restart},
     {"status",             "Show daemon status",                     cmd_status},
-    {"next",               "Switch to next wallpaper",               cmd_next},
-    {"prev",               "Switch to previous wallpaper",           cmd_prev},
-    {"pause",              "Pause wallpaper cycling",                cmd_pause},
-    {"resume",             "Resume wallpaper cycling",               cmd_resume},
+    {"next",               "Switch to next wallpaper [output]",      cmd_next},
+    {"prev",               "Switch to previous wallpaper [output]",  cmd_prev},
+    {"pause",              "Pause wallpaper cycling [output]",       cmd_pause},
+    {"resume",             "Resume wallpaper cycling [output]",      cmd_resume},
     {"reload",             "Reload configuration",                   cmd_reload},
-    {"current",            "Show current wallpaper",                 cmd_current},
+    {"current",            "Show current wallpaper [output]",        cmd_current},
     {"speed-up",           "Increase shader animation speed",        cmd_speed_up},
     {"speed-down",         "Decrease shader animation speed",        cmd_speed_down},
     {"shader-pause",       "Pause shader animation",                 cmd_shader_pause},
@@ -1005,19 +1005,33 @@ int cmd_status(int argc, char *argv[]) {
     return 1;
 }
 
-/* BLAZING FAST IPC command wrappers - inlined for zero overhead */
+/* BLAZING FAST IPC command wrappers - support optional output parameter */
 int cmd_next(int argc, char *argv[]) {
-    (void)argc; (void)argv;
+    if (argc >= 2) {
+        /* Output specified: neowall next DP-1 */
+        char args[512];
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+        return send_ipc_command("next", args, strlen(args)) ? 0 : 1;
+    }
+    /* No output specified - global */
     return send_ipc_command("next", NULL, 0) ? 0 : 1;
 }
 
 int cmd_pause(int argc, char *argv[]) {
-    (void)argc; (void)argv;
+    if (argc >= 2) {
+        char args[512];
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+        return send_ipc_command("pause", args, strlen(args)) ? 0 : 1;
+    }
     return send_ipc_command("pause", NULL, 0) ? 0 : 1;
 }
 
 int cmd_resume(int argc, char *argv[]) {
-    (void)argc; (void)argv;
+    if (argc >= 2) {
+        char args[512];
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+        return send_ipc_command("resume", args, strlen(args)) ? 0 : 1;
+    }
     return send_ipc_command("resume", NULL, 0) ? 0 : 1;
 }
 
@@ -1027,6 +1041,11 @@ int cmd_reload(int argc, char *argv[]) {
 }
 
 int cmd_current(int argc, char *argv[]) {
+    if (argc >= 2) {
+        char args[512];
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+        return send_ipc_command("current", args, strlen(args)) ? 0 : 1;
+    }
     return cmd_status(argc, argv);
 }
 
@@ -1051,7 +1070,13 @@ int cmd_shader_resume(int argc, char *argv[]) {
 }
 
 int cmd_prev(int argc, char *argv[]) {
-    (void)argc; (void)argv;
+    if (argc >= 2) {
+        /* Output specified: neowall prev DP-1 */
+        char args[512];
+        snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+        return send_ipc_command("prev", args, strlen(args)) ? 0 : 1;
+    }
+    /* No output specified - global */
     return send_ipc_command("prev", NULL, 0) ? 0 : 1;
 }
 

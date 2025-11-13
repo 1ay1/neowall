@@ -7,6 +7,8 @@
 #include "output_commands.h"
 #include "config_commands.h"
 #include "neowall.h"
+#include "output/output.h"
+#include "config/vibe_path.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -43,31 +45,31 @@ static command_stats_internal_t command_statistics[64]; /* Max 64 commands */
 /* Core command registry (wallpaper, cycling, shader, info) */
 static const command_info_t command_registry_core[] = {
     /* Wallpaper Control */
-    COMMAND_ENTRY(next, "wallpaper", "Switch to next wallpaper",
+    COMMAND_ENTRY(next, "wallpaper", "Switch to next wallpaper (optional: output name)",
                   CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
-    COMMAND_ENTRY(prev, "wallpaper", "Switch to previous wallpaper",
+    COMMAND_ENTRY(prev, "wallpaper", "Switch to previous wallpaper (optional: output name)",
                   CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
-    COMMAND_ENTRY(current, "wallpaper", "Get current wallpaper information",
+    COMMAND_ENTRY(current, "wallpaper", "Get current wallpaper information (optional: output name)",
                   CMD_CAP_REQUIRES_STATE),
 
     /* Cycling Control */
-    COMMAND_ENTRY(pause, "cycling", "Pause automatic wallpaper cycling",
+    COMMAND_ENTRY(pause, "cycling", "Pause automatic wallpaper cycling (optional: output name)",
                   CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
-    COMMAND_ENTRY(resume, "cycling", "Resume automatic wallpaper cycling",
+    COMMAND_ENTRY(resume, "cycling", "Resume automatic wallpaper cycling (optional: output name)",
                   CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
     COMMAND_ENTRY_CUSTOM("speed-up", cmd_speed_up, "shader",
-                        "Increase shader animation speed",
+                        "Increase shader animation speed (global)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
     COMMAND_ENTRY_CUSTOM("speed-down", cmd_speed_down, "shader",
-                        "Decrease shader animation speed",
+                        "Decrease shader animation speed (global)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
 
     /* Shader Control */
     COMMAND_ENTRY_CUSTOM("shader-pause", cmd_shader_pause, "shader",
-                        "Pause shader animation",
+                        "Pause shader animation (global)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
     COMMAND_ENTRY_CUSTOM("shader-resume", cmd_shader_resume, "shader",
-                        "Resume shader animation",
+                        "Resume shader animation (global)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
 
     /* Status & Information */
@@ -498,67 +500,226 @@ void commands_build_error(ipc_response_t *resp, command_result_t result, const c
 }
 
 /* ============================================================================
- * Command Handler Stub Implementations
- * These will be replaced with actual implementations
+ * Helper Functions
+ * ============================================================================ */
+
+/**
+ * Extract optional output name from request args
+ * Returns true if output param found and copied to output_name
+ */
+static bool extract_optional_output(const ipc_request_t *req, char *output_name, size_t size) {
+    if (!req || !output_name || size == 0) return false;
+
+    /* Look for "output" key in args JSON */
+    const char *output_start = strstr(req->args, "\"output\"");
+    if (!output_start) return false;
+
+    /* Find the value after the colon */
+    const char *colon = strchr(output_start, ':');
+    if (!colon) return false;
+
+    /* Skip whitespace and quotes */
+    const char *value = colon + 1;
+    while (*value && (*value == ' ' || *value == '\t' || *value == '"')) value++;
+
+    if (!*value) return false;
+
+    /* Copy until quote, comma, or brace */
+    size_t i = 0;
+    while (i < size - 1 && value[i] && value[i] != '"' && value[i] != ',' && value[i] != '}') {
+        output_name[i] = value[i];
+        i++;
+    }
+    output_name[i] = '\0';
+
+    return i > 0;
+}
+
+/**
+ * Find output by name, or return first output if name is NULL/empty
+ */
+static struct output_state *get_target_output(struct neowall_state *state, const char *output_name) {
+    if (!state || !state->outputs) return NULL;
+
+    /* If no specific output requested, use first output */
+    if (!output_name || output_name[0] == '\0') {
+        return state->outputs;
+    }
+
+    /* Find specific output by connector name (e.g., DP-1, HDMI-A-1) or model */
+    struct output_state *output = state->outputs;
+    while (output) {
+        if (strcmp(output->connector_name, output_name) == 0 ||
+            strcmp(output->model, output_name) == 0) {
+            return output;
+        }
+        output = output->next;
+    }
+
+    return NULL;
+}
+
+/* ============================================================================
+ * Command Handler Implementations
  * ============================================================================ */
 
 static command_result_t cmd_next(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    (void)req;
-
     if (!state) {
         commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
         return CMD_ERROR_STATE;
     }
 
-    /* Increment next_requested counter to trigger wallpaper change */
-    atomic_fetch_add(&state->next_requested, 1);
+    char output_name[256] = {0};
+    bool has_output = extract_optional_output(req, output_name, sizeof(output_name));
 
-    commands_build_success(resp, "Switched to next wallpaper", NULL);
+    if (has_output) {
+        /* Target specific output */
+        struct output_state *output = get_target_output(state, output_name);
+        if (!output) {
+            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+            return CMD_ERROR_NOT_FOUND;
+        }
+
+        /* Cycle to next wallpaper for this output */
+        output_cycle_wallpaper(output);
+
+        char data[256];
+        snprintf(data, sizeof(data), "{\"output\":\"%s\"}", output_name);
+        commands_build_success(resp, "Switched to next wallpaper", data);
+    } else {
+        /* Global next - increment counter for all outputs */
+        atomic_fetch_add(&state->next_requested, 1);
+        commands_build_success(resp, "Switched to next wallpaper", NULL);
+    }
+
     return CMD_SUCCESS;
 }
 
 static command_result_t cmd_prev(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    (void)req;
-
     if (!state) {
         commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
         return CMD_ERROR_STATE;
     }
 
-    /* Increment prev_requested counter to trigger previous wallpaper change */
-    atomic_fetch_add(&state->prev_requested, 1);
+    char output_name[256] = {0};
+    bool has_output = extract_optional_output(req, output_name, sizeof(output_name));
 
-    commands_build_success(resp, "Switched to previous wallpaper", NULL);
+    if (has_output) {
+        /* Target specific output */
+        struct output_state *output = get_target_output(state, output_name);
+        if (!output) {
+            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+            return CMD_ERROR_NOT_FOUND;
+        }
+
+        /* Cycle to previous wallpaper */
+        if (output->config.cycle && output->config.cycle_count > 0) {
+            if (output->config.current_cycle_index > 0) {
+                output->config.current_cycle_index--;
+            } else {
+                output->config.current_cycle_index = output->config.cycle_count - 1;
+            }
+            const char *wallpaper = output->config.cycle_paths[output->config.current_cycle_index];
+            output_set_wallpaper(output, wallpaper);
+        }
+
+        char data[256];
+        snprintf(data, sizeof(data), "{\"output\":\"%s\"}", output_name);
+        commands_build_success(resp, "Switched to previous wallpaper", data);
+    } else {
+        /* Global prev - increment counter for all outputs */
+        atomic_fetch_add(&state->prev_requested, 1);
+        commands_build_success(resp, "Switched to previous wallpaper", NULL);
+    }
+
     return CMD_SUCCESS;
 }
 
 static command_result_t cmd_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    (void)req;
-
     if (!state) {
         commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
         return CMD_ERROR_STATE;
     }
 
-    /* Set paused flag */
-    atomic_store(&state->paused, true);
+    char output_name[256] = {0};
+    bool has_output = extract_optional_output(req, output_name, sizeof(output_name));
 
-    commands_build_success(resp, "Paused wallpaper cycling", NULL);
+    if (has_output) {
+        /* Pause specific output */
+        struct output_state *output = get_target_output(state, output_name);
+        if (!output) {
+            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+            return CMD_ERROR_NOT_FOUND;
+        }
+
+        output->config.duration = 0.0f;
+
+        char data[256];
+        snprintf(data, sizeof(data), "{\"output\":\"%s\"}", output_name);
+        commands_build_success(resp, "Paused output cycling", data);
+    } else {
+        /* Global pause */
+        atomic_store(&state->paused, true);
+        commands_build_success(resp, "Paused wallpaper cycling", NULL);
+    }
+
     return CMD_SUCCESS;
 }
 
 static command_result_t cmd_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    (void)req;
-
     if (!state) {
         commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
         return CMD_ERROR_STATE;
     }
 
-    /* Clear paused flag */
-    atomic_store(&state->paused, false);
+    char output_name[256] = {0};
+    bool has_output = extract_optional_output(req, output_name, sizeof(output_name));
 
-    commands_build_success(resp, "Resumed wallpaper cycling", NULL);
+    if (has_output) {
+        /* Resume specific output */
+        struct output_state *output = get_target_output(state, output_name);
+        if (!output) {
+            commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+            return CMD_ERROR_NOT_FOUND;
+        }
+
+        /* Restore duration from config if it was paused */
+        if (output->config.cycle && output->config.duration == 0.0f) {
+            if (state->config_path[0] != '\0') {
+                VibeParser *parser = vibe_parser_new();
+                if (parser) {
+                    VibeValue *root = vibe_parse_file(parser, state->config_path);
+                    if (root) {
+                        char path[512];
+                        snprintf(path, sizeof(path), "output.%s.duration", output_name);
+                        double duration = 0.0;
+
+                        if (vibe_path_get_float(root, path, &duration) && duration > 0.0) {
+                            output->config.duration = (float)duration;
+                        } else if (vibe_path_get_float(root, "default.duration", &duration) && duration > 0.0) {
+                            output->config.duration = (float)duration;
+                        } else {
+                            output->config.duration = 300.0f;
+                        }
+
+                        vibe_value_free(root);
+                    }
+                    vibe_parser_free(parser);
+                }
+            } else {
+                output->config.duration = 300.0f;
+            }
+        }
+
+        char data[256];
+        snprintf(data, sizeof(data), "{\"output\":\"%s\",\"duration\":%.1f}", output_name, output->config.duration);
+        commands_build_success(resp, "Resumed output cycling", data);
+    } else {
+        /* Global resume */
+        atomic_store(&state->paused, false);
+        commands_build_success(resp, "Resumed wallpaper cycling", NULL);
+    }
+
     return CMD_SUCCESS;
 }
 
@@ -612,10 +773,10 @@ static command_result_t cmd_shader_pause(struct neowall_state *state, const ipc_
         return CMD_ERROR_STATE;
     }
 
-    /* Pause shader animation (freezes time) */
+    /* Shader pause is global only */
     atomic_store(&state->shader_paused, true);
-
     commands_build_success(resp, "Paused shader animation", NULL);
+
     return CMD_SUCCESS;
 }
 
@@ -627,10 +788,10 @@ static command_result_t cmd_shader_resume(struct neowall_state *state, const ipc
         return CMD_ERROR_STATE;
     }
 
-    /* Resume shader animation */
+    /* Shader resume is global only */
     atomic_store(&state->shader_paused, false);
-
     commands_build_success(resp, "Resumed shader animation", NULL);
+
     return CMD_SUCCESS;
 }
 
