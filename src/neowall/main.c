@@ -32,6 +32,7 @@ typedef struct {
 } Command;
 
 /* Forward declarations */
+static void format_data_output(const char *json_data);
 static int cmd_start(int argc, char *argv[]);
 static int cmd_stop(int argc, char *argv[]);
 static int cmd_restart(int argc, char *argv[]);
@@ -283,11 +284,227 @@ static bool send_ipc_command(const char *command, const char *args_json, size_t 
         return false;
     }
 
-    if (resp.message[0]) {
+    /* In non-JSON mode, display both message and data if available */
+    if (resp.message[0] && strcmp(resp.message, "OK") != 0) {
         printf("%s\n", resp.message);
     }
 
+    /* If there's data, display it formatted (but skip if it's just a message wrapper) */
+    if (resp.data[0] && strcmp(resp.data, "{}") != 0) {
+        /* Skip data that only contains a message (already displayed above) */
+        if (strstr(resp.data, "\"message\":") && !strstr(resp.data, "\"outputs\"") &&
+            !strstr(resp.data, "\"name\":") && !strstr(resp.data, "\"keys\":")) {
+            /* This is just a message wrapper, skip it */
+        } else {
+            /* Try to format the JSON data for human readability */
+            format_data_output(resp.data);
+        }
+    }
+
     return (resp.status == IPC_STATUS_OK);
+}
+
+/* Format JSON data for human-readable output */
+static void format_data_output(const char *json_data) {
+    if (!json_data || !json_data[0]) {
+        return;
+    }
+
+    /* Simple JSON parsing for common data structures */
+    /* This is a basic formatter - for complex formatting, commands should handle it themselves */
+
+    /* Check if it's an outputs array (list-outputs command) */
+    if (strstr(json_data, "\"outputs\":[")) {
+        printf("\nConnected Outputs:\n");
+        printf("─────────────────────────────────────────────────────────\n");
+
+        /* Parse each output entry */
+        const char *pos = json_data;
+        while ((pos = strstr(pos, "\"name\":\"")) != NULL) {
+            pos += 8; /* Skip "name":" */
+            const char *name_end = strchr(pos, '"');
+            if (!name_end) break;
+
+            char name[128];
+            size_t name_len = name_end - pos;
+            if (name_len >= sizeof(name)) name_len = sizeof(name) - 1;
+            memcpy(name, pos, name_len);
+            name[name_len] = '\0';
+
+            /* Extract model */
+            const char *model_pos = strstr(pos, "\"model\":\"");
+            char model[128] = "Unknown";
+            if (model_pos && model_pos < pos + 500) {
+                model_pos += 9;
+                const char *model_end = strchr(model_pos, '"');
+                if (model_end) {
+                    size_t model_len = model_end - model_pos;
+                    if (model_len >= sizeof(model)) model_len = sizeof(model) - 1;
+                    memcpy(model, model_pos, model_len);
+                    model[model_len] = '\0';
+                }
+            }
+
+            /* Extract resolution */
+            int width = 0, height = 0;
+            const char *width_pos = strstr(pos, "\"width\":");
+            if (width_pos && width_pos < pos + 500) {
+                sscanf(width_pos + 8, "%d", &width);
+            }
+            const char *height_pos = strstr(pos, "\"height\":");
+            if (height_pos && height_pos < pos + 500) {
+                sscanf(height_pos + 9, "%d", &height);
+            }
+
+            /* Extract wallpaper info */
+            const char *type_pos = strstr(pos, "\"wallpaper_type\":\"");
+            char type[32] = "unknown";
+            if (type_pos && type_pos < pos + 500) {
+                type_pos += 18;
+                const char *type_end = strchr(type_pos, '"');
+                if (type_end) {
+                    size_t type_len = type_end - type_pos;
+                    if (type_len >= sizeof(type)) type_len = sizeof(type) - 1;
+                    memcpy(type, type_pos, type_len);
+                    type[type_len] = '\0';
+                }
+            }
+
+            /* Extract cycle info */
+            int cycle_index = 0, cycle_total = 0;
+            const char *idx_pos = strstr(pos, "\"cycle_index\":");
+            if (idx_pos && idx_pos < pos + 500) {
+                sscanf(idx_pos + 14, "%d", &cycle_index);
+            }
+            const char *total_pos = strstr(pos, "\"cycle_total\":");
+            if (total_pos && total_pos < pos + 500) {
+                sscanf(total_pos + 14, "%d", &cycle_total);
+            }
+
+            printf("  • %s (%s)\n", name, model);
+            printf("    Resolution: %dx%d\n", width, height);
+            printf("    Wallpaper:  %s", type);
+            if (cycle_total > 0) {
+                printf(" [%d/%d]", cycle_index + 1, cycle_total);
+            }
+            printf("\n\n");
+
+            pos = name_end + 1;
+        }
+        return;
+    }
+
+    /* Check if it's a single output info */
+    if (strstr(json_data, "\"name\":\"") && strstr(json_data, "\"model\":\"")) {
+        printf("\nOutput Information:\n");
+        printf("─────────────────────────────────────────────────────────\n");
+
+        /* Extract and display fields */
+        const char *name_pos = strstr(json_data, "\"name\":\"");
+        if (name_pos) {
+            name_pos += 8;
+            const char *name_end = strchr(name_pos, '"');
+            if (name_end) {
+                printf("  Name:       %.*s\n", (int)(name_end - name_pos), name_pos);
+            }
+        }
+
+        const char *model_pos = strstr(json_data, "\"model\":\"");
+        if (model_pos) {
+            model_pos += 9;
+            const char *model_end = strchr(model_pos, '"');
+            if (model_end) {
+                printf("  Model:      %.*s\n", (int)(model_end - model_pos), model_pos);
+            }
+        }
+
+        int width = 0, height = 0, scale = 1;
+        const char *width_pos = strstr(json_data, "\"width\":");
+        if (width_pos) sscanf(width_pos + 8, "%d", &width);
+        const char *height_pos = strstr(json_data, "\"height\":");
+        if (height_pos) sscanf(height_pos + 9, "%d", &height);
+        const char *scale_pos = strstr(json_data, "\"scale\":");
+        if (scale_pos) sscanf(scale_pos + 8, "%d", &scale);
+
+        printf("  Resolution: %dx%d @ %dx scale\n", width, height, scale);
+
+        const char *type_pos = strstr(json_data, "\"wallpaper_type\":\"");
+        if (type_pos) {
+            type_pos += 18;
+            const char *type_end = strchr(type_pos, '"');
+            if (type_end) {
+                printf("  Type:       %.*s\n", (int)(type_end - type_pos), type_pos);
+            }
+        }
+
+        const char *mode_pos = strstr(json_data, "\"mode\":\"");
+        if (mode_pos) {
+            mode_pos += 8;
+            const char *mode_end = strchr(mode_pos, '"');
+            if (mode_end) {
+                printf("  Mode:       %.*s\n", (int)(mode_end - mode_pos), mode_pos);
+            }
+        }
+
+        const char *path_pos = strstr(json_data, "\"wallpaper_path\":\"");
+        if (path_pos) {
+            path_pos += 18;
+            const char *path_end = strchr(path_pos, '"');
+            if (path_end) {
+                const char *basename_start = path_pos;
+                for (const char *p = path_pos; p < path_end; p++) {
+                    if (*p == '/') basename_start = p + 1;
+                }
+                printf("  Current:    %.*s\n", (int)(path_end - basename_start), basename_start);
+                printf("  Path:       %.*s\n", (int)(path_end - path_pos), path_pos);
+            }
+        }
+
+        int cycle_index = 0, cycle_total = 0;
+        const char *idx_pos = strstr(json_data, "\"cycle_index\":");
+        if (idx_pos) sscanf(idx_pos + 14, "%d", &cycle_index);
+        const char *total_pos = strstr(json_data, "\"cycle_total\":");
+        if (total_pos) sscanf(total_pos + 14, "%d", &cycle_total);
+
+        if (cycle_total > 0) {
+            printf("  Cycling:    %d of %d\n", cycle_index + 1, cycle_total);
+        }
+
+        printf("\n");
+        return;
+    }
+
+    /* Check if it's config keys list */
+    if (strstr(json_data, "\"keys\":[")) {
+        printf("\nAvailable Configuration Keys:\n");
+        printf("─────────────────────────────────────────────────────────\n");
+
+        const char *pos = json_data;
+        while ((pos = strstr(pos, "\"key\":\"")) != NULL) {
+            pos += 7;
+            const char *key_end = strchr(pos, '"');
+            if (!key_end) break;
+
+            printf("  • %.*s\n", (int)(key_end - pos), pos);
+
+            /* Show description if available */
+            const char *desc_pos = strstr(pos, "\"description\":\"");
+            if (desc_pos && desc_pos < key_end + 200) {
+                desc_pos += 15;
+                const char *desc_end = strchr(desc_pos, '"');
+                if (desc_end) {
+                    printf("    %.*s\n", (int)(desc_end - desc_pos), desc_pos);
+                }
+            }
+
+            pos = key_end + 1;
+        }
+        printf("\n");
+        return;
+    }
+
+    /* For unrecognized data, just print it as-is (it's already formatted by daemon) */
+    printf("%s\n", json_data);
 }
 
 /* Command implementations */
