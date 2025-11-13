@@ -16,11 +16,34 @@
 GtkWidget *menu_builder_create(void);
 
 /**
- * Schedule a menu refresh
- * Triggers a delayed menu rebuild (500ms delay)
+ * Update only the status item in an existing menu
+ * Updates the status indicator without rebuilding the entire menu
+ * @param menu The menu containing the status item
+ * @return true if status was updated, false otherwise
+ */
+bool menu_builder_update_status(GtkWidget *menu);
+
+/**
+ * Schedule a menu status update
+ * Triggers a delayed status update (500ms delay)
  * Useful after daemon state changes (start/stop/restart)
  */
+void menu_schedule_status_update(void);
+
+/**
+ * Schedule a full menu refresh
+ * Triggers a delayed menu rebuild (500ms delay)
+ * Only use when menu structure needs to change
+ */
 void menu_schedule_refresh(void);
+
+/**
+ * Set the menu status update callback
+ * This function will be called when only the status needs updating
+ * @param callback Function to call when status should update
+ * @param user_data User data to pass to callback
+ */
+void menu_builder_set_status_update_callback(void (*callback)(gpointer), gpointer user_data);
 
 /**
  * Set the menu refresh callback

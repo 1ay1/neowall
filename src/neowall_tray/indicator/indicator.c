@@ -1,13 +1,16 @@
 /* NeoWall Tray - Indicator Component
- * Implementation of system tray indicator functions
+ * Implementation of system tray indicator
  */
 
 #include "indicator.h"
+#include "../common/log.h"
 #include "../daemon/daemon_check.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <stdlib.h>
+
+#define COMPONENT "INDICATOR"
 
 #define APP_ID "com.github.neowall.tray"
 #define APP_TITLE "NeoWall"
@@ -34,18 +37,18 @@ static char *find_icon_path(void) {
             if (icon_paths[i][0] != '/') {
                 abs_path = realpath(icon_paths[i], NULL);
                 if (abs_path) {
-                    printf("Found icon at: %s -> %s\n", icon_paths[i], abs_path);
+                    TRAY_LOG_DEBUG(COMPONENT, "Found icon at: %s -> %s", icon_paths[i], abs_path);
                     return abs_path;
                 }
             } else {
-                printf("Found icon at: %s\n", icon_paths[i]);
+                TRAY_LOG_DEBUG(COMPONENT, "Found icon at: %s", icon_paths[i]);
                 return strdup(icon_paths[i]);
             }
         }
     }
 
     /* No custom icon found, use icon name (will search theme) */
-    fprintf(stderr, "Debug: No custom icon found, using fallback: %s\n", ICON_FALLBACK);
+    TRAY_LOG_DEBUG(COMPONENT, "No custom icon found, using fallback: %s", ICON_FALLBACK);
     return NULL;
 }
 
@@ -56,9 +59,9 @@ AppIndicator *indicator_init(void) {
     const char *icon = icon_path ? icon_path : ICON_FALLBACK;
 
     if (icon_path) {
-        printf("Using custom icon: %s\n", icon_path);
+        TRAY_LOG_INFO(COMPONENT, "Using custom icon: %s", icon_path);
     } else {
-        printf("Using fallback icon: %s\n", icon);
+        TRAY_LOG_INFO(COMPONENT, "Using fallback icon: %s", icon);
     }
 
     /* Create indicator with icon path */
@@ -69,7 +72,7 @@ AppIndicator *indicator_init(void) {
     );
 
     if (!indicator) {
-        fprintf(stderr, "Failed to create AppIndicator\n");
+        TRAY_LOG_ERROR(COMPONENT, "Failed to create AppIndicator");
         if (icon_path) free(icon_path);
         return NULL;
     }
@@ -85,7 +88,7 @@ AppIndicator *indicator_init(void) {
             *last_slash = '\0';
             filename = last_slash + 1;  /* Save pointer before freeing icon_dir */
             app_indicator_set_icon_theme_path(indicator, icon_dir);
-            printf("Set icon theme path: %s\n", icon_dir);
+            TRAY_LOG_DEBUG(COMPONENT, "Set icon theme path: %s", icon_dir);
         }
 
         /* Extract filename without extension for icon name */
@@ -95,7 +98,7 @@ AppIndicator *indicator_init(void) {
 
         /* Update indicator to use just the name */
         app_indicator_set_icon(indicator, icon_name);
-        printf("Set icon name: %s\n", icon_name);
+        TRAY_LOG_DEBUG(COMPONENT, "Set icon name: %s", icon_name);
 
         free(icon_name);
         free(icon_dir);

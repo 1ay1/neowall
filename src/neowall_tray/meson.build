@@ -10,6 +10,9 @@ tray_sources = [
   # Main entry point
   'main.c',
 
+  # Common utilities
+  'common/log.c',
+
   # Daemon component
   'daemon/daemon_check.c',
   'daemon/command_exec.c',
@@ -17,6 +20,7 @@ tray_sources = [
   # Menu component
   'menu/menu_builder.c',
   'menu/menu_callbacks.c',
+  'menu/menu_items.c',
 
   # Indicator component
   'indicator/indicator.c',
@@ -33,7 +37,7 @@ neowall_tray = executable(
   'neowall_tray',
   tray_sources,
   dependencies: [gtk3, appindicator3],
-  include_directories: tray_inc,
+  include_directories: [tray_inc, inc_dirs],
   install: true,
   install_dir: get_option('bindir'),
 )

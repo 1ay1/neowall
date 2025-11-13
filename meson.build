@@ -2,7 +2,7 @@
 # Meson build configuration
 
 project('neowall', 'c',
-  version: '0.3.0',
+  version: '0.4.0',
   license: 'MIT',
   default_options: [
     'c_std=c11',
@@ -16,7 +16,42 @@ project('neowall', 'c',
 project_name = 'neowall'
 project_version = meson.project_version()
 
-# Add version definition
+# Parse version components
+version_parts = project_version.split('.')
+version_major = version_parts[0]
+version_minor = version_parts[1]
+version_patch = version_parts.length() > 2 ? version_parts[2] : '0'
+
+# Build information
+build_date = run_command('date', '+%Y-%m-%d', check: false).stdout().strip()
+build_type = get_option('buildtype')
+copyright_year = run_command('date', '+%Y', check: false).stdout().strip()
+
+# Generate version header from template
+version_conf = configuration_data()
+version_conf.set('VERSION', project_version)
+version_conf.set('VERSION_MAJOR', version_major)
+version_conf.set('VERSION_MINOR', version_minor)
+version_conf.set('VERSION_PATCH', version_patch)
+version_conf.set('BUILD_DATE', build_date)
+version_conf.set('BUILD_TYPE', build_type)
+version_conf.set('COPYRIGHT_YEAR', copyright_year)
+
+version_h = configure_file(
+  input: 'include/version/version.h.in',
+  output: 'version.h',
+  configuration: version_conf,
+  install: true,
+  install_dir: get_option('includedir') / 'neowall'
+)
+
+# Create dependency for version header
+version_dep = declare_dependency(
+  sources: version_h,
+  include_directories: include_directories('.')
+)
+
+# Add version definition (keep for backwards compatibility)
 add_project_arguments('-DNEOWALL_VERSION="@0@"'.format(project_version), language: 'c')
 add_project_arguments('-D_POSIX_C_SOURCE=200809L', language: 'c')
 add_project_arguments('-D_DEFAULT_SOURCE', language: 'c')
@@ -98,8 +133,11 @@ foreach xml : all_protocols
   proto_headers += wayland_scanner_client.process(xml)
 endforeach
 
-# Include directories
-inc_dirs = include_directories('include', 'src')
+# Include directories (add builddir for generated headers)
+inc_dirs = [
+  include_directories('include', 'src'),
+  include_directories('.', is_system: false)
+]
 
 # Create bin directory in build root for convenience
 run_command('mkdir', '-p', meson.project_build_root() / 'bin', check: false)

@@ -18,7 +18,7 @@
 typedef atomic_bool atomic_bool_t;
 typedef atomic_int atomic_int_t;
 
-#define NEOWALL_VERSION "0.3.0"
+/* Version is now defined in version.h - include that for version info */
 #define MAX_PATH_LENGTH OUTPUT_MAX_PATH_LENGTH  /* Compatibility alias */
 #define MAX_OUTPUTS 16
 #define MAX_WALLPAPERS 256

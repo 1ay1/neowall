@@ -17,7 +17,7 @@
 #include "../ipc/socket.h"
 #include "../ipc/protocol.h"
 
-#define NEOWALL_VERSION "0.3.0"
+#include <version.h>
 
 /* Global flags */
 static bool flag_json_output = false;
@@ -579,10 +579,11 @@ static int cmd_version(int argc, char *argv[]) {
 
     /* Single write() call for maximum speed */
     const char *msg =
-        "NeoWall " NEOWALL_VERSION "\n"
-        "GPU-accelerated shader wallpapers for Wayland\n\n"
-        "License: MIT\n"
-        "Website: https://github.com/1ay1/neowall\n";
+        NEOWALL_VERSION_STRING "\n"
+        NEOWALL_PROJECT_DESCRIPTION "\n\n"
+        "License: " NEOWALL_PROJECT_LICENSE "\n"
+        "Website: " NEOWALL_PROJECT_URL "\n"
+        "Author: " NEOWALL_PROJECT_AUTHOR "\n";
 
     fputs(msg, stdout);
     return 0;
@@ -591,7 +592,7 @@ static int cmd_version(int argc, char *argv[]) {
 static int cmd_help(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
-    printf("NeoWall %s - GPU-accelerated shader wallpapers for Wayland\n\n", NEOWALL_VERSION);
+    printf("%s - %s\n\n", NEOWALL_VERSION_STRING, NEOWALL_PROJECT_DESCRIPTION);
     printf("Usage: neowall [OPTIONS] [COMMAND]\n\n");
     printf("Global Options:\n");
     printf("  --json             Output in JSON format (for scripting)\n");

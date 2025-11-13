@@ -7,7 +7,7 @@
 #include "../dialogs/dialogs.h"
 #include <stdio.h>
 
-/* Forward declaration for menu refresh function */
+/* Forward declaration for menu update functions */
 extern void menu_schedule_refresh(void);
 
 /* Wallpaper control callbacks */
@@ -77,25 +77,50 @@ void menu_callback_show_status(GtkMenuItem *item, gpointer user_data) {
 void menu_callback_edit_config(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
-    command_execute("config");
+
+    if (!command_execute("config")) {
+        dialog_show_error("Configuration Error",
+                         "Failed to open configuration file.\n"
+                         "Please check your editor settings.");
+    }
 }
 
 void menu_callback_start_daemon(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
-    command_execute("start");
 
-    /* Schedule menu refresh after daemon starts */
-    menu_schedule_refresh();
+    if (command_execute("start")) {
+        dialog_show_info("Starting Daemon",
+                        "NeoWall daemon is starting...\n"
+                        "Please wait a moment.",
+                        2000);  /* Auto-close after 2 seconds */
+
+        /* Schedule full menu refresh after daemon starts (menu structure changes) */
+        menu_schedule_refresh();
+    } else {
+        dialog_show_error("Start Failed",
+                         "Failed to start NeoWall daemon.\n"
+                         "Please check the logs for details.");
+    }
 }
 
 void menu_callback_restart_daemon(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
-    command_execute("restart");
 
-    /* Schedule menu refresh after daemon restarts */
-    menu_schedule_refresh();
+    if (command_execute("restart")) {
+        dialog_show_info("Restarting Daemon",
+                        "NeoWall daemon is restarting...\n"
+                        "Please wait a moment.",
+                        2000);  /* Auto-close after 2 seconds */
+
+        /* Schedule full menu refresh after daemon restarts (menu structure changes) */
+        menu_schedule_refresh();
+    } else {
+        dialog_show_error("Restart Failed",
+                         "Failed to restart NeoWall daemon.\n"
+                         "Please check the logs for details.");
+    }
 }
 
 void menu_callback_stop_daemon(GtkMenuItem *item, gpointer user_data) {
@@ -106,10 +131,18 @@ void menu_callback_stop_daemon(GtkMenuItem *item, gpointer user_data) {
     gint result = dialog_confirm_stop_daemon();
 
     if (result == GTK_RESPONSE_YES) {
-        command_execute("stop");
+        if (command_execute("stop")) {
+            dialog_show_info("Stopping Daemon",
+                            "NeoWall daemon is stopping...",
+                            2000);  /* Auto-close after 2 seconds */
 
-        /* Schedule menu refresh after daemon stops */
-        menu_schedule_refresh();
+            /* Schedule full menu refresh after daemon stops (menu structure changes) */
+            menu_schedule_refresh();
+        } else {
+            dialog_show_error("Stop Failed",
+                             "Failed to stop NeoWall daemon.\n"
+                             "The daemon may not be running.");
+        }
     }
 }
 
