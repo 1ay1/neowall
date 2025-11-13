@@ -473,7 +473,7 @@ const char *commands_result_to_string(command_result_t result) {
 void commands_build_success(ipc_response_t *resp, const char *message, const char *data) {
     if (!resp) return;
 
-    char buffer[2048];
+    static char buffer[32768];  /* Large buffer for detailed status responses */
     if (data) {
         snprintf(buffer, sizeof(buffer), "{\"message\":\"%s\",\"data\":%s}",
                 message ? message : "OK", data);
@@ -644,14 +644,63 @@ static command_result_t cmd_status(struct neowall_state *state, const ipc_reques
         return CMD_ERROR_STATE;
     }
 
-    char data[1024];
-    snprintf(data, sizeof(data),
-             "{\"daemon\":\"running\",\"pid\":%d,\"outputs\":%u,\"paused\":%s,\"shader_paused\":%s,\"shader_speed\":%.2f}",
-             getpid(),
-             state->output_count,
-             atomic_load(&state->paused) ? "true" : "false",
-             atomic_load(&state->shader_paused) ? "true" : "false",
-             atomic_load(&state->shader_speed));
+    static char data[16384];  /* Increased buffer size for long paths */
+    size_t offset = 0;
+
+    /* Start JSON object */
+    offset += snprintf(data + offset, sizeof(data) - offset,
+                      "{\"daemon\":\"running\",\"pid\":%d,\"outputs\":%u,\"paused\":%s,\"shader_paused\":%s,\"shader_speed\":%.2f",
+                      getpid(),
+                      state->output_count,
+                      atomic_load(&state->paused) ? "true" : "false",
+                      atomic_load(&state->shader_paused) ? "true" : "false",
+                      atomic_load(&state->shader_speed));
+
+    /* Add wallpaper information */
+    offset += snprintf(data + offset, sizeof(data) - offset, ",\"wallpapers\":[");
+
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    struct output_state *output = state->outputs;
+    bool first = true;
+
+    while (output && offset < sizeof(data) - 512) {
+        if (!first) {
+            offset += snprintf(data + offset, sizeof(data) - offset, ",");
+        }
+        first = false;
+
+        const char *type = (output->config.type == WALLPAPER_SHADER) ? "shader" : "image";
+        const char *path = (output->config.type == WALLPAPER_SHADER)
+            ? output->config.shader_path
+            : output->config.path;
+
+        /* Escape path for JSON */
+        char escaped_path[512];
+        size_t j = 0;
+        for (size_t i = 0; path[i] && j < sizeof(escaped_path) - 2; i++) {
+            if (path[i] == '"' || path[i] == '\\') {
+                escaped_path[j++] = '\\';
+            }
+            escaped_path[j++] = path[i];
+        }
+        escaped_path[j] = '\0';
+
+        offset += snprintf(data + offset, sizeof(data) - offset,
+                          "{\"output\":\"%s\",\"type\":\"%s\",\"path\":\"%s\",\"mode\":%u,\"cycle_index\":%zu,\"cycle_total\":%zu}",
+                          output->connector_name,
+                          type,
+                          escaped_path,
+                          (unsigned int)output->config.mode,
+                          output->config.current_cycle_index,
+                          output->config.cycle_count);
+
+        output = output->next;
+    }
+
+    pthread_rwlock_unlock(&state->output_list_lock);
+
+    /* Close wallpapers array and main object */
+    offset += snprintf(data + offset, sizeof(data) - offset, "]}");
 
     commands_build_success(resp, NULL, data);
     return CMD_SUCCESS;

@@ -5,10 +5,12 @@
 #include "dialogs.h"
 #include "../common/log.h"
 #include "../daemon/command_exec.h"
+#include "../daemon/daemon_check.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <ctype.h>
 
 #include <version.h>
 
@@ -18,15 +20,233 @@
 #define LOGO_PATH "/usr/share/pixmaps/neowall.svg"
 #define ICON_PATH "/usr/share/pixmaps/neowall-icon.svg"
 
-/* Show the daemon status dialog */
-void dialog_show_status(void) {
-    char output[4096] = {0};
+/* Simple JSON value extractor */
+__attribute__((unused))
+static bool json_get_string(const char *json, const char *key, char *out, size_t out_size) {
+    char search[128];
+    snprintf(search, sizeof(search), "\"%s\":\"", key);
 
-    if (!command_execute_with_output("status", output, sizeof(output))) {
-        dialog_show_error("Status Error", "Failed to retrieve daemon status");
+    const char *start = strstr(json, search);
+    if (!start) {
+        return false;
+    }
+
+    start += strlen(search);
+    const char *end = strchr(start, '"');
+    if (!end) {
+        return false;
+    }
+
+    size_t len = end - start;
+    if (len >= out_size) {
+        len = out_size - 1;
+    }
+
+    strncpy(out, start, len);
+    out[len] = '\0';
+    return true;
+}
+
+static bool json_get_int(const char *json, const char *key, int *out) {
+    char search[128];
+    snprintf(search, sizeof(search), "\"%s\":", key);
+
+    const char *start = strstr(json, search);
+    if (!start) {
+        return false;
+    }
+
+    start += strlen(search);
+    while (*start && isspace(*start)) start++;
+
+    if (*start == '"') start++;  /* Skip quote if present */
+
+    *out = atoi(start);
+    return true;
+}
+
+static bool json_get_bool(const char *json, const char *key, bool *out) {
+    char search[128];
+    snprintf(search, sizeof(search), "\"%s\":", key);
+
+    const char *start = strstr(json, search);
+    if (!start) {
+        return false;
+    }
+
+    start += strlen(search);
+    while (*start && isspace(*start)) start++;
+
+    if (strncmp(start, "true", 4) == 0) {
+        *out = true;
+        return true;
+    } else if (strncmp(start, "false", 5) == 0) {
+        *out = false;
+        return true;
+    }
+
+    return false;
+}
+
+static bool json_get_float(const char *json, const char *key, float *out) {
+    char search[128];
+    snprintf(search, sizeof(search), "\"%s\":", key);
+
+    const char *start = strstr(json, search);
+    if (!start) {
+        return false;
+    }
+
+    start += strlen(search);
+    while (*start && isspace(*start)) start++;
+
+    *out = atof(start);
+    return true;
+}
+
+/* Show the daemon status dialog with detailed information */
+void dialog_show_status(void) {
+    char status_text[4096];
+
+    /* Check if daemon is running first */
+    if (!daemon_is_running()) {
+        snprintf(status_text, sizeof(status_text),
+                 "○ Daemon Status: Stopped\n\n"
+                 "The NeoWall daemon is not currently running.\n"
+                 "Use the tray menu to start it.");
+
+        GtkWidget *dialog = gtk_message_dialog_new(
+            NULL,
+            GTK_DIALOG_MODAL,
+            GTK_MESSAGE_INFO,
+            GTK_BUTTONS_OK,
+            "NeoWall Status"
+        );
+
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", status_text);
+        gtk_dialog_run(GTK_DIALOG(dialog));
+        gtk_widget_destroy(dialog);
         return;
     }
 
+    /* Get detailed status via IPC */
+    char output[8192] = {0};
+    bool ipc_success = command_execute_with_output("status", output, sizeof(output));
+
+    if (ipc_success && strstr(output, "\"daemon\":\"running\"")) {
+        /* Parse JSON response */
+        int pid = 0, output_count = 0;
+        bool paused = false, shader_paused = false;
+        float shader_speed = 1.0f;
+
+        json_get_int(output, "pid", &pid);
+        json_get_int(output, "outputs", &output_count);
+        json_get_bool(output, "paused", &paused);
+        json_get_bool(output, "shader_paused", &shader_paused);
+        json_get_float(output, "shader_speed", &shader_speed);
+
+        /* Start building status display */
+        size_t offset = 0;
+        offset += snprintf(status_text + offset, sizeof(status_text) - offset,
+                          "● <b>Daemon Status: Running</b>\n\n"
+                          "<b>Process Information:</b>\n"
+                          "  • PID: %d\n"
+                          "  • Outputs: %d\n\n"
+                          "<b>Wallpaper State:</b>\n"
+                          "  • Cycling: %s\n\n"
+                          "<b>Shader State:</b>\n"
+                          "  • Animation: %s\n"
+                          "  • Speed: %.2fx\n",
+                          pid,
+                          output_count,
+                          paused ? "⏸ Paused" : "▶ Active",
+                          shader_paused ? "⏸ Paused" : "▶ Active",
+                          shader_speed);
+
+        /* Parse and display current wallpapers */
+        const char *wallpapers = strstr(output, "\"wallpapers\":[");
+        if (wallpapers && output_count > 0) {
+            offset += snprintf(status_text + offset, sizeof(status_text) - offset,
+                             "\n<b>Current Wallpapers:</b>\n");
+
+            wallpapers += 14;  /* Skip "wallpapers":[ */
+            const char *obj_start = wallpapers;
+            int wp_num = 1;
+
+            while ((obj_start = strchr(obj_start, '{')) != NULL && offset < sizeof(status_text) - 512) {
+                const char *obj_end = strchr(obj_start, '}');
+                if (!obj_end) break;
+
+                /* Extract wallpaper info */
+                const char *output_pos = strstr(obj_start, "\"output\":\"");
+                const char *type_pos = strstr(obj_start, "\"type\":\"");
+                const char *path_pos = strstr(obj_start, "\"path\":\"");
+
+                if (output_pos && type_pos && path_pos && output_pos < obj_end) {
+                    output_pos += 10;
+                    type_pos += 8;
+                    path_pos += 8;
+
+                    /* Extract output name */
+                    char output_name[64] = {0};
+                    const char *q = strchr(output_pos, '"');
+                    if (q && (q - output_pos) < 63) {
+                        strncpy(output_name, output_pos, q - output_pos);
+                    }
+
+                    /* Extract type */
+                    char type[16] = {0};
+                    q = strchr(type_pos, '"');
+                    if (q && (q - type_pos) < 15) {
+                        strncpy(type, type_pos, q - type_pos);
+                    }
+
+                    /* Extract path (with unescaping) */
+                    char path[256] = {0};
+                    q = path_pos;
+                    size_t pi = 0;
+                    while (*q && *q != '"' && pi < sizeof(path) - 1) {
+                        if (*q == '\\' && *(q+1) == '"') {
+                            path[pi++] = '"';
+                            q += 2;
+                        } else if (*q == '\\' && *(q+1) == '\\') {
+                            path[pi++] = '\\';
+                            q += 2;
+                        } else {
+                            path[pi++] = *q++;
+                        }
+                    }
+                    path[pi] = '\0';
+
+                    /* Get basename for display */
+                    const char *basename = strrchr(path, '/');
+                    basename = basename ? basename + 1 : path;
+
+                    offset += snprintf(status_text + offset, sizeof(status_text) - offset,
+                                     "  %d. <b>%s</b> (%s)\n"
+                                     "      <small>%s</small>\n",
+                                     wp_num++, output_name, type, basename);
+                }
+
+                obj_start = obj_end + 1;
+            }
+        }
+
+        offset += snprintf(status_text + offset, sizeof(status_text) - offset,
+                          "\n<small><i>Tip: Use the tray menu to control these settings</i></small>");
+    } else {
+        /* Fallback to basic status */
+        pid_t pid = daemon_read_pid();
+        snprintf(status_text, sizeof(status_text),
+                 "● <b>Daemon Status: Running</b>\n\n"
+                 "<b>Process Information:</b>\n"
+                 "  • PID: %d\n\n"
+                 "<i>Unable to retrieve detailed status via IPC.\n"
+                 "The daemon may still be starting up.</i>",
+                 pid);
+    }
+
+    /* Create and show dialog */
     GtkWidget *dialog = gtk_message_dialog_new(
         NULL,
         GTK_DIALOG_MODAL,
@@ -35,7 +255,7 @@ void dialog_show_status(void) {
         "NeoWall Status"
     );
 
-    gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", output);
+    gtk_message_dialog_format_secondary_markup(GTK_MESSAGE_DIALOG(dialog), "%s", status_text);
     gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
 }
