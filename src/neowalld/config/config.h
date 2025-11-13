@@ -12,7 +12,7 @@
 struct neowall_state;
 struct wallpaper_config;
 
-/* Configuration parsing */
+/* Configuration parsing (legacy) */
 bool config_load(struct neowall_state *state, const char *config_path);
 bool config_parse_wallpaper(struct wallpaper_config *config, const char *output_name);
 void config_free_wallpaper(struct wallpaper_config *config);
@@ -23,5 +23,9 @@ char **load_shaders_from_directory(const char *dir_path, size_t *count);
 /* Config reload */
 bool config_has_changed(struct neowall_state *state);
 void config_reload(struct neowall_state *state);
+
+/* Runtime configuration (new API) */
+#include "config_schema.h"
+#include "config_write.h"
 
 #endif /* CONFIG_H */

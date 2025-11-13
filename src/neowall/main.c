@@ -64,6 +64,8 @@ static int cmd_jump_output(int argc, char *argv[]);
 
 /* Config commands */
 static int cmd_get_config(int argc, char *argv[]);
+static int cmd_set_config(int argc, char *argv[]);
+static int cmd_reset_config(int argc, char *argv[]);
 static int cmd_list_config_keys(int argc, char *argv[]);
 static int cmd_list_commands(int argc, char *argv[]);
 
@@ -96,6 +98,8 @@ static Command commands[] = {
 
     /* Config commands */
     {"get-config",         "Get configuration value",                cmd_get_config},
+    {"set-config",         "Set configuration value",                cmd_set_config},
+    {"reset-config",       "Reset configuration to defaults",        cmd_reset_config},
     {"list-config-keys",   "List all config keys",                   cmd_list_config_keys},
 
     /* Introspection */
@@ -1201,6 +1205,47 @@ static int cmd_get_config(int argc, char *argv[]) {
     return send_ipc_command("get-config", args, strlen(args)) ? 0 : 1;
 }
 
+static int cmd_set_config(int argc, char *argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "Error: set-config requires <key> and <value>\n");
+        fprintf(stderr, "Usage: neowall set-config <key> <value>\n");
+        fprintf(stderr, "\nExamples:\n");
+        fprintf(stderr, "  neowall set-config general.cycle_interval 600\n");
+        fprintf(stderr, "  neowall set-config general.wallpaper_mode fill\n");
+        fprintf(stderr, "  neowall set-config performance.shader_speed 1.5\n");
+        return 1;
+    }
+
+    const char *key = argv[1];
+    const char *value = argv[2];
+
+    char args[1024];
+    snprintf(args, sizeof(args), "{\"key\":\"%s\",\"value\":\"%s\"}", key, value);
+    return send_ipc_command("set-config", args, strlen(args)) ? 0 : 1;
+}
+
+static int cmd_reset_config(int argc, char *argv[]) {
+    if (argc < 2) {
+        /* No key provided - reset all */
+        fprintf(stderr, "Warning: This will reset ALL configuration to defaults.\n");
+        fprintf(stderr, "Are you sure? Use: neowall reset-config <key> to reset specific key\n");
+        fprintf(stderr, "Or use: neowall reset-config --all to confirm reset all\n");
+        return 1;
+    }
+
+    const char *key = argv[1];
+
+    if (strcmp(key, "--all") == 0) {
+        /* Reset all */
+        return send_ipc_command("reset-config", NULL, 0) ? 0 : 1;
+    }
+
+    /* Reset specific key */
+    char args[512];
+    snprintf(args, sizeof(args), "{\"key\":\"%s\"}", key);
+    return send_ipc_command("reset-config", args, strlen(args)) ? 0 : 1;
+}
+
 static int cmd_list_config_keys(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("list-config-keys", NULL, 0) ? 0 : 1;
@@ -1246,6 +1291,12 @@ static int cmd_help(int argc, char *argv[]) {
     printf("  set-output-wallpaper <output> <path>  Set wallpaper/shader for output\n");
     printf("  set-output-interval <output> <sec>    Set cycle interval (seconds)\n");
     printf("  jump-output <output> <index>      Jump to specific cycle index\n");
+    printf("\n");
+    printf("Configuration:\n");
+    printf("  get-config [key]                  Get configuration value(s)\n");
+    printf("  set-config <key> <value>          Set configuration value\n");
+    printf("  reset-config <key|--all>          Reset configuration to defaults\n");
+    printf("  list-config-keys                  List all configuration keys\n");
     printf("\n");
     printf("Shader Control:\n");
     printf("  speed-up           Increase shader animation speed\n");

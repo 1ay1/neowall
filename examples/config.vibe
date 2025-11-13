@@ -1,0 +1,515 @@
+# ============================================================================
+# NeoWall Configuration File
+# ============================================================================
+# GPU-Accelerated Animated Wallpapers for Wayland
+# "Sets wallpapers until it... doesn't."
+#
+# This file uses VIBE (Visual Intuitive Bracket Encoding) format
+# Specification: https://1ay1.github.io/vibe/
+#
+# Quick syntax guide:
+#   - Objects use { } braces
+#   - key value (no = sign needed)
+#   - No quotes needed for simple strings
+#   - Comments start with #
+#   - Hierarchical nesting: output { DP-1 { ... } }
+#
+# ============================================================================
+
+# ============================================================================
+# DEFAULT CONFIGURATION
+# ============================================================================
+# This section applies to ALL monitors unless overridden in output { } section
+
+default {
+    # ========================================================================
+    # Wallpaper Configuration
+    # ========================================================================
+
+    # Path to wallpaper image or directory
+    #
+    # DIRECTORY MODE (Recommended!):
+    #   - Point to a folder to automatically cycle through ALL images
+    #   - Example: path ~/Pictures/wallpapers/
+    #   - IMPORTANT: Must end with / for directories!
+    #   - Loads all PNG/JPEG files in alphabetical order
+    #
+    # SINGLE FILE MODE:
+    #   - Path to one specific image file
+    #   - Example: path ~/Pictures/wallpaper.png
+    #
+    # Use ~ for home directory, absolute or relative paths
+    # Default: Shipped wallpaper (copied to ~/.local/share/neowall/default.png)
+    path ~/.local/share/neowall/default.png
+
+    # ========================================================================
+    # Shader Configuration (Alternative to static images)
+    # ========================================================================
+
+    # Live Shader Wallpaper - GPU-accelerated animated effects
+    # Just specify the shader filename - no path needed!
+    # Uncomment to use shaders instead of images
+    # shader retro_wave.glsl
+    #
+    # Available shaders (in ~/.config/neowall/shaders/):
+    #   - retro_wave.glsl     : Retro synthwave aesthetic with neon colors
+    #   - plasma.glsl         : Colorful animated plasma effect
+    #   - matrix_rain.glsl    : Matrix-style falling characters
+    #   - synthwave.glsl      : Classic 80s synthwave vibes
+    #   - fractal_noise.glsl  : Organic fractal patterns
+    #   - cyberpunk.glsl      : Neon city skyline
+    #
+    # You can also use full paths:
+    # shader ~/.config/neowall/shaders/retro_wave.glsl
+    # shader /usr/share/neowall/shaders/synthwave.glsl
+    #
+    # NOTE: Use EITHER 'path' OR 'shader', not both!
+
+    # Shader animation speed multiplier
+    # Range: 0.1 - 10.0
+    # 1.0 = normal speed (default)
+    # 2.0 = 2x speed - animations run twice as fast
+    # 0.5 = 0.5x speed - animations run at half speed
+    # shader_speed 1.0
+
+    # ========================================================================
+    # Display Settings
+    # ========================================================================
+
+    # Display mode - how wallpaper fills the screen
+    # Options:
+    #   - fill    : Scale to fill screen, crop if needed (recommended)
+    #   - fit     : Scale to fit inside screen, may show borders
+    #   - center  : Center without scaling
+    #   - stretch : Stretch to fill (may distort aspect ratio)
+    #   - tile    : Repeat image to fill screen
+    mode fill
+
+    # ========================================================================
+    # Cycling Configuration
+    # ========================================================================
+
+    # Wallpaper cycling duration in seconds
+    # Set to 0 to disable automatic cycling
+    # Range: 0 - 86400 (24 hours)
+    # Examples:
+    #   60    = 1 minute
+    #   300   = 5 minutes (recommended for quick rotation)
+    #   900   = 15 minutes
+    #   1800  = 30 minutes (recommended for work)
+    #   3600  = 1 hour
+    duration 0
+
+    # ========================================================================
+    # Transition Effects
+    # ========================================================================
+
+    # Transition effect when changing wallpapers
+    # Options:
+    #   - none         : Instant switch (no transition)
+    #   - fade         : Smooth crossfade (DEFAULT, recommended)
+    #   - slide-left   : Slide old image to the left
+    #   - slide-right  : Slide old image to the right
+    #   - glitch       : Digital glitch effect (cyberpunk style)
+    #   - pixelate     : Pixelated mosaic transition
+    transition fade
+
+    # Transition duration in milliseconds
+    # Range: 100 - 5000
+    # Examples:
+    #   100  = Fast (snappy)
+    #   300  = Default (balanced)
+    #   500  = Smooth (recommended for fade)
+    #   1000 = Slow (dramatic)
+    transition_duration 300
+}
+
+# ============================================================================
+# PER-MONITOR CONFIGURATION
+# ============================================================================
+# Override default settings for specific monitors
+# Hierarchical structure: output { <monitor-name> { settings... } }
+#
+# To find your monitor names, run:
+#   neowall list-outputs
+#
+# Or use compositor-specific commands:
+#   - Sway:     swaymsg -t get_outputs
+#   - Hyprland: hyprctl monitors
+#   - Generic:  wlr-randr
+#
+# Common monitor naming conventions:
+#   - Laptop internal:  eDP-1, eDP, LVDS-1
+#   - HDMI ports:       HDMI-A-1, HDMI-A-2, HDMI-1
+#   - DisplayPort:      DP-1, DP-2, DP-3
+#   - DVI:              DVI-D-1, DVI-I-1
+#   - VGA:              VGA-1, VGA-2
+
+output {
+    # Example 1: Laptop display (commented out by default)
+    # eDP-1 {
+    #     path ~/Pictures/laptop-wallpaper.jpg
+    #     mode fill
+    #     duration 0
+    # }
+
+    # Example 2: Primary external monitor via HDMI
+    # HDMI-A-1 {
+    #     path ~/Pictures/monitor-wallpaper.png
+    #     mode fit
+    #     duration 300
+    #     transition fade
+    #     transition_duration 500
+    # }
+
+    # Example 3: DisplayPort monitor with cycling from directory
+    # DP-1 {
+    #     path ~/Pictures/Nature/
+    #     mode fill
+    #     duration 300
+    #     transition fade
+    #     transition_duration 1000
+    # }
+
+    # Example 4: Secondary monitor with shader wallpaper
+    # DP-2 {
+    #     shader plasma.glsl
+    #     shader_speed 1.5
+    #     mode fill
+    # }
+
+    # Example 5: Vertical/portrait monitor
+    # DP-3 {
+    #     path ~/Pictures/portrait-wallpaper.png
+    #     mode fit
+    # }
+}
+
+# ============================================================================
+# COMPLETE EXAMPLE CONFIGURATIONS
+# ============================================================================
+
+# --- Example 1: Simple Single Monitor Setup ---
+# default {
+#     path ~/Pictures/my-wallpaper.png
+#     mode fill
+# }
+
+# --- Example 2: Directory Cycling (Recommended!) ---
+# default {
+#     path ~/Pictures/Wallpapers/
+#     mode fill
+#     duration 600
+#     transition fade
+#     transition_duration 1000
+# }
+
+# --- Example 3: Live Shader Wallpaper ---
+# default {
+#     shader retro_wave.glsl
+#     shader_speed 1.5
+#     mode fill
+# }
+
+# --- Example 4: Dual Monitor Setup (Laptop + External) ---
+# default {
+#     path ~/Pictures/default.png
+#     mode fill
+# }
+# output {
+#     eDP-1 {
+#         path ~/Pictures/laptop.jpg
+#         mode fill
+#     }
+#     HDMI-A-1 {
+#         path ~/Pictures/external.jpg
+#         mode fill
+#     }
+# }
+
+# --- Example 5: Triple Monitor Gaming Setup ---
+# output {
+#     DP-1 {
+#         path ~/Pictures/Gaming/main-screen.png
+#         mode fill
+#     }
+#     DP-2 {
+#         path ~/Pictures/Gaming/side-left.png
+#         mode fill
+#     }
+#     DP-3 {
+#         path ~/Pictures/Gaming/side-right.png
+#         mode fill
+#     }
+# }
+
+# --- Example 6: Work Setup with Cycling ---
+# default {
+#     path ~/Pictures/Work/
+#     mode fill
+#     duration 1800
+#     transition fade
+# }
+# output {
+#     eDP-1 {
+#         path ~/Pictures/Work/minimal.png
+#         mode center
+#     }
+# }
+
+# --- Example 7: Mixed Shaders and Images ---
+# output {
+#     eDP-1 {
+#         shader synthwave.glsl
+#         shader_speed 0.8
+#     }
+#     HDMI-A-1 {
+#         path ~/Pictures/wallpaper.png
+#         mode fill
+#     }
+# }
+
+# --- Example 8: Performance Mode (Fast Transitions) ---
+# default {
+#     path ~/Pictures/Wallpapers/
+#     mode fill
+#     duration 300
+#     transition slide-left
+#     transition_duration 100
+# }
+
+# --- Example 9: Cinematic Mode (Slow Transitions) ---
+# default {
+#     path ~/Pictures/Nature/
+#     mode fill
+#     duration 1800
+#     transition fade
+#     transition_duration 2000
+# }
+
+# --- Example 10: Cyberpunk Aesthetic ---
+# default {
+#     shader cyberpunk.glsl
+#     shader_speed 2.0
+#     transition glitch
+#     transition_duration 500
+# }
+
+# ============================================================================
+# RUNTIME CONFIGURATION VIA CLI
+# ============================================================================
+# You can modify settings at runtime using the 'neowall set-config' command.
+# Changes are applied immediately and written to this file atomically.
+#
+# Syntax:
+#   neowall set-config <key> <value>
+#
+# Global Settings (applies to all monitors):
+#   neowall set-config default.duration 600
+#   neowall set-config default.mode fill
+#   neowall set-config default.shader_speed 1.5
+#   neowall set-config default.transition fade
+#   neowall set-config default.transition_duration 500
+#
+# Per-Output Settings (specific monitor):
+#   neowall set-config output.DP-1.duration 300
+#   neowall set-config output.DP-1.mode fit
+#   neowall set-config output.HDMI-1.shader_speed 2.0
+#   neowall set-config output.eDP-1.path ~/Pictures/laptop.jpg
+#
+# View Current Configuration:
+#   neowall get-config
+#   neowall get-config default.duration
+#   neowall get-config output.DP-1
+#
+# Reset to Defaults:
+#   neowall reset-config default.duration
+#   neowall reset-config --all
+#
+# List All Configurable Keys:
+#   neowall list-config-keys
+
+# ============================================================================
+# TIPS & BEST PRACTICES
+# ============================================================================
+#
+# 1. Directory Cycling:
+#    - Set path to a directory with trailing slash: ~/Pictures/Walls/
+#    - All PNG and JPEG files are automatically loaded
+#    - Files cycle in alphabetical order
+#    - Much easier than listing individual files
+#
+# 2. Shader Performance:
+#    - Shaders render at ~60 FPS with minimal CPU usage
+#    - GPU accelerated (requires OpenGL ES 2.0+)
+#    - Control speed with shader_speed (0.1 - 10.0)
+#    - Create custom shaders! See ~/.config/neowall/shaders/README.md
+#
+# 3. Transition Effects:
+#    - 'fade' works best for most cases (smooth and professional)
+#    - 'slide-*' good for dynamic, energetic feel
+#    - 'glitch' perfect for cyberpunk/tech themes
+#    - 'pixelate' retro/8-bit aesthetic
+#    - 'none' for instant switching (saves CPU)
+#
+# 4. Cycling Durations:
+#    - Work/Focus:     1800-3600 (30 min - 1 hour)
+#    - General Use:    600-900 (10-15 minutes)
+#    - Active/Dynamic: 300 (5 minutes)
+#    - Disable: 0
+#
+# 5. Display Modes:
+#    - 'fill' for most cases (covers screen, crops if needed)
+#    - 'fit' for unusual aspect ratios or when preserving entire image
+#    - 'center' for wallpapers with important central content
+#    - 'tile' for patterns or small images
+#    - 'stretch' generally not recommended (distorts image)
+#
+# 6. Multi-Monitor Workflows:
+#    - Set different durations per monitor
+#    - Mix static images and animated shaders
+#    - Use appropriate mode for each display's aspect ratio
+#    - Portrait monitors work well with 'fit' mode
+#
+# 7. Configuration Management:
+#    - Changes via CLI are immediate (no restart needed)
+#    - Config file is automatically backed up before changes
+#    - Backups stored as: config.vibe.backup.YYYYMMDD_HHMMSS
+#    - Edit this file directly for bulk changes
+#    - Reload after manual edits: neowall reload (if supported)
+#
+# 8. Performance Optimization:
+#    - Disable cycling during intensive work: duration 0
+#    - Use simple transitions or 'none' to save resources
+#    - Lower shader_speed to reduce GPU load
+#    - Static images use less resources than shaders
+#
+# 9. Organization:
+#    - Keep wallpapers organized in themed directories:
+#      ~/Pictures/Wallpapers/Nature/
+#      ~/Pictures/Wallpapers/Abstract/
+#      ~/Pictures/Wallpapers/Minimal/
+#    - Point path to different directories for different moods
+#
+# 10. Hot-Swapping:
+#     - Use CLI to test settings without editing this file:
+#       neowall set-config default.duration 300
+#     - Once satisfied, settings are persisted automatically
+#     - Revert with: neowall reset-config <key>
+
+# ============================================================================
+# TROUBLESHOOTING
+# ============================================================================
+#
+# Config not loading?
+#   - Check syntax: braces { } must match
+#   - Verify location: ~/.config/neowall/config.vibe
+#   - Check logs: journalctl --user -u neowalld
+#   - Test parse: neowall validate-config (if available)
+#
+# Wallpaper not showing?
+#   - Verify file exists: ls -la ~/Pictures/wallpaper.png
+#   - Check file format: PNG or JPEG only
+#   - Ensure path has no typos
+#   - Try absolute path instead of ~
+#
+# Monitor not found?
+#   - List outputs: neowall list-outputs
+#   - Check connector name (case-sensitive!)
+#   - Names may change on reconnect (especially USB-C/Thunderbolt)
+#   - Use output info: neowall output-info DP-1
+#
+# Cycling not working?
+#   - Ensure duration > 0
+#   - For directories, path must end with /
+#   - Check directory has image files
+#   - Verify read permissions on directory
+#
+# Shader not displaying?
+#   - Check shader file exists in ~/.config/neowall/shaders/
+#   - Verify GPU supports OpenGL ES 2.0+
+#   - Check logs for shader compilation errors
+#   - Try a different shader to isolate issue
+#   - Ensure 'shader' value is just filename or full path
+#
+# Changes not applying?
+#   - Verify key name: neowall list-config-keys
+#   - Check value is valid for that key type
+#   - Try getting value first: neowall get-config <key>
+#   - Check daemon is running: neowall status
+#
+# Performance issues?
+#   - Set duration 0 to disable cycling
+#   - Use transition none for instant switching
+#   - Lower shader_speed or disable shaders
+#   - Use static images instead of shaders
+#   - Check GPU drivers are up to date
+
+# ============================================================================
+# CONTROL COMMANDS
+# ============================================================================
+#
+# Daemon Management:
+#   neowall start              # Start the daemon
+#   neowall stop               # Stop the daemon
+#   neowall restart            # Restart the daemon
+#   neowall status             # Check daemon status
+#
+# Wallpaper Control (Global):
+#   neowall next               # Skip to next wallpaper
+#   neowall prev               # Go to previous wallpaper
+#   neowall pause              # Pause cycling
+#   neowall resume             # Resume cycling
+#   neowall current            # Show current wallpaper
+#
+# Per-Output Control:
+#   neowall list-outputs       # List all monitors
+#   neowall output-info DP-1   # Get output details
+#   neowall next-output DP-1   # Next wallpaper on DP-1
+#   neowall prev-output DP-1   # Previous wallpaper on DP-1
+#
+# Shader Control:
+#   neowall shader-pause       # Pause shader animations
+#   neowall shader-resume      # Resume shader animations
+#   neowall speed-up           # Increase animation speed
+#   neowall speed-down         # Decrease animation speed
+#
+# Configuration:
+#   neowall set-config <k> <v> # Set config value
+#   neowall get-config [key]   # Get config value(s)
+#   neowall reset-config [key] # Reset to defaults
+#   neowall list-config-keys   # List all config keys
+
+# ============================================================================
+# DOCUMENTATION & SUPPORT
+# ============================================================================
+#
+# Full Documentation:
+#   - README.md                  : Project overview
+#   - docs/CONFIG_GUIDE.md       : Detailed configuration guide
+#   - docs/USAGE_GUIDE.md        : Usage and commands
+#   - docs/CONFIG_STATE_DESIGN.md: Architecture and design
+#
+# Shader Development:
+#   - ~/.config/neowall/shaders/README.md  : Shader guide
+#   - Shadertoy compatible format
+#   - GLSL ES 2.0/3.0 support
+#
+# VIBE Format Specification:
+#   - https://1ay1.github.io/vibe/
+#   - Simple, human-friendly config format
+#   - No quotes needed, flexible whitespace
+#
+# Project Repository:
+#   - https://github.com/1ay1/neowall
+#   - Report issues, request features
+#   - Contribute shaders and improvements
+#
+# Community:
+#   - GitHub Discussions for questions
+#   - Issue tracker for bugs
+#   - Pull requests welcome!
+#
+# ============================================================================
+# Happy wallpapering! 🎨
+# ============================================================================

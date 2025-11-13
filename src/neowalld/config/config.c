@@ -18,6 +18,7 @@
 #include "neowall.h"
 #include "../image/image.h"    /* For image_free() */
 #include "config_access.h"
+#include "config_rules.h"      /* For config validation rules */
 #include "compositor.h"
 #include "shader.h"
 
@@ -490,8 +491,9 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
 }
 
 /* Parse wallpaper configuration with strict validation */
-static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *config,
-                                   const char *context_name) {
+static bool parse_wallpaper_config(struct neowall_state *state, VibeValue *obj,
+                                   struct wallpaper_config *config,
+                                   const char *context_name, const char *output_name) {
     if (!obj || !config || obj->type != VIBE_TYPE_OBJECT) {
         log_error("[%s] Invalid parameters for parse_wallpaper_config", context_name);
         return false;
@@ -632,10 +634,10 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             return false;
         }
 
-        if (config->type == WALLPAPER_SHADER) {
-            log_error("[%s] INVALID CONFIG: 'mode' specified in SHADER mode. "
-                     "Display modes (fill, fit, center, etc.) only apply to image wallpapers. "
-                     "Shaders always render fullscreen.", context_name);
+        /* Validate using rules system */
+        char error[512];
+        if (!config_validate_rules(state, output_name, "mode", mode_val->as_string, error, sizeof(error))) {
+            log_error("[%s] %s", context_name, error);
             return false;
         }
 
@@ -681,14 +683,14 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             return false;
         }
 
-        config->transition = transition_type_from_string(transition_val->as_string);
-
-        if (config->type == WALLPAPER_SHADER) {
-            log_error("[%s] INVALID CONFIG: 'transition' specified in SHADER mode. "
-                     "Transitions only apply to image wallpapers. This setting is invalid for shaders.",
-                     context_name);
+        /* Validate using rules system */
+        char error[512];
+        if (!config_validate_rules(state, output_name, "transition", transition_val->as_string, error, sizeof(error))) {
+            log_error("[%s] %s", context_name, error);
             return false;
         }
+
+        config->transition = transition_type_from_string(transition_val->as_string);
 
         log_info("[%s] Transition set to: %s (type=%d)", context_name,
                  transition_val->as_string, config->transition);
@@ -716,14 +718,16 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             return false;
         }
 
-        config->transition_duration = (float)trans_duration_value;
-
-        if (config->type == WALLPAPER_SHADER) {
-            log_error("[%s] INVALID CONFIG: 'transition_duration' specified in SHADER mode. "
-                     "Transitions only apply to image wallpapers. This setting is invalid for shaders.",
-                     context_name);
+        /* Validate using rules system */
+        char trans_dur_str[32];
+        snprintf(trans_dur_str, sizeof(trans_dur_str), "%.0f", trans_duration_value);
+        char error[512];
+        if (!config_validate_rules(state, output_name, "transition_duration", trans_dur_str, error, sizeof(error))) {
+            log_error("[%s] %s", context_name, error);
             return false;
         }
+
+        config->transition_duration = (float)trans_duration_value;
 
         log_info("[%s] Transition duration set to: %.2f seconds", context_name, config->transition_duration);
     }
@@ -749,14 +753,17 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             return false;
         }
 
-        config->shader_speed = (float)speed;
-
-        if (config->type != WALLPAPER_SHADER) {
-            log_error("[%s] INVALID CONFIG: 'shader_speed' specified in IMAGE mode. "
-                     "Shader speed only applies to GLSL shaders. This setting is invalid for images.",
-                     context_name);
+        /* Validate using rules system */
+        char speed_str[32];
+        snprintf(speed_str, sizeof(speed_str), "%.2f", speed);
+        char error[512];
+        if (!config_validate_rules(state, output_name, "shader_speed", speed_str, error, sizeof(error))) {
+            log_error("[%s] %s", context_name, error);
             return false;
         }
+
+        config->shader_speed = (float)speed;
+        log_info("[%s] Shader speed multiplier set to: %.2f", context_name, config->shader_speed);
     }
 
     /* Parse shader_fps (only relevant for shader mode) */
@@ -782,10 +789,12 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         config->shader_fps = fps;
         log_info("[%s] Shader FPS set to: %d", context_name, fps);
 
-        if (config->type != WALLPAPER_SHADER) {
-            log_error("[%s] INVALID CONFIG: 'shader_fps' specified in IMAGE mode. "
-                     "Shader FPS only applies to GLSL shaders. This setting is invalid for images.",
-                     context_name);
+        /* Validate using rules system */
+        char fps_str[32];
+        snprintf(fps_str, sizeof(fps_str), "%d", (int)fps);
+        char error[512];
+        if (!config_validate_rules(state, output_name, "shader_fps", fps_str, error, sizeof(error))) {
+            log_error("[%s] %s", context_name, error);
             return false;
         }
     }
@@ -806,10 +815,11 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             log_info("[%s] Vsync: disabled (using custom FPS with tearing control)", context_name);
         }
 
-        if (config->type != WALLPAPER_SHADER) {
-            log_error("[%s] INVALID CONFIG: 'vsync' specified in IMAGE mode. "
-                     "Vsync only applies to GLSL shaders. This setting is invalid for images.",
-                     context_name);
+        /* Validate using rules system */
+        const char *vsync_str = config->vsync ? "true" : "false";
+        char error[512];
+        if (!config_validate_rules(state, output_name, "vsync", vsync_str, error, sizeof(error))) {
+            log_error("[%s] %s", context_name, error);
             return false;
         }
     }
@@ -824,7 +834,18 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             log_error("[%s] Config parsing failed due to invalid show_fps value", context_name);
             return false;
         }
-        config->show_fps = show_fps_val->as_boolean;
+
+        bool show_fps = show_fps_val->as_boolean;
+
+        /* Validate using rules system */
+        const char *show_fps_str = show_fps ? "true" : "false";
+        char error[512];
+        if (!config_validate_rules(state, output_name, "show_fps", show_fps_str, error, sizeof(error))) {
+            log_error("[%s] %s", context_name, error);
+            return false;
+        }
+
+        config->show_fps = show_fps;
         log_info("[%s] FPS watermark: %s", context_name, config->show_fps ? "enabled" : "disabled");
     }
 
@@ -838,10 +859,10 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
 
         size_t count = channels_val->as_array->count;
         if (count > 0) {
-            if (config->type != WALLPAPER_SHADER) {
-                log_error("[%s] INVALID CONFIG: 'channels' specified in IMAGE mode. "
-                         "Channels (iChannel textures) only apply to GLSL shaders. This setting is invalid for images.",
-                         context_name);
+            /* Validate using rules system */
+            char error[512];
+            if (!config_validate_rules(state, output_name, "channels", "[]", error, sizeof(error))) {
+                log_error("[%s] %s", context_name, error);
                 return false;
             }
 
@@ -1480,7 +1501,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
     bool has_valid_default = false;
 
     if (default_obj && default_obj->type == VIBE_TYPE_OBJECT) {
-        if (parse_wallpaper_config(default_obj, &default_config, "default")) {
+        if (parse_wallpaper_config(state, default_obj, &default_config, "default", NULL)) {
             has_valid_default = true;
 
             const char *type_str = (default_config.type == WALLPAPER_SHADER) ? "shader" : "image";
@@ -1550,7 +1571,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
             snprintf(context, sizeof(context), "output.%s", output_name);
 
             struct wallpaper_config output_config;
-            if (parse_wallpaper_config(output_config_obj, &output_config, context)) {
+            if (parse_wallpaper_config(state, output_config_obj, &output_config, context, output_name)) {
                 const char *type_str = (output_config.type == WALLPAPER_SHADER) ? "shader" : "image";
                 const char *path_str = (output_config.type == WALLPAPER_SHADER) ?
                                        output_config.shader_path : output_config.path;
