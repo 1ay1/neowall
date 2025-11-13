@@ -82,14 +82,14 @@ static Command commands[] = {
     {"status",             "Show daemon status",                     cmd_status},
     {"next",               "Switch to next wallpaper (all outputs)", cmd_next},
     {"prev",               "Switch to previous wallpaper (all outputs)", cmd_prev},
-    {"pause",              "Pause wallpaper cycling (all outputs)",  cmd_pause},
-    {"resume",             "Resume wallpaper cycling (all outputs)", cmd_resume},
+    {"cycle-pause",        "Pause wallpaper cycling (all outputs)",  cmd_pause},
+    {"cycle-resume",       "Resume wallpaper cycling (all outputs)", cmd_resume},
     {"reload",             "Reload configuration",                   cmd_reload},
     {"current",            "Show current wallpaper [output]",        cmd_current},
     {"speed-up",           "Increase shader animation speed [output]", cmd_speed_up},
     {"speed-down",         "Decrease shader animation speed [output]", cmd_speed_down},
-    {"shader-pause",       "Pause shader animation [output]",        cmd_shader_pause},
-    {"shader-resume",      "Resume shader animation [output]",       cmd_shader_resume},
+    {"live-pause",         "Pause live wallpaper animation [output]", cmd_shader_pause},
+    {"live-resume",        "Resume live wallpaper animation [output]", cmd_shader_resume},
 
     /* Output-specific commands */
     {"list-outputs",       "List all connected outputs",             cmd_list_outputs},
@@ -1013,12 +1013,12 @@ int cmd_next(int argc, char *argv[]) {
 
 int cmd_pause(int argc, char *argv[]) {
     (void)argc; (void)argv; /* Global only - no arguments */
-    return send_ipc_command("pause", NULL, 0) ? 0 : 1;
+    return send_ipc_command("cycle-pause", NULL, 0) ? 0 : 1;
 }
 
 int cmd_resume(int argc, char *argv[]) {
     (void)argc; (void)argv; /* Global only - no arguments */
-    return send_ipc_command("resume", NULL, 0) ? 0 : 1;
+    return send_ipc_command("cycle-resume", NULL, 0) ? 0 : 1;
 }
 
 int cmd_reload(int argc, char *argv[]) {
@@ -1057,18 +1057,18 @@ int cmd_shader_pause(int argc, char *argv[]) {
     if (argc >= 2) {
         char args[512];
         snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-        return send_ipc_command("shader-pause", args, strlen(args)) ? 0 : 1;
+        return send_ipc_command("live-pause", args, strlen(args)) ? 0 : 1;
     }
-    return send_ipc_command("shader-pause", NULL, 0) ? 0 : 1;
+    return send_ipc_command("live-pause", NULL, 0) ? 0 : 1;
 }
 
 int cmd_shader_resume(int argc, char *argv[]) {
     if (argc >= 2) {
         char args[512];
         snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
-        return send_ipc_command("shader-resume", args, strlen(args)) ? 0 : 1;
+        return send_ipc_command("live-resume", args, strlen(args)) ? 0 : 1;
     }
-    return send_ipc_command("shader-resume", NULL, 0) ? 0 : 1;
+    return send_ipc_command("live-resume", NULL, 0) ? 0 : 1;
 }
 
 int cmd_prev(int argc, char *argv[]) {

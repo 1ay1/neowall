@@ -18,12 +18,12 @@
 /* Forward declarations of command handlers */
 static command_result_t cmd_next(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_prev(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-static command_result_t cmd_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-static command_result_t cmd_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+static command_result_t cmd_cycle_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+static command_result_t cmd_cycle_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_speed_up(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_speed_down(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-static command_result_t cmd_shader_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-static command_result_t cmd_shader_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+static command_result_t cmd_live_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+static command_result_t cmd_live_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 
 /* Status & information */
 static command_result_t cmd_status(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
@@ -53,10 +53,10 @@ static const command_info_t command_registry_core[] = {
                   CMD_CAP_REQUIRES_STATE),
 
     /* Cycling Control */
-    COMMAND_ENTRY(pause, "cycling", "Pause automatic wallpaper cycling on all outputs",
-                  CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
-    COMMAND_ENTRY(resume, "cycling", "Resume automatic wallpaper cycling on all outputs",
-                  CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
+    COMMAND_ENTRY_CUSTOM("cycle-pause", cmd_cycle_pause, "cycling", "Pause automatic wallpaper cycling on all outputs",
+                  CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
+    COMMAND_ENTRY_CUSTOM("cycle-resume", cmd_cycle_resume, "cycling", "Resume automatic wallpaper cycling on all outputs",
+                  CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
     COMMAND_ENTRY_CUSTOM("speed-up", cmd_speed_up, "shader",
                         "Increase shader animation speed (optional: output name)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
@@ -64,12 +64,12 @@ static const command_info_t command_registry_core[] = {
                         "Decrease shader animation speed (optional: output name)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
 
-    /* Shader Control */
-    COMMAND_ENTRY_CUSTOM("shader-pause", cmd_shader_pause, "shader",
-                        "Pause shader animation (optional: output name)",
+    /* Live Wallpaper Control */
+    COMMAND_ENTRY_CUSTOM("live-pause", cmd_live_pause, "live",
+                        "Pause live wallpaper animation (optional: output name)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
-    COMMAND_ENTRY_CUSTOM("shader-resume", cmd_shader_resume, "shader",
-                        "Resume shader animation (optional: output name)",
+    COMMAND_ENTRY_CUSTOM("live-resume", cmd_live_resume, "live",
+                        "Resume live wallpaper animation (optional: output name)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
 
     /* Status & Information */
@@ -593,7 +593,7 @@ static command_result_t cmd_prev(struct neowall_state *state, const ipc_request_
     return CMD_SUCCESS;
 }
 
-static command_result_t cmd_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
+static command_result_t cmd_cycle_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
     (void)req; /* Unused - global command only */
 
     if (!state) {
@@ -608,7 +608,7 @@ static command_result_t cmd_pause(struct neowall_state *state, const ipc_request
     return CMD_SUCCESS;
 }
 
-static command_result_t cmd_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
+static command_result_t cmd_cycle_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
     (void)req; /* Unused - global command only */
 
     if (!state) {
@@ -622,7 +622,6 @@ static command_result_t cmd_resume(struct neowall_state *state, const ipc_reques
 
     return CMD_SUCCESS;
 }
-
 
 
 static command_result_t cmd_speed_up(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
@@ -705,7 +704,7 @@ static command_result_t cmd_speed_down(struct neowall_state *state, const ipc_re
     return CMD_SUCCESS;
 }
 
-static command_result_t cmd_shader_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
+static command_result_t cmd_live_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
     if (!state) {
         commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
         return CMD_ERROR_STATE;
@@ -737,7 +736,7 @@ static command_result_t cmd_shader_pause(struct neowall_state *state, const ipc_
     return CMD_SUCCESS;
 }
 
-static command_result_t cmd_shader_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
+static command_result_t cmd_live_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
     if (!state) {
         commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
         return CMD_ERROR_STATE;

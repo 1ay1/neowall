@@ -50,6 +50,10 @@ static const command_info_t config_command_registry[] = {
                         "List all configuration keys",
                         CMD_CAP_REQUIRES_STATE, NULL, NULL),
 
+    COMMAND_ENTRY_CUSTOM("reload", cmd_reload, "config",
+                        "Reload configuration file",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
+
     COMMAND_SENTINEL
 };
 
@@ -475,5 +479,34 @@ command_result_t cmd_list_config_keys(struct neowall_state *state,
     vibe_value_free(root);
 
     commands_build_success(resp, "Config keys listed", data);
+    return CMD_SUCCESS;
+}
+
+/* ============================================================================
+ * Reload Configuration Command
+ * ============================================================================ */
+
+command_result_t cmd_reload(struct neowall_state *state,
+                           const ipc_request_t *req,
+                           ipc_response_t *resp) {
+    (void)req; /* Unused */
+
+    if (!state) {
+        commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
+        return CMD_ERROR_STATE;
+    }
+
+    /* Reload configuration from file */
+    if (state->config_path[0] == '\0') {
+        commands_build_error(resp, CMD_ERROR_STATE, "No configuration file path set");
+        return CMD_ERROR_STATE;
+    }
+
+    if (!config_load(state, state->config_path)) {
+        commands_build_error(resp, CMD_ERROR_FAILED, "Failed to reload configuration");
+        return CMD_ERROR_FAILED;
+    }
+
+    commands_build_success(resp, "Configuration reloaded successfully", NULL);
     return CMD_SUCCESS;
 }
