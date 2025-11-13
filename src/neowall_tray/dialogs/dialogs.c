@@ -129,21 +129,36 @@ void dialog_show_status(void) {
         return;
     }
 
-    /* Get detailed status via IPC */
+    /* Get detailed status via IPC (with --json flag for machine-readable output) */
     char output[8192] = {0};
-    bool ipc_success = command_execute_with_output("status", output, sizeof(output));
+    bool ipc_success = command_execute_with_output("--json status", output, sizeof(output));
 
     if (ipc_success && strstr(output, "\"daemon\":\"running\"")) {
+        /* JSON response is nested: {"status":"ok","message":"OK","data":{"message":"OK","data":{...}}}
+         * We need to extract the innermost data object */
+
+        /* Find the innermost "data" that contains daemon info */
+        const char *daemon_data = strstr(output, "\"daemon\":\"running\"");
+        if (!daemon_data) {
+            /* Fallback if structure is different */
+            daemon_data = output;
+        } else {
+            /* Move back to find the opening brace of this object */
+            while (daemon_data > output && *daemon_data != '{') {
+                daemon_data--;
+            }
+        }
+
         /* Parse JSON response */
         int pid = 0, output_count = 0;
         bool paused = false, shader_paused = false;
         float shader_speed = 1.0f;
 
-        json_get_int(output, "pid", &pid);
-        json_get_int(output, "outputs", &output_count);
-        json_get_bool(output, "paused", &paused);
-        json_get_bool(output, "shader_paused", &shader_paused);
-        json_get_float(output, "shader_speed", &shader_speed);
+        json_get_int(daemon_data, "pid", &pid);
+        json_get_int(daemon_data, "outputs", &output_count);
+        json_get_bool(daemon_data, "paused", &paused);
+        json_get_bool(daemon_data, "shader_paused", &shader_paused);
+        json_get_float(daemon_data, "shader_speed", &shader_speed);
 
         /* Start building status display */
         size_t offset = 0;
@@ -164,7 +179,7 @@ void dialog_show_status(void) {
                           shader_speed);
 
         /* Parse and display current wallpapers */
-        const char *wallpapers = strstr(output, "\"wallpapers\":[");
+        const char *wallpapers = strstr(daemon_data, "\"wallpapers\":[");
         if (wallpapers && output_count > 0) {
             offset += snprintf(status_text + offset, sizeof(status_text) - offset,
                              "\n<b>Current Wallpapers:</b>\n");
