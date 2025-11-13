@@ -54,6 +54,8 @@ config_sources = files(
 commands_sources = files(
   'commands/commands.c',
   'commands/registry.c',
+  'commands/output_commands.c',
+  'commands/config_commands.c',
 )
 
 # Output subsystem

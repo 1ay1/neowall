@@ -4,6 +4,8 @@
  */
 
 #include "commands.h"
+#include "output_commands.h"
+#include "config_commands.h"
 #include "neowall.h"
 #include <string.h>
 #include <stdio.h>
@@ -15,11 +17,12 @@ static command_result_t cmd_next(struct neowall_state *state, const ipc_request_
 static command_result_t cmd_prev(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-static command_result_t cmd_reload(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_speed_up(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_speed_down(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_shader_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_shader_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+
+/* Status & information */
 static command_result_t cmd_status(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_current(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_ping(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
@@ -32,7 +35,7 @@ typedef struct {
     struct timespec last_call;
 } command_stats_internal_t;
 
-static command_stats_internal_t command_statistics[32]; /* Max 32 commands */
+static command_stats_internal_t command_statistics[64]; /* Max 64 commands */
 
 /* Command registry */
 static const command_info_t command_registry[] = {
@@ -183,6 +186,140 @@ static const command_info_t command_registry[] = {
         .example = "{\"command\":\"list\"}",
         .handler = cmd_list,
         .capabilities = CMD_CAP_NONE,
+        .version = 1,
+    },
+
+    /* Output Management */
+    {
+        .name = "list-outputs",
+        .category = "output",
+        .description = "List all connected outputs",
+        .args_schema = NULL,
+        .example = "{\"command\":\"list-outputs\"}",
+        .handler = cmd_list_outputs,
+        .capabilities = CMD_CAP_REQUIRES_STATE,
+        .version = 1,
+    },
+    {
+        .name = "output-info",
+        .category = "output",
+        .description = "Get information about specific output",
+        .args_schema = "{\"output\": <string>}",
+        .example = "{\"command\":\"output-info\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler = cmd_output_info,
+        .capabilities = CMD_CAP_REQUIRES_STATE,
+        .version = 1,
+    },
+    {
+        .name = "next-output",
+        .category = "output",
+        .description = "Switch to next wallpaper on specific output",
+        .args_schema = "{\"output\": <string>}",
+        .example = "{\"command\":\"next-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler = cmd_next_output,
+        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+        .version = 1,
+    },
+    {
+        .name = "prev-output",
+        .category = "output",
+        .description = "Switch to previous wallpaper on specific output",
+        .args_schema = "{\"output\": <string>}",
+        .example = "{\"command\":\"prev-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler = cmd_prev_output,
+        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+        .version = 1,
+    },
+    {
+        .name = "reload-output",
+        .category = "output",
+        .description = "Reload wallpaper on specific output",
+        .args_schema = "{\"output\": <string>}",
+        .example = "{\"command\":\"reload-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler = cmd_reload_output,
+        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+        .version = 1,
+    },
+    {
+        .name = "pause-output",
+        .category = "output",
+        .description = "Pause cycling on specific output",
+        .args_schema = "{\"output\": <string>}",
+        .example = "{\"command\":\"pause-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler = cmd_pause_output,
+        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+        .version = 1,
+    },
+    {
+        .name = "resume-output",
+        .category = "output",
+        .description = "Resume cycling on specific output",
+        .args_schema = "{\"output\": <string>}",
+        .example = "{\"command\":\"resume-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler = cmd_resume_output,
+        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+        .version = 1,
+    },
+    {
+        .name = "set-output-mode",
+        .category = "output",
+        .description = "Set wallpaper mode for specific output",
+        .args_schema = "{\"output\": <string>, \"mode\": <string>}",
+        .example = "{\"command\":\"set-output-mode\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"mode\\\":\\\"fill\\\"}\"}",
+        .handler = cmd_set_output_mode,
+        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+        .version = 1,
+    },
+    {
+        .name = "set-output-interval",
+        .category = "output",
+        .description = "Set cycle interval for specific output",
+        .args_schema = "{\"output\": <string>, \"interval\": <integer>}",
+        .example = "{\"command\":\"set-output-interval\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"interval\\\":600}\"}",
+        .handler = cmd_set_output_interval,
+        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+        .version = 1,
+    },
+    {
+        .name = "set-output-wallpaper",
+        .category = "output",
+        .description = "Set wallpaper for specific output",
+        .args_schema = "{\"output\": <string>, \"path\": <string>}",
+        .example = "{\"command\":\"set-output-wallpaper\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"path\\\":\\\"/path/to/wallpaper.jpg\\\"}\"}",
+        .handler = cmd_set_output_wallpaper,
+        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+        .version = 1,
+    },
+    {
+        .name = "jump-to-output",
+        .category = "output",
+        .description = "Jump to specific cycle index on output",
+        .args_schema = "{\"output\": <string>, \"index\": <integer>}",
+        .example = "{\"command\":\"jump-to-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"index\\\":3}\"}",
+        .handler = cmd_jump_to_output,
+        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+        .version = 1,
+    },
+
+    /* Configuration Queries */
+    {
+        .name = "get-config",
+        .category = "config",
+        .description = "Get configuration value(s)",
+        .args_schema = "{\"key\": <string>}",
+        .example = "{\"command\":\"get-config\",\"args\":\"{\\\"key\\\":\\\"general.cycle_interval\\\"}\"}",
+        .handler = cmd_get_config,
+        .capabilities = CMD_CAP_REQUIRES_STATE,
+        .version = 1,
+    },
+    {
+        .name = "list-config-keys",
+        .category = "config",
+        .description = "List all configuration keys",
+        .args_schema = NULL,
+        .example = "{\"command\":\"list-config-keys\"}",
+        .handler = cmd_list_config_keys,
+        .capabilities = CMD_CAP_REQUIRES_STATE,
         .version = 1,
     },
 
@@ -557,14 +694,7 @@ static command_result_t cmd_resume(struct neowall_state *state, const ipc_reques
     return CMD_SUCCESS;
 }
 
-static command_result_t cmd_reload(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    (void)req;
-    (void)state;
 
-    /* Hot reload removed for simplicity - instruct user to restart daemon */
-    commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Reload not supported. Please restart the daemon: neowall restart");
-    return CMD_ERROR_INVALID_ARGS;
-}
 
 static command_result_t cmd_speed_up(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
     (void)req;

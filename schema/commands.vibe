@@ -643,11 +643,574 @@ shader {
 }
 
 # ============================================================================
-# CONFIG COMMANDS - Configuration management
+# OUTPUT COMMANDS - Per-monitor control
+# ============================================================================
+output {
+  description "Per-output (per-monitor) control and management (IPC)"
+  ipc true
+
+  list-outputs {
+    description "List all connected outputs with their current state"
+    handler cmd_list_outputs
+    requires_state true
+    modifies_state false
+
+    returns {
+      type object
+      fields {
+        outputs {
+          type array
+          items {
+            name {
+              type string
+              description "Output connector name (e.g., DP-1, HDMI-A-2)"
+            }
+            model {
+              type string
+              description "Display model name"
+            }
+            width {
+              type integer
+              description "Logical width in pixels"
+            }
+            height {
+              type integer
+              description "Logical height in pixels"
+            }
+            scale {
+              type integer
+              description "Display scale factor"
+            }
+            wallpaper_type {
+              type enum
+              values shader image
+            }
+            wallpaper_path {
+              type string
+              description "Current wallpaper/shader path"
+            }
+            mode {
+              type string
+              description "Wallpaper display mode"
+              values fill fit center stretch tile
+            }
+            cycle_index {
+              type integer
+              description "Current position in cycle"
+            }
+            cycle_total {
+              type integer
+              description "Total wallpapers in cycle"
+            }
+          }
+        }
+      }
+    }
+
+    implementation {
+      file src/neowalld/commands/output_commands.c
+      function cmd_list_outputs
+      lock_requirements output_list_lock
+    }
+
+    example {
+      request {"command":"list-outputs"}
+      response {"status":"ok","data":{"outputs":[{"name":"DP-1","model":"Dell U2720Q","width":3840,"height":2160,"scale":2,"wallpaper_type":"shader","wallpaper_path":"/shaders/perlin.glsl","mode":"fill","cycle_index":2,"cycle_total":5}]}}
+    }
+
+    since 0.4.0
+  }
+
+  output-info {
+    description "Get detailed information about a specific output"
+    handler cmd_output_info
+    requires_state true
+    modifies_state false
+
+    args {
+      output {
+        type string
+        required true
+        description "Output name (connector or model)"
+      }
+    }
+
+    returns {
+      type object
+      fields {
+        name string
+        model string
+        width integer
+        height integer
+        scale integer
+        wallpaper_type enum
+        wallpaper_path string
+        mode string
+        cycle_index integer
+        cycle_total integer
+        cycle_interval integer
+        paused boolean
+      }
+    }
+
+    implementation {
+      file src/neowalld/commands/output_commands.c
+      function cmd_output_info
+    }
+
+    example {
+      request {"command":"output-info","args":"{\"output\":\"DP-1\"}"}
+      response {"status":"ok","data":{"name":"DP-1","model":"Dell U2720Q","width":3840,"height":2160,"scale":2,"wallpaper_type":"shader","wallpaper_path":"/shaders/perlin.glsl","mode":"fill","cycle_index":2,"cycle_total":5,"cycle_interval":300,"paused":false}}
+    }
+
+    since 0.4.0
+  }
+
+  next-output {
+    description "Switch to next wallpaper on specific output"
+    handler cmd_next_output
+    requires_state true
+    modifies_state true
+
+    args {
+      output {
+        type string
+        required true
+        description "Output name (connector or model)"
+      }
+    }
+
+    returns {
+      type string
+      value "Switched to next wallpaper on <output>"
+    }
+
+    behavior {
+      scope "Affects only the specified output"
+      boundary_handling "Wraps from cycle_count-1 to 0"
+      independence "Other outputs continue their cycles unaffected"
+    }
+
+    implementation {
+      file src/neowalld/commands/output_commands.c
+      function cmd_next_output
+      lock_requirements output_list_lock
+    }
+
+    example {
+      request {"command":"next-output","args":"{\"output\":\"DP-1\"}"}
+      response {"status":"ok","message":"Switched to next wallpaper on DP-1"}
+    }
+
+    since 0.4.0
+  }
+
+  prev-output {
+    description "Switch to previous wallpaper on specific output"
+    handler cmd_prev_output
+    requires_state true
+    modifies_state true
+
+    args {
+      output {
+        type string
+        required true
+        description "Output name (connector or model)"
+      }
+    }
+
+    returns {
+      type string
+      value "Switched to previous wallpaper on <output>"
+    }
+
+    behavior {
+      scope "Affects only the specified output"
+      boundary_handling "Wraps from 0 to cycle_count-1"
+      independence "Other outputs continue their cycles unaffected"
+    }
+
+    implementation {
+      file src/neowalld/commands/output_commands.c
+      function cmd_prev_output
+      lock_requirements output_list_lock
+    }
+
+    example {
+      request {"command":"prev-output","args":"{\"output\":\"DP-1\"}"}
+      response {"status":"ok","message":"Switched to previous wallpaper on DP-1"}
+    }
+
+    since 0.4.0
+  }
+
+  reload-output {
+    description "Reload current wallpaper on specific output"
+    handler cmd_reload_output
+    requires_state true
+    modifies_state true
+
+    args {
+      output {
+        type string
+        required true
+        description "Output name (connector or model)"
+      }
+    }
+
+    returns {
+      type string
+      value "Reloaded wallpaper on <output>"
+    }
+
+    behavior {
+      action "Reloads image/shader from disk and re-renders"
+      use_case "Apply external file changes without cycling"
+    }
+
+    implementation {
+      file src/neowalld/commands/output_commands.c
+      function cmd_reload_output
+      lock_requirements output_list_lock
+    }
+
+    example {
+      request {"command":"reload-output","args":"{\"output\":\"DP-1\"}"}
+      response {"status":"ok","message":"Reloaded wallpaper on DP-1"}
+    }
+
+    since 0.4.0
+  }
+
+  pause-output {
+    description "Pause cycling on specific output"
+    handler cmd_pause_output
+    requires_state true
+    modifies_state true
+
+    args {
+      output {
+        type string
+        required true
+        description "Output name (connector or model)"
+      }
+    }
+
+    returns {
+      type string
+      value "Paused cycling on <output>"
+    }
+
+    behavior {
+      scope "Affects only the specified output"
+      independence "Other outputs continue cycling normally"
+    }
+
+    implementation {
+      file src/neowalld/commands/output_commands.c
+      function cmd_pause_output
+    }
+
+    example {
+      request {"command":"pause-output","args":"{\"output\":\"DP-1\"}"}
+      response {"status":"ok","message":"Paused cycling on DP-1"}
+    }
+
+    since 0.4.0
+  }
+
+  resume-output {
+    description "Resume cycling on specific output"
+    handler cmd_resume_output
+    requires_state true
+    modifies_state true
+
+    args {
+      output {
+        type string
+        required true
+        description "Output name (connector or model)"
+      }
+    }
+
+    returns {
+      type string
+      value "Resumed cycling on <output>"
+    }
+
+    behavior {
+      scope "Affects only the specified output"
+      timing "Cycle timer resumes from where it left off"
+    }
+
+    implementation {
+      file src/neowalld/commands/output_commands.c
+      function cmd_resume_output
+    }
+
+    example {
+      request {"command":"resume-output","args":"{\"output\":\"DP-1\"}"}
+      response {"status":"ok","message":"Resumed cycling on DP-1"}
+    }
+
+    since 0.4.0
+  }
+
+  set-output-mode {
+    description "Change wallpaper display mode for specific output"
+    handler cmd_set_output_mode
+    requires_state true
+    modifies_state true
+
+    args {
+      output {
+        type string
+        required true
+        description "Output name (connector or model)"
+      }
+      mode {
+        type enum
+        required true
+        values fill fit center stretch tile
+        description "Wallpaper display mode"
+      }
+    }
+
+    returns {
+      type string
+      value "Set mode to <mode> on <output>"
+    }
+
+    behavior {
+      scope "Affects only the specified output"
+      immediate "Mode applied on next frame"
+    }
+
+    implementation {
+      file src/neowalld/commands/output_commands.c
+      function cmd_set_output_mode
+    }
+
+    example {
+      request {"command":"set-output-mode","args":"{\"output\":\"DP-1\",\"mode\":\"fill\"}"}
+      response {"status":"ok","message":"Set mode to fill on DP-1"}
+    }
+
+    since 0.4.0
+  }
+
+  set-output-wallpaper {
+    description "Set wallpaper or shader for specific output"
+    handler cmd_set_output_wallpaper
+    requires_state true
+    modifies_state true
+
+    args {
+      output {
+        type string
+        required true
+        description "Output name (connector or model)"
+      }
+      path {
+        type string
+        required false
+        description "Single wallpaper/shader path"
+      }
+      paths {
+        type array
+        required false
+        description "Array of wallpaper/shader paths for cycling"
+      }
+    }
+
+    returns {
+      type string
+      value "Set wallpaper on <output>"
+    }
+
+    behavior {
+      scope "Affects only the specified output"
+      validation "Checks if path exists and is readable"
+      type_detection "Auto-detects shader (.glsl) vs image"
+      cycle_handling "If paths array provided, sets up cycling"
+    }
+
+    implementation {
+      file src/neowalld/commands/output_commands.c
+      function cmd_set_output_wallpaper
+    }
+
+    example {
+      request {"command":"set-output-wallpaper","args":"{\"output\":\"DP-1\",\"path\":\"/home/user/wallpaper.jpg\"}"}
+      response {"status":"ok","message":"Set wallpaper on DP-1"}
+    }
+
+    since 0.4.0
+  }
+
+  set-output-interval {
+    description "Set cycle interval for specific output"
+    handler cmd_set_output_interval
+    requires_state true
+    modifies_state true
+
+    args {
+      output {
+        type string
+        required true
+        description "Output name (connector or model)"
+      }
+      interval {
+        type integer
+        required true
+        description "Cycle interval in seconds"
+        range 1 86400
+      }
+    }
+
+    returns {
+      type string
+      value "Set cycle interval to <interval>s on <output>"
+    }
+
+    behavior {
+      scope "Affects only the specified output"
+      timer_reset "Restarts the cycle timer for this output"
+    }
+
+    implementation {
+      file src/neowalld/commands/output_commands.c
+      function cmd_set_output_interval
+    }
+
+    example {
+      request {"command":"set-output-interval","args":"{\"output\":\"DP-1\",\"interval\":600}"}
+      response {"status":"ok","message":"Set cycle interval to 600s on DP-1"}
+    }
+
+    since 0.4.0
+  }
+
+  jump-to-output {
+    description "Jump to specific index in wallpaper cycle for output"
+    handler cmd_jump_to_output
+    requires_state true
+    modifies_state true
+
+    args {
+      output {
+        type string
+        required true
+        description "Output name (connector or model)"
+      }
+      index {
+        type integer
+        required true
+        description "Cycle index to jump to (0-based)"
+      }
+    }
+
+    returns {
+      type string
+      value "Jumped to index <index> on <output>"
+    }
+
+    behavior {
+      scope "Affects only the specified output"
+      validation "Index must be within [0, cycle_total-1]"
+      immediate "Wallpaper changed immediately"
+    }
+
+    implementation {
+      file src/neowalld/commands/output_commands.c
+      function cmd_jump_to_output
+    }
+
+    example {
+      request {"command":"jump-to-output","args":"{\"output\":\"DP-1\",\"index\":3}"}
+      response {"status":"ok","message":"Jumped to index 3 on DP-1"}
+    }
+
+    since 0.4.0
+  }
+}
+
+# ============================================================================
+# CONFIG COMMANDS - Runtime configuration queries
 # ============================================================================
 config {
-  description "Configuration management (IPC)"
+  description "Configuration queries (IPC)"
   ipc true
+
+  get-config {
+    description "Get configuration value(s)"
+    handler cmd_get_config
+    requires_state true
+    modifies_state false
+
+    args {
+      key {
+        type string
+        required false
+        description "Config key path (e.g., 'general.cycle_interval'). If omitted, returns all config."
+      }
+    }
+
+    returns {
+      type object
+      description "Configuration value or full config object"
+    }
+
+    behavior {
+      scope "Read-only access to runtime configuration"
+      format "Returns values as they are currently loaded"
+    }
+
+    implementation {
+      file src/neowalld/commands/config_commands.c
+      function cmd_get_config
+    }
+
+    example {
+      request {"command":"get-config","args":"{\"key\":\"general.cycle_interval\"}"}
+      response {"status":"ok","data":{"general.cycle_interval":300}}
+    }
+
+    since 0.4.0
+  }
+
+  list-config-keys {
+    description "List all available configuration keys"
+    handler cmd_list_config_keys
+    requires_state true
+    modifies_state false
+
+    returns {
+      type array
+      items {
+        key string
+        type string
+        description string
+        current_value any
+      }
+    }
+
+    behavior {
+      scope "Introspection of configuration structure"
+    }
+
+    implementation {
+      file src/neowalld/commands/config_commands.c
+      function cmd_list_config_keys
+    }
+
+    example {
+      request {"command":"list-config-keys"}
+      response {"status":"ok","data":{"keys":[{"key":"general.cycle_interval","type":"integer","description":"Default cycle interval","current_value":300}]}}
+    }
+
+    since 0.4.0
+  }
 
   reload {
     description "Reload configuration (deprecated - requires daemon restart)"
