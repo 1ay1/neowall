@@ -46,57 +46,91 @@ info() {
 }
 
 # ============================================================================
-# VALIDATE COMMANDS SCHEMA - CATEGORY WISE
+# VALIDATE CLIENT-SIDE COMMANDS
 # ============================================================================
+info "Validating client-side commands..."
+
+CLIENT_FILE="$SRC_DIR/neowall/main.c"
+declare -A CLIENT_COMMANDS
+CLIENT_COMMANDS[start]=1
+CLIENT_COMMANDS[stop]=1
+CLIENT_COMMANDS[restart]=1
+CLIENT_COMMANDS[config]=1
+CLIENT_COMMANDS[tray]=1
+CLIENT_COMMANDS[help]=1
+CLIENT_COMMANDS[version]=1
+
+for cmd in "${!CLIENT_COMMANDS[@]}"; do
+    # Check if command handler exists in client
+    if grep -q "^static.*cmd_$cmd(" "$CLIENT_FILE"; then
+        success "[client] Command '$cmd' implemented"
+    else
+        error "[client] Command '$cmd' missing from $CLIENT_FILE"
+    fi
+
+    # Check if command exists in schema
+    if grep -q "^\s*$cmd\s*{" "$SCHEMA_DIR/commands.vibe"; then
+        : # Command found in schema
+    else
+        error "[client] Command '$cmd' missing from schema"
+    fi
+done
+
+# ============================================================================
+# VALIDATE IPC COMMANDS SCHEMA - CATEGORY WISE
+# ============================================================================
+info ""
+info "Validating IPC commands (daemon)..."
+
 REGISTRY_FILE="$SRC_DIR/neowalld/commands/registry.c"
 
 # Extract all command names from code
 CODE_COMMANDS=$(grep -E '^\s*\.name\s*=\s*"' "$REGISTRY_FILE" | \
     sed 's/.*"\(.*\)".*/\1/' | sort)
 
-# Define categories and their commands
-declare -A CATEGORIES
-CATEGORIES[system]="ping version list status"
-CATEGORIES[wallpaper]="next prev current"
-CATEGORIES[cycling]="pause resume"
-CATEGORIES[shader]="speed-up speed-down shader-pause shader-resume"
-CATEGORIES[config]="reload"
+# Define IPC categories and their commands
+declare -A IPC_CATEGORIES
+IPC_CATEGORIES[system]="ping version list status"
+IPC_CATEGORIES[wallpaper]="next prev current"
+IPC_CATEGORIES[cycling]="pause resume"
+IPC_CATEGORIES[shader]="speed-up speed-down shader-pause shader-resume"
+IPC_CATEGORIES[config]="reload"
 
 # Validate each category
 for category in system wallpaper cycling shader config; do
     info ""
-    info "Validating ${category} commands..."
+    info "Validating ${category} IPC commands..."
 
-    CATEGORY_CMDS=${CATEGORIES[$category]}
+    CATEGORY_CMDS=${IPC_CATEGORIES[$category]}
 
     for cmd in $CATEGORY_CMDS; do
         # Check if command exists in code
         if echo "$CODE_COMMANDS" | grep -q "^$cmd$"; then
-            success "[$category] Command '$cmd' implemented"
+            success "[$category] IPC command '$cmd' implemented"
         else
-            error "[$category] Command '$cmd' in schema but not in code"
+            error "[$category] IPC command '$cmd' in schema but not in code"
         fi
 
         # Check if command exists in schema
         if grep -q "^\s*$cmd\s*{" "$SCHEMA_DIR/commands.vibe"; then
             : # Command found in schema
         else
-            error "[$category] Command '$cmd' missing from schema"
+            error "[$category] IPC command '$cmd' missing from schema"
         fi
     done
 done
 
-# Check for commands in code but not in any category
+# Check for IPC commands in code but not in any category
 info ""
-info "Checking for uncategorized commands..."
-ALL_SCHEMA_CMDS=""
+info "Checking for uncategorized IPC commands..."
+ALL_IPC_CMDS=""
 for category in system wallpaper cycling shader config; do
-    ALL_SCHEMA_CMDS="$ALL_SCHEMA_CMDS ${CATEGORIES[$category]}"
+    ALL_IPC_CMDS="$ALL_IPC_CMDS ${IPC_CATEGORIES[$category]}"
 done
 
 while IFS= read -r cmd; do
     found=false
-    for schema_cmd in $ALL_SCHEMA_CMDS; do
+    for schema_cmd in $ALL_IPC_CMDS; do
         if [ "$cmd" = "$schema_cmd" ]; then
             found=true
             break
@@ -104,28 +138,49 @@ while IFS= read -r cmd; do
     done
 
     if [ "$found" = false ]; then
-        warn "Command '$cmd' in code but not in any schema category"
+        warn "IPC command '$cmd' in code but not in any schema category"
     fi
 done <<< "$CODE_COMMANDS"
 
 # ============================================================================
-# VALIDATE COMMAND HANDLERS
+# VALIDATE IPC COMMAND HANDLERS (in daemon registry.c)
 # ============================================================================
 info ""
-info "Validating command handler functions exist..."
+info "Validating IPC command handler functions exist..."
 
-# Extract handler names from schema
-SCHEMA_HANDLERS=$(grep "handler cmd_" "$SCHEMA_DIR/commands.vibe" | \
+# Extract handler names from schema IPC sections only (not client section)
+SCHEMA_HANDLERS=$(awk '/^(system|wallpaper|cycling|shader|config) \{/,/^}/' "$SCHEMA_DIR/commands.vibe" | \
+    grep "handler cmd_" | \
     sed 's/.*handler\s\+\(cmd_[a-z_]\+\).*/\1/' | sort -u)
 
 # Check if each handler is defined in registry.c
 while IFS= read -r handler; do
     if ! grep -q "^static command_result_t $handler(" "$REGISTRY_FILE"; then
-        error "Handler '$handler' declared in schema but not found in $REGISTRY_FILE"
+        error "IPC handler '$handler' declared in schema but not found in $REGISTRY_FILE"
     else
-        success "Handler '$handler' exists"
+        success "IPC handler '$handler' exists"
     fi
 done <<< "$SCHEMA_HANDLERS"
+
+# ============================================================================
+# VALIDATE CLIENT COMMAND HANDLERS (in client main.c)
+# ============================================================================
+info ""
+info "Validating client command handler functions exist..."
+
+# Extract handler names from client section only
+CLIENT_SCHEMA_HANDLERS=$(awk '/^client \{/,/^}/' "$SCHEMA_DIR/commands.vibe" | \
+    grep "handler cmd_" | \
+    sed 's/.*handler\s\+\(cmd_[a-z_]\+\).*/\1/' | sort -u)
+
+# Check if each handler is defined in main.c
+while IFS= read -r handler; do
+    if ! grep -q "^static.*$handler(" "$CLIENT_FILE"; then
+        error "Client handler '$handler' declared in schema but not found in $CLIENT_FILE"
+    else
+        success "Client handler '$handler' exists"
+    fi
+done <<< "$CLIENT_SCHEMA_HANDLERS"
 
 # ============================================================================
 # VALIDATE ERROR CODES

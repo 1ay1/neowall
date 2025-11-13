@@ -9,10 +9,165 @@ meta {
 }
 
 # ============================================================================
+# CLIENT-SIDE COMMANDS
+# These are handled by the neowall client binary, not sent as IPC to daemon
+# ============================================================================
+client {
+  description "Commands handled by client binary (not IPC)"
+
+  start {
+    description "Start the neowalld daemon process"
+    handler cmd_start
+    requires_daemon false
+    ipc false
+
+    behavior {
+      action "Fork and exec neowalld binary"
+      checks_running "Returns early if daemon already running"
+      daemonize true
+    }
+
+    implementation {
+      file src/neowall/main.c
+      function cmd_start
+      daemon_path_resolution "Checks ./builddir/bin/, /usr/local/bin/, /usr/bin/"
+    }
+
+    example "neowall start"
+    since 0.1.0
+  }
+
+  stop {
+    description "Stop the neowalld daemon process"
+    handler cmd_stop
+    requires_daemon true
+    ipc false
+
+    behavior {
+      action "Send SIGTERM to daemon PID"
+      pid_file "Reads from /tmp/neowalld.pid"
+      timeout "Waits up to 5 seconds for graceful shutdown"
+    }
+
+    implementation {
+      file src/neowall/main.c
+      function cmd_stop
+    }
+
+    example "neowall stop"
+    since 0.1.0
+  }
+
+  restart {
+    description "Restart the daemon (stop then start)"
+    handler cmd_restart
+    requires_daemon false
+    ipc false
+
+    behavior {
+      action "Calls cmd_stop then cmd_start"
+      delay "Sleeps 1 second between stop and start"
+    }
+
+    implementation {
+      file src/neowall/main.c
+      function cmd_restart
+    }
+
+    example "neowall restart"
+    since 0.1.0
+  }
+
+  config {
+    description "Edit configuration file in default editor"
+    handler cmd_config
+    requires_daemon false
+    ipc false
+
+    behavior {
+      action "Opens config file in $EDITOR or vi"
+      config_path "$XDG_CONFIG_HOME/neowall/config.vibe or ~/.config/neowall/config.vibe"
+    }
+
+    implementation {
+      file src/neowall/main.c
+      function cmd_config
+    }
+
+    example "neowall config"
+    since 0.1.0
+  }
+
+  tray {
+    description "Launch system tray application"
+    handler cmd_tray
+    requires_daemon false
+    ipc false
+
+    behavior {
+      action "Exec neowall-tray binary"
+      prompts_start "Asks to start daemon if not running"
+    }
+
+    implementation {
+      file src/neowall/main.c
+      function cmd_tray
+    }
+
+    example "neowall tray &"
+    since 0.3.0
+  }
+
+  help {
+    description "Show help message"
+    handler cmd_help
+    requires_daemon false
+    ipc false
+
+    behavior {
+      action "Print usage information"
+    }
+
+    implementation {
+      file src/neowall/main.c
+      function cmd_help
+    }
+
+    example "neowall help"
+    since 0.1.0
+  }
+
+  version {
+    description "Show client version (same as IPC version command)"
+    handler cmd_version
+    requires_daemon false
+    ipc false
+
+    behavior {
+      action "Print version string"
+      note "Same version as daemon, but client-side command"
+    }
+
+    implementation {
+      file src/neowall/main.c
+      function cmd_version
+    }
+
+    example "neowall version"
+    since 0.1.0
+  }
+}
+
+# ============================================================================
+# IPC COMMANDS - Sent to running daemon via Unix socket
+# ============================================================================
+
+# ============================================================================
 # SYSTEM COMMANDS - Information and daemon control
 # ============================================================================
 system {
-  description "System information and daemon control"
+  description "System information and daemon control (IPC)"
+  ipc true
 
   ping {
     description "Health check - verify daemon is responding"
@@ -134,7 +289,8 @@ system {
 # WALLPAPER COMMANDS - Navigation and information
 # ============================================================================
 wallpaper {
-  description "Wallpaper management and navigation"
+  description "Wallpaper management and navigation (IPC)"
+  ipc true
 
   next {
     description "Switch to next wallpaper in cycle"
@@ -265,7 +421,8 @@ wallpaper {
 # CYCLING COMMANDS - Automatic wallpaper rotation control
 # ============================================================================
 cycling {
-  description "Automatic wallpaper cycling control"
+  description "Automatic wallpaper cycling control (IPC)"
+  ipc true
 
   pause {
     description "Pause automatic wallpaper cycling"
@@ -335,7 +492,8 @@ cycling {
 # SHADER COMMANDS - Animation control
 # ============================================================================
 shader {
-  description "Shader animation control"
+  description "Shader animation control (IPC)"
+  ipc true
 
   speed-up {
     description "Increase global shader animation speed"
@@ -488,7 +646,8 @@ shader {
 # CONFIG COMMANDS - Configuration management
 # ============================================================================
 config {
-  description "Configuration management"
+  description "Configuration management (IPC)"
+  ipc true
 
   reload {
     description "Reload configuration (deprecated - requires daemon restart)"
