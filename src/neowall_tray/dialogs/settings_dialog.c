@@ -1222,7 +1222,7 @@ void settings_dialog_show(void) {
     /* Initialize UI theme */
     ui_utils_init_theme();
 
-    /* Create dialog */
+    /* Create dialog - modal to parent */
     dlg->dialog = gtk_dialog_new_with_buttons(
         "NeoWall Settings",
         NULL,
@@ -1247,7 +1247,9 @@ void settings_dialog_show(void) {
     ui_utils_add_class(dlg->apply_button, "suggested-action");
     ui_utils_add_class(dlg->apply_button, "apply-button");
 
-    gtk_window_set_default_size(GTK_WINDOW(dlg->dialog), 650, 550);
+    gtk_window_set_default_size(GTK_WINDOW(dlg->dialog), 700, 600);
+    gtk_window_set_resizable(GTK_WINDOW(dlg->dialog), FALSE);
+    gtk_window_set_type_hint(GTK_WINDOW(dlg->dialog), GDK_WINDOW_TYPE_HINT_DIALOG);
 
     /* Content area */
     GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dlg->dialog));
@@ -1316,7 +1318,7 @@ void settings_dialog_show(void) {
 
     ui_utils_update_status_label(dlg->status_label, "✓ Configuration loaded", UI_STATUS_SUCCESS);
 
-    /* Run dialog */
+    /* Run dialog (modal to parent) */
     while (TRUE) {
         gint response = gtk_dialog_run(GTK_DIALOG(dlg->dialog));
 

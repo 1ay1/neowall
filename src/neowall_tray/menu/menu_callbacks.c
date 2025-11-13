@@ -24,11 +24,7 @@ void menu_callback_prev_wallpaper(GtkMenuItem *item, gpointer user_data) {
     command_execute("prev");
 }
 
-void menu_callback_show_current(GtkMenuItem *item, gpointer user_data) {
-    (void)item;
-    (void)user_data;
-    dialog_show_current_wallpaper();
-}
+
 
 /* Cycling control callbacks */
 void menu_callback_pause_cycling(GtkMenuItem *item, gpointer user_data) {

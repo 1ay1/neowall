@@ -13,11 +13,7 @@
  */
 void dialog_show_status(void);
 
-/**
- * Show the current wallpaper dialog
- * Displays the path to the currently active wallpaper
- */
-void dialog_show_current_wallpaper(void);
+
 
 /**
  * Show the about dialog

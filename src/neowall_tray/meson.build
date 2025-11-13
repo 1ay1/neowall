@@ -29,6 +29,7 @@ tray_sources = [
   'dialogs/dialogs.c',
   'dialogs/settings_dialog.c',
   'dialogs/about_dialog.c',
+  'dialogs/status_dialog.c',
 
   # UI component
   'ui/ui_utils.c',

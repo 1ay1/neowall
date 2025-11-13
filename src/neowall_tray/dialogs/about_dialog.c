@@ -87,6 +87,7 @@ void about_dialog_show(void) {
 
     gtk_window_set_default_size(GTK_WINDOW(dialog), 600, 700);
     gtk_window_set_resizable(GTK_WINDOW(dialog), FALSE);
+    gtk_window_set_type_hint(GTK_WINDOW(dialog), GDK_WINDOW_TYPE_HINT_DIALOG);
     ui_utils_set_window_icon(GTK_WINDOW(dialog));
 
     GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));

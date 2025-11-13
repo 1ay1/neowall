@@ -27,22 +27,6 @@ static const MenuItemDef wallpaper_items[] = {
         .callback = G_CALLBACK(menu_callback_prev_wallpaper),
         .submenu_id = MENU_ID_WALLPAPER,
         .order = 2
-    },
-    {
-        .label = NULL,
-        .id = "sep1",
-        .type = MENU_ITEM_TYPE_SEPARATOR,
-        .callback = NULL,
-        .submenu_id = MENU_ID_WALLPAPER,
-        .order = 3
-    },
-    {
-        .label = MENU_LABEL_CURRENT,
-        .id = "current",
-        .type = MENU_ITEM_TYPE_NORMAL,
-        .callback = G_CALLBACK(menu_callback_show_current),
-        .submenu_id = MENU_ID_WALLPAPER,
-        .order = 4
     }
 };
 
