@@ -51,4 +51,14 @@ command_result_t cmd_reload(struct neowall_state *state,
                            const ipc_request_t *req,
                            ipc_response_t *resp);
 
+/* ============================================================================
+ * Command Registry Export
+ * ============================================================================ */
+
+/**
+ * Get config commands registry
+ * Returns NULL-terminated array of command_info_t for config commands
+ */
+const command_info_t *config_get_commands(void);
+
 #endif /* NEOWALL_CONFIG_COMMANDS_H */

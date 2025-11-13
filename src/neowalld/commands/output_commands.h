@@ -180,4 +180,14 @@ bool extract_json_string(const char *args_json, const char *key, char *value, si
 struct output_state *find_output_by_name(struct neowall_state *state, 
                                           const char *name);
 
+/* ============================================================================
+ * Command Registry Export
+ * ============================================================================ */
+
+/**
+ * Get output commands registry
+ * Returns NULL-terminated array of command_info_t for output commands
+ */
+const command_info_t *output_get_commands(void);
+
 #endif /* NEOWALL_OUTPUT_COMMANDS_H */

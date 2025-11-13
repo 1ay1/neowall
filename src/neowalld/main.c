@@ -371,7 +371,7 @@ static void print_usage(const char *program_name) {
     printf("Options:\n");
     printf("  -c, --config PATH     Path to configuration file\n");
     printf("  -f, --foreground      Run in foreground (for debugging)\n");
-
+    printf("  -d, --dump-commands   Dump command registry as JSON and exit\n");
     printf("  -v, --verbose         Enable verbose logging\n");
     printf("  -h, --help            Show this help message\n");
     printf("  -V, --version         Show version information\n");
@@ -780,22 +780,38 @@ int main(int argc, char *argv[]) {
     }
 
     static struct option long_options[] = {
-        {"config",     required_argument, 0, 'c'},
-        {"foreground", no_argument,       0, 'f'},
-        {"verbose",    no_argument,       0, 'v'},
-        {"help",       no_argument,       0, 'h'},
-        {"version",    no_argument,       0, 'V'},
-        {0, 0, 0, 0}
+        {"config",        required_argument, NULL, 'c'},
+        {"foreground",    no_argument,       NULL, 'f'},
+        {"dump-commands", no_argument,       NULL, 'd'},
+        {"verbose",       no_argument,       NULL, 'v'},
+        {"help",          no_argument,       NULL, 'h'},
+        {"version",       no_argument,       NULL, 'V'},
+        {NULL, 0, NULL, 0}
     };
 
     /* Parse command line arguments */
-    while ((opt = getopt_long(argc, argv, "c:fvhV", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:fdvhV", long_options, NULL)) != -1) {
         switch (opt) {
             case 'c':
                 strncpy(config_path, optarg, sizeof(config_path) - 1);
                 break;
             case 'f':
                 daemon_mode = false;  /* Explicit foreground */
+                break;
+            case 'd':
+                /* Dump command registry and exit */
+                commands_init();
+                {
+                    char json_buffer[32768];
+                    size_t len = commands_generate_json_list(json_buffer, sizeof(json_buffer), NULL, NULL);
+                    if (len < sizeof(json_buffer)) {
+                        printf("%s\n", json_buffer);
+                        return EXIT_SUCCESS;
+                    } else {
+                        fprintf(stderr, "Error: Command list too large for buffer\n");
+                        return EXIT_FAILURE;
+                    }
+                }
                 break;
             case 'v':
                 /* Verbose mode - enable debug logging */

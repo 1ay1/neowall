@@ -25,6 +25,7 @@ _build/
 .idea/
 *.sublime-*
 .DS_Store
+.cache/
 
 # Python
 __pycache__/

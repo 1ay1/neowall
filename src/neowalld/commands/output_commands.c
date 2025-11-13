@@ -4,11 +4,99 @@
  */
 
 #include "output_commands.h"
+#include "commands.h"
 #include "neowall.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
+
+/* Forward declarations of command handlers */
+command_result_t cmd_list_outputs(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_output_info(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_next_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_prev_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_reload_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_pause_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_resume_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_set_output_mode(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_set_output_interval(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_set_output_wallpaper(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_jump_to_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+
+/* Output command registry */
+static const command_info_t output_command_registry[] = {
+    COMMAND_ENTRY_CUSTOM("list-outputs", cmd_list_outputs, "output",
+                        "List all connected outputs",
+                        CMD_CAP_REQUIRES_STATE, NULL, NULL),
+
+    COMMAND_ENTRY_CUSTOM("output-info", cmd_output_info, "output",
+                        "Get information about specific output",
+                        CMD_CAP_REQUIRES_STATE,
+                        "{\"output\": <string>}",
+                        "{\"command\":\"output-info\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("next-output", cmd_next_output, "output",
+                        "Switch to next wallpaper on specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>}",
+                        "{\"command\":\"next-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("prev-output", cmd_prev_output, "output",
+                        "Switch to previous wallpaper on specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>}",
+                        "{\"command\":\"prev-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("reload-output", cmd_reload_output, "output",
+                        "Reload wallpaper on specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>}",
+                        "{\"command\":\"reload-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("pause-output", cmd_pause_output, "output",
+                        "Pause cycling on specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>}",
+                        "{\"command\":\"pause-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("resume-output", cmd_resume_output, "output",
+                        "Resume cycling on specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>}",
+                        "{\"command\":\"resume-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("set-output-mode", cmd_set_output_mode, "output",
+                        "Set wallpaper mode for specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>, \"mode\": <string>}",
+                        "{\"command\":\"set-output-mode\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"mode\\\":\\\"fill\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("set-output-interval", cmd_set_output_interval, "output",
+                        "Set cycle interval for specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>, \"interval\": <integer>}",
+                        "{\"command\":\"set-output-interval\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"interval\\\":600}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("set-output-wallpaper", cmd_set_output_wallpaper, "output",
+                        "Set wallpaper for specific output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>, \"path\": <string>}",
+                        "{\"command\":\"set-output-wallpaper\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"path\\\":\\\"/path/to/wallpaper.jpg\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("jump-to-output", cmd_jump_to_output, "output",
+                        "Jump to specific cycle index on output",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"output\": <string>, \"index\": <integer>}",
+                        "{\"command\":\"jump-to-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"index\\\":3}\"}"),
+
+    COMMAND_SENTINEL
+};
+
+/* Export command registry */
+const command_info_t *output_get_commands(void) {
+    return output_command_registry;
+}
 
 /* ============================================================================
  * Utility Functions

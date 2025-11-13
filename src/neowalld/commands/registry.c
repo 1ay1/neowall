@@ -9,6 +9,7 @@
 #include "neowall.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -28,366 +29,105 @@ static command_result_t cmd_current(struct neowall_state *state, const ipc_reque
 static command_result_t cmd_ping(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_version(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_list_commands(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+static command_result_t cmd_command_stats(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 
 /* Command statistics tracking */
 typedef struct {
     command_stats_t stats;
     struct timespec last_call;
+    uint64_t total_time_ns;  /* Internal: total time in nanoseconds for averaging */
 } command_stats_internal_t;
 
 static command_stats_internal_t command_statistics[64]; /* Max 64 commands */
 
-/* Command registry */
-static const command_info_t command_registry[] = {
+/* Core command registry (wallpaper, cycling, shader, info) */
+static const command_info_t command_registry_core[] = {
     /* Wallpaper Control */
-    {
-        .name = "next",
-        .category = "wallpaper",
-        .description = "Switch to next wallpaper",
-        .args_schema = NULL,
-        .example = "{\"command\":\"next\"}",
-        .handler_name = "cmd_next",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_next,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "prev",
-        .category = "wallpaper",
-        .description = "Switch to previous wallpaper",
-        .args_schema = NULL,
-        .example = "{\"command\":\"prev\"}",
-        .handler_name = "cmd_prev",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_prev,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "current",
-        .category = "wallpaper",
-        .description = "Get current wallpaper information",
-        .args_schema = NULL,
-        .example = "{\"command\":\"current\"}",
-        .handler_name = "cmd_current",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_current,
-        .capabilities = CMD_CAP_REQUIRES_STATE,
-        .version = 1,
-    },
+    COMMAND_ENTRY(next, "wallpaper", "Switch to next wallpaper",
+                  CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
+    COMMAND_ENTRY(prev, "wallpaper", "Switch to previous wallpaper",
+                  CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
+    COMMAND_ENTRY(current, "wallpaper", "Get current wallpaper information",
+                  CMD_CAP_REQUIRES_STATE),
 
     /* Cycling Control */
-    {
-        .name = "pause",
-        .category = "cycling",
-        .description = "Pause automatic wallpaper cycling",
-        .args_schema = NULL,
-        .example = "{\"command\":\"pause\"}",
-        .handler_name = "cmd_pause",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_pause,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "resume",
-        .category = "cycling",
-        .description = "Resume automatic wallpaper cycling",
-        .args_schema = NULL,
-        .example = "{\"command\":\"resume\"}",
-        .handler_name = "cmd_resume",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_resume,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-
-    /* Configuration */
-    {
-        .name = "reload",
-        .category = "config",
-        .description = "Reload configuration from disk",
-        .args_schema = NULL,
-        .example = "{\"command\":\"reload\"}",
-        .handler_name = "cmd_reload",
-        .implementation_file = "commands/config_commands.c",
-        .handler = cmd_reload,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
+    COMMAND_ENTRY(pause, "cycling", "Pause automatic wallpaper cycling",
+                  CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
+    COMMAND_ENTRY(resume, "cycling", "Resume automatic wallpaper cycling",
+                  CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
+    COMMAND_ENTRY_CUSTOM("speed-up", cmd_speed_up, "cycling",
+                        "Decrease cycle interval (speed up transitions)",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
+    COMMAND_ENTRY_CUSTOM("speed-down", cmd_speed_down, "cycling",
+                        "Increase cycle interval (slow down transitions)",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
 
     /* Shader Control */
-    {
-        .name = "speed-up",
-        .category = "shader",
-        .description = "Increase shader animation speed",
-        .args_schema = "{\"amount\": <float>}",
-        .example = "{\"command\":\"speed-up\",\"args\":{\"amount\":0.5}}",
-        .handler_name = "cmd_speed_up",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_speed_up,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "speed-down",
-        .category = "shader",
-        .description = "Decrease shader animation speed",
-        .args_schema = "{\"amount\": <float>}",
-        .example = "{\"command\":\"speed-down\",\"args\":{\"amount\":0.5}}",
-        .handler_name = "cmd_speed_down",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_speed_down,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "shader-pause",
-        .category = "shader",
-        .description = "Pause shader animation",
-        .args_schema = NULL,
-        .example = "{\"command\":\"shader-pause\"}",
-        .handler_name = "cmd_shader_pause",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_shader_pause,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "shader-resume",
-        .category = "shader",
-        .description = "Resume shader animation",
-        .args_schema = NULL,
-        .example = "{\"command\":\"shader-resume\"}",
-        .handler_name = "cmd_shader_resume",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_shader_resume,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
+    COMMAND_ENTRY_CUSTOM("shader-pause", cmd_shader_pause, "shader",
+                        "Pause shader animation",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
+    COMMAND_ENTRY_CUSTOM("shader-resume", cmd_shader_resume, "shader",
+                        "Resume shader animation",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
 
     /* Status & Information */
-    {
-        .name = "status",
-        .category = "info",
-        .description = "Get daemon status and statistics",
-        .args_schema = NULL,
-        .example = "{\"command\":\"status\"}",
-        .handler_name = "cmd_status",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_status,
-        .capabilities = CMD_CAP_REQUIRES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "version",
-        .category = "info",
-        .description = "Get daemon version information",
-        .args_schema = NULL,
-        .example = "{\"command\":\"version\"}",
-        .handler_name = "cmd_version",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_version,
-        .capabilities = CMD_CAP_NONE,
-        .version = 1,
-    },
-    {
-        .name = "ping",
-        .category = "info",
-        .description = "Check if daemon is responsive",
-        .args_schema = NULL,
-        .example = "{\"command\":\"ping\"}",
-        .handler_name = "cmd_ping",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_ping,
-        .capabilities = CMD_CAP_NONE,
-        .version = 1,
-    },
-    {
-        .name = "list-commands",
-        .category = "info",
-        .description = "List all available commands with metadata",
-        .args_schema = NULL,
-        .example = "{\"command\":\"list-commands\"}",
-        .handler_name = "cmd_list_commands",
-        .implementation_file = "commands/registry.c",
-        .handler = cmd_list_commands,
-        .capabilities = CMD_CAP_NONE,
-        .version = 1,
-    },
+    COMMAND_ENTRY(status, "info", "Get daemon status and wallpaper info",
+                  CMD_CAP_REQUIRES_STATE),
+    COMMAND_ENTRY(version, "info", "Get daemon version information",
+                  CMD_CAP_NONE),
+    COMMAND_ENTRY(ping, "info", "Ping daemon (health check)",
+                  CMD_CAP_NONE),
+    COMMAND_ENTRY_CUSTOM("list-commands", cmd_list_commands, "info",
+                        "List all available commands with metadata",
+                        CMD_CAP_NONE, NULL, NULL),
+    COMMAND_ENTRY_CUSTOM("command-stats", cmd_command_stats, "info",
+                        "Get command execution statistics",
+                        CMD_CAP_NONE,
+                        "{\"command\": <string>}",
+                        "{\"command\":\"command-stats\",\"args\":\"{\\\"command\\\":\\\"next\\\"}\"}"),
 
-    /* Output Management */
-    {
-        .name = "list-outputs",
-        .category = "output",
-        .description = "List all connected outputs",
-        .args_schema = NULL,
-        .example = "{\"command\":\"list-outputs\"}",
-        .handler_name = "cmd_list_outputs",
-        .implementation_file = "commands/output_commands.c",
-        .handler = cmd_list_outputs,
-        .capabilities = CMD_CAP_REQUIRES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "output-info",
-        .category = "output",
-        .description = "Get information about specific output",
-        .args_schema = "{\"output\": <string>}",
-        .example = "{\"command\":\"output-info\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
-        .handler_name = "cmd_output_info",
-        .implementation_file = "commands/output_commands.c",
-        .handler = cmd_output_info,
-        .capabilities = CMD_CAP_REQUIRES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "next-output",
-        .category = "output",
-        .description = "Switch to next wallpaper on specific output",
-        .args_schema = "{\"output\": <string>}",
-        .example = "{\"command\":\"next-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
-        .handler_name = "cmd_next_output",
-        .implementation_file = "commands/output_commands.c",
-        .handler = cmd_next_output,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "prev-output",
-        .category = "output",
-        .description = "Switch to previous wallpaper on specific output",
-        .args_schema = "{\"output\": <string>}",
-        .example = "{\"command\":\"prev-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
-        .handler_name = "cmd_prev_output",
-        .implementation_file = "commands/output_commands.c",
-        .handler = cmd_prev_output,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "reload-output",
-        .category = "wallpaper",
-        .description = "Reload wallpaper on specific output",
-        .args_schema = "{\"output\": <string>}",
-        .example = "{\"command\":\"reload-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
-        .handler_name = "cmd_reload_output",
-        .implementation_file = "commands/output_commands.c",
-        .handler = cmd_reload_output,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "pause-output",
-        .category = "output",
-        .description = "Pause cycling on specific output",
-        .args_schema = "{\"output\": <string>}",
-        .example = "{\"command\":\"pause-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
-        .handler_name = "cmd_pause_output",
-        .implementation_file = "commands/output_commands.c",
-        .handler = cmd_pause_output,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "resume-output",
-        .category = "output",
-        .description = "Resume cycling on specific output",
-        .args_schema = "{\"output\": <string>}",
-        .example = "{\"command\":\"resume-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
-        .handler_name = "cmd_resume_output",
-        .implementation_file = "commands/output_commands.c",
-        .handler = cmd_resume_output,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "set-output-mode",
-        .category = "output",
-        .description = "Set wallpaper mode for specific output",
-        .args_schema = "{\"output\": <string>, \"mode\": <string>}",
-        .example = "{\"command\":\"set-output-mode\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"mode\\\":\\\"fill\\\"}\"}",
-        .handler_name = "cmd_set_output_mode",
-        .implementation_file = "commands/output_commands.c",
-        .handler = cmd_set_output_mode,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "set-output-interval",
-        .category = "output",
-        .description = "Set cycle interval for specific output",
-        .args_schema = "{\"output\": <string>, \"interval\": <integer>}",
-        .example = "{\"command\":\"set-output-interval\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"interval\\\":600}\"}",
-        .handler_name = "cmd_set_output_interval",
-        .implementation_file = "commands/output_commands.c",
-        .handler = cmd_set_output_interval,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "set-output-wallpaper",
-        .category = "output",
-        .description = "Set wallpaper for specific output",
-        .args_schema = "{\"output\": <string>, \"path\": <string>}",
-        .example = "{\"command\":\"set-output-wallpaper\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"path\\\":\\\"/path/to/wallpaper.jpg\\\"}\"}",
-        .handler_name = "cmd_set_output_wallpaper",
-        .implementation_file = "commands/output_commands.c",
-        .handler = cmd_set_output_wallpaper,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "jump-to-output",
-        .category = "output",
-        .description = "Jump to specific cycle index on output",
-        .args_schema = "{\"output\": <string>, \"index\": <integer>}",
-        .example = "{\"command\":\"jump-to-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"index\\\":3}\"}",
-        .handler_name = "cmd_jump_to_output",
-        .implementation_file = "commands/output_commands.c",
-        .handler = cmd_jump_to_output,
-        .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-        .version = 1,
-    },
-
-    /* Configuration Queries */
-    {
-        .name = "get-config",
-        .category = "config",
-        .description = "Get configuration value(s)",
-        .args_schema = "{\"key\": <string>}",
-        .example = "{\"command\":\"get-config\",\"args\":\"{\\\"key\\\":\\\"general.cycle_interval\\\"}\"}",
-        .handler_name = "cmd_get_config",
-        .implementation_file = "commands/config_commands.c",
-        .handler = cmd_get_config,
-        .capabilities = CMD_CAP_REQUIRES_STATE,
-        .version = 1,
-    },
-    {
-        .name = "list-config-keys",
-        .category = "config",
-        .description = "List all configuration keys",
-        .args_schema = NULL,
-        .example = "{\"command\":\"list-config-keys\"}",
-        .handler_name = "cmd_list_config_keys",
-        .implementation_file = "commands/config_commands.c",
-        .handler = cmd_list_config_keys,
-        .capabilities = CMD_CAP_REQUIRES_STATE,
-        .version = 1,
-    },
-
-    /* Sentinel */
-    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0 }
+    COMMAND_SENTINEL
 };
+
+/* Build unified command registry from all modules */
+static command_info_t command_registry[64]; /* Populated at init */
+static size_t command_registry_size = 0;
+
+
 
 /* Get registry size */
 static size_t get_registry_size(void) {
-    size_t count = 0;
-    while (command_registry[count].name != NULL) {
-        count++;
+    return command_registry_size;
+}
+
+/* Build unified registry from all modules */
+static void build_unified_registry(void) {
+    /* Get external module registries */
+    extern const command_info_t *output_get_commands(void);
+    extern const command_info_t *config_get_commands(void);
+
+    size_t idx = 0;
+
+    /* Add core commands */
+    for (size_t i = 0; command_registry_core[i].name != NULL && idx < 63; i++) {
+        command_registry[idx++] = command_registry_core[i];
     }
-    return count;
+
+    /* Add output commands */
+    const command_info_t *output_cmds = output_get_commands();
+    for (size_t i = 0; output_cmds[i].name != NULL && idx < 63; i++) {
+        command_registry[idx++] = output_cmds[i];
+    }
+
+    /* Add config commands */
+    const command_info_t *config_cmds = config_get_commands();
+    for (size_t i = 0; config_cmds[i].name != NULL && idx < 63; i++) {
+        command_registry[idx++] = config_cmds[i];
+    }
+
+    /* Add sentinel */
+    command_registry[idx] = (command_info_t)COMMAND_SENTINEL;
+    command_registry_size = idx;
 }
 
 /* ============================================================================
@@ -436,20 +176,34 @@ int commands_dispatch(const ipc_request_t *req, ipc_response_t *resp, void *user
             command_statistics[cmd_index].stats.calls_success++;
         } else {
             command_statistics[cmd_index].stats.calls_failed++;
+            /* Capture last error */
+            snprintf(command_statistics[cmd_index].stats.last_error,
+                     sizeof(command_statistics[cmd_index].stats.last_error),
+                     "%s", resp->message);
         }
 
         /* Calculate execution time in microseconds */
-        unsigned long elapsed_us = (end.tv_sec - start.tv_sec) * 1000000 +
-                                  (end.tv_nsec - start.tv_nsec) / 1000;
+        uint64_t elapsed_us = (end.tv_sec - start.tv_sec) * 1000000ULL +
+                              (end.tv_nsec - start.tv_nsec) / 1000ULL;
 
-        /* Update average (simple moving average) */
-        if (command_statistics[cmd_index].stats.calls_total == 1) {
-            command_statistics[cmd_index].stats.avg_time_us = elapsed_us;
-        } else {
-            command_statistics[cmd_index].stats.avg_time_us =
-                (command_statistics[cmd_index].stats.avg_time_us * 9 + elapsed_us) / 10;
+        /* Update timing statistics */
+        command_statistics[cmd_index].stats.total_time_us += elapsed_us;
+        command_statistics[cmd_index].total_time_ns += (end.tv_sec - start.tv_sec) * 1000000000ULL +
+                                                       (end.tv_nsec - start.tv_nsec);
+
+        if (elapsed_us < command_statistics[cmd_index].stats.min_time_us) {
+            command_statistics[cmd_index].stats.min_time_us = elapsed_us;
+        }
+        if (elapsed_us > command_statistics[cmd_index].stats.max_time_us) {
+            command_statistics[cmd_index].stats.max_time_us = elapsed_us;
         }
 
+        /* Calculate average */
+        command_statistics[cmd_index].stats.avg_time_us =
+            command_statistics[cmd_index].stats.total_time_us / command_statistics[cmd_index].stats.calls_total;
+
+        /* Update last call timestamp */
+        command_statistics[cmd_index].stats.last_called = time(NULL);
         command_statistics[cmd_index].last_call = end;
     }
 
@@ -547,8 +301,15 @@ int commands_reset_stats(const char *name) {
  * ============================================================================ */
 
 int commands_init(void) {
+    /* Build unified registry from all modules */
+    build_unified_registry();
+
     /* Initialize statistics */
     memset(command_statistics, 0, sizeof(command_statistics));
+    for (size_t i = 0; i < get_registry_size(); i++) {
+        command_statistics[i].stats.min_time_us = UINT64_MAX;
+    }
+
     return 0;
 }
 
@@ -614,12 +375,15 @@ size_t commands_generate_command_help(const char *name, char *buffer, size_t siz
                    cmd->example ? cmd->example : "N/A");
 }
 
-size_t commands_generate_json_list(char *buffer, size_t size) {
+size_t commands_generate_json_list(char *buffer, size_t size,
+                                   const char *category_filter,
+                                   const char *file_filter) {
     if (!buffer || size == 0) return 0;
 
     char *p = buffer;
     size_t remaining = size;
     int written;
+    size_t matched = 0;
 
     written = snprintf(p, remaining, "{\"commands\":[");
     if (written < 0 || (size_t)written >= remaining) return size;
@@ -627,9 +391,17 @@ size_t commands_generate_json_list(char *buffer, size_t size) {
     remaining -= written;
 
     for (size_t i = 0; command_registry[i].name; i++) {
+        /* Apply filters */
+        if (category_filter && strcmp(command_registry[i].category, category_filter) != 0) {
+            continue;
+        }
+        if (file_filter && strstr(command_registry[i].implementation_file, file_filter) == NULL) {
+            continue;
+        }
+
         written = snprintf(p, remaining,
                           "%s{\"name\":\"%s\",\"category\":\"%s\",\"handler\":\"%s\",\"file\":\"%s\"}",
-                          i > 0 ? "," : "",
+                          matched > 0 ? "," : "",
                           command_registry[i].name,
                           command_registry[i].category,
                           command_registry[i].handler_name,
@@ -637,9 +409,50 @@ size_t commands_generate_json_list(char *buffer, size_t size) {
         if (written < 0 || (size_t)written >= remaining) return size;
         p += written;
         remaining -= written;
+        matched++;
     }
 
-    written = snprintf(p, remaining, "],\"total\":%zu}", get_registry_size());
+    written = snprintf(p, remaining, "],\"total\":%zu,\"matched\":%zu}", get_registry_size(), matched);
+    if (written < 0 || (size_t)written >= remaining) return size;
+    p += written;
+
+    return p - buffer;
+}
+
+size_t commands_get_all_stats_json(char *buffer, size_t size) {
+    if (!buffer || size == 0) return 0;
+
+    char *p = buffer;
+    size_t remaining = size;
+    int written;
+
+    written = snprintf(p, remaining, "{\"stats\":[");
+    if (written < 0 || (size_t)written >= remaining) return size;
+    p += written;
+    remaining -= written;
+
+    for (size_t i = 0; command_registry[i].name && i < get_registry_size(); i++) {
+        const command_stats_internal_t *s = &command_statistics[i];
+
+        written = snprintf(p, remaining,
+                          "%s{\"command\":\"%s\",\"calls_total\":%lu,\"calls_success\":%lu,"
+                          "\"calls_failed\":%lu,\"avg_time_us\":%lu,\"min_time_us\":%lu,"
+                          "\"max_time_us\":%lu,\"last_called\":%ld}",
+                          i > 0 ? "," : "",
+                          command_registry[i].name,
+                          s->stats.calls_total,
+                          s->stats.calls_success,
+                          s->stats.calls_failed,
+                          s->stats.avg_time_us,
+                          s->stats.min_time_us == UINT64_MAX ? 0 : s->stats.min_time_us,
+                          s->stats.max_time_us,
+                          (long)s->stats.last_called);
+        if (written < 0 || (size_t)written >= remaining) return size;
+        p += written;
+        remaining -= written;
+    }
+
+    written = snprintf(p, remaining, "]}");
     if (written < 0 || (size_t)written >= remaining) return size;
     p += written;
 
@@ -981,10 +794,54 @@ static command_result_t cmd_version(struct neowall_state *state, const ipc_reque
 }
 
 static command_result_t cmd_list_commands(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
-    (void)state; (void)req;
+    (void)state;
+
+    /* Parse optional filters from args */
+    const char *category_filter = NULL;
+    const char *file_filter = NULL;
+
+    if (req->args[0] != '\0') {
+        /* Simple JSON parsing for filters */
+        static char cat_buf[64], file_buf[128];
+
+        const char *cat_key = strstr(req->args, "\"category\"");
+        if (cat_key) {
+            const char *colon = strchr(cat_key, ':');
+            if (colon) {
+                const char *val = colon + 1;
+                while (*val && (*val == ' ' || *val == '"')) val++;
+                const char *end = val;
+                while (*end && *end != '"' && *end != ',' && *end != '}') end++;
+                size_t len = end - val;
+                if (len > 0 && len < sizeof(cat_buf)) {
+                    strncpy(cat_buf, val, len);
+                    cat_buf[len] = '\0';
+                    category_filter = cat_buf;
+                }
+            }
+        }
+
+        const char *file_key = strstr(req->args, "\"file\"");
+        if (file_key) {
+            const char *colon = strchr(file_key, ':');
+            if (colon) {
+                const char *val = colon + 1;
+                while (*val && (*val == ' ' || *val == '"')) val++;
+                const char *end = val;
+                while (*end && *end != '"' && *end != ',' && *end != '}') end++;
+                size_t len = end - val;
+                if (len > 0 && len < sizeof(file_buf)) {
+                    strncpy(file_buf, val, len);
+                    file_buf[len] = '\0';
+                    file_filter = file_buf;
+                }
+            }
+        }
+    }
 
     /* Generate command list JSON directly into response data buffer */
-    size_t len = commands_generate_json_list(resp->data, sizeof(resp->data));
+    size_t len = commands_generate_json_list(resp->data, sizeof(resp->data),
+                                            category_filter, file_filter);
 
     if (len >= sizeof(resp->data)) {
         commands_build_error(resp, CMD_ERROR_FAILED, "Command list too large for response buffer");
@@ -996,4 +853,65 @@ static command_result_t cmd_list_commands(struct neowall_state *state, const ipc
     strncpy(resp->message, "OK", sizeof(resp->message) - 1);
 
     return CMD_SUCCESS;
+}
+
+static command_result_t cmd_command_stats(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
+    (void)state;
+
+    /* Check if specific command requested */
+    const char *cmd_name = NULL;
+    if (req->args[0] != '\0') {
+        /* Simple JSON parsing for "command" field */
+        const char *cmd_key = strstr(req->args, "\"command\"");
+        if (cmd_key) {
+            const char *colon = strchr(cmd_key, ':');
+            if (colon) {
+                const char *value_start = colon + 1;
+                while (*value_start && (*value_start == ' ' || *value_start == '"')) {
+                    value_start++;
+                }
+                static char cmd_buf[128];
+                const char *value_end = value_start;
+                while (*value_end && *value_end != '"' && *value_end != ',' && *value_end != '}') {
+                    value_end++;
+                }
+                size_t len = value_end - value_start;
+                if (len > 0 && len < sizeof(cmd_buf)) {
+                    strncpy(cmd_buf, value_start, len);
+                    cmd_buf[len] = '\0';
+                    cmd_name = cmd_buf;
+                }
+            }
+        }
+    }
+
+    if (cmd_name) {
+        /* Get stats for specific command */
+        command_stats_t stats;
+        if (commands_get_stats(cmd_name, &stats) == 0) {
+            snprintf(resp->data, sizeof(resp->data),
+                    "{\"command\":\"%s\",\"calls_total\":%lu,\"calls_success\":%lu,"
+                    "\"calls_failed\":%lu,\"avg_time_us\":%lu,\"min_time_us\":%lu,"
+                    "\"max_time_us\":%lu,\"last_called\":%ld,\"last_error\":\"%s\"}",
+                    cmd_name, stats.calls_total, stats.calls_success, stats.calls_failed,
+                    stats.avg_time_us, stats.min_time_us == UINT64_MAX ? 0 : stats.min_time_us,
+                    stats.max_time_us, (long)stats.last_called, stats.last_error);
+            resp->status = IPC_STATUS_OK;
+            strncpy(resp->message, "OK", sizeof(resp->message) - 1);
+            return CMD_SUCCESS;
+        } else {
+            commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Command not found");
+            return CMD_ERROR_INVALID_ARGS;
+        }
+    } else {
+        /* Get stats for all commands */
+        size_t len = commands_get_all_stats_json(resp->data, sizeof(resp->data));
+        if (len >= sizeof(resp->data)) {
+            commands_build_error(resp, CMD_ERROR_FAILED, "Stats too large for response buffer");
+            return CMD_ERROR_FAILED;
+        }
+        resp->status = IPC_STATUS_OK;
+        strncpy(resp->message, "OK", sizeof(resp->message) - 1);
+        return CMD_SUCCESS;
+    }
 }

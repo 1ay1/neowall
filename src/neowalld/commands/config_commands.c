@@ -4,9 +4,38 @@
  */
 
 #include "config_commands.h"
+#include "commands.h"
 #include "neowall.h"
 #include <string.h>
 #include <stdio.h>
+
+/* Forward declarations of command handlers */
+command_result_t cmd_get_config(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_list_config_keys(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+command_result_t cmd_reload(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+
+/* Config command registry */
+static const command_info_t config_command_registry[] = {
+    COMMAND_ENTRY_CUSTOM("get-config", cmd_get_config, "config",
+                        "Get configuration value(s)",
+                        CMD_CAP_REQUIRES_STATE,
+                        "{\"key\": <string>}",
+                        "{\"command\":\"get-config\",\"args\":\"{\\\"key\\\":\\\"general.cycle_interval\\\"}\"}"),
+
+    COMMAND_ENTRY_CUSTOM("list-config-keys", cmd_list_config_keys, "config",
+                        "List all configuration keys",
+                        CMD_CAP_REQUIRES_STATE, NULL, NULL),
+
+    COMMAND_ENTRY(reload, "config", "Reload configuration from disk",
+                  CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
+
+    COMMAND_SENTINEL
+};
+
+/* Export command registry */
+const command_info_t *config_get_commands(void) {
+    return config_command_registry;
+}
 
 /* ============================================================================
  * Configuration Query Commands
