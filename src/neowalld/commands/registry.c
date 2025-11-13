@@ -654,6 +654,9 @@ static command_result_t cmd_speed_up(struct neowall_state *state, const ipc_requ
         if (new_speed > 10.0f) new_speed = 10.0f;
         output->shader_speed = new_speed;
 
+        /* Force redraw to apply new speed immediately */
+        output->needs_redraw = true;
+
         char data[256];
         snprintf(data, sizeof(data), "{\"output\":\"%s\",\"speed\":%.2f}", output_name, new_speed);
         commands_build_success(resp, "Increased shader speed", data);
@@ -663,6 +666,17 @@ static command_result_t cmd_speed_up(struct neowall_state *state, const ipc_requ
         float new_speed = current_speed + 0.25f;
         if (new_speed > 5.0f) new_speed = 5.0f;
         atomic_store(&state->shader_speed, new_speed);
+
+        /* Force redraw on all outputs with shaders */
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        struct output_state *output = state->outputs;
+        while (output) {
+            if (output->config.type == WALLPAPER_SHADER) {
+                output->needs_redraw = true;
+            }
+            output = output->next;
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
 
         /* Persist state to disk */
         save_global_state(state);
@@ -697,6 +711,9 @@ static command_result_t cmd_speed_down(struct neowall_state *state, const ipc_re
         if (new_speed < 0.1f) new_speed = 0.1f;
         output->shader_speed = new_speed;
 
+        /* Force redraw to apply new speed immediately */
+        output->needs_redraw = true;
+
         char data[256];
         snprintf(data, sizeof(data), "{\"output\":\"%s\",\"speed\":%.2f}", output_name, new_speed);
         commands_build_success(resp, "Decreased shader speed", data);
@@ -706,6 +723,17 @@ static command_result_t cmd_speed_down(struct neowall_state *state, const ipc_re
         float new_speed = current_speed - 0.25f;
         if (new_speed < 0.1f) new_speed = 0.1f;
         atomic_store(&state->shader_speed, new_speed);
+
+        /* Force redraw on all outputs with shaders */
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        struct output_state *output = state->outputs;
+        while (output) {
+            if (output->config.type == WALLPAPER_SHADER) {
+                output->needs_redraw = true;
+            }
+            output = output->next;
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
 
         /* Persist state to disk */
         save_global_state(state);
