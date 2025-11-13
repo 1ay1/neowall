@@ -603,6 +603,10 @@ static command_result_t cmd_cycle_pause(struct neowall_state *state, const ipc_r
 
     /* Global pause */
     atomic_store(&state->paused, true);
+
+    /* Persist state to disk */
+    save_global_state(state);
+
     commands_build_success(resp, "Paused wallpaper cycling on all outputs", NULL);
 
     return CMD_SUCCESS;
@@ -618,6 +622,10 @@ static command_result_t cmd_cycle_resume(struct neowall_state *state, const ipc_
 
     /* Global resume */
     atomic_store(&state->paused, false);
+
+    /* Persist state to disk */
+    save_global_state(state);
+
     commands_build_success(resp, "Resumed wallpaper cycling on all outputs", NULL);
 
     return CMD_SUCCESS;
@@ -653,12 +661,15 @@ static command_result_t cmd_speed_up(struct neowall_state *state, const ipc_requ
         /* Global shader speed increase */
         float current_speed = atomic_load(&state->shader_speed);
         float new_speed = current_speed + 0.25f;
-        if (new_speed > 10.0f) new_speed = 10.0f;
+        if (new_speed > 5.0f) new_speed = 5.0f;
         atomic_store(&state->shader_speed, new_speed);
 
-        char data[128];
-        snprintf(data, sizeof(data), "{\"speed\":%.2f}", new_speed);
-        commands_build_success(resp, "Increased shader speed", data);
+        /* Persist state to disk */
+        save_global_state(state);
+
+        static char data[256];
+        snprintf(data, sizeof(data), "{\"shader_speed\":%.2f}", new_speed);
+        commands_build_success(resp, "Shader speed increased", data);
     }
 
     return CMD_SUCCESS;
@@ -696,9 +707,12 @@ static command_result_t cmd_speed_down(struct neowall_state *state, const ipc_re
         if (new_speed < 0.1f) new_speed = 0.1f;
         atomic_store(&state->shader_speed, new_speed);
 
-        char data[128];
-        snprintf(data, sizeof(data), "{\"speed\":%.2f}", new_speed);
-        commands_build_success(resp, "Decreased shader speed", data);
+        /* Persist state to disk */
+        save_global_state(state);
+
+        static char data[256];
+        snprintf(data, sizeof(data), "{\"shader_speed\":%.2f}", new_speed);
+        commands_build_success(resp, "Shader speed decreased", data);
     }
 
     return CMD_SUCCESS;
@@ -730,6 +744,10 @@ static command_result_t cmd_live_pause(struct neowall_state *state, const ipc_re
     } else {
         /* Global shader pause */
         atomic_store(&state->shader_paused, true);
+
+        /* Persist state to disk */
+        save_global_state(state);
+
         commands_build_success(resp, "Paused shader animation", NULL);
     }
 
@@ -774,6 +792,9 @@ static command_result_t cmd_live_resume(struct neowall_state *state, const ipc_r
             output = output->next;
         }
         pthread_rwlock_unlock(&state->output_list_lock);
+
+        /* Persist state to disk */
+        save_global_state(state);
 
         commands_build_success(resp, "Resumed shader animation", NULL);
     }

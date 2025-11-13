@@ -9,8 +9,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #define COMPONENT "SETTINGS"
+
+/* Helper structure to track original values for comparison */
+typedef struct {
+    char folder[512];
+    int duration;
+    int mode_index;
+    double speed;
+    bool battery_pause;
+} OriginalSettings;
 
 /* Widget references for accessing values */
 typedef struct {
@@ -334,22 +344,75 @@ void settings_dialog_show(void) {
         gdouble speed = gtk_range_get_value(GTK_RANGE(widgets->speed_scale));
         gboolean battery_pause = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widgets->battery_check));
 
-        /* Log the values for now */
-        TRAY_LOG_DEBUG(COMPONENT, "Folder: %s", folder ? folder : "none");
-        TRAY_LOG_DEBUG(COMPONENT, "Duration: %.0f seconds", duration);
-        TRAY_LOG_DEBUG(COMPONENT, "Mode: %d", mode_index);
-        TRAY_LOG_DEBUG(COMPONENT, "Speed: %.1f", speed);
-        TRAY_LOG_DEBUG(COMPONENT, "Battery pause: %d", battery_pause);
+        /* Map mode index to mode string */
+        const char *mode_names[] = {"fill", "fit", "center", "stretch", "tile"};
+        const char *mode = (mode_index >= 0 && mode_index < 5) ? mode_names[mode_index] : "fill";
 
-        /* TODO: Apply settings using set-config commands
-         * This requires implementing the actual config writing logic
-         * For now, show a message */
-        dialog_show_info("Settings",
-                        "Settings UI is ready!\n\n"
-                        "Applying settings will be implemented in the next update.\n"
-                        "For now, please edit config.vibe manually and use\n"
-                        "'Reload Configuration' to apply changes.",
-                        4000);
+        /* Apply settings via set-config commands */
+        bool success = true;
+        char cmd[1024];
+
+        /* Set wallpaper folder/path */
+        if (folder && folder[0] != '\0') {
+            snprintf(cmd, sizeof(cmd), "set-config \"default.path\" \"%s\"", folder);
+            if (!command_execute(cmd)) {
+                TRAY_LOG_ERROR(COMPONENT, "Failed to set wallpaper path");
+                success = false;
+            }
+        }
+
+        /* Set cycle duration */
+        if (success) {
+            snprintf(cmd, sizeof(cmd), "set-config \"default.duration\" \"%.0f\"", duration);
+            if (!command_execute(cmd)) {
+                TRAY_LOG_ERROR(COMPONENT, "Failed to set duration");
+                success = false;
+            }
+        }
+
+        /* Set display mode */
+        if (success) {
+            snprintf(cmd, sizeof(cmd), "set-config \"default.mode\" \"%s\"", mode);
+            if (!command_execute(cmd)) {
+                TRAY_LOG_ERROR(COMPONENT, "Failed to set display mode");
+                success = false;
+            }
+        }
+
+        /* Set shader speed */
+        if (success) {
+            snprintf(cmd, sizeof(cmd), "set-config \"default.shader_speed\" \"%.2f\"", speed);
+            if (!command_execute(cmd)) {
+                TRAY_LOG_ERROR(COMPONENT, "Failed to set shader speed");
+                success = false;
+            }
+        }
+
+        /* Set battery pause option (if we add this to config schema in future) */
+        if (success && battery_pause) {
+            TRAY_LOG_DEBUG(COMPONENT, "Battery pause option: %d (not yet implemented in config)", battery_pause);
+        }
+
+        /* Reload configuration to apply changes */
+        if (success) {
+            if (command_execute("reload")) {
+                TRAY_LOG_INFO(COMPONENT, "Settings applied and configuration reloaded successfully");
+                dialog_show_info("Settings Applied",
+                                "Your settings have been saved and applied.\n"
+                                "Changes will take effect immediately.",
+                                3000);
+            } else {
+                TRAY_LOG_ERROR(COMPONENT, "Failed to reload configuration");
+                dialog_show_error("Reload Failed",
+                                "Settings were saved but failed to reload.\n"
+                                "Try using 'Reload Configuration' from the menu.");
+                success = false;
+            }
+        } else {
+            dialog_show_error("Settings Error",
+                            "Failed to apply some settings.\n"
+                            "Please check the log for details.");
+        }
 
         g_free(folder);
     }

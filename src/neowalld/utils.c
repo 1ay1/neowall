@@ -222,7 +222,7 @@ const char *get_state_file_path(void) {
     const char *state_home = getenv("XDG_STATE_HOME");
     const char *config_home = getenv("XDG_CONFIG_HOME");
     const char *home = getenv("HOME");
-    
+
     /* Prefer XDG_STATE_HOME for persistent state (usually ~/.local/state) */
     if (state_home && state_home[0] != '\0') {
         snprintf(state_path, sizeof(state_path), "%s/neowall/state", state_home);
@@ -244,7 +244,7 @@ const char *get_state_file_path(void) {
             snprintf(state_path, sizeof(state_path), "/tmp/neowall-state-%d.txt", getuid());
         }
     }
-    
+
     return state_path;
 }
 
@@ -260,21 +260,21 @@ typedef struct {
 } output_state_entry_t;
 
 /* Write current wallpaper state for multi-monitor support */
-bool write_wallpaper_state(const char *output_name, const char *wallpaper_path, 
+bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
                            const char *mode, int cycle_index, int cycle_total,
                            const char *status) {
     /* CRITICAL: This function is called from multiple contexts (main thread, render path)
      * We need to use file locking to prevent concurrent writes from corrupting the file.
      * However, we don't have direct access to neowall_state here, so we use a static mutex.
      * This is safe because the state file is a singleton resource. */
-    
+
     static pthread_mutex_t state_file_mutex = PTHREAD_MUTEX_INITIALIZER;
-    
+
     const char *state_path = get_state_file_path();
-    
+
     /* Acquire lock before file operations */
     pthread_mutex_lock(&state_file_mutex);
-    
+
     /* Ensure state directory exists */
     char dir_path[MAX_PATH_LENGTH];
     strncpy(dir_path, state_path, sizeof(dir_path) - 1);
@@ -298,21 +298,21 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
             mkdir(dir_path, 0755);
         }
     }
-    
+
     /* Read existing states from file */
     output_state_entry_t states[MAX_OUTPUTS];
     int state_count = 0;
     bool found_output = false;
-    
+
     FILE *fp_read = fopen(state_path, "r");
     if (fp_read) {
         char line[MAX_PATH_LENGTH];
         output_state_entry_t current_entry = {0};
         bool reading_entry = false;
-        
+
         while (fgets(line, sizeof(line), fp_read)) {
             line[strcspn(line, "\n")] = 0;
-            
+
             if (strncmp(line, "[output]", 8) == 0) {
                 /* Save previous entry if exists */
                 if (reading_entry && current_entry.output_name[0] != '\0') {
@@ -353,22 +353,22 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
                 }
             }
         }
-        
+
         /* Save last entry */
         if (reading_entry && current_entry.output_name[0] != '\0') {
             if (state_count < MAX_OUTPUTS) {
                 states[state_count++] = current_entry;
             }
         }
-        
+
         fclose(fp_read);
     }
-    
+
     /* Update or add the current output's state */
     for (int i = 0; i < state_count; i++) {
         if (output_name && strcmp(states[i].output_name, output_name) == 0) {
             /* Update existing entry */
-            strncpy(states[i].wallpaper_path, wallpaper_path ? wallpaper_path : "none", 
+            strncpy(states[i].wallpaper_path, wallpaper_path ? wallpaper_path : "none",
                     sizeof(states[i].wallpaper_path) - 1);
             strncpy(states[i].mode, mode ? mode : "fill", sizeof(states[i].mode) - 1);
             states[i].cycle_index = cycle_index;
@@ -379,22 +379,22 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
             break;
         }
     }
-    
+
     /* Add new entry if not found */
     if (!found_output && state_count < MAX_OUTPUTS) {
-        strncpy(states[state_count].output_name, output_name ? output_name : "unknown", 
+        strncpy(states[state_count].output_name, output_name ? output_name : "unknown",
                 sizeof(states[state_count].output_name) - 1);
-        strncpy(states[state_count].wallpaper_path, wallpaper_path ? wallpaper_path : "none", 
+        strncpy(states[state_count].wallpaper_path, wallpaper_path ? wallpaper_path : "none",
                 sizeof(states[state_count].wallpaper_path) - 1);
         strncpy(states[state_count].mode, mode ? mode : "fill", sizeof(states[state_count].mode) - 1);
         states[state_count].cycle_index = cycle_index;
         states[state_count].cycle_total = cycle_total;
-        strncpy(states[state_count].status, status ? status : "active", 
+        strncpy(states[state_count].status, status ? status : "active",
                 sizeof(states[state_count].status) - 1);
         states[state_count].timestamp = (long)time(NULL);
         state_count++;
     }
-    
+
     /* Write all states back to file */
     FILE *fp_write = fopen(state_path, "w");
     if (!fp_write) {
@@ -402,7 +402,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
         pthread_mutex_unlock(&state_file_mutex);
         return false;
     }
-    
+
     for (int i = 0; i < state_count; i++) {
         fprintf(fp_write, "[output]\n");
         fprintf(fp_write, "name=%s\n", states[i].output_name);
@@ -414,7 +414,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
         fprintf(fp_write, "timestamp=%ld\n", states[i].timestamp);
         fprintf(fp_write, "\n");
     }
-    
+
     fclose(fp_write);
     pthread_mutex_unlock(&state_file_mutex);
     return true;
@@ -424,21 +424,21 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
 int restore_cycle_index_from_state(const char *output_name) {
     const char *state_path = get_state_file_path();
     FILE *fp = fopen(state_path, "r");
-    
+
     if (!fp) {
         log_debug("No state file found, starting from index 0");
         return 0;
     }
-    
+
     char line[MAX_PATH_LENGTH];
     char current_output[256] = "";
     int cycle_index = 0;
     bool in_matching_output = false;
-    
+
     while (fgets(line, sizeof(line), fp)) {
         /* Remove newline */
         line[strcspn(line, "\n")] = 0;
-        
+
         if (strncmp(line, "[output]", 8) == 0) {
             /* Start of new output section */
             in_matching_output = false;
@@ -458,14 +458,14 @@ int restore_cycle_index_from_state(const char *output_name) {
             break;
         }
     }
-    
+
     fclose(fp);
-    
+
     if (in_matching_output) {
         log_info("Restored cycle index %d for output %s from state", cycle_index, output_name);
         return cycle_index;
     }
-    
+
     return 0;
 }
 
@@ -473,24 +473,24 @@ int restore_cycle_index_from_state(const char *output_name) {
 bool read_wallpaper_state(void) {
     const char *state_path = get_state_file_path();
     FILE *fp = fopen(state_path, "r");
-    
+
     if (!fp) {
         printf("No wallpaper state found.\n");
         printf("The daemon may not be running or no wallpaper has been set yet.\n");
         return false;
     }
-    
+
     char line[MAX_PATH_LENGTH];
     output_state_entry_t current_entry = {0};
     bool reading_entry = false;
     int output_count = 0;
-    
+
     printf("Current wallpaper state:\n");
-    
+
     while (fgets(line, sizeof(line), fp)) {
         /* Remove newline */
         line[strcspn(line, "\n")] = 0;
-        
+
         if (strncmp(line, "[output]", 8) == 0) {
             /* Display previous entry if exists */
             if (reading_entry && current_entry.output_name[0] != '\0') {
@@ -544,7 +544,7 @@ bool read_wallpaper_state(void) {
             }
         }
     }
-    
+
     /* Display last entry */
     if (reading_entry && current_entry.output_name[0] != '\0') {
         printf("\n  Output:    %s\n", current_entry.output_name);
@@ -564,14 +564,174 @@ bool read_wallpaper_state(void) {
         }
         output_count++;
     }
-    
+
     fclose(fp);
-    
+
     if (output_count == 0) {
         printf("\n  No outputs configured.\n");
     } else {
         printf("\nTotal outputs: %d\n", output_count);
     }
-    
+
     return true;
+}
+
+/* Save global daemon state to file */
+bool save_global_state(struct neowall_state *state) {
+    if (!state) {
+        return false;
+    }
+
+    const char *state_home = getenv("XDG_STATE_HOME");
+    const char *config_home = getenv("XDG_CONFIG_HOME");
+    const char *home = getenv("HOME");
+
+    char global_state_path[MAX_PATH_LENGTH];
+
+    /* Determine state file path */
+    if (state_home && state_home[0] != '\0') {
+        snprintf(global_state_path, sizeof(global_state_path),
+                "%s/neowall/daemon.state", state_home);
+    } else if (config_home && config_home[0] != '\0') {
+        snprintf(global_state_path, sizeof(global_state_path),
+                "%s/neowall/daemon.state", config_home);
+    } else if (home && home[0] != '\0') {
+        snprintf(global_state_path, sizeof(global_state_path),
+                "%s/.config/neowall/daemon.state", home);
+    } else {
+        log_error("Cannot determine state file path");
+        return false;
+    }
+
+    /* Ensure directory exists */
+    char dir_path[MAX_PATH_LENGTH];
+    strncpy(dir_path, global_state_path, sizeof(dir_path) - 1);
+    dir_path[sizeof(dir_path) - 1] = '\0';
+    char *last_slash = strrchr(dir_path, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        struct stat st = {0};
+        if (stat(dir_path, &st) == -1) {
+            char parent_path[MAX_PATH_LENGTH];
+            strncpy(parent_path, dir_path, sizeof(parent_path) - 1);
+            parent_path[sizeof(parent_path) - 1] = '\0';
+            char *parent_slash = strrchr(parent_path, '/');
+            if (parent_slash) {
+                *parent_slash = '\0';
+                mkdir(parent_path, 0755);
+            }
+            mkdir(dir_path, 0755);
+        }
+    }
+
+    /* Open file for writing */
+    FILE *fp = fopen(global_state_path, "w");
+    if (!fp) {
+        log_error("Failed to write global state file %s: %s",
+                 global_state_path, strerror(errno));
+        return false;
+    }
+
+    /* Write global state */
+    fprintf(fp, "# NeoWall Global Daemon State\n");
+    fprintf(fp, "# This file stores runtime state that persists across restarts\n");
+    fprintf(fp, "# DO NOT edit manually - managed by daemon\n\n");
+
+    fprintf(fp, "[global]\n");
+    fprintf(fp, "cycle_paused=%s\n",
+            atomic_load(&state->paused) ? "true" : "false");
+    fprintf(fp, "shader_paused=%s\n",
+            atomic_load(&state->shader_paused) ? "true" : "false");
+    fprintf(fp, "shader_speed=%.2f\n",
+            atomic_load(&state->shader_speed));
+    fprintf(fp, "timestamp=%ld\n", (long)time(NULL));
+
+    fclose(fp);
+    log_debug("Saved global daemon state to %s", global_state_path);
+    return true;
+}
+
+/* Restore global daemon state from file */
+bool restore_global_state(struct neowall_state *state) {
+    if (!state) {
+        return false;
+    }
+
+    const char *state_home = getenv("XDG_STATE_HOME");
+    const char *config_home = getenv("XDG_CONFIG_HOME");
+    const char *home = getenv("HOME");
+
+    char global_state_path[MAX_PATH_LENGTH];
+
+    /* Determine state file path */
+    if (state_home && state_home[0] != '\0') {
+        snprintf(global_state_path, sizeof(global_state_path),
+                "%s/neowall/daemon.state", state_home);
+    } else if (config_home && config_home[0] != '\0') {
+        snprintf(global_state_path, sizeof(global_state_path),
+                "%s/neowall/daemon.state", config_home);
+    } else if (home && home[0] != '\0') {
+        snprintf(global_state_path, sizeof(global_state_path),
+                "%s/.config/neowall/daemon.state", home);
+    } else {
+        log_debug("Cannot determine state file path, using defaults");
+        return false;
+    }
+
+    /* Open file for reading */
+    FILE *fp = fopen(global_state_path, "r");
+    if (!fp) {
+        log_debug("No global state file found at %s, using defaults", global_state_path);
+        return false;
+    }
+
+    char line[512];
+    bool in_global_section = false;
+    bool restored_any = false;
+
+    while (fgets(line, sizeof(line), fp)) {
+        /* Remove trailing newline */
+        line[strcspn(line, "\n")] = 0;
+
+        /* Skip comments and empty lines */
+        if (line[0] == '#' || line[0] == '\0') {
+            continue;
+        }
+
+        /* Check for section header */
+        if (strcmp(line, "[global]") == 0) {
+            in_global_section = true;
+            continue;
+        }
+
+        /* Parse key-value pairs in global section */
+        if (in_global_section) {
+            if (strncmp(line, "cycle_paused=", 13) == 0) {
+                bool paused = (strcmp(line + 13, "true") == 0);
+                atomic_store(&state->paused, paused);
+                log_info("Restored cycle pause state: %s", paused ? "paused" : "active");
+                restored_any = true;
+            } else if (strncmp(line, "shader_paused=", 14) == 0) {
+                bool paused = (strcmp(line + 14, "true") == 0);
+                atomic_store(&state->shader_paused, paused);
+                log_info("Restored shader pause state: %s", paused ? "paused" : "active");
+                restored_any = true;
+            } else if (strncmp(line, "shader_speed=", 13) == 0) {
+                float speed = atof(line + 13);
+                if (speed >= 0.1f && speed <= 5.0f) {
+                    atomic_store(&state->shader_speed, speed);
+                    log_info("Restored shader speed: %.2f", speed);
+                    restored_any = true;
+                }
+            }
+        }
+    }
+
+    fclose(fp);
+
+    if (restored_any) {
+        log_info("Global daemon state restored from %s", global_state_path);
+    }
+
+    return restored_any;
 }

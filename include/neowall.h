@@ -150,6 +150,10 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
 bool read_wallpaper_state(void);
 int restore_cycle_index_from_state(const char *output_name);
 
+/* Global daemon state persistence */
+bool save_global_state(struct neowall_state *state);
+bool restore_global_state(struct neowall_state *state);
+
 /* Signal handling */
 void signal_handler_init(struct neowall_state *state);
 void signal_handler_cleanup(void);

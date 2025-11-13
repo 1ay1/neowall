@@ -898,6 +898,13 @@ int main(int argc, char *argv[]) {
     atomic_init(&state.prev_requested, 0);
     atomic_init(&state.shader_paused, false);
     atomic_init(&state.shader_speed, 1.0f);
+
+    /* Restore persisted runtime state (pause flags, shader speed) */
+    if (restore_global_state(&state)) {
+        log_info("Restored global daemon state from previous session");
+    } else {
+        log_debug("No previous state found, using default values");
+    }
     // watch_config removed
     state.timer_fd = -1;
     state.wakeup_fd = -1;
@@ -990,6 +997,10 @@ int main(int argc, char *argv[]) {
 
     /* Cleanup */
     log_info("Shutting down...");
+
+    /* Save global state before shutdown */
+    save_global_state(&state);
+    log_debug("Saved global daemon state");
 
     /* Set alarm as last resort - force exit after 2 seconds if cleanup hangs */
     alarm(2);
