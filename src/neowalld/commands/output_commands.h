@@ -110,37 +110,6 @@ command_result_t cmd_resume_output(struct neowall_state *state,
                                     const ipc_request_t *req,
                                     ipc_response_t *resp);
 
-/* ============================================================================
- * Output-Specific Configuration
- * ============================================================================ */
-
-/**
- * Set wallpaper mode for specific output
- * 
- * Args: {"output": "DP-1", "mode": "fill|fit|center|stretch|tile"}
- */
-command_result_t cmd_set_output_mode(struct neowall_state *state,
-                                      const ipc_request_t *req,
-                                      ipc_response_t *resp);
-
-/**
- * Set cycle interval for specific output
- * 
- * Args: {"output": "DP-1", "interval": 300}
- */
-command_result_t cmd_set_output_interval(struct neowall_state *state,
-                                          const ipc_request_t *req,
-                                          ipc_response_t *resp);
-
-/**
- * Set wallpaper/shader for specific output
- * 
- * Args: {"output": "DP-1", "path": "/path/to/wallpaper.jpg"}
- */
-command_result_t cmd_set_output_wallpaper(struct neowall_state *state,
-                                           const ipc_request_t *req,
-                                           ipc_response_t *resp);
-
 /**
  * Jump to specific index in wallpaper cycle
  * 
@@ -149,36 +118,6 @@ command_result_t cmd_set_output_wallpaper(struct neowall_state *state,
 command_result_t cmd_jump_to_output(struct neowall_state *state,
                                      const ipc_request_t *req,
                                      ipc_response_t *resp);
-
-/* ============================================================================
- * Utility Functions
- * ============================================================================ */
-
-/**
- * Extract output name from JSON args
- * Returns true on success, false if "output" key not found
- */
-bool extract_output_name(const char *args_json, char *output_name, size_t size);
-
-/**
- * Extract integer value from JSON args
- * Returns true on success
- */
-bool extract_json_int(const char *args_json, const char *key, int *value);
-
-/**
- * Extract string value from JSON args
- * Returns true on success
- */
-bool extract_json_string(const char *args_json, const char *key, char *value, size_t size);
-
-/**
- * Find output by name (connector name or model)
- * Returns NULL if not found
- * NOTE: Caller must hold output_list_lock (read or write)
- */
-struct output_state *find_output_by_name(struct neowall_state *state, 
-                                          const char *name);
 
 /* ============================================================================
  * Command Registry Export

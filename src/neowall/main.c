@@ -33,41 +33,46 @@ typedef struct {
 
 /* Forward declarations */
 static void format_data_output(const char *json_data);
-static int cmd_start(int argc, char *argv[]);
-static int cmd_stop(int argc, char *argv[]);
-static int cmd_restart(int argc, char *argv[]);
-static int cmd_status(int argc, char *argv[]);
-static int cmd_next(int argc, char *argv[]);
-static int cmd_pause(int argc, char *argv[]);
-static int cmd_resume(int argc, char *argv[]);
-static int cmd_reload(int argc, char *argv[]);
-static int cmd_current(int argc, char *argv[]);
-static int cmd_speed_up(int argc, char *argv[]);
-static int cmd_speed_down(int argc, char *argv[]);
-static int cmd_shader_pause(int argc, char *argv[]);
-static int cmd_shader_resume(int argc, char *argv[]);
-static int cmd_config(int argc, char *argv[]);
-static int cmd_tray(int argc, char *argv[]);
-static int cmd_version(int argc, char *argv[]);
-static int cmd_help(int argc, char *argv[]);
+int cmd_start(int argc, char *argv[]);
+int cmd_stop(int argc, char *argv[]);
+int cmd_restart(int argc, char *argv[]);
+int cmd_status(int argc, char *argv[]);
+int cmd_next(int argc, char *argv[]);
+int cmd_prev(int argc, char *argv[]);
+int cmd_pause(int argc, char *argv[]);
+int cmd_resume(int argc, char *argv[]);
+int cmd_reload(int argc, char *argv[]);
+int cmd_current(int argc, char *argv[]);
+int cmd_speed_up(int argc, char *argv[]);
+int cmd_speed_down(int argc, char *argv[]);
+int cmd_shader_pause(int argc, char *argv[]);
+int cmd_shader_resume(int argc, char *argv[]);
+int cmd_config(int argc, char *argv[]);
+int cmd_tray(int argc, char *argv[]);
+int cmd_version(int argc, char *argv[]);
+int cmd_ping(int argc, char *argv[]);
+int cmd_help(int argc, char *argv[]);
 
-/* Output-specific commands */
-static int cmd_list_outputs(int argc, char *argv[]);
-static int cmd_output_info(int argc, char *argv[]);
-static int cmd_next_output(int argc, char *argv[]);
-static int cmd_prev_output(int argc, char *argv[]);
-static int cmd_reload_output(int argc, char *argv[]);
-static int cmd_set_output_mode(int argc, char *argv[]);
-static int cmd_set_output_wallpaper(int argc, char *argv[]);
-static int cmd_set_output_interval(int argc, char *argv[]);
-static int cmd_jump_output(int argc, char *argv[]);
+/* Output-specific command handlers */
+int cmd_list_outputs(int argc, char *argv[]);
+int cmd_output_info(int argc, char *argv[]);
+int cmd_next_output(int argc, char *argv[]);
+int cmd_prev_output(int argc, char *argv[]);
+int cmd_reload_output(int argc, char *argv[]);
+int cmd_pause_output(int argc, char *argv[]);
+int cmd_resume_output(int argc, char *argv[]);
+int cmd_jump_to_output(int argc, char *argv[]);
+int cmd_set_output_mode(int argc, char *argv[]);
+int cmd_set_output_wallpaper(int argc, char *argv[]);
+int cmd_set_output_interval(int argc, char *argv[]);
+int cmd_jump_output(int argc, char *argv[]);
 
-/* Config commands */
-static int cmd_get_config(int argc, char *argv[]);
-static int cmd_set_config(int argc, char *argv[]);
-static int cmd_reset_config(int argc, char *argv[]);
-static int cmd_list_config_keys(int argc, char *argv[]);
-static int cmd_list_commands(int argc, char *argv[]);
+/* Config command handlers */
+int cmd_get_config(int argc, char *argv[]);
+int cmd_set_config(int argc, char *argv[]);
+int cmd_reset_config(int argc, char *argv[]);
+int cmd_list_config_keys(int argc, char *argv[]);
+int cmd_list_commands(int argc, char *argv[]);
 
 /* Command registry */
 static Command commands[] = {
@@ -76,6 +81,7 @@ static Command commands[] = {
     {"restart",            "Restart the neowalld daemon",            cmd_restart},
     {"status",             "Show daemon status",                     cmd_status},
     {"next",               "Switch to next wallpaper",               cmd_next},
+    {"prev",               "Switch to previous wallpaper",           cmd_prev},
     {"pause",              "Pause wallpaper cycling",                cmd_pause},
     {"resume",             "Resume wallpaper cycling",               cmd_resume},
     {"reload",             "Reload configuration",                   cmd_reload},
@@ -91,10 +97,13 @@ static Command commands[] = {
     {"next-output",        "Next wallpaper on output",               cmd_next_output},
     {"prev-output",        "Previous wallpaper on output",           cmd_prev_output},
     {"reload-output",      "Reload wallpaper on output",             cmd_reload_output},
+    {"pause-output",       "Pause cycling on output",                cmd_pause_output},
+    {"resume-output",      "Resume cycling on output",               cmd_resume_output},
+    {"jump-to-output",     "Jump to cycle index on output",          cmd_jump_to_output},
     {"set-output-mode",    "Set mode for output",                    cmd_set_output_mode},
     {"set-output-wallpaper", "Set wallpaper for output",             cmd_set_output_wallpaper},
     {"set-output-interval", "Set cycle interval for output",         cmd_set_output_interval},
-    {"jump-output",        "Jump to cycle index on output",          cmd_jump_output},
+    {"jump-output",        "Jump to cycle index on output (alias)",  cmd_jump_output},
 
     /* Config commands */
     {"get-config",         "Get configuration value",                cmd_get_config},
@@ -104,6 +113,7 @@ static Command commands[] = {
 
     /* Introspection */
     {"list-commands",      "List all available commands",            cmd_list_commands},
+    {"ping",               "Ping daemon (health check)",             cmd_ping},
 
     {"config",             "Edit configuration",                     cmd_config},
     {"tray",               "Launch system tray application",         cmd_tray},
@@ -638,8 +648,14 @@ static void format_data_output(const char *json_data) {
 /* Find daemon binary path */
 static const char *find_daemon_path(void) {
     static char daemon_path[512];
+    static bool path_found = false;
 
-    /* Try 1: Same directory as client binary */
+    /* Return cached path if already found */
+    if (path_found) {
+        return daemon_path;
+    }
+
+    /* Try 1: Same directory as client binary (typical for installed version) */
     ssize_t len = readlink("/proc/self/exe", daemon_path, sizeof(daemon_path) - 20);
     if (len > 0) {
         daemon_path[len] = '\0';
@@ -647,12 +663,36 @@ static const char *find_daemon_path(void) {
         if (last_slash) {
             strcpy(last_slash + 1, "neowalld");
             if (access(daemon_path, X_OK) == 0) {
+                path_found = true;
                 return daemon_path;
             }
         }
     }
 
-    /* Try 2: Common installation paths */
+    /* Try 2: Build directory structure (for development)
+     * If client is in build/src/neowall/neowall, daemon is in build/src/neowalld/neowalld */
+    len = readlink("/proc/self/exe", daemon_path, sizeof(daemon_path) - 50);
+    if (len > 0) {
+        daemon_path[len] = '\0';
+        char *build_marker = strstr(daemon_path, "/build/");
+        if (build_marker) {
+            /* Found build directory - construct daemon path */
+            char *last_slash = strrchr(daemon_path, '/');
+            if (last_slash) {
+                /* Replace "src/neowall/neowall" with "src/neowalld/neowalld" */
+                char *src_neowall = strstr(daemon_path, "/src/neowall/");
+                if (src_neowall) {
+                    strcpy(src_neowall, "/src/neowalld/neowalld");
+                    if (access(daemon_path, X_OK) == 0) {
+                        path_found = true;
+                        return daemon_path;
+                    }
+                }
+            }
+        }
+    }
+
+    /* Try 3: Common installation paths */
     const char *install_paths[] = {
         "/usr/local/bin/neowalld",
         "/usr/bin/neowalld",
@@ -661,15 +701,20 @@ static const char *find_daemon_path(void) {
 
     for (int i = 0; install_paths[i]; i++) {
         if (access(install_paths[i], X_OK) == 0) {
-            return install_paths[i];
+            strncpy(daemon_path, install_paths[i], sizeof(daemon_path) - 1);
+            daemon_path[sizeof(daemon_path) - 1] = '\0';
+            path_found = true;
+            return daemon_path;
         }
     }
 
-    /* Try 3: Check PATH */
-    return "neowalld";
+    /* Try 4: Check PATH (fallback) */
+    strncpy(daemon_path, "neowalld", sizeof(daemon_path) - 1);
+    daemon_path[sizeof(daemon_path) - 1] = '\0';
+    return daemon_path;
 }
 
-static int cmd_start(int argc, char *argv[]) {
+int cmd_start(int argc, char *argv[]) {
     /* FAST: check if already running before doing anything else */
     pid_t existing_pid = read_daemon_pid();
     if (existing_pid > 0) {
@@ -742,7 +787,7 @@ static int cmd_start(int argc, char *argv[]) {
 
 
 
-static int cmd_stop(int argc, char *argv[]) {
+int cmd_stop(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
     /* FAST: read PID once instead of checking twice */
@@ -804,7 +849,7 @@ static int cmd_stop(int argc, char *argv[]) {
     return 0;
 }
 
-static int cmd_restart(int argc, char *argv[]) {
+int cmd_restart(int argc, char *argv[]) {
     printf("Restarting neowalld...\n");
     cmd_stop(0, NULL);
     /* No sleep needed - stop already waits for clean shutdown */
@@ -841,7 +886,7 @@ static float json_get_float(const char *json, const char *key) {
     return atof(pos);
 }
 
-static int cmd_status(int argc, char *argv[]) {
+int cmd_status(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
     if (!is_daemon_running()) {
@@ -961,51 +1006,61 @@ static int cmd_status(int argc, char *argv[]) {
 }
 
 /* BLAZING FAST IPC command wrappers - inlined for zero overhead */
-static inline int cmd_next(int argc, char *argv[]) {
+int cmd_next(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("next", NULL, 0) ? 0 : 1;
 }
 
-static inline int cmd_pause(int argc, char *argv[]) {
+int cmd_pause(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("pause", NULL, 0) ? 0 : 1;
 }
 
-static inline int cmd_resume(int argc, char *argv[]) {
+int cmd_resume(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("resume", NULL, 0) ? 0 : 1;
 }
 
-static inline int cmd_reload(int argc, char *argv[]) {
+int cmd_reload(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("reload", NULL, 0) ? 0 : 1;
 }
 
-static inline int cmd_current(int argc, char *argv[]) {
+int cmd_current(int argc, char *argv[]) {
     return cmd_status(argc, argv);
 }
 
-static inline int cmd_speed_up(int argc, char *argv[]) {
+int cmd_speed_up(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("speed-up", NULL, 0) ? 0 : 1;
 }
 
-static inline int cmd_speed_down(int argc, char *argv[]) {
+int cmd_speed_down(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("speed-down", NULL, 0) ? 0 : 1;
 }
 
-static inline int cmd_shader_pause(int argc, char *argv[]) {
+int cmd_shader_pause(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("shader-pause", NULL, 0) ? 0 : 1;
 }
 
-static inline int cmd_shader_resume(int argc, char *argv[]) {
+int cmd_shader_resume(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("shader-resume", NULL, 0) ? 0 : 1;
 }
 
-static int cmd_config(int argc, char *argv[]) {
+int cmd_prev(int argc, char *argv[]) {
+    (void)argc; (void)argv;
+    return send_ipc_command("prev", NULL, 0) ? 0 : 1;
+}
+
+int cmd_ping(int argc, char *argv[]) {
+    (void)argc; (void)argv;
+    return send_ipc_command("ping", NULL, 0) ? 0 : 1;
+}
+
+int cmd_config(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
     const char *config_home = getenv("XDG_CONFIG_HOME");
@@ -1045,7 +1100,7 @@ static int cmd_config(int argc, char *argv[]) {
     return ret;
 }
 
-static int cmd_tray(int argc, char *argv[]) {
+int cmd_tray(int argc, char *argv[]) {
     (void)argc;  /* Unused - no arguments needed for tray command */
 
     if (!is_daemon_running()) {
@@ -1069,7 +1124,7 @@ static int cmd_tray(int argc, char *argv[]) {
 }
 
 /* BLAZING FAST version display - minimal I/O */
-static int cmd_version(int argc, char *argv[]) {
+int cmd_version(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
     /* Single write() call for maximum speed */
@@ -1088,12 +1143,12 @@ static int cmd_version(int argc, char *argv[]) {
  * Output-Specific Commands
  * ============================================================================ */
 
-static int cmd_list_outputs(int argc, char *argv[]) {
+int cmd_list_outputs(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("list-outputs", NULL, 0) ? 0 : 1;
 }
 
-static int cmd_output_info(int argc, char *argv[]) {
+int cmd_output_info(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Error: output-info requires output name\n");
         fprintf(stderr, "Usage: neowall output-info <output-name>\n");
@@ -1105,7 +1160,7 @@ static int cmd_output_info(int argc, char *argv[]) {
     return send_ipc_command("output-info", args, strlen(args)) ? 0 : 1;
 }
 
-static int cmd_next_output(int argc, char *argv[]) {
+int cmd_next_output(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Error: next-output requires output name\n");
         fprintf(stderr, "Usage: neowall next-output <output-name>\n");
@@ -1117,7 +1172,7 @@ static int cmd_next_output(int argc, char *argv[]) {
     return send_ipc_command("next-output", args, strlen(args)) ? 0 : 1;
 }
 
-static int cmd_prev_output(int argc, char *argv[]) {
+int cmd_prev_output(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Error: prev-output requires output name\n");
         fprintf(stderr, "Usage: neowall prev-output <output-name>\n");
@@ -1129,19 +1184,51 @@ static int cmd_prev_output(int argc, char *argv[]) {
     return send_ipc_command("prev-output", args, strlen(args)) ? 0 : 1;
 }
 
-static int cmd_reload_output(int argc, char *argv[]) {
+int cmd_reload_output(int argc, char *argv[]) {
     if (argc < 2) {
-        fprintf(stderr, "Error: reload-output requires output name\n");
         fprintf(stderr, "Usage: neowall reload-output <output-name>\n");
         return 1;
     }
 
-    char args[256];
+    char args[512];
     snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
     return send_ipc_command("reload-output", args, strlen(args)) ? 0 : 1;
 }
 
-static int cmd_set_output_mode(int argc, char *argv[]) {
+int cmd_pause_output(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: neowall pause-output <output-name>\n");
+        return 1;
+    }
+
+    char args[512];
+    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+    return send_ipc_command("pause-output", args, strlen(args)) ? 0 : 1;
+}
+
+int cmd_resume_output(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: neowall resume-output <output-name>\n");
+        return 1;
+    }
+
+    char args[512];
+    snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
+    return send_ipc_command("resume-output", args, strlen(args)) ? 0 : 1;
+}
+
+int cmd_jump_to_output(int argc, char *argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "Usage: neowall jump-to-output <output-name> <index>\n");
+        return 1;
+    }
+
+    char args[512];
+    snprintf(args, sizeof(args), "{\"output\":\"%s\",\"index\":%s}", argv[1], argv[2]);
+    return send_ipc_command("jump-to-output", args, strlen(args)) ? 0 : 1;
+}
+
+int cmd_set_output_mode(int argc, char *argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Error: set-output-mode requires output name and mode\n");
         fprintf(stderr, "Usage: neowall set-output-mode <output-name> <mode>\n");
@@ -1154,7 +1241,7 @@ static int cmd_set_output_mode(int argc, char *argv[]) {
     return send_ipc_command("set-output-mode", args, strlen(args)) ? 0 : 1;
 }
 
-static int cmd_set_output_wallpaper(int argc, char *argv[]) {
+int cmd_set_output_wallpaper(int argc, char *argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Error: set-output-wallpaper requires output name and path\n");
         fprintf(stderr, "Usage: neowall set-output-wallpaper <output-name> <path>\n");
@@ -1166,7 +1253,7 @@ static int cmd_set_output_wallpaper(int argc, char *argv[]) {
     return send_ipc_command("set-output-wallpaper", args, strlen(args)) ? 0 : 1;
 }
 
-static int cmd_set_output_interval(int argc, char *argv[]) {
+int cmd_set_output_interval(int argc, char *argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Error: set-output-interval requires output name and interval\n");
         fprintf(stderr, "Usage: neowall set-output-interval <output-name> <seconds>\n");
@@ -1178,7 +1265,7 @@ static int cmd_set_output_interval(int argc, char *argv[]) {
     return send_ipc_command("set-output-interval", args, strlen(args)) ? 0 : 1;
 }
 
-static int cmd_jump_output(int argc, char *argv[]) {
+int cmd_jump_output(int argc, char *argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Error: jump-output requires output name and index\n");
         fprintf(stderr, "Usage: neowall jump-output <output-name> <index>\n");
@@ -1194,7 +1281,7 @@ static int cmd_jump_output(int argc, char *argv[]) {
  * Config Commands
  * ============================================================================ */
 
-static int cmd_get_config(int argc, char *argv[]) {
+int cmd_get_config(int argc, char *argv[]) {
     if (argc < 2) {
         /* No key provided - get all config */
         return send_ipc_command("get-config", NULL, 0) ? 0 : 1;
@@ -1205,7 +1292,7 @@ static int cmd_get_config(int argc, char *argv[]) {
     return send_ipc_command("get-config", args, strlen(args)) ? 0 : 1;
 }
 
-static int cmd_set_config(int argc, char *argv[]) {
+int cmd_set_config(int argc, char *argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Error: set-config requires <key> and <value>\n");
         fprintf(stderr, "Usage: neowall set-config <key> <value>\n");
@@ -1224,7 +1311,7 @@ static int cmd_set_config(int argc, char *argv[]) {
     return send_ipc_command("set-config", args, strlen(args)) ? 0 : 1;
 }
 
-static int cmd_reset_config(int argc, char *argv[]) {
+int cmd_reset_config(int argc, char *argv[]) {
     if (argc < 2) {
         /* No key provided - reset all */
         fprintf(stderr, "Warning: This will reset ALL configuration to defaults.\n");
@@ -1246,12 +1333,12 @@ static int cmd_reset_config(int argc, char *argv[]) {
     return send_ipc_command("reset-config", args, strlen(args)) ? 0 : 1;
 }
 
-static int cmd_list_config_keys(int argc, char *argv[]) {
+int cmd_list_config_keys(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("list-config-keys", NULL, 0) ? 0 : 1;
 }
 
-static int cmd_list_commands(int argc, char *argv[]) {
+int cmd_list_commands(int argc, char *argv[]) {
     (void)argc; (void)argv;
     return send_ipc_command("list-commands", NULL, 0) ? 0 : 1;
 }
@@ -1260,7 +1347,7 @@ static int cmd_list_commands(int argc, char *argv[]) {
  * Help Command
  * ============================================================================ */
 
-static int cmd_help(int argc, char *argv[]) {
+int cmd_help(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
     printf("%s - %s\n\n", NEOWALL_VERSION_STRING, NEOWALL_PROJECT_DESCRIPTION);

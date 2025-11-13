@@ -1,11 +1,14 @@
 /*
  * NeoWall Output Commands
  * Commands for per-output (per-monitor) control and management
+ *
+ * Config modifications now use: neowall set-config output.<name>.<key> <value>
  */
 
 #include "output_commands.h"
 #include "commands.h"
 #include "neowall.h"
+#include "config/vibe_path.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,13 +22,6 @@ command_result_t cmd_prev_output(struct neowall_state *state, const ipc_request_
 command_result_t cmd_reload_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 command_result_t cmd_pause_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 command_result_t cmd_resume_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_set_output_mode(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_set_output_duration(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_set_output_path(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_set_output_shader(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_set_output_shader_speed(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_set_output_transition(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-command_result_t cmd_set_output_transition_duration(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 command_result_t cmd_jump_to_output(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 
 /* Output command registry */
@@ -70,48 +66,6 @@ static const command_info_t output_command_registry[] = {
                         "{\"output\": <string>}",
                         "{\"command\":\"resume-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}"),
 
-    COMMAND_ENTRY_CUSTOM("set-output-mode", cmd_set_output_mode, "output",
-                        "Set wallpaper mode for specific output (matches config key: output.mode)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>, \"mode\": <string>}",
-                        "{\"command\":\"set-output-mode\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"mode\\\":\\\"fill\\\"}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("set-output-duration", cmd_set_output_duration, "output",
-                        "Set cycle duration for specific output (matches config key: output.duration)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>, \"duration\": <integer>}",
-                        "{\"command\":\"set-output-duration\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"duration\\\":600}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("set-output-path", cmd_set_output_path, "output",
-                        "Set image wallpaper path for specific output (matches config key: output.path)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>, \"path\": <string>}",
-                        "{\"command\":\"set-output-path\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"path\\\":\\\"/path/to/wallpaper.jpg\\\"}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("set-output-shader", cmd_set_output_shader, "output",
-                        "Set shader wallpaper for specific output (matches config key: output.shader)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>, \"shader\": <string>}",
-                        "{\"command\":\"set-output-shader\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"shader\\\":\\\"matrix_rain.glsl\\\"}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("set-output-shader-speed", cmd_set_output_shader_speed, "output",
-                        "Set shader animation speed for specific output (matches config key: output.shader_speed)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>, \"speed\": <float>}",
-                        "{\"command\":\"set-output-shader-speed\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"speed\\\":2.0}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("set-output-transition", cmd_set_output_transition, "output",
-                        "Set transition effect for specific output (matches config key: output.transition)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>, \"transition\": <string>}",
-                        "{\"command\":\"set-output-transition\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"transition\\\":\\\"fade\\\"}\"}"),
-
-    COMMAND_ENTRY_CUSTOM("set-output-transition-duration", cmd_set_output_transition_duration, "output",
-                        "Set transition duration for specific output (matches config key: output.transition_duration)",
-                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
-                        "{\"output\": <string>, \"duration\": <integer>}",
-                        "{\"command\":\"set-output-transition-duration\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"duration\\\":500}\"}"),
-
     COMMAND_ENTRY_CUSTOM("jump-to-output", cmd_jump_to_output, "output",
                         "Jump to specific cycle index on output",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
@@ -127,168 +81,60 @@ const command_info_t *output_get_commands(void) {
 }
 
 /* ============================================================================
- * Utility Functions
+ * Helper Functions
  * ============================================================================ */
 
 /**
- * Extract output name from JSON args
- * Simple JSON parsing for "output" field
+ * Find output by name
  */
-bool extract_output_name(const char *args_json, char *output_name, size_t size) {
-    if (!args_json || !output_name || size == 0) {
-        return false;
-    }
+static struct output_state *find_output_by_name(struct neowall_state *state, const char *output_name) {
+    if (!state || !output_name) return NULL;
 
-    /* Find "output" key */
-    const char *output_key = strstr(args_json, "\"output\"");
-    if (!output_key) {
-        return false;
-    }
-
-    /* Find the value after the colon */
-    const char *colon = strchr(output_key, ':');
-    if (!colon) {
-        return false;
-    }
-
-    /* Skip whitespace and opening quote */
-    const char *value_start = colon + 1;
-    while (*value_start && isspace(*value_start)) {
-        value_start++;
-    }
-    if (*value_start == '"') {
-        value_start++;
-    }
-
-    /* Find closing quote */
-    const char *value_end = strchr(value_start, '"');
-    if (!value_end) {
-        return false;
-    }
-
-    /* Copy the value */
-    size_t len = value_end - value_start;
-    if (len >= size) {
-        len = size - 1;
-    }
-    memcpy(output_name, value_start, len);
-    output_name[len] = '\0';
-
-    return len > 0;
-}
-
-/**
- * Extract integer value from JSON args
- */
-bool extract_json_int(const char *args_json, const char *key, int *value) {
-    if (!args_json || !key || !value) {
-        return false;
-    }
-
-    char key_pattern[128];
-    snprintf(key_pattern, sizeof(key_pattern), "\"%s\"", key);
-
-    const char *key_pos = strstr(args_json, key_pattern);
-    if (!key_pos) {
-        return false;
-    }
-
-    const char *colon = strchr(key_pos, ':');
-    if (!colon) {
-        return false;
-    }
-
-    /* Skip whitespace */
-    const char *value_start = colon + 1;
-    while (*value_start && isspace(*value_start)) {
-        value_start++;
-    }
-
-    /* Parse integer */
-    char *endptr;
-    long val = strtol(value_start, &endptr, 10);
-    if (endptr == value_start) {
-        return false;
-    }
-
-    *value = (int)val;
-    return true;
-}
-
-/**
- * Extract string value from JSON args
- */
-bool extract_json_string(const char *args_json, const char *key, char *value, size_t size) {
-    if (!args_json || !key || !value || size == 0) {
-        return false;
-    }
-
-    char key_pattern[128];
-    snprintf(key_pattern, sizeof(key_pattern), "\"%s\"", key);
-
-    const char *key_pos = strstr(args_json, key_pattern);
-    if (!key_pos) {
-        return false;
-    }
-
-    const char *colon = strchr(key_pos, ':');
-    if (!colon) {
-        return false;
-    }
-
-    /* Skip whitespace and opening quote */
-    const char *value_start = colon + 1;
-    while (*value_start && isspace(*value_start)) {
-        value_start++;
-    }
-    if (*value_start == '"') {
-        value_start++;
-    }
-
-    /* Find closing quote */
-    const char *value_end = strchr(value_start, '"');
-    if (!value_end) {
-        return false;
-    }
-
-    /* Copy the value */
-    size_t len = value_end - value_start;
-    if (len >= size) {
-        len = size - 1;
-    }
-    memcpy(value, value_start, len);
-    value[len] = '\0';
-
-    return len > 0;
-}
-
-/**
- * Find output by name (connector name or model)
- * NOTE: Caller must hold output_list_lock (read or write)
- */
-struct output_state *find_output_by_name(struct neowall_state *state, const char *name) {
-    if (!state || !name) {
-        return NULL;
-    }
+    pthread_rwlock_rdlock(&state->output_list_lock);
 
     struct output_state *output = state->outputs;
     while (output) {
-        /* Try connector name first (e.g., HDMI-A-2, DP-1) */
-        if (output->connector_name[0] != '\0' && strcmp(output->connector_name, name) == 0) {
-            return output;
-        }
-        /* Fall back to model name */
-        if (strcmp(output->model, name) == 0) {
+        if (strcmp(output->connector_name, output_name) == 0) {
+            pthread_rwlock_unlock(&state->output_list_lock);
             return output;
         }
         output = output->next;
     }
 
+    pthread_rwlock_unlock(&state->output_list_lock);
     return NULL;
 }
 
+/**
+ * Extract output name from args
+ */
+static bool extract_output_name(const char *args, char *output_buf, size_t buf_size) {
+    if (!args || !output_buf || buf_size == 0) return false;
+
+    /* Simple JSON parsing for "output" field */
+    const char *output_start = strstr(args, "\"output\"");
+    if (!output_start) return false;
+
+    output_start = strchr(output_start, ':');
+    if (!output_start) return false;
+
+    output_start = strchr(output_start, '"');
+    if (!output_start) return false;
+
+    output_start++;
+    const char *output_end = strchr(output_start, '"');
+    if (!output_end) return false;
+
+    size_t len = output_end - output_start;
+    if (len >= buf_size) return false;
+
+    memcpy(output_buf, output_start, len);
+    output_buf[len] = '\0';
+    return true;
+}
+
 /* ============================================================================
- * Output Information Commands
+ * Command Implementations
  * ============================================================================ */
 
 command_result_t cmd_list_outputs(struct neowall_state *state,
@@ -301,62 +147,36 @@ command_result_t cmd_list_outputs(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    static char data[16384];
-    size_t offset = 0;
-
-    /* Start JSON object */
-    offset += snprintf(data + offset, sizeof(data) - offset, "{\"outputs\":[");
+    /* Build JSON array of outputs */
+    static char data[8192];
+    int offset = snprintf(data, sizeof(data), "{\"outputs\":[");
 
     pthread_rwlock_rdlock(&state->output_list_lock);
+
     struct output_state *output = state->outputs;
     bool first = true;
 
-    while (output && offset < sizeof(data) - 1024) {
+    while (output) {
         if (!first) {
             offset += snprintf(data + offset, sizeof(data) - offset, ",");
         }
         first = false;
 
-        const char *type = (output->config.type == WALLPAPER_SHADER) ? "shader" : "image";
-        const char *path = (output->config.type == WALLPAPER_SHADER)
-            ? output->config.shader_path
-            : output->config.path;
-
-        /* Escape path for JSON */
-        char escaped_path[1024];
-        size_t j = 0;
-        for (size_t i = 0; path[i] && j < sizeof(escaped_path) - 2; i++) {
-            if (path[i] == '"' || path[i] == '\\') {
-                escaped_path[j++] = '\\';
-            }
-            escaped_path[j++] = path[i];
-        }
-        escaped_path[j] = '\0';
-
-        /* Get mode string */
-        const char *mode_str = "unknown";
-        switch (output->config.mode) {
-            case MODE_FILL: mode_str = "fill"; break;
-            case MODE_FIT: mode_str = "fit"; break;
-            case MODE_CENTER: mode_str = "center"; break;
-            case MODE_STRETCH: mode_str = "stretch"; break;
-            case MODE_TILE: mode_str = "tile"; break;
-        }
+        const char *type_str = (output->config.type == WALLPAPER_SHADER) ? "shader" : "image";
+        const char *current = (output->config.type == WALLPAPER_SHADER) ?
+                              output->config.shader_path : output->config.path;
 
         offset += snprintf(data + offset, sizeof(data) - offset,
-                          "{\"name\":\"%s\",\"model\":\"%s\",\"width\":%d,\"height\":%d,\"scale\":%d,"
-                          "\"wallpaper_type\":\"%s\",\"wallpaper_path\":\"%s\",\"mode\":\"%s\","
-                          "\"cycle_index\":%zu,\"cycle_total\":%zu}",
+                          "{\"name\":\"%s\",\"width\":%d,\"height\":%d,"
+                          "\"scale\":%d,\"type\":\"%s\",\"current\":\"%s\","
+                          "\"mode\":\"%s\"}",
                           output->connector_name,
-                          output->model,
-                          output->logical_width,
-                          output->logical_height,
+                          output->width,
+                          output->height,
                           output->scale,
-                          type,
-                          escaped_path,
-                          mode_str,
-                          output->config.current_cycle_index,
-                          output->config.cycle_count);
+                          type_str,
+                          current,
+                          wallpaper_mode_to_string(output->config.mode));
 
         output = output->next;
     }
@@ -377,74 +197,53 @@ command_result_t cmd_output_info(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    char output_name[128];
+    /* Extract output name */
+    char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
         commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    pthread_rwlock_rdlock(&state->output_list_lock);
+    /* Find output */
     struct output_state *output = find_output_by_name(state, output_name);
-
     if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
-    const char *type = (output->config.type == WALLPAPER_SHADER) ? "shader" : "image";
-    const char *path = (output->config.type == WALLPAPER_SHADER)
-        ? output->config.shader_path
-        : output->config.path;
+    /* Build detailed info */
+    static char data[8192];
+    const char *type_str = (output->config.type == WALLPAPER_SHADER) ? "shader" : "image";
+    const char *current = (output->config.type == WALLPAPER_SHADER) ?
+                          output->config.shader_path : output->config.path;
 
-    /* Escape path for JSON */
-    char escaped_path[1024];
-    size_t j = 0;
-    for (size_t i = 0; path[i] && j < sizeof(escaped_path) - 2; i++) {
-        if (path[i] == '"' || path[i] == '\\') {
-            escaped_path[j++] = '\\';
-        }
-        escaped_path[j++] = path[i];
-    }
-    escaped_path[j] = '\0';
-
-    /* Get mode string */
-    const char *mode_str = "unknown";
-    switch (output->config.mode) {
-        case MODE_FILL: mode_str = "fill"; break;
-        case MODE_FIT: mode_str = "fit"; break;
-        case MODE_CENTER: mode_str = "center"; break;
-        case MODE_STRETCH: mode_str = "stretch"; break;
-        case MODE_TILE: mode_str = "tile"; break;
-    }
-
-    char data[2048];
     snprintf(data, sizeof(data),
-             "{\"name\":\"%s\",\"model\":\"%s\",\"width\":%d,\"height\":%d,\"scale\":%d,"
-             "\"wallpaper_type\":\"%s\",\"wallpaper_path\":\"%s\",\"mode\":\"%s\","
-             "\"cycle_index\":%zu,\"cycle_total\":%zu}",
+             "{\"name\":\"%s\",\"width\":%d,\"height\":%d,\"scale\":%d,"
+             "\"make\":\"%s\",\"model\":\"%s\","
+             "\"type\":\"%s\",\"current\":\"%s\",\"mode\":\"%s\","
+             "\"duration\":%.0f,\"transition\":\"%s\",\"shader_speed\":%.2f,"
+             "\"cycle_enabled\":%s,\"cycle_index\":%zu,\"cycle_count\":%zu,"
+             "\"frames_rendered\":%lu}",
              output->connector_name,
-             output->model,
-             output->logical_width,
-             output->logical_height,
+             output->width,
+             output->height,
              output->scale,
-             type,
-             escaped_path,
-             mode_str,
+             output->make,
+             output->model,
+             type_str,
+             current,
+             wallpaper_mode_to_string(output->config.mode),
+             output->config.duration,
+             transition_type_to_string(output->config.transition),
+             output->config.shader_speed,
+             output->config.cycle ? "true" : "false",
              output->config.current_cycle_index,
-             output->config.cycle_count);
+             output->config.cycle_count,
+             output->frames_rendered);
 
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    commands_build_success(resp, NULL, data);
+    commands_build_success(resp, "Output information", data);
     return CMD_SUCCESS;
 }
-
-/* ============================================================================
- * Output-Specific Wallpaper Control
- * ============================================================================ */
 
 command_result_t cmd_next_output(struct neowall_state *state,
                                   const ipc_request_t *req,
@@ -454,53 +253,26 @@ command_result_t cmd_next_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    char output_name[128];
+    /* Extract output name */
+    char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
         commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    pthread_rwlock_wrlock(&state->output_list_lock);
+    /* Find output */
     struct output_state *output = find_output_by_name(state, output_name);
-
     if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
-    /* Increment cycle index and load the wallpaper */
-    if (output->config.cycle_count > 0 && output->config.cycle_paths) {
-        output->config.current_cycle_index = (output->config.current_cycle_index + 1) % output->config.cycle_count;
+    /* Cycle to next wallpaper */
+    output_cycle_wallpaper(output);
 
-        /* Get the wallpaper path at new index */
-        const char *next_path = output->config.cycle_paths[output->config.current_cycle_index];
-
-        /* Determine if it's a shader or image and load it */
-        const char *ext = strrchr(next_path, '.');
-        if (ext && strcmp(ext, ".glsl") == 0) {
-            output_set_shader(output, next_path);
-        } else {
-            output_set_wallpaper(output, next_path);
-        }
-
-        /* Update cycle time */
-        output->last_cycle_time = get_time_ms();
-
-        log_info("Output %s: advanced to wallpaper %zu/%zu: %s",
-                 output->connector_name,
-                 output->config.current_cycle_index + 1,
-                 output->config.cycle_count,
-                 next_path);
-    }
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Switched to next wallpaper on %s", output_name);
-    commands_build_success(resp, message, NULL);
+    static char data[512];
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"next\"}", output_name);
+    commands_build_success(resp, "Switched to next wallpaper", data);
     return CMD_SUCCESS;
 }
 
@@ -512,57 +284,35 @@ command_result_t cmd_prev_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    char output_name[128];
+    /* Extract output name */
+    char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
         commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    pthread_rwlock_wrlock(&state->output_list_lock);
+    /* Find output */
     struct output_state *output = find_output_by_name(state, output_name);
-
     if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
-    /* Decrement cycle index and load the wallpaper */
-    if (output->config.cycle_count > 0 && output->config.cycle_paths) {
-        if (output->config.current_cycle_index == 0) {
-            output->config.current_cycle_index = output->config.cycle_count - 1;
-        } else {
+    /* Cycle to previous wallpaper */
+    if (output->config.cycle && output->config.cycle_count > 0) {
+        if (output->config.current_cycle_index > 0) {
             output->config.current_cycle_index--;
-        }
-
-        /* Get the wallpaper path at new index */
-        const char *prev_path = output->config.cycle_paths[output->config.current_cycle_index];
-
-        /* Determine if it's a shader or image and load it */
-        const char *ext = strrchr(prev_path, '.');
-        if (ext && strcmp(ext, ".glsl") == 0) {
-            output_set_shader(output, prev_path);
         } else {
-            output_set_wallpaper(output, prev_path);
+            output->config.current_cycle_index = output->config.cycle_count - 1;
         }
 
-        /* Update cycle time */
-        output->last_cycle_time = get_time_ms();
-
-        log_info("Output %s: went back to wallpaper %zu/%zu: %s",
-                 output->connector_name,
-                 output->config.current_cycle_index + 1,
-                 output->config.cycle_count,
-                 prev_path);
+        const char *wallpaper = output->config.cycle_paths[output->config.current_cycle_index];
+        output_set_wallpaper(output, wallpaper);
     }
 
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Switched to previous wallpaper on %s", output_name);
-    commands_build_success(resp, message, NULL);
+    static char data[512];
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"prev\"}", output_name);
+    commands_build_success(resp, "Switched to previous wallpaper", data);
     return CMD_SUCCESS;
 }
 
@@ -574,49 +324,30 @@ command_result_t cmd_reload_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    char output_name[128];
+    /* Extract output name */
+    char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
         commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    pthread_rwlock_wrlock(&state->output_list_lock);
+    /* Find output */
     struct output_state *output = find_output_by_name(state, output_name);
-
     if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
     /* Reload current wallpaper */
-    if (output->config.cycle_count > 0 && output->config.cycle_paths) {
-        const char *current_path = output->config.cycle_paths[output->config.current_cycle_index];
-
-        /* Determine if it's a shader or image and reload it */
-        const char *ext = strrchr(current_path, '.');
-        if (ext && strcmp(ext, ".glsl") == 0) {
-            output_set_shader(output, current_path);
-        } else {
-            output_set_wallpaper(output, current_path);
-        }
-
-        log_info("Output %s: reloaded wallpaper: %s", output->connector_name, current_path);
-    } else if (output->config.type == WALLPAPER_SHADER) {
+    if (output->config.type == WALLPAPER_SHADER) {
         output_set_shader(output, output->config.shader_path);
-        log_info("Output %s: reloaded shader: %s", output->connector_name, output->config.shader_path);
     } else {
         output_set_wallpaper(output, output->config.path);
-        log_info("Output %s: reloaded wallpaper: %s", output->connector_name, output->config.path);
     }
 
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Reloaded wallpaper on %s", output_name);
-    commands_build_success(resp, message, NULL);
+    static char data[512];
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"reload\"}", output_name);
+    commands_build_success(resp, "Reloaded wallpaper", data);
     return CMD_SUCCESS;
 }
 
@@ -628,32 +359,26 @@ command_result_t cmd_pause_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    char output_name[128];
+    /* Extract output name */
+    char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
         commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    pthread_rwlock_wrlock(&state->output_list_lock);
+    /* Find output */
     struct output_state *output = find_output_by_name(state, output_name);
-
     if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
-    /* Pause cycling for this output (set duration to very large value) */
-    output->config.duration = 86400.0f * 365.0f; /* Effectively pause: 1 year */
-    log_info("Output %s: paused cycling (duration set to max)", output->connector_name);
+    /* Pause cycling by setting duration to 0 */
+    output->config.duration = 0.0f;
 
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Paused cycling on %s", output_name);
-    commands_build_success(resp, message, NULL);
+    static char data[512];
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"paused\":true}", output_name);
+    commands_build_success(resp, "Paused output cycling", data);
     return CMD_SUCCESS;
 }
 
@@ -665,383 +390,62 @@ command_result_t cmd_resume_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    char output_name[128];
+    /* Extract output name */
+    char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
         commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    pthread_rwlock_wrlock(&state->output_list_lock);
+    /* Find output */
     struct output_state *output = find_output_by_name(state, output_name);
-
     if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
-    /* Resume cycling for this output (reset to default duration) */
-    output->config.duration = 300.0f; /* Reset to 5 minutes default */
-    output->last_cycle_time = 0; /* Trigger immediate cycle */
-    log_info("Output %s: resumed cycling (duration reset)", output->connector_name);
+    /* Resume cycling - restore duration from config file */
+    if (output->config.cycle && output->config.duration == 0.0f) {
+        /* Try to read duration from config.vibe */
+        if (state->config_path[0] != '\0') {
+            VibeParser *parser = vibe_parser_new();
+            if (parser) {
+                VibeValue *root = vibe_parse_file(parser, state->config_path);
+                if (root) {
+                    /* Try output-specific duration first */
+                    char path[512];
+                    snprintf(path, sizeof(path), "output.%s.duration", output_name);
+                    double duration = 0.0;
 
-    pthread_rwlock_unlock(&state->output_list_lock);
+                    if (vibe_path_get_float(root, path, &duration) && duration > 0.0) {
+                        output->config.duration = (float)duration;
+                    } else if (vibe_path_get_float(root, "default.duration", &duration) && duration > 0.0) {
+                        /* Fall back to default duration */
+                        output->config.duration = (float)duration;
+                    } else {
+                        /* Final fallback: hardcoded default */
+                        output->config.duration = 300.0f;
+                        log_info("No duration found in config for output %s, using 300s default", output_name);
+                    }
 
-    char message[256];
-    snprintf(message, sizeof(message), "Resumed cycling on %s", output_name);
-    commands_build_success(resp, message, NULL);
-    return CMD_SUCCESS;
-}
-
-/* ============================================================================
- * Output-Specific Configuration
- * ============================================================================ */
-
-command_result_t cmd_set_output_mode(struct neowall_state *state,
-                                      const ipc_request_t *req,
-                                      ipc_response_t *resp) {
-    if (!state) {
-        commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
-        return CMD_ERROR_STATE;
-    }
-
-    char output_name[128];
-    if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    char mode_str[32];
-    if (!extract_json_string(req->args, "mode", mode_str, sizeof(mode_str))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'mode' argument");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    /* Parse mode */
-    enum wallpaper_mode mode;
-    if (strcmp(mode_str, "fill") == 0) {
-        mode = MODE_FILL;
-    } else if (strcmp(mode_str, "fit") == 0) {
-        mode = MODE_FIT;
-    } else if (strcmp(mode_str, "center") == 0) {
-        mode = MODE_CENTER;
-    } else if (strcmp(mode_str, "stretch") == 0) {
-        mode = MODE_STRETCH;
-    } else if (strcmp(mode_str, "tile") == 0) {
-        mode = MODE_TILE;
-    } else {
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Invalid mode '%s'. Must be: fill, fit, center, stretch, or tile", mode_str);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    pthread_rwlock_wrlock(&state->output_list_lock);
-    struct output_state *output = find_output_by_name(state, output_name);
-
-    if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    /* Set mode and trigger redraw */
-    output->config.mode = mode;
-    output->needs_redraw = true;
-    log_info("Output %s: set mode to %s", output->connector_name, mode_str);
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Set mode to %s on %s", mode_str, output_name);
-    commands_build_success(resp, message, NULL);
-    return CMD_SUCCESS;
-}
-
-command_result_t cmd_set_output_duration(struct neowall_state *state,
-                                          const ipc_request_t *req,
-                                          ipc_response_t *resp) {
-    if (!state) {
-        commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
-        return CMD_ERROR_STATE;
-    }
-
-    char output_name[128];
-    if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    int duration;
-    if (!extract_json_int(req->args, "duration", &duration) || duration < 0 || duration > 86400) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'duration' argument (must be 0-86400)");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    pthread_rwlock_wrlock(&state->output_list_lock);
-    struct output_state *output = find_output_by_name(state, output_name);
-
-    if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    /* Set duration (in seconds) and reset timer */
-    output->config.duration = (float)duration;
-    output->last_cycle_time = 0; /* Reset cycle timer */
-    log_info("Output %s: set cycle duration to %d seconds", output->connector_name, duration);
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Set cycle duration to %ds on %s", duration, output_name);
-    commands_build_success(resp, message, NULL);
-    return CMD_SUCCESS;
-}
-
-command_result_t cmd_set_output_path(struct neowall_state *state,
-                                      const ipc_request_t *req,
-                                      ipc_response_t *resp) {
-    if (!state) {
-        commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
-        return CMD_ERROR_STATE;
-    }
-
-    char output_name[128];
-    if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    char path[4096];
-    if (!extract_json_string(req->args, "path", path, sizeof(path))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'path' argument");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    /* TODO: Validate path exists and is readable */
-
-    pthread_rwlock_wrlock(&state->output_list_lock);
-    struct output_state *output = find_output_by_name(state, output_name);
-
-    if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    /* Set image wallpaper path */
-    output->config.type = WALLPAPER_IMAGE;
-    strncpy(output->config.path, path, sizeof(output->config.path) - 1);
-    output->config.path[sizeof(output->config.path) - 1] = '\0';
-
-    output->needs_redraw = true;
-    output->last_cycle_time = 0; /* Force immediate load */
-    log_info("Output %s: set image path to %s", output->connector_name, path);
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Set image path on %s", output_name);
-    commands_build_success(resp, message, NULL);
-    return CMD_SUCCESS;
-}
-
-command_result_t cmd_set_output_shader(struct neowall_state *state,
-                                        const ipc_request_t *req,
-                                        ipc_response_t *resp) {
-    if (!state) {
-        commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
-        return CMD_ERROR_STATE;
-    }
-
-    char output_name[128];
-    if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    char shader[4096];
-    if (!extract_json_string(req->args, "shader", shader, sizeof(shader))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'shader' argument");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    pthread_rwlock_wrlock(&state->output_list_lock);
-    struct output_state *output = find_output_by_name(state, output_name);
-
-    if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    /* Set shader wallpaper */
-    output->config.type = WALLPAPER_SHADER;
-    strncpy(output->config.shader_path, shader, sizeof(output->config.shader_path) - 1);
-    output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
-
-    output->needs_redraw = true;
-    output->last_cycle_time = 0; /* Force immediate load */
-    log_info("Output %s: set shader to %s", output->connector_name, shader);
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Set shader on %s", output_name);
-    commands_build_success(resp, message, NULL);
-    return CMD_SUCCESS;
-}
-
-command_result_t cmd_set_output_shader_speed(struct neowall_state *state,
-                                               const ipc_request_t *req,
-                                               ipc_response_t *resp) {
-    if (!state) {
-        commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
-        return CMD_ERROR_STATE;
-    }
-
-    char output_name[128];
-    if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    /* Parse speed as float from JSON */
-    const char *speed_start = strstr(req->args, "\"speed\"");
-    float speed = 1.0f;
-    if (speed_start) {
-        speed_start = strchr(speed_start, ':');
-        if (speed_start) {
-            speed = strtof(speed_start + 1, NULL);
+                    vibe_value_free(root);
+                } else {
+                    /* Config parse failed, use default */
+                    output->config.duration = 300.0f;
+                    log_info("Failed to parse config file, using 300s default for output %s", output_name);
+                }
+                vibe_parser_free(parser);
+            }
+        } else {
+            /* No config path, use default */
+            output->config.duration = 300.0f;
         }
     }
 
-    if (speed <= 0.0f || speed > 10.0f) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Invalid 'speed' argument (must be 0.0-10.0)");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    pthread_rwlock_wrlock(&state->output_list_lock);
-    struct output_state *output = find_output_by_name(state, output_name);
-
-    if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    /* Set shader speed */
-    output->config.shader_speed = speed;
-    log_info("Output %s: set shader speed to %.2f", output->connector_name, speed);
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Set shader speed to %.2f on %s", speed, output_name);
-    commands_build_success(resp, message, NULL);
-    return CMD_SUCCESS;
-}
-
-command_result_t cmd_set_output_transition(struct neowall_state *state,
-                                             const ipc_request_t *req,
-                                             ipc_response_t *resp) {
-    if (!state) {
-        commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
-        return CMD_ERROR_STATE;
-    }
-
-    char output_name[128];
-    if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    char transition[64];
-    if (!extract_json_string(req->args, "transition", transition, sizeof(transition))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'transition' argument");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    /* Parse transition type */
-    enum transition_type type = transition_type_from_string(transition);
-
-    pthread_rwlock_wrlock(&state->output_list_lock);
-    struct output_state *output = find_output_by_name(state, output_name);
-
-    if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    /* Set transition type */
-    output->config.transition = type;
-    log_info("Output %s: set transition to %s", output->connector_name, transition);
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Set transition to %s on %s", transition, output_name);
-    commands_build_success(resp, message, NULL);
-    return CMD_SUCCESS;
-}
-
-command_result_t cmd_set_output_transition_duration(struct neowall_state *state,
-                                                      const ipc_request_t *req,
-                                                      ipc_response_t *resp) {
-    if (!state) {
-        commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
-        return CMD_ERROR_STATE;
-    }
-
-    char output_name[128];
-    if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    int duration;
-    if (!extract_json_int(req->args, "duration", &duration) || duration < 0 || duration > 10000) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'duration' argument (must be 0-10000 ms)");
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    pthread_rwlock_wrlock(&state->output_list_lock);
-    struct output_state *output = find_output_by_name(state, output_name);
-
-    if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
-        return CMD_ERROR_INVALID_ARGS;
-    }
-
-    /* Set transition duration (in milliseconds) */
-    output->config.transition_duration = (float)duration / 1000.0f;
-    log_info("Output %s: set transition duration to %d ms", output->connector_name, duration);
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Set transition duration to %dms on %s", duration, output_name);
-    commands_build_success(resp, message, NULL);
+    static char data[512];
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"paused\":false,\"duration\":%.1f}",
+             output_name, output->config.duration);
+    commands_build_success(resp, "Resumed output cycling", data);
     return CMD_SUCCESS;
 }
 
@@ -1053,66 +457,53 @@ command_result_t cmd_jump_to_output(struct neowall_state *state,
         return CMD_ERROR_STATE;
     }
 
-    char output_name[128];
+    /* Extract output name */
+    char output_name[256];
     if (!extract_output_name(req->args, output_name, sizeof(output_name))) {
         commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'output' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    int index;
-    if (!extract_json_int(req->args, "index", &index) || index < 0) {
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing or invalid 'index' argument (must be >= 0)");
+    /* Extract index */
+    const char *index_start = strstr(req->args, "\"index\"");
+    if (!index_start) {
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing 'index' argument");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    pthread_rwlock_wrlock(&state->output_list_lock);
-    struct output_state *output = find_output_by_name(state, output_name);
-
-    if (!output) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Output '%s' not found", output_name);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
+    index_start = strchr(index_start, ':');
+    if (!index_start) {
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Invalid 'index' format");
         return CMD_ERROR_INVALID_ARGS;
+    }
+
+    int index = atoi(index_start + 1);
+
+    /* Find output */
+    struct output_state *output = find_output_by_name(state, output_name);
+    if (!output) {
+        commands_build_error(resp, CMD_ERROR_NOT_FOUND, "Output not found");
+        return CMD_ERROR_NOT_FOUND;
     }
 
     /* Validate index */
-    if ((size_t)index >= output->config.cycle_count) {
-        pthread_rwlock_unlock(&state->output_list_lock);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Index %d out of range (0-%zu)", index, output->config.cycle_count - 1);
-        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, error_msg);
+    if (!output->config.cycle || output->config.cycle_count == 0) {
+        commands_build_error(resp, CMD_ERROR_FAILED, "Output is not in cycling mode");
+        return CMD_ERROR_FAILED;
+    }
+
+    if (index < 0 || (size_t)index >= output->config.cycle_count) {
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Index out of range");
         return CMD_ERROR_INVALID_ARGS;
     }
 
-    /* Jump to index and load the wallpaper */
+    /* Jump to index */
     output->config.current_cycle_index = (size_t)index;
+    const char *wallpaper = output->config.cycle_paths[index];
+    output_set_wallpaper(output, wallpaper);
 
-    if (output->config.cycle_paths) {
-        const char *jump_path = output->config.cycle_paths[output->config.current_cycle_index];
-
-        /* Determine if it's a shader or image and load it */
-        const char *ext = strrchr(jump_path, '.');
-        if (ext && strcmp(ext, ".glsl") == 0) {
-            output_set_shader(output, jump_path);
-        } else {
-            output_set_wallpaper(output, jump_path);
-        }
-
-        /* Update cycle time */
-        output->last_cycle_time = get_time_ms();
-
-        log_info("Output %s: jumped to wallpaper %d/%zu: %s",
-                 output->connector_name,
-                 index + 1,
-                 output->config.cycle_count,
-                 jump_path);
-    }
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    char message[256];
-    snprintf(message, sizeof(message), "Jumped to index %d on %s", index, output_name);
-    commands_build_success(resp, message, NULL);
+    static char data[512];
+    snprintf(data, sizeof(data), "{\"output\":\"%s\",\"index\":%d}", output_name, index);
+    commands_build_success(resp, "Jumped to wallpaper", data);
     return CMD_SUCCESS;
 }

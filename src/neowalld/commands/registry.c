@@ -55,11 +55,11 @@ static const command_info_t command_registry_core[] = {
                   CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
     COMMAND_ENTRY(resume, "cycling", "Resume automatic wallpaper cycling",
                   CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE),
-    COMMAND_ENTRY_CUSTOM("speed-up", cmd_speed_up, "cycling",
-                        "Decrease cycle interval (speed up transitions)",
+    COMMAND_ENTRY_CUSTOM("speed-up", cmd_speed_up, "shader",
+                        "Increase shader animation speed",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
-    COMMAND_ENTRY_CUSTOM("speed-down", cmd_speed_down, "cycling",
-                        "Increase cycle interval (slow down transitions)",
+    COMMAND_ENTRY_CUSTOM("speed-down", cmd_speed_down, "shader",
+                        "Decrease shader animation speed",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
 
     /* Shader Control */

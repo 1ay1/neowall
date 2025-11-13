@@ -25,6 +25,7 @@ typedef enum {
     CMD_ERROR_FAILED,          /* Command execution failed */
     CMD_ERROR_NOT_IMPLEMENTED, /* Command not yet implemented */
     CMD_ERROR_PERMISSION,      /* Permission denied */
+    CMD_ERROR_NOT_FOUND,       /* Resource not found */
 } command_result_t;
 
 /**
