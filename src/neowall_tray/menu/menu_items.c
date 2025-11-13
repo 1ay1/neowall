@@ -168,12 +168,20 @@ static const MenuItemDef system_items_running[] = {
         .order = 1
     },
     {
+        .label = MENU_LABEL_SETTINGS,
+        .id = "settings",
+        .type = MENU_ITEM_TYPE_NORMAL,
+        .callback = G_CALLBACK(menu_callback_show_settings),
+        .submenu_id = NULL,
+        .order = 2
+    },
+    {
         .label = MENU_LABEL_RELOAD,
         .id = "reload",
         .type = MENU_ITEM_TYPE_NORMAL,
         .callback = G_CALLBACK(menu_callback_reload_config),
         .submenu_id = NULL,
-        .order = 2
+        .order = 3
     },
     {
         .label = MENU_LABEL_CONFIG,
@@ -181,7 +189,7 @@ static const MenuItemDef system_items_running[] = {
         .type = MENU_ITEM_TYPE_NORMAL,
         .callback = G_CALLBACK(menu_callback_edit_config),
         .submenu_id = NULL,
-        .order = 3
+        .order = 4
     },
     {
         .label = MENU_LABEL_RESTART,
@@ -189,7 +197,7 @@ static const MenuItemDef system_items_running[] = {
         .type = MENU_ITEM_TYPE_NORMAL,
         .callback = G_CALLBACK(menu_callback_restart_daemon),
         .submenu_id = NULL,
-        .order = 4
+        .order = 5
     },
     {
         .label = MENU_LABEL_STOP,
@@ -197,7 +205,7 @@ static const MenuItemDef system_items_running[] = {
         .type = MENU_ITEM_TYPE_NORMAL,
         .callback = G_CALLBACK(menu_callback_stop_daemon),
         .submenu_id = NULL,
-        .order = 5
+        .order = 6
     }
 };
 

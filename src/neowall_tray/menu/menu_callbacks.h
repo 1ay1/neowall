@@ -24,6 +24,7 @@ void menu_callback_speed_down(GtkMenuItem *item, gpointer user_data);
 
 /* System control callbacks */
 void menu_callback_show_status(GtkMenuItem *item, gpointer user_data);
+void menu_callback_show_settings(GtkMenuItem *item, gpointer user_data);
 void menu_callback_reload_config(GtkMenuItem *item, gpointer user_data);
 void menu_callback_edit_config(GtkMenuItem *item, gpointer user_data);
 void menu_callback_start_daemon(GtkMenuItem *item, gpointer user_data);

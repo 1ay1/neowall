@@ -65,6 +65,7 @@ typedef struct {
 
 /* System controls */
 #define MENU_LABEL_STATUS_FULL      "Show Full Status"
+#define MENU_LABEL_SETTINGS         "Settings..."
 #define MENU_LABEL_RELOAD           "Reload Configuration"
 #define MENU_LABEL_CONFIG           "Edit Configuration..."
 #define MENU_LABEL_START            "Start Daemon"

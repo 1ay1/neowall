@@ -3,6 +3,7 @@
  */
 
 #include "dialogs.h"
+#include "settings_dialog.h"
 #include "../common/log.h"
 #include "../daemon/command_exec.h"
 #include "../daemon/daemon_check.h"
@@ -577,4 +578,9 @@ GtkWidget *dialog_show_progress_auto_close(const char *title, const char *messag
     }
 
     return dialog;
+}
+
+/* Show the settings/preferences dialog - delegates to settings_dialog.c */
+void dialog_show_settings(void) {
+    settings_dialog_show();
 }

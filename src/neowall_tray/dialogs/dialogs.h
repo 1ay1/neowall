@@ -65,4 +65,10 @@ GtkWidget *dialog_show_progress_auto_close(const char *title, const char *messag
                                            gboolean (*check_callback)(void),
                                            guint auto_close_delay_ms);
 
+/**
+ * Show the settings/preferences dialog
+ * Displays common configuration options in a user-friendly GUI
+ */
+void dialog_show_settings(void);
+
 #endif /* NEOWALL_TRAY_DIALOGS_H */

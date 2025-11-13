@@ -5,6 +5,7 @@
 #include "menu_callbacks.h"
 #include "../daemon/command_exec.h"
 #include "../dialogs/dialogs.h"
+#include "../dialogs/settings_dialog.h"
 #include <stdio.h>
 
 /* Forward declaration for menu update functions */
@@ -72,6 +73,12 @@ void menu_callback_show_status(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
     dialog_show_status();
+}
+
+void menu_callback_show_settings(GtkMenuItem *item, gpointer user_data) {
+    (void)item;
+    (void)user_data;
+    settings_dialog_show();
 }
 
 void menu_callback_reload_config(GtkMenuItem *item, gpointer user_data) {
