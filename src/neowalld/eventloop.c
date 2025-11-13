@@ -257,7 +257,7 @@ static void render_outputs(struct neowall_state *state) {
         }
 
         /* Check if we should cycle wallpaper (timer-driven) */
-        if (!atomic_load(&state->paused) && output->config.cycle && output->config.duration > 0.0f) {
+        if (!atomic_load(&state->paused) && !output->cycle_paused && output->config.cycle && output->config.duration > 0.0f) {
             if (output_should_cycle(output, current_time)) {
                 output_cycle_wallpaper(output);
                 current_time = get_time_ms();

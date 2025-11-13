@@ -206,6 +206,9 @@ struct output_state *output_create(struct neowall_state *state,
     out->shader_paused = false;
     out->shader_speed = 1.0f;  /* Default 1x speed */
 
+    /* Initialize per-output cycling control */
+    out->cycle_paused = false;
+
     /* Initialize FPS tracking */
     out->fps_last_log_time = 0;
     out->fps_frame_count = 0;

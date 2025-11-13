@@ -382,7 +382,7 @@ command_result_t cmd_pause_output(struct neowall_state *state,
         return CMD_ERROR_NOT_FOUND;
     }
 
-    output->config.duration = 0.0f;  /* Pause by setting duration to 0 */
+    output->cycle_paused = true;  /* Pause cycling for this output */
 
     static char data[512];
     snprintf(data, sizeof(data), "{\"output\":\"%s\",\"action\":\"pause\"}", output_name);
@@ -411,11 +411,8 @@ command_result_t cmd_resume_output(struct neowall_state *state,
         return CMD_ERROR_NOT_FOUND;
     }
 
-    /* Resume by restoring duration - in a real implementation,
-     * we'd need to read the original duration from config */
-    if (output->config.duration == 0.0f) {
-        output->config.duration = 300.0f;  /* Default 5 minutes */
-    }
+    /* Resume cycling for this output */
+    output->cycle_paused = false;
 
     /* If shader animation was paused, resume it */
     if (output->config.type == WALLPAPER_SHADER) {

@@ -194,6 +194,9 @@ struct output_state {
     bool shader_paused;                 /* Shader animation paused for this output */
     float shader_speed;                 /* Shader animation speed multiplier for this output */
     
+    /* Per-output cycling control */
+    bool cycle_paused;                  /* Wallpaper cycling paused for this output */
+    
     /* FPS measurement */
     uint64_t fps_last_log_time;         /* Last time we logged FPS */
     uint64_t fps_frame_count;           /* Frames rendered since last FPS log */
