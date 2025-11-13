@@ -1,8 +1,8 @@
 # NeoWall User Manual
 
-**Complete Guide to NeoWall - Wayland Animated Wallpaper Manager**
+**Version 0.4.0**
 
-Version 1.0 | January 2025
+Complete guide to using NeoWall - GPU-accelerated animated wallpapers for Wayland.
 
 ---
 
@@ -10,2152 +10,849 @@ Version 1.0 | January 2025
 
 1. [Introduction](#introduction)
 2. [Getting Started](#getting-started)
-3. [Installation](#installation)
-4. [Configuration](#configuration)
-5. [Static Wallpapers](#static-wallpapers)
-6. [Shader Wallpapers](#shader-wallpapers)
-7. [Command Line Interface](#command-line-interface)
-8. [System Tray](#system-tray)
-9. [IPC Protocol](#ipc-protocol)
-10. [Advanced Features](#advanced-features)
-11. [Troubleshooting](#troubleshooting)
-12. [FAQ](#faq)
-13. [Appendix](#appendix)
+3. [Understanding Wallpaper Types](#understanding-wallpaper-types)
+4. [Command Reference](#command-reference)
+5. [Configuration Guide](#configuration-guide)
+6. [Advanced Usage](#advanced-usage)
+7. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Introduction
 
-### What is NeoWall?
-
-NeoWall is a modern, high-performance wallpaper manager for Wayland compositors. It supports both static images and animated GLSL shaders, providing a beautiful and dynamic desktop experience.
+NeoWall is a Wayland-native wallpaper manager that supports both **static** and **live** (animated) wallpapers. It uses GPU acceleration for smooth animations with minimal CPU usage.
 
 ### Key Features
 
-✨ **Static Wallpapers**
-- Multiple image formats (PNG, JPEG, WebP)
-- Flexible display modes (fill, fit, center, tile, stretch)
-- Smooth transitions between wallpapers
-- Directory-based cycling with configurable intervals
-
-🎨 **Shader Wallpapers**
-- Full GLSL shader support
-- Real-time animated backgrounds
-- Configurable speed and framerate
-- V-sync support for smooth animations
-- Multiple texture channels (iChannel0-3)
-- FPS counter overlay
-
-🖥️ **Multi-Monitor Support**
-- Per-output configuration
-- Independent wallpapers for each monitor
-- Mix static and shader wallpapers
-
-⚡ **Performance**
-- GPU-accelerated rendering
-- Minimal CPU usage
-- Efficient memory management
-- Adaptive framerate control
-
-🎯 **Flexible Configuration**
-- VIBE configuration format (human-readable)
-- Runtime configuration via IPC
-- Command-line interface
-- System tray integration
-
-### Supported Compositors
-
-NeoWall works with Wayland compositors that support the `wlr-layer-shell` protocol:
-
-- ✅ Hyprland
-- ✅ Sway
-- ✅ River
-- ✅ Wayfire
-- ✅ Labwc
-- ✅ Other wlroots-based compositors
+- ✨ **Static Wallpapers** - JPG, PNG images with multiple display modes
+- 🎬 **Live Wallpapers** - GLSL shaders (GIF, video, SVG coming soon)
+- 🖥️ **Multi-Monitor** - Independent control for each display
+- ⚡ **GPU Accelerated** - Smooth 60 FPS animations
+- 🎮 **Per-Output Control** - Commands work globally or per-monitor
+- 💾 **Persistent Config** - Changes survive restarts
+- 🔄 **Auto-Cycling** - Rotate through wallpapers automatically
 
 ---
 
 ## Getting Started
 
-### Quick Start
+### Starting the Daemon
 
-1. **Install NeoWall:**
-   ```bash
-   # See Installation section for details
-   sudo make install
-   ```
+```bash
+# Start NeoWall daemon
+neowall start
 
-2. **Create a basic configuration:**
-   ```bash
-   mkdir -p ~/.config/neowall
-   neowall --create-default-config
-   ```
+# Check if running
+neowall status
 
-3. **Start the daemon:**
-   ```bash
-   neowall daemon
-   ```
+# Stop daemon
+neowall stop
 
-4. **Set a wallpaper:**
-   ```bash
-   neowall set-wallpaper ~/Pictures/wallpaper.png
-   ```
+# Restart daemon
+neowall restart
+```
 
-### First Configuration
+### Quick Test
 
-Create `~/.config/neowall/config.vibe`:
+```bash
+# Set a static wallpaper
+neowall set-config default.path ~/Pictures/wallpaper.jpg
+neowall set-config default.type image
 
+# Or set a live shader wallpaper
+neowall set-config default.path /usr/share/neowall/shaders/plasma.glsl
+neowall set-config default.type shader
+```
+
+### Health Check
+
+```bash
+# Ping daemon
+neowall ping          # Returns: pong
+
+# Get version
+neowall version
+
+# List outputs
+neowall list-outputs
+```
+
+---
+
+## Understanding Wallpaper Types
+
+NeoWall supports two broad categories of wallpapers:
+
+### Static Wallpapers
+
+**Type:** `image`  
+**Formats:** JPG, PNG, BMP, etc.  
+**Display Modes:** center, stretch, fit, fill, tile
+
+**Config Example:**
 ```vibe
-# NeoWall Configuration
-
 default {
-    # Set your wallpaper
-    path = "~/Pictures/wallpaper.png"
-    
-    # Display mode
-    mode = "fill"
-    
-    # Optional: transition effect
-    transition = "fade"
-    transition_duration = 500
+    type image
+    path ~/Pictures/mountain.jpg
+    mode fill
 }
 ```
 
-Start NeoWall:
-```bash
-neowall daemon
+### Live Wallpapers
+
+**Type:** `shader` (GIF, video, SVG coming soon)  
+**Formats:** GLSL shader files (.glsl)  
+**Features:** Animated, GPU-rendered, customizable speed
+
+**Config Example:**
+```vibe
+default {
+    type shader
+    path ~/.config/neowall/shaders/plasma.glsl
+    shader_speed 1.5
+    shader_fps 60
+}
 ```
 
 ---
 
-## Installation
+## Command Reference
 
-### Prerequisites
+NeoWall has **26 commands** organized into 6 categories:
 
-**Build Dependencies:**
-- `meson` >= 0.60.0
-- `ninja`
-- `gcc` or `clang`
-- `pkg-config`
+### 1. Daemon Control (4 commands)
 
-**Runtime Dependencies:**
-- Wayland compositor with wlr-layer-shell
-- `libwayland-client`
-- `libpng`
-- `libjpeg` (optional, for JPEG support)
-- `libwebp` (optional, for WebP support)
-- OpenGL ES 3.0 or higher
-- `libEGL`
+| Command | Description |
+|---------|-------------|
+| `neowall start` | Start the daemon |
+| `neowall stop` | Stop the daemon |
+| `neowall restart` | Restart the daemon |
+| `neowall ping` | Health check (returns "pong") |
 
-### Building from Source
+### 2. Info Commands (5 commands)
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/1ay1/neowall.git
-   cd neowall
-   ```
+| Command | Description |
+|---------|-------------|
+| `neowall status` | Show daemon status and wallpaper info |
+| `neowall version` | Show version information |
+| `neowall current [output]` | Show current wallpaper (optional: for specific output) |
+| `neowall list-commands` | List all available commands |
+| `neowall command-stats [cmd]` | Show execution statistics |
 
-2. **Configure the build:**
-   ```bash
-   meson setup build
-   ```
-
-   Optional features:
-   ```bash
-   meson setup build -Djpeg=enabled -Dwebp=enabled
-   ```
-
-3. **Compile:**
-   ```bash
-   meson compile -C build
-   ```
-
-4. **Install:**
-   ```bash
-   sudo meson install -C build
-   ```
-
-### Package Managers
-
-**Arch Linux (AUR):**
+**Examples:**
 ```bash
-yay -S neowall-git
+neowall status
+neowall current
+neowall current DP-1       # Current wallpaper on DP-1
+neowall command-stats next # Stats for 'next' command
 ```
 
-**Homebrew (macOS/Linux):**
+### 3. Wallpaper Control (2 commands)
+
+| Command | Description |
+|---------|-------------|
+| `neowall next [output]` | Switch to next wallpaper |
+| `neowall prev [output]` | Switch to previous wallpaper |
+
+**Examples:**
 ```bash
-brew install neowall
+# Global control (all outputs)
+neowall next
+neowall prev
+
+# Per-output control
+neowall next DP-1
+neowall prev HDMI-1
 ```
 
-**From Release:**
+### 4. Cycling Control (2 commands)
+
+| Command | Description |
+|---------|-------------|
+| `neowall pause [output]` | Pause automatic wallpaper cycling |
+| `neowall resume [output]` | Resume automatic wallpaper cycling |
+
+**Examples:**
 ```bash
-# Download latest release
-wget https://github.com/1ay1/neowall/releases/latest/download/neowall-linux.tar.gz
-tar xzf neowall-linux.tar.gz
-cd neowall
-sudo make install
+# Global pause/resume
+neowall pause
+neowall resume
+
+# Per-output pause/resume
+neowall pause DP-1
+neowall resume DP-1
 ```
 
-### Verification
+### 5. Live Wallpaper Control (4 commands)
 
-Check installation:
+| Command | Description |
+|---------|-------------|
+| `neowall shader-pause [output]` | Pause shader animation |
+| `neowall shader-resume [output]` | Resume shader animation |
+| `neowall speed-up [output]` | Increase animation speed by 0.25x |
+| `neowall speed-down [output]` | Decrease animation speed by 0.25x |
+
+**Examples:**
 ```bash
-neowall --version
-neowall --help
+# Global shader control
+neowall shader-pause
+neowall shader-resume
+neowall speed-up        # Speed increases to 1.25x, 1.5x, etc.
+neowall speed-down      # Speed decreases to 0.75x, 0.5x, etc.
+
+# Per-output shader control
+neowall shader-pause DP-1
+neowall speed-up HDMI-1
+```
+
+### 6. Output Commands (8 commands)
+
+| Command | Description |
+|---------|-------------|
+| `neowall list-outputs` | List all connected displays |
+| `neowall output-info <output>` | Detailed info about specific output |
+| `neowall next-output <output>` | Next wallpaper on specific output |
+| `neowall prev-output <output>` | Previous wallpaper on specific output |
+| `neowall reload-output <output>` | Reload current wallpaper |
+| `neowall pause-output <output>` | Pause cycling on specific output |
+| `neowall resume-output <output>` | Resume cycling on specific output |
+| `neowall jump-to-output <output> <index>` | Jump to cycle index |
+
+**Examples:**
+```bash
+neowall list-outputs
+neowall output-info DP-1
+neowall next-output DP-1
+neowall reload-output DP-1
+neowall jump-to-output DP-1 5  # Jump to 6th wallpaper (0-indexed)
+```
+
+### 7. Config Commands (4 commands) - **PERSISTENT**
+
+| Command | Description |
+|---------|-------------|
+| `neowall get-config <key>` | Get config value |
+| `neowall set-config <key> <value>` | Set config value (persists!) |
+| `neowall reset-config <key\|--all>` | Reset config to defaults |
+| `neowall list-config-keys` | List all config keys |
+
+**Examples:**
+```bash
+# Get values
+neowall get-config default.type
+neowall get-config output.DP-1.mode
+
+# Set values (these persist across restarts!)
+neowall set-config default.type shader
+neowall set-config default.path ~/shaders/plasma.glsl
+neowall set-config default.shader_speed 1.5
+neowall set-config output.DP-1.mode fill
+
+# Reset values
+neowall reset-config default.shader_speed
+neowall reset-config --all  # Resets everything!
+
+# List available keys
+neowall list-config-keys
 ```
 
 ---
 
-## Configuration
+## Configuration Guide
 
-### Configuration File Location
+### Config File Location
 
-NeoWall looks for configuration in this order:
+`~/.config/neowall/config.vibe`
 
-1. `$XDG_CONFIG_HOME/neowall/config.vibe`
-2. `~/.config/neowall/config.vibe`
-3. Built-in defaults
+### VIBE Format
 
-### VIBE Configuration Format
-
-NeoWall uses VIBE (Visual Indented Block Expressions) for configuration:
+NeoWall uses the **VIBE** (Values In Bracket Expression) format:
 
 ```vibe
 # Comments start with #
 
-section {
-    key = "value"
-    number = 42
-    boolean = true
-    
-    nested {
-        key = "value"
-    }
-}
-```
-
-### Basic Structure
-
-```vibe
-# Global default configuration
 default {
-    path = "~/Pictures/wallpaper.png"
-    mode = "fill"
+    type shader
+    path ~/.config/neowall/shaders/matrix.glsl
+    shader_speed 1.0
+    shader_fps 60
+    mode fill
 }
 
-# Per-output configuration
 output {
     DP-1 {
-        path = "~/Pictures/monitor1.png"
+        type image
+        path ~/Pictures/wallpapers/mountain.jpg
+        mode fill
     }
     
-    HDMI-A-1 {
-        shader = "~/shaders/plasma.glsl"
+    HDMI-1 {
+        type shader
+        path ~/.config/neowall/shaders/plasma.glsl
+        shader_speed 2.0
     }
 }
 ```
 
-### Configuration Rules
+### Configuration Keys
 
-**IMPORTANT:** Static and shader settings are mutually exclusive!
+#### Top-Level Sections
 
-#### Static Wallpaper Settings (with `path`)
+- `default { }` - Default settings for all outputs
+- `output { }` - Per-output specific settings
 
-```vibe
-default {
-    path = "~/wallpaper.png"         # Image file or directory
-    mode = "fill"                     # Display mode
-    transition = "fade"               # Transition effect
-    transition_duration = 500         # Milliseconds
-    duration = 300                    # Cycling interval (seconds)
-}
-```
+#### Wallpaper Settings
 
-#### Shader Wallpaper Settings (with `shader`)
+| Key | Type | Description | Valid For |
+|-----|------|-------------|-----------|
+| `type` | string | Wallpaper type: `image` or `shader` | All |
+| `path` | string | Path to wallpaper file | All |
+| `mode` | string | Display mode (see below) | Images only |
 
-```vibe
-default {
-    shader = "~/shader.glsl"          # Shader file or directory
-    shader_speed = 1.5                # Animation speed multiplier
-    shader_fps = 60                   # Target framerate
-    vsync = true                      # Enable V-sync
-    show_fps = true                   # Show FPS counter
-    duration = 60                     # Cycling interval (seconds)
-    
-    # Optional: texture inputs
-    channels = [
-        "~/texture1.png",
-        "~/texture2.png"
-    ]
-}
-```
-
-#### Universal Settings
-
-```vibe
-duration = 300    # Works with both static and shader
-                  # For directories: cycling interval
-```
-
-### Validation Rules
-
-NeoWall enforces strict validation:
-
-❌ **INVALID - Cannot use both:**
-```vibe
-default {
-    path = "~/wallpaper.png"
-    shader = "~/shader.glsl"    # ERROR: Choose one!
-}
-```
-
-❌ **INVALID - mode doesn't work with shaders:**
-```vibe
-default {
-    shader = "~/shader.glsl"
-    mode = "fill"               # ERROR: mode is static-only
-}
-```
-
-❌ **INVALID - shader_speed doesn't work with images:**
-```vibe
-default {
-    path = "~/wallpaper.png"
-    shader_speed = 2.0          # ERROR: shader_speed is shader-only
-}
-```
-
-✅ **VALID - Correct usage:**
-```vibe
-# Static wallpaper
-output {
-    DP-1 {
-        path = "~/wallpaper.png"
-        mode = "fill"
-        transition = "fade"
-    }
-}
-
-# Shader wallpaper
-output {
-    HDMI-A-1 {
-        shader = "~/shader.glsl"
-        shader_speed = 1.5
-        vsync = true
-    }
-}
-```
-
----
-
-## Static Wallpapers
-
-### Single Image
-
-Set a single wallpaper:
-
-```vibe
-default {
-    path = "~/Pictures/nature.jpg"
-    mode = "fill"
-}
-```
-
-### Display Modes
-
-Control how images are displayed:
+#### Display Modes (for static images)
 
 | Mode | Description |
 |------|-------------|
-| `fill` | Fill screen, crop to fit (default) |
-| `fit` | Fit entire image, may have borders |
-| `center` | Center image at original size |
-| `tile` | Repeat image as tiles |
+| `center` | Center image without scaling |
 | `stretch` | Stretch to fill screen (may distort) |
+| `fit` | Scale to fit inside screen (maintain aspect) |
+| `fill` | Scale to fill screen (maintain aspect, may crop) |
+| `tile` | Tile image across screen |
 
-Example:
+#### Cycling Settings
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `cycle` | boolean | Enable wallpaper cycling |
+| `duration` | float | Time in seconds between cycles |
+
+#### Live Wallpaper Settings
+
+| Key | Type | Description | Default |
+|-----|------|-------------|---------|
+| `shader_speed` | float | Animation speed multiplier | 1.0 |
+| `shader_fps` | integer | Target FPS | 60 |
+| `vsync` | boolean | Enable vsync | false |
+| `show_fps` | boolean | Show FPS counter | false |
+
+#### Transition Settings
+
+| Key | Type | Description | Default |
+|-----|------|-------------|---------|
+| `transition` | string | Transition effect | fade |
+| `transition_duration` | float | Transition time (seconds) | 0.3 |
+
+**Available Transitions:**
+- `none` - Instant switch
+- `fade` - Fade in/out
+- `slide_left`, `slide_right`, `slide_up`, `slide_down`
+- `glitch` - Glitch effect
+- `pixelate` - Pixelation effect
+
+### Configuration Examples
+
+#### Example 1: Simple Static Wallpaper
+
 ```vibe
 default {
-    path = "~/Pictures/wallpaper.png"
-    mode = "fit"    # Show entire image
+    type image
+    path ~/Pictures/wallpaper.jpg
+    mode fill
 }
 ```
 
-### Transitions
-
-Smooth transitions when changing wallpapers:
-
-| Transition | Description |
-|------------|-------------|
-| `none` | Instant change |
-| `fade` | Cross-fade between images |
-| `slide` | Slide in new image |
-| `wipe` | Wipe across screen |
-
-Configuration:
-```vibe
-default {
-    path = "~/Pictures/wallpaper.png"
-    transition = "fade"
-    transition_duration = 500    # Milliseconds (default: 300)
-}
-```
-
-### Directory Cycling
-
-Automatically cycle through images in a directory:
+#### Example 2: Live Shader Wallpaper
 
 ```vibe
 default {
-    # Path ending with / indicates directory
-    path = "~/Pictures/wallpapers/"
-    
-    # Cycle every 5 minutes (300 seconds)
-    duration = 300
-    
-    # Smooth transitions
-    transition = "fade"
-    transition_duration = 1000
-    
-    mode = "fill"
+    type shader
+    path ~/.config/neowall/shaders/plasma.glsl
+    shader_speed 1.5
+    shader_fps 60
+    vsync false
 }
 ```
 
-**Supported formats in directories:**
-- `.png`
-- `.jpg`, `.jpeg`
-- `.webp` (if built with WebP support)
-
-**Directory structure:**
-```
-~/Pictures/wallpapers/
-├── nature1.png
-├── nature2.jpg
-├── abstract.png
-└── sunset.jpg
-```
-
-NeoWall will automatically:
-- Scan the directory for supported images
-- Sort alphabetically
-- Cycle through them at the specified interval
-
-### Manual Control
-
-Change wallpaper via command line:
-
-```bash
-# Set specific wallpaper
-neowall set-wallpaper ~/Pictures/new-wallpaper.png
-
-# Next wallpaper (when cycling)
-neowall next-wallpaper
-
-# Previous wallpaper (when cycling)
-neowall prev-wallpaper
-```
-
-### Per-Monitor Configuration
-
-Different wallpapers for different monitors:
+#### Example 3: Multi-Monitor Setup
 
 ```vibe
-# Find output names with: neowall list-outputs
+# Default for most monitors
+default {
+    type image
+    path ~/Pictures/default-wallpaper.jpg
+    mode fill
+}
 
+# Specific settings per monitor
 output {
-    # Primary monitor
     DP-1 {
-        path = "~/Pictures/primary.png"
-        mode = "fill"
+        type shader
+        path ~/.config/neowall/shaders/matrix.glsl
+        shader_speed 1.0
     }
     
-    # Secondary monitor
-    HDMI-A-1 {
-        path = "~/Pictures/secondary.png"
-        mode = "fit"
+    HDMI-1 {
+        type image
+        path ~/Pictures/ultrawide-wallpaper.jpg
+        mode fill
     }
-    
-    # Third monitor with cycling
-    DP-2 {
-        path = "~/Pictures/collection/"
-        duration = 600
-        transition = "fade"
+}
+```
+
+#### Example 4: Auto-Cycling Wallpapers
+
+```vibe
+default {
+    type image
+    path ~/Pictures/wallpapers/   # Directory path (ends with /)
+    mode fill
+    cycle true
+    duration 300                   # 5 minutes
+    transition fade
+    transition_duration 0.5        # 0.5 second fade
+}
+```
+
+#### Example 5: Shader with Custom Speed
+
+```vibe
+output {
+    DP-1 {
+        type shader
+        path ~/.config/neowall/shaders/fast_plasma.glsl
+        shader_speed 2.5              # 2.5x speed
+        shader_fps 120                # 120 FPS (if monitor supports)
+        vsync true                    # Sync to monitor refresh
+        show_fps true                 # Show FPS counter
     }
 }
 ```
 
 ---
 
-## Shader Wallpapers
+## Advanced Usage
 
-### What are Shader Wallpapers?
+### VIBE Path Notation
 
-Shader wallpapers are animated backgrounds created using GLSL (OpenGL Shading Language). They run directly on your GPU for smooth, efficient animations.
-
-### Basic Shader Setup
-
-```vibe
-default {
-    shader = "~/.config/neowall/shaders/plasma.glsl"
-    shader_speed = 1.0
-    shader_fps = 60
-    vsync = true
-}
-```
-
-### Shader Settings
-
-#### Speed Control
-
-```vibe
-default {
-    shader = "~/shader.glsl"
-    shader_speed = 1.5    # 1.5x normal speed
-                          # Range: 0.1 to 10.0
-                          # Default: 1.0
-}
-```
-
-#### Framerate
-
-```vibe
-default {
-    shader = "~/shader.glsl"
-    
-    # Option 1: Fixed framerate
-    shader_fps = 60
-    vsync = false
-    
-    # Option 2: V-sync (matches monitor refresh)
-    vsync = true           # shader_fps ignored when true
-}
-```
-
-**Recommended settings:**
-
-| Use Case | Settings |
-|----------|----------|
-| Smooth animation | `vsync = true` |
-| Lower power usage | `shader_fps = 30, vsync = false` |
-| Maximum smoothness | `shader_fps = 144, vsync = false` (high-refresh monitors) |
-
-#### FPS Counter
-
-Display current framerate:
-
-```vibe
-default {
-    shader = "~/shader.glsl"
-    show_fps = true        # Show FPS in corner
-}
-```
-
-The FPS counter appears in the top-left corner showing:
-- Current FPS
-- Frame time (ms)
-- Target FPS (if applicable)
-
-### Shader Directory Cycling
-
-Cycle through multiple shaders:
-
-```vibe
-default {
-    # Directory of shaders
-    shader = "~/.config/neowall/shaders/"
-    
-    # Change shader every minute
-    duration = 60
-    
-    # Shader settings apply to all
-    shader_speed = 1.0
-    vsync = true
-}
-```
-
-Directory structure:
-```
-~/.config/neowall/shaders/
-├── plasma.glsl
-├── waves.glsl
-├── matrix.glsl
-└── fractal.glsl
-```
-
-### Texture Channels (iChannel)
-
-Pass textures to shaders (like Shadertoy):
-
-```vibe
-default {
-    shader = "~/shader.glsl"
-    
-    channels = [
-        "~/textures/noise.png",      # iChannel0
-        "~/textures/pattern.png",    # iChannel1
-        "~/textures/gradient.png",   # iChannel2
-        "~/textures/detail.png"      # iChannel3
-    ]
-}
-```
-
-In your shader:
-```glsl
-uniform sampler2D iChannel0;  // First texture
-uniform sampler2D iChannel1;  // Second texture
-uniform sampler2D iChannel2;  // Third texture
-uniform sampler2D iChannel3;  // Fourth texture
-
-void main() {
-    vec2 uv = gl_FragCoord.xy / iResolution.xy;
-    vec4 noise = texture(iChannel0, uv);
-    // ... your shader code
-}
-```
-
-### Writing Custom Shaders
-
-NeoWall provides Shadertoy-compatible uniforms:
-
-```glsl
-#version 300 es
-precision highp float;
-
-// Provided by NeoWall
-uniform vec3 iResolution;      // Screen resolution (width, height, 1.0)
-uniform float iTime;           // Time in seconds
-uniform float iTimeDelta;      // Time since last frame
-uniform int iFrame;            // Frame number
-uniform vec4 iMouse;           // Mouse coordinates (future)
-uniform sampler2D iChannel0;   // Texture channel 0
-uniform sampler2D iChannel1;   // Texture channel 1
-uniform sampler2D iChannel2;   // Texture channel 2
-uniform sampler2D iChannel3;   // Texture channel 3
-
-out vec4 fragColor;
-
-void mainImage(out vec4 fragColor, in vec2 fragCoord) {
-    // Your shader code here
-    vec2 uv = fragCoord / iResolution.xy;
-    fragColor = vec4(uv, 0.5 + 0.5 * sin(iTime), 1.0);
-}
-
-void main() {
-    mainImage(fragColor, gl_FragCoord.xy);
-}
-```
-
-### Example Shaders
-
-#### Simple Gradient
-```glsl
-#version 300 es
-precision highp float;
-uniform vec3 iResolution;
-uniform float iTime;
-out vec4 fragColor;
-
-void main() {
-    vec2 uv = gl_FragCoord.xy / iResolution.xy;
-    vec3 color = vec3(uv.x, uv.y, 0.5 + 0.5 * sin(iTime));
-    fragColor = vec4(color, 1.0);
-}
-```
-
-#### Plasma Effect
-```glsl
-#version 300 es
-precision highp float;
-uniform vec3 iResolution;
-uniform float iTime;
-out vec4 fragColor;
-
-void main() {
-    vec2 uv = gl_FragCoord.xy / iResolution.xy;
-    vec2 pos = uv * 10.0;
-    
-    float v = 0.0;
-    v += sin(pos.x + iTime);
-    v += sin(pos.y + iTime);
-    v += sin(pos.x + pos.y + iTime);
-    v += sin(length(pos) + iTime * 1.5);
-    
-    vec3 color = 0.5 + 0.5 * cos(v + vec3(0.0, 2.0, 4.0));
-    fragColor = vec4(color, 1.0);
-}
-```
-
-### Shader Resources
-
-**Where to find shaders:**
-- [Shadertoy](https://www.shadertoy.com/) - Convert to NeoWall format
-- [GLSL Sandbox](https://glslsandbox.com/)
-- [ShaderToy Gallery](https://www.shadertoy.com/browse)
-
-**Converting Shadertoy shaders:**
-
-1. Copy the shader code
-2. Add NeoWall header:
-   ```glsl
-   #version 300 es
-   precision highp float;
-   out vec4 fragColor;
-   ```
-3. Replace `void mainImage(...)` content
-4. Add `void main() { mainImage(fragColor, gl_FragCoord.xy); }`
-
-### Performance Tips
-
-**For better performance:**
-
-1. **Lower resolution:** Shaders render at display resolution
-2. **Reduce FPS:** `shader_fps = 30` instead of 60
-3. **Simplify shader:** Complex shaders use more GPU
-4. **Use V-sync:** `vsync = true` prevents unnecessary rendering
-5. **Monitor GPU usage:** `show_fps = true` to check performance
-
-**Power saving:**
-```vibe
-default {
-    shader = "~/shader.glsl"
-    shader_fps = 20        # Lower FPS
-    vsync = false
-    shader_speed = 0.5     # Slower animation
-}
-```
-
----
-
-## Command Line Interface
-
-### Basic Commands
-
-#### Start Daemon
+Config commands use **dot notation** to access nested values:
 
 ```bash
-# Start NeoWall daemon
-neowall daemon
+# Access default section
+neowall get-config default.type
+neowall get-config default.path
 
-# Start with specific config
-neowall daemon --config ~/my-config.vibe
+# Access output-specific settings
+neowall get-config output.DP-1.mode
+neowall get-config output.HDMI-1.shader_speed
 
-# Verbose logging
-neowall daemon --verbose
-
-# Debug mode
-neowall daemon --debug
+# Set nested values
+neowall set-config output.DP-1.type shader
+neowall set-config output.DP-1.path ~/shaders/cool.glsl
 ```
 
-#### Wallpaper Management
+### Runtime vs Persistent Commands
+
+**Important:** There are two types of commands:
+
+#### Runtime Commands (Temporary)
+
+These affect the **current session only** and are lost on daemon restart:
 
 ```bash
-# Set wallpaper (static)
-neowall set-wallpaper ~/Pictures/wallpaper.png
-
-# Set wallpaper for specific output
-neowall set-wallpaper --output DP-1 ~/Pictures/wallpaper.png
-
-# Set shader wallpaper
-neowall set-shader ~/shaders/plasma.glsl
-
-# Set shader for specific output
-neowall set-shader --output HDMI-A-1 ~/shaders/waves.glsl
+neowall next [output]
+neowall prev [output]
+neowall pause [output]
+neowall resume [output]
+neowall shader-pause [output]
+neowall shader-resume [output]
+neowall speed-up [output]
+neowall speed-down [output]
 ```
 
-#### Cycling Control
+**Use case:** Quick experimentation, temporary adjustments
+
+#### Persistent Commands (Permanent)
+
+These **write to config.vibe** and survive restarts:
 
 ```bash
-# Next wallpaper/shader
-neowall next
-
-# Previous wallpaper/shader
-neowall prev
-
-# Next on specific output
-neowall next --output DP-1
-
-# Pause cycling
-neowall pause
-
-# Resume cycling
-neowall resume
-
-# Reset to first wallpaper
-neowall reset
+neowall set-config <key> <value>
+neowall reset-config <key>
 ```
 
-#### Information
+**Use case:** Permanent settings you want to keep
+
+### Workflow Example
 
 ```bash
-# List connected outputs
+# 1. Experiment with runtime commands
+neowall next                    # Try next wallpaper
+neowall speed-up               # Speed up shader
+neowall shader-pause           # Pause animation
+
+# 2. When you find settings you like, persist them
+neowall set-config default.shader_speed 1.75
+neowall set-config default.path ~/.config/neowall/shaders/favorite.glsl
+
+# 3. On restart, your saved settings are restored
+neowall restart
+```
+
+### Multi-Monitor Control Patterns
+
+#### Pattern 1: Same Action on All Monitors
+
+```bash
+# Global command (no output specified)
+neowall next          # Next on all outputs
+neowall pause         # Pause all outputs
+```
+
+#### Pattern 2: Independent Control
+
+```bash
+# Different actions per monitor
+neowall next DP-1           # Next on DP-1
+neowall pause HDMI-1        # Pause HDMI-1
+neowall shader-pause DP-2   # Pause shader on DP-2
+```
+
+#### Pattern 3: Mixed Static and Live
+
+```bash
+# DP-1: Static images
+neowall set-config output.DP-1.type image
+neowall set-config output.DP-1.path ~/Pictures/
+
+# HDMI-1: Live shader
+neowall set-config output.HDMI-1.type shader
+neowall set-config output.HDMI-1.path ~/.config/neowall/shaders/plasma.glsl
+
+# Control them independently
+neowall next DP-1              # Next image on DP-1
+neowall speed-up HDMI-1        # Speed up shader on HDMI-1
+```
+
+### Finding Your Output Names
+
+```bash
+# List all connected outputs with details
 neowall list-outputs
 
-# Show current status
-neowall status
-
-# Show detailed info
-neowall info
-
-# Show version
-neowall --version
-
-# Show help
-neowall --help
+# Example output:
+# Connected Outputs:
+# ─────────────────────────────────────────────────────────
+#   • DP-1 (LG 34WK95U)
+#     Resolution: 3440x1440
+#     Wallpaper:  shader
+#   
+#   • HDMI-1 (Dell P2419H)
+#     Resolution: 1920x1080
+#     Wallpaper:  image
 ```
 
-#### Configuration
-
-```bash
-# Get config value
-neowall get-config wallpaper.mode
-
-# Set config value
-neowall set-config wallpaper.mode fill
-
-# Set config for specific output
-neowall set-config --output DP-1 wallpaper.mode fit
-
-# Reset config to defaults
-neowall reset-config
-
-# Reload config file
-neowall reload
-```
-
-### Advanced Commands
-
-#### IPC Commands
-
-```bash
-# Send raw IPC command
-neowall ipc '{"command":"status"}'
-
-# Query specific information
-neowall ipc '{"command":"get-config","args":"{\"key\":\"wallpaper.mode\"}"}'
-
-# Set configuration
-neowall ipc '{"command":"set-config","args":"{\"key\":\"wallpaper.mode\",\"value\":\"fill\"}"}'
-```
-
-#### Testing
-
-```bash
-# Test shader compilation
-neowall test-shader ~/shader.glsl
-
-# Validate config file
-neowall validate-config ~/.config/neowall/config.vibe
-
-# Check compositor compatibility
-neowall check-compositor
-```
-
-#### Debugging
-
-```bash
-# Run with debug output
-NEOWALL_DEBUG=1 neowall daemon
-
-# Log to file
-neowall daemon 2>&1 | tee neowall.log
-
-# Trace protocol messages
-WAYLAND_DEBUG=1 neowall daemon
-```
-
-### Command Line Options
-
-```
-neowall [OPTIONS] <COMMAND>
-
-OPTIONS:
-  -h, --help              Show help message
-  -v, --version           Show version
-  -c, --config PATH       Use specific config file
-  -o, --output NAME       Target specific output
-  --verbose               Enable verbose logging
-  --debug                 Enable debug mode
-  --no-fork               Don't daemonize (stay in foreground)
-
-COMMANDS:
-  daemon                  Start the wallpaper daemon
-  set-wallpaper PATH      Set static wallpaper
-  set-shader PATH         Set shader wallpaper
-  next                    Next wallpaper/shader
-  prev                    Previous wallpaper/shader
-  pause                   Pause cycling
-  resume                  Resume cycling
-  reset                   Reset to first wallpaper
-  list-outputs            List available outputs
-  status                  Show current status
-  info                    Show detailed information
-  get-config KEY          Get configuration value
-  set-config KEY VALUE    Set configuration value
-  reset-config [KEY]      Reset configuration
-  reload                  Reload configuration
-  ipc JSON                Send raw IPC command
-  test-shader PATH        Test shader compilation
-  validate-config PATH    Validate config file
-  check-compositor        Check compositor support
-```
-
-### Environment Variables
-
-```bash
-# Config file location
-export NEOWALL_CONFIG=~/.config/neowall/config.vibe
-
-# Socket location
-export NEOWALL_SOCKET=/tmp/neowall-$UID.sock
-
-# Debug level (0-3)
-export NEOWALL_DEBUG=2
-
-# Force software rendering
-export NEOWALL_SOFTWARE_RENDER=1
-
-# Wayland display
-export WAYLAND_DISPLAY=wayland-1
-```
-
----
-
-## System Tray
-
-### Overview
-
-NeoWall provides a system tray icon for quick access to common functions.
-
-### Features
-
-- 🖼️ Quick wallpaper selection
-- ⏯️ Pause/Resume cycling
-- ⏭️ Next/Previous controls
-- 🎨 Shader browser
-- ⚙️ Settings access
-- 📊 Status display
-
-### Starting the Tray
-
-```bash
-# Start system tray
-neowall-tray
-
-# Start with daemon
-neowall daemon &
-neowall-tray &
-```
-
-**Autostart:**
-
-Create `~/.config/autostart/neowall.desktop`:
-```desktop
-[Desktop Entry]
-Type=Application
-Name=NeoWall
-Exec=neowall daemon
-X-GNOME-Autostart-enabled=true
-```
-
-Create `~/.config/autostart/neowall-tray.desktop`:
-```desktop
-[Desktop Entry]
-Type=Application
-Name=NeoWall Tray
-Exec=neowall-tray
-X-GNOME-Autostart-enabled=true
-```
-
-### Tray Menu
-
-**Right-click menu:**
-```
-NeoWall
-├── Current: wallpaper.png
-├── ─────────────────────
-├── 📁 Browse Wallpapers...
-├── 🎨 Browse Shaders...
-├── ─────────────────────
-├── ⏯️ Pause Cycling
-├── ⏮️ Previous
-├── ⏭️ Next
-├── ─────────────────────
-├── ⚙️ Settings
-├── 📊 Status
-├── 🔄 Reload Config
-├── ─────────────────────
-└── ❌ Quit
-```
-
-### Tray Configuration
-
-Configure tray behavior in config file:
-
-```vibe
-tray {
-    # Enable/disable tray icon
-    enable = true
-    
-    # Icon theme
-    theme = "default"
-    
-    # Show notifications
-    notifications = true
-    
-    # Update interval (ms)
-    update_interval = 1000
-}
-```
-
----
-
-## IPC Protocol
-
-### Overview
-
-NeoWall uses a JSON-based IPC protocol over Unix sockets for communication between the daemon and clients.
-
-### Socket Location
-
-Default socket: `/tmp/neowall-$UID.sock`
-
-Custom socket:
-```bash
-NEOWALL_SOCKET=/custom/path.sock neowall daemon
-```
-
-### Message Format
-
-**Request:**
-```json
-{
-    "command": "command-name",
-    "args": "{\"key\":\"value\"}"
-}
-```
-
-**Response:**
-```json
-{
-    "success": true,
-    "message": "Operation successful",
-    "data": "{...}"
-}
-```
-
-### Available Commands
-
-#### Status Commands
-
-**Get Status:**
-```json
-{
-    "command": "status"
-}
-```
-
-Response:
-```json
-{
-    "success": true,
-    "data": "{
-        \"running\": true,
-        \"outputs\": [
-            {
-                \"name\": \"DP-1\",
-                \"type\": \"static\",
-                \"current\": \"/home/user/wallpaper.png\"
-            }
-        ]
-    }"
-}
-```
-
-**Get Info:**
-```json
-{
-    "command": "info"
-}
-```
-
-**List Outputs:**
-```json
-{
-    "command": "list-outputs"
-}
-```
-
-#### Wallpaper Commands
-
-**Set Wallpaper:**
-```json
-{
-    "command": "set-wallpaper",
-    "args": "{\"path\":\"/home/user/wallpaper.png\"}"
-}
-```
-
-With output:
-```json
-{
-    "command": "set-wallpaper",
-    "args": "{\"output\":\"DP-1\",\"path\":\"/home/user/wallpaper.png\"}"
-}
-```
-
-**Set Shader:**
-```json
-{
-    "command": "set-shader",
-    "args": "{\"path\":\"/home/user/shader.glsl\"}"
-}
-```
-
-**Next/Previous:**
-```json
-{
-    "command": "next"
-}
-```
-
-```json
-{
-    "command": "prev"
-}
-```
-
-**Pause/Resume:**
-```json
-{
-    "command": "pause"
-}
-```
-
-```json
-{
-    "command": "resume"
-}
-```
-
-#### Configuration Commands
-
-**Get Config:**
-```json
-{
-    "command": "get-config",
-    "args": "{\"key\":\"wallpaper.mode\"}"
-}
-```
-
-**Set Config:**
-```json
-{
-    "command": "set-config",
-    "args": "{\"key\":\"wallpaper.mode\",\"value\":\"fill\"}"
-}
-```
-
-**Reset Config:**
-```json
-{
-    "command": "reset-config",
-    "args": "{\"key\":\"wallpaper.mode\"}"
-}
-```
-
-**Reload Config:**
-```json
-{
-    "command": "reload"
-}
-```
-
-### Example Client (Python)
-
-```python
-#!/usr/bin/env python3
-import socket
-import json
-import os
-
-def send_ipc_command(command, args=None):
-    # Connect to socket
-    socket_path = f"/tmp/neowall-{os.getuid()}.sock"
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.connect(socket_path)
-    
-    # Build request
-    request = {"command": command}
-    if args:
-        request["args"] = json.dumps(args)
-    
-    # Send request
-    sock.sendall(json.dumps(request).encode() + b'\n')
-    
-    # Receive response
-    response = sock.recv(4096)
-    sock.close()
-    
-    return json.loads(response)
-
-# Example usage
-result = send_ipc_command("set-wallpaper", {"path": "/home/user/wallpaper.png"})
-print(result)
-
-result = send_ipc_command("next")
-print(result)
-
-result = send_ipc_command("status")
-print(json.loads(result["data"]))
-```
-
-### Example Client (Bash)
-
-```bash
-#!/bin/bash
-
-# Send IPC command
-send_command() {
-    local cmd=$1
-    local args=$2
-    
-    local socket="/tmp/neowall-$(id -u).sock"
-    
-    if [ -n "$args" ]; then
-        echo "{\"command\":\"$cmd\",\"args\":$args}" | nc -U "$socket"
-    else
-        echo "{\"command\":\"$cmd\"}" | nc -U "$socket"
-    fi
-}
-
-# Set wallpaper
-send_command "set-wallpaper" '"{\"path\":\"/home/user/wallpaper.png\"}"'
-
-# Get status
-send_command "status"
-
-# Next wallpaper
-send_command "next"
-```
-
----
-
-## Advanced Features
-
-### Hot Reload
-
-NeoWall supports hot-reloading configuration without restart:
-
-```bash
-# Edit config file
-vim ~/.config/neowall/config.vibe
-
-# Reload
-neowall reload
-```
-
-Changes take effect immediately for:
-- Display modes
-- Transition settings
-- Shader parameters
-- Cycling intervals
-- Per-output configurations
-
-### Custom Transitions
-
-Define custom transition effects (advanced):
-
-```vibe
-transitions {
-    custom-fade {
-        type = "shader"
-        duration = 1000
-        shader = "~/.config/neowall/transitions/custom.glsl"
-    }
-}
-
-default {
-    path = "~/wallpaper.png"
-    transition = "custom-fade"
-}
-```
-
-### Multi-Display Scenarios
-
-#### Clone displays (same wallpaper):
-```vibe
-default {
-    path = "~/wallpaper.png"
-    mode = "fill"
-}
-# All outputs use default
-```
-
-#### Extend displays (different wallpapers):
-```vibe
-output {
-    DP-1 {
-        path = "~/Pictures/left.png"
-    }
-    DP-2 {
-        path = "~/Pictures/right.png"
-    }
-}
-```
-
-#### Mixed mode (static + shader):
-```vibe
-output {
-    DP-1 {
-        path = "~/wallpaper.png"
-        mode = "fill"
-    }
-    DP-2 {
-        shader = "~/shader.glsl"
-        vsync = true
-    }
-}
-```
+Use the name in parentheses (e.g., `DP-1`, `HDMI-1`) for commands.
 
 ### Performance Tuning
 
-#### Low Power Mode
-
-```vibe
-default {
-    shader = "~/shader.glsl"
-    shader_fps = 15          # Very low FPS
-    vsync = false
-    shader_speed = 0.5       # Slow animation
-}
-```
-
-#### High Performance Mode
-
-```vibe
-default {
-    shader = "~/shader.glsl"
-    shader_fps = 144         # High FPS
-    vsync = false
-    shader_speed = 1.0
-}
-```
-
-#### Balanced Mode
-
-```vibe
-default {
-    shader = "~/shader.glsl"
-    vsync = true             # Match monitor refresh
-    shader_speed = 1.0
-}
-```
-
-### Scripting Integration
-
-#### Change wallpaper based on time
+#### For Shaders
 
 ```bash
-#!/bin/bash
-# time-based-wallpaper.sh
+# Lower FPS for better battery life
+neowall set-config default.shader_fps 30
 
-hour=$(date +%H)
+# Higher FPS for smoother animation (if monitor supports it)
+neowall set-config default.shader_fps 120
 
-if [ $hour -ge 6 -a $hour -lt 12 ]; then
-    # Morning
-    neowall set-wallpaper ~/Pictures/morning.png
-elif [ $hour -ge 12 -a $hour -lt 18 ]; then
-    # Afternoon
-    neowall set-wallpaper ~/Pictures/afternoon.png
-else
-    # Evening/Night
-    neowall set-wallpaper ~/Pictures/night.png
-fi
+# Enable vsync to match monitor refresh rate
+neowall set-config default.vsync true
+
+# Show FPS counter to monitor performance
+neowall set-config default.show_fps true
 ```
 
-Add to crontab:
-```cron
-0 * * * * /path/to/time-based-wallpaper.sh
-```
-
-#### Change based on battery status
+#### For Static Images
 
 ```bash
-#!/bin/bash
-# battery-aware-wallpaper.sh
+# Faster cycling
+neowall set-config default.duration 60     # 1 minute
 
-battery=$(cat /sys/class/power_supply/BAT0/capacity)
+# Slower cycling
+neowall set-config default.duration 600    # 10 minutes
 
-if [ $battery -lt 20 ]; then
-    # Low battery - use static wallpaper
-    neowall set-wallpaper ~/Pictures/wallpaper.png
-else
-    # Good battery - use shader
-    neowall set-shader ~/shaders/plasma.glsl
-fi
+# Faster transitions
+neowall set-config default.transition_duration 0.2
+
+# Instant switching (no transition)
+neowall set-config default.transition none
 ```
 
-#### Integration with pywal
+### Command Statistics
+
+Monitor which commands you use most:
 
 ```bash
-#!/bin/bash
-# Use pywal colors with NeoWall
+# View all command stats
+neowall command-stats
 
-# Generate color scheme
-wal -i ~/Pictures/wallpaper.png
+# View stats for specific command
+neowall command-stats next
 
-# Set wallpaper in NeoWall
-neowall set-wallpaper ~/Pictures/wallpaper.png
-
-# Optional: Generate shader with pywal colors
-# (requires custom shader that reads pywal colors)
+# Example output:
+# Command: next
+# Total calls: 42
+# Success: 41
+# Failed: 1
+# Avg time: 15ms
+# Min time: 10ms
+# Max time: 25ms
 ```
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
-
-#### 1. NeoWall won't start
-
-**Symptoms:**
-- Daemon exits immediately
-- "Failed to connect to Wayland" error
-
-**Solutions:**
-
-1. Check Wayland is running:
-   ```bash
-   echo $WAYLAND_DISPLAY
-   # Should output: wayland-0 or similar
-   ```
-
-2. Check compositor supports wlr-layer-shell:
-   ```bash
-   neowall check-compositor
-   ```
-
-3. Try running in foreground:
-   ```bash
-   neowall daemon --no-fork --verbose
-   ```
-
-4. Check logs:
-   ```bash
-   journalctl --user -u neowall -f
-   ```
-
-#### 2. Wallpaper not displaying
-
-**Symptoms:**
-- NeoWall runs but no wallpaper visible
-- Black screen
-
-**Solutions:**
-
-1. Check compositor layer configuration:
-   ```bash
-   # For Hyprland, add to hyprland.conf:
-   layerrule = blur, neowall
-   layerrule = ignorezero, neowall
-   ```
-
-2. Verify file exists and is readable:
-   ```bash
-   ls -l ~/Pictures/wallpaper.png
-   file ~/Pictures/wallpaper.png
-   ```
-
-3. Try different display mode:
-   ```bash
-   neowall set-config wallpaper.mode center
-   ```
-
-4. Check OpenGL support:
-   ```bash
-   glxinfo | grep "OpenGL version"
-   ```
-
-#### 3. Shader won't load
-
-**Symptoms:**
-- "Shader compilation failed" error
-- Shader wallpaper shows black screen
-
-**Solutions:**
-
-1. Test shader compilation:
-   ```bash
-   neowall test-shader ~/shader.glsl
-   ```
-
-2. Check shader syntax:
-   - Must be GLSL ES 3.0 (`#version 300 es`)
-   - Must have `out vec4 fragColor`
-   - Must define `main()` function
-
-3. Check shader uniforms match NeoWall's:
-   ```glsl
-   uniform vec3 iResolution;
-   uniform float iTime;
-   // etc.
-   ```
-
-4. Enable debug mode:
-   ```bash
-   NEOWALL_DEBUG=3 neowall daemon
-   ```
-
-#### 4. High CPU/GPU usage
-
-**Symptoms:**
-- System feels slow
-- High CPU usage by NeoWall
-- GPU temperature high
-
-**Solutions:**
-
-1. Check current FPS:
-   ```vibe
-   default {
-       shader = "~/shader.glsl"
-       show_fps = true
-   }
-   ```
-
-2. Reduce framerate:
-   ```vibe
-   default {
-       shader = "~/shader.glsl"
-       shader_fps = 30
-       vsync = false
-   }
-   ```
-
-3. Enable V-sync:
-   ```vibe
-   default {
-       shader = "~/shader.glsl"
-       vsync = true
-   }
-   ```
-
-4. Simplify shader or use static wallpaper
-
-#### 5. Config changes not applying
-
-**Symptoms:**
-- Edited config but nothing changed
-- "Invalid configuration" errors
-
-**Solutions:**
-
-1. Validate config syntax:
-   ```bash
-   neowall validate-config ~/.config/neowall/config.vibe
-   ```
-
-2. Reload config:
-   ```bash
-   neowall reload
-   ```
-
-3. Check for validation errors:
-   ```bash
-   journalctl --user -u neowall | grep "ERROR\|INVALID"
-   ```
-
-4. Verify file permissions:
-   ```bash
-   ls -l ~/.config/neowall/config.vibe
-   ```
-
-#### 6. Crashes or segfaults
-
-**Symptoms:**
-- NeoWall crashes unexpectedly
-- Segmentation fault errors
-
-**Solutions:**
-
-1. Update to latest version:
-   ```bash
-   git pull
-   meson compile -C build
-   sudo meson install -C build
-   ```
-
-2. Check for driver issues:
-   ```bash
-   # Update graphics drivers
-   # Check compositor is stable
-   ```
-
-3. Run with debugger:
-   ```bash
-   gdb neowall
-   run daemon --no-fork
-   # When it crashes: bt
-   ```
-
-4. Report bug with backtrace
-
-### Debug Mode
-
-Enable maximum verbosity:
+### Daemon Won't Start
 
 ```bash
-# Method 1: Command line
-neowall daemon --debug
+# Check if already running
+neowall status
 
-# Method 2: Environment variable
-NEOWALL_DEBUG=3 neowall daemon
+# Kill stale processes
+pkill -9 neowalld
 
-# Method 3: Log to file
-neowall daemon --debug 2>&1 | tee neowall-debug.log
+# Start with verbose output (if available)
+neowalld -v
+
+# Check logs
+journalctl -u neowalld -f
 ```
 
-Debug levels:
-- `0` - Errors only
-- `1` - Warnings
-- `2` - Info (default with --verbose)
-- `3` - Debug (all messages)
+### Wallpaper Not Changing
 
-### Log Files
-
-**Location:**
-- systemd: `journalctl --user -u neowall`
-- Manual: Check where you redirected stderr
-
-**Useful log commands:**
 ```bash
-# Follow logs in real-time
-journalctl --user -u neowall -f
+# Check daemon status
+neowall status
 
-# Show last 100 lines
-journalctl --user -u neowall -n 100
+# Verify output name
+neowall list-outputs
 
-# Filter errors only
-journalctl --user -u neowall | grep ERROR
+# Check current config
+neowall get-config default.path
+neowall get-config default.type
 
-# Show logs since last boot
-journalctl --user -u neowall -b
+# Try manual reload
+neowall reload-output DP-1
 ```
 
-### Getting Help
+### Shader Not Loading
 
-1. **Check documentation:**
-   - This manual
-   - `docs/CONFIG_RULES.md`
-   - `README.md`
-
-2. **Search issues:**
-   - https://github.com/1ay1/neowall/issues
-
-3. **Ask for help:**
-   - GitHub Discussions
-   - Discord server
-   - Matrix room
-
-4. **Report bugs:**
-   - Include NeoWall version: `neowall --version`
-   - Include config file
-   - Include debug logs
-   - Include compositor name and version
-   - Steps to reproduce
-
----
-
-## FAQ
-
-### General Questions
-
-**Q: What compositors does NeoWall support?**
-
-A: NeoWall works with any Wayland compositor that supports the `wlr-layer-shell` protocol. This includes Hyprland, Sway, River, Wayfire, and other wlroots-based compositors.
-
-**Q: Can I use NeoWall on X11?**
-
-A: No, NeoWall is Wayland-only. For X11, consider alternatives like `feh`, `nitrogen`, or `xwinwrap`.
-
-**Q: Does NeoWall work on GNOME/KDE?**
-
-A: GNOME and KDE Plasma use different protocols. NeoWall currently doesn't support them. There are compositor-specific alternatives for these desktop environments.
-
-**Q: How much RAM/CPU does NeoWall use?**
-
-A: Typical usage:
-- Static wallpaper: ~5-10 MB RAM, negligible CPU
-- Shader wallpaper: ~20-50 MB RAM, depends on shader complexity
-- GPU usage depends on shader complexity and FPS
-
-### Configuration Questions
-
-**Q: Can I use both path and shader?**
-
-A: No, they are mutually exclusive. Choose one per output. However, you can use path on one monitor and shader on another.
-
-**Q: Where do I put my config file?**
-
-A: `~/.config/neowall/config.vibe` or use `--config` flag.
-
-**Q: How do I find my output names?**
-
-A: Run `neowall list-outputs`
-
-**Q: Can I use environment variables in config?**
-
-A: Yes, use `~` for home directory. Full `$VAR` expansion is not currently supported.
-
-**Q: What if I make a mistake in config?**
-
-A: NeoWall validates config and shows helpful error messages. Fix the error and reload.
-
-### Wallpaper Questions
-
-**Q: What image formats are supported?**
-
-A: PNG (always), JPEG (if enabled), WebP (if enabled). Check with `neowall --version`.
-
-**Q: Can I use GIF or videos?**
-
-A: No, use static images or shaders. For video-like effects, use shader wallpapers.
-
-**Q: How do I create a slideshow?**
-
-A: Use directory cycling:
-```vibe
-default {
-    path = "~/Pictures/slideshow/"
-    duration = 300
-    transition = "fade"
-}
-```
-
-**Q: Can NeoWall change my desktop wallpaper?**
-
-A: NeoWall manages its own background layer. Desktop environment wallpaper settings are separate.
-
-### Shader Questions
-
-**Q: Where can I find shaders?**
-
-A: Shadertoy.com, GLSL Sandbox, or write your own.
-
-**Q: How do I convert Shadertoy shaders?**
-
-A: See the "Writing Custom Shaders" section. You need to add NeoWall headers and adjust the code structure.
-
-**Q: My shader is too slow/laggy**
-
-A: Reduce `shader_fps`, enable `vsync`, or simplify the shader code.
-
-**Q: Can I use Shadertoy inputs?**
-
-A: Partial support:
-- ✅ iResolution, iTime, iTimeDelta, iFrame
-- ✅ iChannel0-3 (texture inputs)
-- ❌ iMouse (not yet supported)
-- ❌ Audio inputs (not supported)
-
-**Q: Do shaders drain battery?**
-
-A: Shaders use GPU continuously. For battery saving:
-- Lower `shader_fps`
-- Use simpler shaders
-- Switch to static wallpaper when on battery
-
-### Performance Questions
-
-**Q: NeoWall is using too much CPU**
-
-A: For shaders: lower `shader_fps` or enable `vsync`. For static: check if transition is running continuously.
-
-**Q: Should I use vsync?**
-
-A: Generally yes. Vsync prevents unnecessary rendering and saves power.
-
-**Q: What's the best FPS setting?**
-
-A: Match your monitor refresh rate or use vsync. For most users: `vsync = true` is best.
-
-**Q: Can I pause NeoWall?**
-
-A: Yes: `neowall pause` to pause, `neowall resume` to resume.
-
-### Troubleshooting Questions
-
-**Q: NeoWall won't start**
-
-A: Check compositor supports wlr-layer-shell: `neowall check-compositor`
-
-**Q: Wallpaper is black**
-
-A: Check file path is correct, file is readable, and OpenGL is working.
-
-**Q: Config changes don't apply**
-
-A: Run `neowall reload` or restart daemon.
-
-**Q: How do I reset to defaults?**
-
-A: `neowall reset-config` or delete config file.
-
----
-
-## Appendix
-
-### A. Configuration Reference
-
-#### Complete Config Example
-
-```vibe
-# NeoWall Complete Configuration Example
-
-# Global defaults
-default {
-    # Static wallpaper
-    path = "~/Pictures/wallpaper.png"
-    mode = "fill"
-    transition = "fade"
-    transition_duration = 500
-    
-    # OR shader wallpaper (mutually exclusive with path)
-    # shader = "~/shaders/plasma.glsl"
-    # shader_speed = 1.0
-    # shader_fps = 60
-    # vsync = true
-    # show_fps = false
-    
-    # Universal (works with both)
-    duration = 300
-}
-
-# Per-output configuration
-output {
-    # Primary monitor - static with cycling
-    DP-1 {
-        path = "~/Pictures/collection/"
-        duration = 600
-        mode = "fill"
-        transition = "fade"
-        transition_duration = 1000
-    }
-    
-    # Secondary monitor - shader
-    HDMI-A-1 {
-        shader = "~/shaders/waves.glsl"
-        shader_speed = 1.5
-        vsync = true
-        show_fps = false
-        
-        channels = [
-            "~/textures/noise.png"
-        ]
-    }
-    
-    # Laptop screen - low power
-    eDP-1 {
-        path = "~/Pictures/minimal.png"
-        mode = "center"
-    }
-}
-
-# Tray configuration
-tray {
-    enable = true
-    theme = "default"
-    notifications = true
-    update_interval = 1000
-}
-```
-
-#### All Configuration Keys
-
-**Static Wallpaper Keys** (with `path`):
-- `path` - Image file or directory path
-- `mode` - Display mode: fill, fit, center, tile, stretch
-- `transition` - Transition effect: none, fade, slide, wipe
-- `transition_duration` - Transition time in milliseconds
-- `duration` - Cycling interval in seconds (for directories)
-
-**Shader Wallpaper Keys** (with `shader`):
-- `shader` - Shader file or directory path
-- `shader_speed` - Animation speed multiplier (0.1-10.0)
-- `shader_fps` - Target framerate (1-240)
-- `vsync` - Enable V-sync (true/false)
-- `show_fps` - Show FPS counter (true/false)
-- `channels` - Array of texture paths for iChannel0-3
-- `duration` - Cycling interval in seconds (for directories)
-
-**Universal Keys**:
-- `duration` - Directory cycling interval (works with both)
-
-### B. Command Reference
-
-#### Complete Command List
-
-```
-Daemon Management:
-  neowall daemon                    Start daemon
-  neowall daemon --no-fork          Run in foreground
-  neowall daemon --verbose          Verbose logging
-  neowall daemon --debug            Debug mode
-
-Wallpaper Control:
-  neowall set-wallpaper PATH        Set static wallpaper
-  neowall set-shader PATH           Set shader wallpaper
-  neowall next                      Next wallpaper
-  neowall prev                      Previous wallpaper
-  neowall pause                     Pause cycling
-  neowall resume                    Resume cycling
-  neowall reset                     Reset to first
-
-Output Management:
-  neowall list-outputs              List outputs
-  neowall status                    Show status
-  neowall info                      Detailed info
-
-Configuration:
-  neowall get-config KEY            Get config value
-  neowall set-config KEY VALUE      Set config value
-  neowall reset-config [KEY]        Reset config
-  neowall reload                    Reload config file
-  neowall validate-config PATH      Validate config
-
-Testing:
-  neowall test-shader PATH          Test shader
-  neowall check-compositor          Check support
-
-Utility:
-  neowall --version                 Show version
-  neowall --help                    Show help
-```
-
-### C. Keyboard Shortcuts
-
-NeoWall doesn't have built-in keyboard shortcuts, but you can bind commands in your compositor:
-
-**Hyprland example** (`~/.config/hypr/hyprland.conf`):
-```
-# NeoWall shortcuts
-bind = SUPER, W, exec, neowall next
-bind = SUPER SHIFT, W, exec, neowall prev
-bind = SUPER, P, exec, neowall pause
-bind = SUPER SHIFT, P, exec, neowall resume
-```
-
-**Sway example** (`~/.config/sway/config`):
-```
-# NeoWall shortcuts
-bindsym $mod+w exec neowall next
-bindsym $mod+Shift+w exec neowall prev
-bindsym $mod+p exec neowall pause
-bindsym $mod+Shift+p exec neowall resume
-```
-
-### D. Systemd Integration
-
-#### User Service
-
-Create `~/.config/systemd/user/neowall.service`:
-```ini
-[Unit]
-Description=NeoWall Wallpaper Manager
-Documentation=https://github.com/1ay1/neowall
-After=graphical-session.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/neowall daemon --no-fork
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=graphical-session.target
-```
-
-Enable and start:
 ```bash
-systemctl --user enable neowall
-systemctl --user start neowall
-systemctl --user status neowall
+# Verify shader file exists
+ls -la ~/.config/neowall/shaders/
+
+# Check shader type is set
+neowall get-config default.type
+
+# Should return: shader
+
+# Try setting explicitly
+neowall set-config default.type shader
+neowall set-config default.path ~/.config/neowall/shaders/plasma.glsl
 ```
 
-#### With Tray
+### Performance Issues
 
-Create `~/.config/systemd/user/neowall-tray.service`:
-```ini
-[Unit]
-Description=NeoWall System Tray
-After=neowall.service
-Requires=neowall.service
+```bash
+# Lower FPS
+neowall set-config default.shader_fps 30
 
-[Service]
-Type=simple
-ExecStart=/usr/bin/neowall-tray
-Restart=on-failure
-RestartSec=5
+# Slow down animation
+neowall speed-down
+neowall speed-down  # Call multiple times
 
-[Install]
-WantedBy=graphical-session.target
+# Enable vsync
+neowall set-config default.vsync true
+
+# Check current speed
+neowall status  # Look for "shader_speed" value
 ```
 
-### E. Shader Template
+### Config Not Persisting
 
-Basic shader template for NeoWall:
+**Remember:** Only `set-config` and `reset-config` persist changes!
 
-```glsl
-#version 300 es
-precision highp float;
+```bash
+# ❌ WRONG (temporary, lost on restart)
+neowall next
+neowall speed-up
 
-// NeoWall uniforms
-uniform vec3 iResolution;      // viewport resolution (in pixels)
-uniform float iTime;           // shader playback time (in seconds)
-uniform float iTimeDelta;      // render time (in seconds)
-uniform int iFrame;            // shader playback frame
-uniform sampler2D iChannel0;   // input channel 0
-uniform sampler2D iChannel1;   // input channel 1
-uniform sampler2D iChannel2;   // input channel 2
-uniform sampler2D iChannel3;   // input channel 3
-
-// Output
-out vec4 fragColor;
-
-// Main image function (Shadertoy compatible)
-void mainImage(out vec4 fragColor, in vec2 fragCoord) {
-    // Normalized pixel coordinates (from 0 to 1)
-    vec2 uv = fragCoord / iResolution.xy;
-    
-    // Your shader code here
-    vec3 color = vec3(uv.x, uv.y, 0.5 + 0.5 * sin(iTime));
-    
-    // Output to screen
-    fragColor = vec4(color, 1.0);
-}
-
-// Entry point
-void main() {
-    mainImage(fragColor, gl_FragCoord.xy);
-}
+# ✅ CORRECT (persistent)
+neowall set-config default.path ~/new-wallpaper.jpg
+neowall set-config default.shader_speed 1.5
 ```
 
-### F. Resources
+### Reset to Default Config
 
-#### Official Links
-- **GitHub:** https://github.com/1ay1/neowall
-- **Documentation:** https://github.com/1ay1/neowall/tree/main/docs
-- **Issue Tracker:** https://github.com/1ay1/neowall/issues
+```bash
+# Reset specific keys
+neowall reset-config default.shader_speed
+neowall reset-config output.DP-1.mode
 
-#### Community
-- **Discord:** [Join Server]
-- **Matrix:** [Join Room]
-- **Reddit:** r/neowall
+# Nuclear option: reset everything
+neowall reset-config --all
 
-#### Shader Resources
-- **Shadertoy:** https://www.shadertoy.com/
-- **GLSL Sandbox:** https://glslsandbox.com/
-- **The Book of Shaders:** https://thebookofshaders.com/
-- **ShaderToy Tutorial:** https://inspirnathan.com/posts/47-shadertoy-tutorial-part-1
-
-#### Wallpaper Sources
-- **Unsplash:** https://unsplash.com/
-- **Pexels:** https://www.pexels.com/
-- **Wallhaven:** https://wallhaven.cc/
-- **r/wallpapers:** https://reddit.com/r/wallpapers
-
-### G. License
-
-NeoWall is released under the MIT License.
-
-```
-MIT License
-
-Copyright (c) 2024 NeoWall Contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+# Or manually delete config file
+rm ~/.config/neowall/config.vibe
+neowall restart
 ```
 
-### H. Contributing
+### Multi-Monitor Issues
 
-We welcome contributions! See `CONTRIBUTING.md` for guidelines.
+```bash
+# List outputs to verify names
+neowall list-outputs
 
-**Areas for contribution:**
-- Bug fixes
-- Feature implementations
-- Documentation improvements
-- Shader examples
-- Translations
-- Testing
+# Get info about specific output
+neowall output-info DP-1
 
-### I. Credits
+# Reload specific output
+neowall reload-output DP-1
 
-**Created by:** [1ay1](https://github.com/1ay1)
-
-**Contributors:** See [CONTRIBUTORS.md](https://github.com/1ay1/neowall/blob/main/CONTRIBUTORS.md)
-
-**Special Thanks:**
-- wlroots developers
-- Wayland community
-- Shadertoy creators
-- All users and testers
+# Set output-specific config
+neowall set-config output.DP-1.path ~/wallpaper.jpg
+```
 
 ---
 
 ## Quick Reference Card
 
 ### Essential Commands
+
 ```bash
-neowall daemon              # Start daemon
-neowall set-wallpaper PATH  # Set wallpaper
-neowall next                # Next wallpaper
-neowall list-outputs        # List monitors
-neowall status              # Show status
+# Daemon
+neowall start / stop / restart / status / ping
+
+# Wallpaper Control
+neowall next [output]
+neowall prev [output]
+
+# Cycling
+neowall pause [output]
+neowall resume [output]
+
+# Shaders
+neowall shader-pause [output]
+neowall shader-resume [output]
+neowall speed-up [output]
+neowall speed-down [output]
+
+# Config (persistent!)
+neowall set-config <key> <value>
+neowall get-config <key>
+neowall reset-config <key|--all>
+
+# Outputs
+neowall list-outputs
+neowall output-info <output>
 ```
 
-### Basic Config
-```vibe
-default {
-    path = "~/wallpaper.png"
-    mode = "fill"
-}
+### Common Config Keys
+
+```bash
+# Type and path
+default.type              # image or shader
+default.path              # /path/to/file
+
+# Display
+default.mode              # center/stretch/fit/fill/tile
+
+# Cycling
+default.cycle             # true/false
+default.duration          # seconds
+
+# Transitions
+default.transition        # fade/slide_*/glitch/pixelate/none
+default.transition_duration  # seconds
+
+# Live wallpapers
+default.shader_speed      # float multiplier
+default.shader_fps        # integer FPS
+default.vsync             # true/false
+default.show_fps          # true/false
+
+# Per-output (replace DP-1 with your output name)
+output.DP-1.type
+output.DP-1.path
+output.DP-1.mode
+output.DP-1.shader_speed
 ```
-
-### Static vs Shader Rules
-- ✅ Static: `path`, `mode`, `transition`
-- ✅ Shader: `shader`, `shader_speed`, `show_fps`
-- ✅ Both: `duration`
-- ❌ Never: `path` + `shader` together
-
-### Getting Help
-- Manual: Read this file
-- Help: `neowall --help`
-- Issues: GitHub Issues
-- Debug: `neowall daemon --debug`
 
 ---
 
-**End of Manual**
+## Tips & Best Practices
 
-For the latest version of this manual, visit:
-https://github.com/1ay1/neowall/blob/main/docs/USER_MANUAL.md
+### 1. Test Before Persisting
 
-Last updated: January 2025
+```bash
+# Try runtime commands first
+neowall next
+neowall speed-up
+
+# When you find what you like, persist it
+neowall set-config default.shader_speed 1.25
+```
+
+### 2. Use Directory Paths for Cycling
+
+```bash
+# Automatically cycle through all images in directory
+neowall set-config default.path ~/Pictures/wallpapers/
+neowall set-config default.cycle true
+neowall set-config default.duration 300
+```
+
+### 3. Create Output-Specific Configs
+
+```bash
+# Main monitor: Live shader
+neowall set-config output.DP-1.type shader
+neowall set-config output.DP-1.path ~/.config/neowall/shaders/matrix.glsl
+
+# Secondary monitor: Static image
+neowall set-config output.HDMI-1.type image
+neowall set-config output.HDMI-1.path ~/Pictures/secondary.jpg
+```
+
+### 4. Check Status Regularly
+
+```bash
+# See what's currently active
+neowall status
+
+# Check specific output
+neowall output-info DP-1
+```
+
+### 5. Use Transitions for Smooth Changes
+
+```bash
+# Nice fade between wallpapers
+neowall set-config default.transition fade
+neowall set-config default.transition_duration 0.5
+```
+
+---
+
+## Getting Help
+
+- **List all commands:** `neowall list-commands`
+- **Command help:** `neowall help`
+- **Version info:** `neowall version`
+- **GitHub:** https://github.com/1ay1/neowall
+- **Issues:** https://github.com/1ay1/neowall/issues
+
+---
+
+**NeoWall User Manual v0.4.0**  
+Last updated: 2024
