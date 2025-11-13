@@ -27,7 +27,7 @@ static command_result_t cmd_status(struct neowall_state *state, const ipc_reques
 static command_result_t cmd_current(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_ping(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_version(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
-static command_result_t cmd_list(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+static command_result_t cmd_list_commands(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 
 /* Command statistics tracking */
 typedef struct {
@@ -46,6 +46,8 @@ static const command_info_t command_registry[] = {
         .description = "Switch to next wallpaper",
         .args_schema = NULL,
         .example = "{\"command\":\"next\"}",
+        .handler_name = "cmd_next",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_next,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -56,6 +58,8 @@ static const command_info_t command_registry[] = {
         .description = "Switch to previous wallpaper",
         .args_schema = NULL,
         .example = "{\"command\":\"prev\"}",
+        .handler_name = "cmd_prev",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_prev,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -66,6 +70,8 @@ static const command_info_t command_registry[] = {
         .description = "Get current wallpaper information",
         .args_schema = NULL,
         .example = "{\"command\":\"current\"}",
+        .handler_name = "cmd_current",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_current,
         .capabilities = CMD_CAP_REQUIRES_STATE,
         .version = 1,
@@ -78,6 +84,8 @@ static const command_info_t command_registry[] = {
         .description = "Pause automatic wallpaper cycling",
         .args_schema = NULL,
         .example = "{\"command\":\"pause\"}",
+        .handler_name = "cmd_pause",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_pause,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -88,6 +96,8 @@ static const command_info_t command_registry[] = {
         .description = "Resume automatic wallpaper cycling",
         .args_schema = NULL,
         .example = "{\"command\":\"resume\"}",
+        .handler_name = "cmd_resume",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_resume,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -100,6 +110,8 @@ static const command_info_t command_registry[] = {
         .description = "Reload configuration from disk",
         .args_schema = NULL,
         .example = "{\"command\":\"reload\"}",
+        .handler_name = "cmd_reload",
+        .implementation_file = "commands/config_commands.c",
         .handler = cmd_reload,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -112,6 +124,8 @@ static const command_info_t command_registry[] = {
         .description = "Increase shader animation speed",
         .args_schema = "{\"amount\": <float>}",
         .example = "{\"command\":\"speed-up\",\"args\":{\"amount\":0.5}}",
+        .handler_name = "cmd_speed_up",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_speed_up,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -122,6 +136,8 @@ static const command_info_t command_registry[] = {
         .description = "Decrease shader animation speed",
         .args_schema = "{\"amount\": <float>}",
         .example = "{\"command\":\"speed-down\",\"args\":{\"amount\":0.5}}",
+        .handler_name = "cmd_speed_down",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_speed_down,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -132,6 +148,8 @@ static const command_info_t command_registry[] = {
         .description = "Pause shader animation",
         .args_schema = NULL,
         .example = "{\"command\":\"shader-pause\"}",
+        .handler_name = "cmd_shader_pause",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_shader_pause,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -142,6 +160,8 @@ static const command_info_t command_registry[] = {
         .description = "Resume shader animation",
         .args_schema = NULL,
         .example = "{\"command\":\"shader-resume\"}",
+        .handler_name = "cmd_shader_resume",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_shader_resume,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -154,6 +174,8 @@ static const command_info_t command_registry[] = {
         .description = "Get daemon status and statistics",
         .args_schema = NULL,
         .example = "{\"command\":\"status\"}",
+        .handler_name = "cmd_status",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_status,
         .capabilities = CMD_CAP_REQUIRES_STATE,
         .version = 1,
@@ -164,6 +186,8 @@ static const command_info_t command_registry[] = {
         .description = "Get daemon version information",
         .args_schema = NULL,
         .example = "{\"command\":\"version\"}",
+        .handler_name = "cmd_version",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_version,
         .capabilities = CMD_CAP_NONE,
         .version = 1,
@@ -174,17 +198,21 @@ static const command_info_t command_registry[] = {
         .description = "Check if daemon is responsive",
         .args_schema = NULL,
         .example = "{\"command\":\"ping\"}",
+        .handler_name = "cmd_ping",
+        .implementation_file = "commands/registry.c",
         .handler = cmd_ping,
         .capabilities = CMD_CAP_NONE,
         .version = 1,
     },
     {
-        .name = "list",
+        .name = "list-commands",
         .category = "info",
-        .description = "List all available commands",
+        .description = "List all available commands with metadata",
         .args_schema = NULL,
-        .example = "{\"command\":\"list\"}",
-        .handler = cmd_list,
+        .example = "{\"command\":\"list-commands\"}",
+        .handler_name = "cmd_list_commands",
+        .implementation_file = "commands/registry.c",
+        .handler = cmd_list_commands,
         .capabilities = CMD_CAP_NONE,
         .version = 1,
     },
@@ -196,6 +224,8 @@ static const command_info_t command_registry[] = {
         .description = "List all connected outputs",
         .args_schema = NULL,
         .example = "{\"command\":\"list-outputs\"}",
+        .handler_name = "cmd_list_outputs",
+        .implementation_file = "commands/output_commands.c",
         .handler = cmd_list_outputs,
         .capabilities = CMD_CAP_REQUIRES_STATE,
         .version = 1,
@@ -206,6 +236,8 @@ static const command_info_t command_registry[] = {
         .description = "Get information about specific output",
         .args_schema = "{\"output\": <string>}",
         .example = "{\"command\":\"output-info\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler_name = "cmd_output_info",
+        .implementation_file = "commands/output_commands.c",
         .handler = cmd_output_info,
         .capabilities = CMD_CAP_REQUIRES_STATE,
         .version = 1,
@@ -216,6 +248,8 @@ static const command_info_t command_registry[] = {
         .description = "Switch to next wallpaper on specific output",
         .args_schema = "{\"output\": <string>}",
         .example = "{\"command\":\"next-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler_name = "cmd_next_output",
+        .implementation_file = "commands/output_commands.c",
         .handler = cmd_next_output,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -226,16 +260,20 @@ static const command_info_t command_registry[] = {
         .description = "Switch to previous wallpaper on specific output",
         .args_schema = "{\"output\": <string>}",
         .example = "{\"command\":\"prev-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler_name = "cmd_prev_output",
+        .implementation_file = "commands/output_commands.c",
         .handler = cmd_prev_output,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
     },
     {
         .name = "reload-output",
-        .category = "output",
+        .category = "wallpaper",
         .description = "Reload wallpaper on specific output",
         .args_schema = "{\"output\": <string>}",
         .example = "{\"command\":\"reload-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler_name = "cmd_reload_output",
+        .implementation_file = "commands/output_commands.c",
         .handler = cmd_reload_output,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -246,6 +284,8 @@ static const command_info_t command_registry[] = {
         .description = "Pause cycling on specific output",
         .args_schema = "{\"output\": <string>}",
         .example = "{\"command\":\"pause-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler_name = "cmd_pause_output",
+        .implementation_file = "commands/output_commands.c",
         .handler = cmd_pause_output,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -256,6 +296,8 @@ static const command_info_t command_registry[] = {
         .description = "Resume cycling on specific output",
         .args_schema = "{\"output\": <string>}",
         .example = "{\"command\":\"resume-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\"}\"}",
+        .handler_name = "cmd_resume_output",
+        .implementation_file = "commands/output_commands.c",
         .handler = cmd_resume_output,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -266,6 +308,8 @@ static const command_info_t command_registry[] = {
         .description = "Set wallpaper mode for specific output",
         .args_schema = "{\"output\": <string>, \"mode\": <string>}",
         .example = "{\"command\":\"set-output-mode\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"mode\\\":\\\"fill\\\"}\"}",
+        .handler_name = "cmd_set_output_mode",
+        .implementation_file = "commands/output_commands.c",
         .handler = cmd_set_output_mode,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -276,6 +320,8 @@ static const command_info_t command_registry[] = {
         .description = "Set cycle interval for specific output",
         .args_schema = "{\"output\": <string>, \"interval\": <integer>}",
         .example = "{\"command\":\"set-output-interval\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"interval\\\":600}\"}",
+        .handler_name = "cmd_set_output_interval",
+        .implementation_file = "commands/output_commands.c",
         .handler = cmd_set_output_interval,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -286,6 +332,8 @@ static const command_info_t command_registry[] = {
         .description = "Set wallpaper for specific output",
         .args_schema = "{\"output\": <string>, \"path\": <string>}",
         .example = "{\"command\":\"set-output-wallpaper\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"path\\\":\\\"/path/to/wallpaper.jpg\\\"}\"}",
+        .handler_name = "cmd_set_output_wallpaper",
+        .implementation_file = "commands/output_commands.c",
         .handler = cmd_set_output_wallpaper,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -296,6 +344,8 @@ static const command_info_t command_registry[] = {
         .description = "Jump to specific cycle index on output",
         .args_schema = "{\"output\": <string>, \"index\": <integer>}",
         .example = "{\"command\":\"jump-to-output\",\"args\":\"{\\\"output\\\":\\\"DP-1\\\",\\\"index\\\":3}\"}",
+        .handler_name = "cmd_jump_to_output",
+        .implementation_file = "commands/output_commands.c",
         .handler = cmd_jump_to_output,
         .capabilities = CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
         .version = 1,
@@ -308,6 +358,8 @@ static const command_info_t command_registry[] = {
         .description = "Get configuration value(s)",
         .args_schema = "{\"key\": <string>}",
         .example = "{\"command\":\"get-config\",\"args\":\"{\\\"key\\\":\\\"general.cycle_interval\\\"}\"}",
+        .handler_name = "cmd_get_config",
+        .implementation_file = "commands/config_commands.c",
         .handler = cmd_get_config,
         .capabilities = CMD_CAP_REQUIRES_STATE,
         .version = 1,
@@ -318,13 +370,15 @@ static const command_info_t command_registry[] = {
         .description = "List all configuration keys",
         .args_schema = NULL,
         .example = "{\"command\":\"list-config-keys\"}",
+        .handler_name = "cmd_list_config_keys",
+        .implementation_file = "commands/config_commands.c",
         .handler = cmd_list_config_keys,
         .capabilities = CMD_CAP_REQUIRES_STATE,
         .version = 1,
     },
 
     /* Sentinel */
-    { NULL, NULL, NULL, NULL, NULL, NULL, 0, 0 }
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0 }
 };
 
 /* Get registry size */
@@ -574,17 +628,18 @@ size_t commands_generate_json_list(char *buffer, size_t size) {
 
     for (size_t i = 0; command_registry[i].name; i++) {
         written = snprintf(p, remaining,
-                          "%s{\"name\":\"%s\",\"category\":\"%s\",\"description\":\"%s\"}",
+                          "%s{\"name\":\"%s\",\"category\":\"%s\",\"handler\":\"%s\",\"file\":\"%s\"}",
                           i > 0 ? "," : "",
                           command_registry[i].name,
                           command_registry[i].category,
-                          command_registry[i].description);
+                          command_registry[i].handler_name,
+                          command_registry[i].implementation_file);
         if (written < 0 || (size_t)written >= remaining) return size;
         p += written;
         remaining -= written;
     }
 
-    written = snprintf(p, remaining, "]}");
+    written = snprintf(p, remaining, "],\"total\":%zu}", get_registry_size());
     if (written < 0 || (size_t)written >= remaining) return size;
     p += written;
 
@@ -925,10 +980,20 @@ static command_result_t cmd_version(struct neowall_state *state, const ipc_reque
     return CMD_SUCCESS;
 }
 
-static command_result_t cmd_list(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
+static command_result_t cmd_list_commands(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
     (void)state; (void)req;
-    char buffer[4096];
-    commands_generate_json_list(buffer, sizeof(buffer));
-    ipc_success_response(resp, buffer);
+
+    /* Generate command list JSON directly into response data buffer */
+    size_t len = commands_generate_json_list(resp->data, sizeof(resp->data));
+
+    if (len >= sizeof(resp->data)) {
+        commands_build_error(resp, CMD_ERROR_FAILED, "Command list too large for response buffer");
+        return CMD_ERROR_FAILED;
+    }
+
+    /* Set response status */
+    resp->status = IPC_STATUS_OK;
+    strncpy(resp->message, "OK", sizeof(resp->message) - 1);
+
     return CMD_SUCCESS;
 }

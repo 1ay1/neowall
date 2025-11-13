@@ -65,6 +65,7 @@ static int cmd_jump_output(int argc, char *argv[]);
 /* Config commands */
 static int cmd_get_config(int argc, char *argv[]);
 static int cmd_list_config_keys(int argc, char *argv[]);
+static int cmd_list_commands(int argc, char *argv[]);
 
 /* Command registry */
 static Command commands[] = {
@@ -96,6 +97,9 @@ static Command commands[] = {
     /* Config commands */
     {"get-config",         "Get configuration value",                cmd_get_config},
     {"list-config-keys",   "List all config keys",                   cmd_list_config_keys},
+
+    /* Introspection */
+    {"list-commands",      "List all available commands",            cmd_list_commands},
 
     {"config",             "Edit configuration",                     cmd_config},
     {"tray",               "Launch system tray application",         cmd_tray},
@@ -500,6 +504,124 @@ static void format_data_output(const char *json_data) {
             pos = key_end + 1;
         }
         printf("\n");
+        return;
+    }
+
+    /* Check if it's a commands list */
+    if (strstr(json_data, "\"commands\":[")) {
+        printf("\nAvailable Commands:\n");
+        printf("═════════════════════════════════════════════════════════\n");
+
+        const char *pos = json_data;
+        int count = 0;
+        while ((pos = strstr(pos, "\"name\":\"")) != NULL) {
+            pos += 8;
+            const char *name_end = strchr(pos, '"');
+            if (!name_end) break;
+
+            char name[64];
+            size_t name_len = name_end - pos;
+            if (name_len >= sizeof(name)) name_len = sizeof(name) - 1;
+            memcpy(name, pos, name_len);
+            name[name_len] = '\0';
+
+            /* Extract category */
+            const char *cat_pos = strstr(pos, "\"category\":\"");
+            char category[32] = "unknown";
+            if (cat_pos && cat_pos < pos + 500) {
+                cat_pos += 12;
+                const char *cat_end = strchr(cat_pos, '"');
+                if (cat_end) {
+                    size_t cat_len = cat_end - cat_pos;
+                    if (cat_len >= sizeof(category)) cat_len = sizeof(category) - 1;
+                    memcpy(category, cat_pos, cat_len);
+                    category[cat_len] = '\0';
+                }
+            }
+
+            /* Extract handler */
+            const char *handler_pos = strstr(pos, "\"handler\":\"");
+            char handler[64] = "unknown";
+            if (handler_pos && handler_pos < pos + 500) {
+                handler_pos += 11;
+                const char *handler_end = strchr(handler_pos, '"');
+                if (handler_end) {
+                    size_t handler_len = handler_end - handler_pos;
+                    if (handler_len >= sizeof(handler)) handler_len = sizeof(handler) - 1;
+                    memcpy(handler, handler_pos, handler_len);
+                    handler[handler_len] = '\0';
+                }
+            }
+
+            /* Extract file */
+            const char *file_pos = strstr(pos, "\"file\":\"");
+            char file[128] = "";
+            if (file_pos && file_pos < pos + 500) {
+                file_pos += 8;
+                const char *file_end = strchr(file_pos, '"');
+                if (file_end) {
+                    size_t file_len = file_end - file_pos;
+                    if (file_len >= sizeof(file)) file_len = sizeof(file) - 1;
+                    memcpy(file, file_pos, file_len);
+                    file[file_len] = '\0';
+                }
+            }
+
+            /* Extract description */
+            const char *desc_pos = strstr(pos, "\"description\":\"");
+            char description[128] = "";
+            if (desc_pos && desc_pos < pos + 500) {
+                desc_pos += 15;
+                const char *desc_end = strchr(desc_pos, '"');
+                if (desc_end) {
+                    size_t desc_len = desc_end - desc_pos;
+                    if (desc_len >= sizeof(description)) desc_len = sizeof(description) - 1;
+                    memcpy(description, desc_pos, desc_len);
+                    description[desc_len] = '\0';
+                }
+            }
+
+            /* Extract capabilities */
+            const char *caps_pos = strstr(pos, "\"capabilities\":\"");
+            char capabilities[64] = "none";
+            if (caps_pos && caps_pos < pos + 500) {
+                caps_pos += 16;
+                const char *caps_end = strchr(caps_pos, '"');
+                if (caps_end && caps_end > caps_pos) {
+                    size_t caps_len = caps_end - caps_pos;
+                    if (caps_len >= sizeof(capabilities)) caps_len = sizeof(capabilities) - 1;
+                    memcpy(capabilities, caps_pos, caps_len);
+                    capabilities[caps_len] = '\0';
+                }
+            }
+
+            count++;
+            printf("\n%3d. %-25s [%s]\n", count, name, category);
+            if (description[0]) {
+                printf("     %s\n", description);
+            }
+            printf("     Handler: %s\n", handler);
+            if (file[0]) {
+                printf("     File:    %s\n", file);
+            }
+            if (strcmp(capabilities, "none") != 0 && capabilities[0] != '\0') {
+                printf("     Capabilities: %s\n", capabilities);
+            }
+
+            pos = name_end + 1;
+        }
+
+        /* Show total count */
+        const char *total_pos = strstr(json_data, "\"total\":");
+        if (total_pos) {
+            int total = 0;
+            sscanf(total_pos + 8, "%d", &total);
+            printf("\n─────────────────────────────────────────────────────────\n");
+            printf("Total: %d commands\n\n", total);
+        } else {
+            printf("\n─────────────────────────────────────────────────────────\n");
+            printf("Total: %d commands\n\n", count);
+        }
         return;
     }
 
@@ -1084,6 +1206,11 @@ static int cmd_list_config_keys(int argc, char *argv[]) {
     return send_ipc_command("list-config-keys", NULL, 0) ? 0 : 1;
 }
 
+static int cmd_list_commands(int argc, char *argv[]) {
+    (void)argc; (void)argv;
+    return send_ipc_command("list-commands", NULL, 0) ? 0 : 1;
+}
+
 /* ============================================================================
  * Help Command
  * ============================================================================ */
@@ -1133,6 +1260,7 @@ static int cmd_help(int argc, char *argv[]) {
     printf("  tray               Launch system tray application\n");
     printf("\n");
     printf("Information:\n");
+    printf("  list-commands      List all available IPC commands with metadata\n");
     printf("  version            Show version information\n");
     printf("  help               Show this help message\n");
     printf("\n");

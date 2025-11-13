@@ -60,7 +60,9 @@ typedef struct {
     const char *description;             /* Short description */
     const char *args_schema;             /* JSON schema for args (or NULL) */
     const char *example;                 /* Example usage (or NULL) */
-    command_handler_t handler;           /* Handler function */
+    const char *handler_name;            /* Handler function name string (e.g., "cmd_next") */
+    const char *implementation_file;     /* Source file implementing handler */
+    command_handler_t handler;           /* Handler function pointer */
     command_capabilities_t capabilities; /* Command capabilities/flags */
     unsigned int version;                /* Command version (for compatibility) */
 } command_info_t;

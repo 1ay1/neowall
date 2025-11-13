@@ -9,8 +9,8 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-/* Maximum message size */
-#define IPC_MAX_MESSAGE_SIZE 8192
+/* Maximum message size - increased to support large command lists with metadata */
+#define IPC_MAX_MESSAGE_SIZE 32768
 
 /* Response status codes */
 typedef enum {
@@ -31,7 +31,7 @@ typedef struct {
 typedef struct {
     ipc_status_t status;
     char message[512];
-    char data[4096];  /* JSON string of response data */
+    char data[IPC_MAX_MESSAGE_SIZE];  /* JSON string of response data - matches max message size */
 } ipc_response_t;
 
 /* Protocol functions */
