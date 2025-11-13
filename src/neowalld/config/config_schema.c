@@ -369,8 +369,8 @@ if (!output) {
 /* Check mutual exclusivity */
 bool is_valid = true;
 if (setting_path) {
-    /* Setting path - ensure shader is not set */
-    if (output->config.shader_path[0] != '\0') {
+    /* Setting path - ensure it's not already a shader type */
+    if (output->config.type == WALLPAPER_SHADER) {
         log_error("Cannot set path: shader is already set for output %s. Use EITHER path OR shader, not both.", output_name);
         is_valid = false;
     }

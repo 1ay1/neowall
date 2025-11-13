@@ -61,7 +61,7 @@ wallpaper_type_t config_get_wallpaper_type(
     /* Determine type based on what's set */
     wallpaper_type_t type = WALLPAPER_TYPE_ANY;
 
-    if (output->config.shader_path[0] != '\0') {
+    if (output->config.type == WALLPAPER_SHADER) {
         type = WALLPAPER_TYPE_SHADER;
     } else if (output->config.path[0] != '\0') {
         type = WALLPAPER_TYPE_STATIC;
@@ -171,7 +171,7 @@ static bool check_mutual_exclusive_rule(
 
     if (setting_key1 && strcmp(rule->key2, "shader") == 0) {
         /* Setting path, check if shader is set */
-        if (output->config.shader_path[0] != '\0') {
+        if (output->config.type == WALLPAPER_SHADER) {
             conflict = true;
         }
     } else if (setting_key2 && strcmp(rule->key1, "path") == 0) {

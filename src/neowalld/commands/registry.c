@@ -903,9 +903,7 @@ static command_result_t cmd_status(struct neowall_state *state, const ipc_reques
         first = false;
 
         const char *type = (output->config.type == WALLPAPER_SHADER) ? "shader" : "image";
-        const char *path = (output->config.type == WALLPAPER_SHADER)
-            ? output->config.shader_path
-            : output->config.path;
+        const char *path = output->config.path;
 
         /* Escape path for JSON */
         char escaped_path[512];
@@ -966,9 +964,7 @@ static command_result_t cmd_current(struct neowall_state *state, const ipc_reque
 
         char output_info[4096];  /* Increased buffer size for long paths */
         const char *type = (output->config.type == WALLPAPER_SHADER) ? "shader" : "image";
-        const char *path = (output->config.type == WALLPAPER_SHADER)
-            ? output->config.shader_path
-            : output->config.path;
+        const char *path = output->config.path;
 
         /* Truncate path if it's too long to fit in JSON */
         char safe_path[512];

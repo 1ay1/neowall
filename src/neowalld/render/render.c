@@ -1154,10 +1154,10 @@ bool render_frame_shader(struct output_state *output) {
                     /* Update config with new shader path */
                     #pragma GCC diagnostic push
                     #pragma GCC diagnostic ignored "-Wstringop-truncation"
-                    strncpy(output->config.shader_path, output->pending_shader_path,
-                            sizeof(output->config.shader_path) - 1);
+                    strncpy(output->config.path, output->pending_shader_path,
+                            sizeof(output->config.path) - 1);
                     #pragma GCC diagnostic pop
-                    output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
+                    output->config.path[sizeof(output->config.path) - 1] = '\0';
 
                     /* Write state to file */
                     const char *mode_str = wallpaper_mode_to_string(output->config.mode);
@@ -1313,8 +1313,8 @@ bool render_frame(struct output_state *output) {
                 last_reload_attempt_time = current_time;
 
                 /* Try to load the shader if we have a path */
-                if (output->config.shader_path[0] != '\0') {
-                    output_set_shader(output, output->config.shader_path);
+                if (output->config.path[0] != '\0') {
+                    output_set_shader(output, output->config.path);
                     if (output->live_shader_program == 0) {
                         consecutive_failures++;
                         log_error("Failed to reload shader (attempt %d/3), skipping frame", consecutive_failures);
@@ -1323,7 +1323,7 @@ bool render_frame(struct output_state *output) {
                             log_error("╔═══════════════════════════════════════════════════════════════╗");
                             log_error("║ CRITICAL: Shader failed to load after 3 attempts             ║");
                             log_error("╠═══════════════════════════════════════════════════════════════╣");
-                            log_error("║ Config has bad shader path: '%s'", output->config.shader_path);
+                            log_error("║ Config has bad shader path: '%s'", output->config.path);
                             log_error("║                                                               ║");
                             log_error("║ FIX YOUR CONFIG:                                              ║");
                             log_error("║   1. Edit: ~/.config/neowall/config.vibe                      ║");

@@ -186,7 +186,6 @@ struct output_state *output_create(struct neowall_state *state,
         out->config.current_cycle_index = 0;
         out->config.type = WALLPAPER_IMAGE;
         out->config.path[0] = '\0';
-        out->config.shader_path[0] = '\0';
         out->config.shader_speed = 1.0f;
         out->config.shader_fps = 60;  /* Default 60 FPS */
         out->config.show_fps = false;  /* Default: no FPS watermark */
@@ -722,8 +721,8 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         log_debug("EGL surface not ready for output %s, deferring shader load: %s",
                   output->model[0] ? output->model : "unknown", shader_path);
         /* Store shader path in config for later application when surface is ready */
-        strncpy(output->config.shader_path, shader_path, sizeof(output->config.shader_path) - 1);
-        output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
+        strncpy(output->config.path, shader_path, sizeof(output->config.path) - 1);
+        output->config.path[sizeof(output->config.path) - 1] = '\0';
         output->config.type = WALLPAPER_SHADER;
         return;
     }
@@ -808,8 +807,8 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
 
         /* Update config with new shader path - protected by state mutex */
         pthread_mutex_lock(&output->state->state_mutex);
-        strncpy(output->config.shader_path, shader_path, sizeof(output->config.shader_path) - 1);
-        output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
+        strncpy(output->config.path, shader_path, sizeof(output->config.path) - 1);
+        output->config.path[sizeof(output->config.path) - 1] = '\0';
         pthread_mutex_unlock(&output->state->state_mutex);
 
         /* Write state to file */
@@ -919,8 +918,8 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
 
     /* Update config - protected by state mutex */
     pthread_mutex_lock(&output->state->state_mutex);
-    strncpy(output->config.shader_path, shader_path, sizeof(output->config.shader_path) - 1);
-    output->config.shader_path[sizeof(output->config.shader_path) - 1] = '\0';
+    strncpy(output->config.path, shader_path, sizeof(output->config.path) - 1);
+    output->config.path[sizeof(output->config.path) - 1] = '\0';
     output->config.type = WALLPAPER_SHADER;
     pthread_mutex_unlock(&output->state->state_mutex);
 
@@ -960,14 +959,11 @@ void output_cycle_wallpaper(struct output_state *output) {
         } else if (!output->config.cycle) {
             log_info("Cannot cycle wallpaper on output '%s': Cycling is disabled",
                      output_name);
-            log_info("Current wallpaper: %s",
-                     output->config.type == WALLPAPER_SHADER ?
-                     output->config.shader_path : output->config.path);
+            log_info("Current wallpaper: %s", output->config.path);
         }
 
         /* Write state file to indicate cycling is not available */
-        const char *current_path = output->config.type == WALLPAPER_SHADER ?
-                                   output->config.shader_path : output->config.path;
+        const char *current_path = output->config.path;
         const char *mode_str = wallpaper_mode_to_string(output->config.mode);
         write_wallpaper_state(output_get_identifier(output), current_path, mode_str, 0, 0,
                              "cycling not enabled");
@@ -1014,7 +1010,7 @@ void output_cycle_wallpaper(struct output_state *output) {
      */
     bool is_shader_with_image_cycling = false;
     if (output->config.type == WALLPAPER_SHADER &&
-        output->config.shader_path[0] != '\0') {
+        output->config.path[0] != '\0') {
         /* Check if the first cycle path looks like an image (not a .glsl shader) */
         const char *ext = strrchr(next_path, '.');
         if (ext && (strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
@@ -1042,7 +1038,7 @@ void output_cycle_wallpaper(struct output_state *output) {
 
         /* Write state to file */
         const char *mode_str = wallpaper_mode_to_string(output->config.mode);
-        write_wallpaper_state(output_get_identifier(output), output->config.shader_path, mode_str,
+        write_wallpaper_state(output_get_identifier(output), output->config.path, mode_str,
                              output->config.current_cycle_index,
                              output->config.cycle_count,
                              "active");
@@ -1451,7 +1447,7 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     /* Set initial wallpaper/shader based on type */
     if (config->type == WALLPAPER_SHADER) {
         /* Load shader wallpaper */
-        const char *initial_shader = config->shader_path;
+        const char *initial_shader = config->path;
         bool is_shader_with_image_cycling = false;
 
         if (output->config.cycle && output->config.cycle_count > 0 && output->config.cycle_paths) {
@@ -1539,8 +1535,7 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     output_configure_frame_timer(output);
 
     /* Update state file with new config (after swap so output->config points to new slot) */
-    const char *state_path = (config->type == WALLPAPER_SHADER) ?
-                             output->config.shader_path : output->config.path;
+    const char *state_path = output->config.path;
     const char *mode_str = wallpaper_mode_to_string(output->config.mode);
     write_wallpaper_state(output_get_identifier(output), state_path, mode_str,
                          output->config.current_cycle_index,
@@ -1564,13 +1559,13 @@ void output_apply_deferred_config(struct output_state *output) {
     }
 
     /* Check if there's a deferred config to apply */
-    if (output->config.type == WALLPAPER_SHADER && output->config.shader_path[0] != '\0') {
+    if (output->config.type == WALLPAPER_SHADER && output->config.path[0] != '\0') {
         /* Check if shader is not yet loaded */
         if (output->live_shader_program == 0) {
             log_info("Applying deferred shader config to output %s: %s",
                      output->model[0] ? output->model : "unknown",
-                     output->config.shader_path);
-            output_set_shader(output, output->config.shader_path);
+                     output->config.path);
+            output_set_shader(output, output->config.path);
         }
     } else if (output->config.type == WALLPAPER_IMAGE && output->config.path[0] != '\0') {
         /* Check if wallpaper is not yet loaded */

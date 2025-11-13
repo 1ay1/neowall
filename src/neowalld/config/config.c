@@ -473,7 +473,6 @@ static ValidationResult validate_transition_duration(double duration) {
 static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->type = WALLPAPER_IMAGE;
     config->path[0] = '\0';
-    config->shader_path[0] = '\0';
     config->mode = MODE_FILL;
     config->duration = 0.0f;  /* No cycling by default */
     config->transition = TRANSITION_FADE;
@@ -602,9 +601,9 @@ static bool parse_wallpaper_config(struct neowall_state *state, VibeValue *obj,
             config->cycle_count = shader_count;
             config->cycle_paths = shader_paths;
 
-            /* Use first shader as initial shader_path */
-            strncpy(config->shader_path, shader_paths[0], sizeof(config->shader_path) - 1);
-            config->shader_path[sizeof(config->shader_path) - 1] = '\0';
+            /* Use first shader as initial path */
+            strncpy(config->path, shader_paths[0], sizeof(config->path) - 1);
+            config->path[sizeof(config->path) - 1] = '\0';
 
             log_info("[%s] SHADER MODE: Loaded %zu shaders from directory for cycling",
                     context_name, shader_count);
@@ -615,8 +614,8 @@ static bool parse_wallpaper_config(struct neowall_state *state, VibeValue *obj,
             return false;
         } else {
             /* Single shader file */
-            strncpy(config->shader_path, shader_str, sizeof(config->shader_path) - 1);
-            config->shader_path[sizeof(config->shader_path) - 1] = '\0';
+            strncpy(config->path, shader_str, sizeof(config->path) - 1);
+            config->path[sizeof(config->path) - 1] = '\0';
 
             log_info("[%s] SHADER MODE: Single shader '%s'", context_name, shader_str);
         }
@@ -1505,8 +1504,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
             has_valid_default = true;
 
             const char *type_str = (default_config.type == WALLPAPER_SHADER) ? "shader" : "image";
-            const char *path_str = (default_config.type == WALLPAPER_SHADER) ?
-                                   default_config.shader_path : default_config.path;
+            const char *path_str = default_config.path;
 
             log_info("Valid default configuration: type=%s, path=%s, mode=%s",
                      type_str, path_str, wallpaper_mode_to_string(default_config.mode));
@@ -1573,8 +1571,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
             struct wallpaper_config output_config;
             if (parse_wallpaper_config(state, output_config_obj, &output_config, context, output_name)) {
                 const char *type_str = (output_config.type == WALLPAPER_SHADER) ? "shader" : "image";
-                const char *path_str = (output_config.type == WALLPAPER_SHADER) ?
-                                       output_config.shader_path : output_config.path;
+                const char *path_str = output_config.path;
 
                 log_info("Valid configuration for output '%s': type=%s, path=%s, mode=%s",
                          output_name, type_str, path_str,
@@ -1648,7 +1645,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
                 shader_count++;
                 log_info("  Output %s: SHADER mode - %s (speed=%.1fx)",
                          summary_output->model[0] ? summary_output->model : "unknown",
-                         summary_output->config.shader_path,
+                         summary_output->config.path,
                          summary_output->config.shader_speed);
             } else {
                 image_count++;
@@ -2083,14 +2080,14 @@ void config_reload(struct neowall_state *state) {
             if (output->live_shader_program == 0) {
                 log_error("CRITICAL: Output %s has SHADER config but no shader program loaded!",
                          output->model);
-                log_error("         Shader path in config: '%s'", output->config.shader_path);
+                log_error("         Shader path in config: '%s'", output->config.path);
                 log_error("         This indicates shader loading failed during config_load()");
 
                 /* Attempt to load shader explicitly */
-                if (output->config.shader_path[0] != '\0') {
+                if (output->config.path[0] != '\0') {
                     log_info("Attempting explicit shader load for %s: %s",
-                            output->model, output->config.shader_path);
-                    output_set_shader(output, output->config.shader_path);
+                            output->model, output->config.path);
+                    output_set_shader(output, output->config.path);
 
                     if (output->live_shader_program == 0) {
                         log_error("FAILED: Shader still not loaded after explicit attempt");

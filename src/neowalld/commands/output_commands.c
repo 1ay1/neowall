@@ -163,8 +163,7 @@ command_result_t cmd_list_outputs(struct neowall_state *state,
         first = false;
 
         const char *type_str = (output->config.type == WALLPAPER_SHADER) ? "shader" : "image";
-        const char *current = (output->config.type == WALLPAPER_SHADER) ?
-                              output->config.shader_path : output->config.path;
+        const char *current = output->config.path;
 
         offset += snprintf(data + offset, sizeof(data) - offset,
                           "{\"name\":\"%s\",\"width\":%d,\"height\":%d,"
@@ -214,8 +213,7 @@ command_result_t cmd_output_info(struct neowall_state *state,
     /* Build detailed info */
     static char data[8192];
     const char *type_str = (output->config.type == WALLPAPER_SHADER) ? "shader" : "image";
-    const char *current = (output->config.type == WALLPAPER_SHADER) ?
-                          output->config.shader_path : output->config.path;
+    const char *current = output->config.path;
 
     snprintf(data, sizeof(data),
              "{\"name\":\"%s\",\"width\":%d,\"height\":%d,\"scale\":%d,"
@@ -340,7 +338,7 @@ command_result_t cmd_reload_output(struct neowall_state *state,
 
     /* Reload current wallpaper */
     if (output->config.type == WALLPAPER_SHADER) {
-        output_set_shader(output, output->config.shader_path);
+        output_set_shader(output, output->config.path);
     } else {
         output_set_wallpaper(output, output->config.path);
     }

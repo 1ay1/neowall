@@ -42,29 +42,48 @@ enum transition_type {
 
 /* Wallpaper type */
 enum wallpaper_type {
-    WALLPAPER_IMAGE,    /* Static image file */
+    WALLPAPER_IMAGE,    /* Static image file (JPG, PNG, etc.) */
     WALLPAPER_SHADER,   /* Live GLSL shader */
+    WALLPAPER_GIF,      /* Animated GIF (future) */
+    WALLPAPER_VIDEO,    /* Video file (future) */
+    WALLPAPER_SVG,      /* Animated SVG (future) */
 };
+
+/* Helper to check if wallpaper type is live/animated */
+static inline bool wallpaper_type_is_live(enum wallpaper_type type) {
+    return type == WALLPAPER_SHADER || 
+           type == WALLPAPER_GIF || 
+           type == WALLPAPER_VIDEO || 
+           type == WALLPAPER_SVG;
+}
 
 /* Wallpaper configuration for a specific output */
 struct wallpaper_config {
-    enum wallpaper_type type;           /* Wallpaper type (image or shader) */
-    char path[OUTPUT_MAX_PATH_LENGTH];  /* Path to wallpaper image */
-    char shader_path[OUTPUT_MAX_PATH_LENGTH];  /* Path to GLSL shader file */
-    enum wallpaper_mode mode;           /* Display mode */
-    float duration;                     /* Duration in seconds (for cycling) */
-    enum transition_type transition;    /* Transition effect */
-    float transition_duration;          /* Transition duration in seconds */
-    float shader_speed;                 /* Shader animation speed multiplier (default 1.0) */
-    int shader_fps;                     /* Target FPS for shader rendering (default 60) */
-    bool vsync;                         /* Enable vsync (sync to monitor refresh, ignores shader_fps) */
-    bool show_fps;                      /* Show FPS watermark on screen (default false) */
+    /* Wallpaper type and path - applies to all types (image, shader, gif, video, svg) */
+    enum wallpaper_type type;           /* Wallpaper type (static or live) */
+    char path[OUTPUT_MAX_PATH_LENGTH];  /* Path to wallpaper file (image/shader/gif/video/svg) */
+    
+    /* Display settings (mainly for static images) */
+    enum wallpaper_mode mode;           /* Display mode (center/stretch/fit/fill/tile) */
+    
+    /* Cycling settings */
     bool cycle;                         /* Enable wallpaper cycling */
+    float duration;                     /* Duration in seconds (for cycling) */
     char **cycle_paths;                 /* Array of paths for cycling */
     size_t cycle_count;                 /* Number of wallpapers to cycle */
     size_t current_cycle_index;         /* Current index in cycle */
     
-    /* iChannel texture configuration */
+    /* Transition settings */
+    enum transition_type transition;    /* Transition effect */
+    float transition_duration;          /* Transition duration in seconds */
+    
+    /* Live wallpaper settings (shaders, gifs, videos) */
+    float shader_speed;                 /* Animation speed multiplier (default 1.0) */
+    int shader_fps;                     /* Target FPS for rendering (default 60) */
+    bool vsync;                         /* Enable vsync (sync to monitor refresh, ignores shader_fps) */
+    bool show_fps;                      /* Show FPS watermark on screen (default false) */
+    
+    /* iChannel texture configuration (for shaders) */
     char **channel_paths;               /* Array of texture paths/names for iChannels */
     size_t channel_count;               /* Number of configured channels */
 };
