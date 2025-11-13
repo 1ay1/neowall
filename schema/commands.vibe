@@ -500,7 +500,7 @@ config {
 
     returns {
       type error
-      code CMD_ERROR_ARGS
+      code CMD_ERROR_INVALID_ARGS
       message "Reload not supported. Please restart the daemon: neowall restart"
     }
 
@@ -533,24 +533,42 @@ errors {
   CMD_SUCCESS {
     code 0
     description "Command executed successfully"
+    enum_value CMD_SUCCESS
   }
 
   CMD_ERROR_FAILED {
     code -1
     description "Command execution failed"
     usage "Generic failure, check message for details"
+    enum_value CMD_ERROR_FAILED
   }
 
   CMD_ERROR_STATE {
     code -2
     description "Daemon state not available"
     usage "Command requires state but state pointer is NULL"
+    enum_value CMD_ERROR_STATE
   }
 
-  CMD_ERROR_ARGS {
+  CMD_ERROR_INVALID_ARGS {
     code -3
     description "Invalid arguments provided"
     usage "Command arguments failed validation"
+    enum_value CMD_ERROR_INVALID_ARGS
+  }
+
+  CMD_ERROR_NOT_IMPLEMENTED {
+    code -4
+    description "Command not yet implemented"
+    usage "Placeholder for future commands"
+    enum_value CMD_ERROR_NOT_IMPLEMENTED
+  }
+
+  CMD_ERROR_PERMISSION {
+    code -5
+    description "Permission denied"
+    usage "Insufficient privileges to execute command"
+    enum_value CMD_ERROR_PERMISSION
   }
 }
 
