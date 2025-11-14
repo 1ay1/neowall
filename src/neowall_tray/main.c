@@ -6,6 +6,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <string.h>
 
 #include "common/log.h"
 #include "daemon/daemon_check.h"
@@ -22,6 +28,7 @@
 static AppIndicator *g_indicator = NULL;
 static GtkWidget *g_menu = NULL;
 static guint g_update_timer_id = 0;
+static char g_pid_file_path[512] = {0};
 
 /* Update interval in seconds */
 #define UPDATE_INTERVAL_SECONDS 2
@@ -95,6 +102,80 @@ static void signal_handler(int signum) {
     gtk_main_quit();
 }
 
+/* Get PID file path */
+static const char* get_tray_pid_file_path(void) {
+    if (g_pid_file_path[0] != '\0') {
+        return g_pid_file_path;
+    }
+
+    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+    if (runtime_dir && runtime_dir[0] != '\0') {
+        snprintf(g_pid_file_path, sizeof(g_pid_file_path), "%s/neowall_tray.pid", runtime_dir);
+    } else {
+        const char *home = getenv("HOME");
+        if (home && home[0] != '\0') {
+            snprintf(g_pid_file_path, sizeof(g_pid_file_path), "%s/.neowall_tray.pid", home);
+        } else {
+            snprintf(g_pid_file_path, sizeof(g_pid_file_path), "/tmp/neowall_tray-%d.pid", getuid());
+        }
+    }
+
+    return g_pid_file_path;
+}
+
+/* Check if another instance is running */
+static bool is_tray_already_running(void) {
+    const char *pid_file = get_tray_pid_file_path();
+
+    FILE *fp = fopen(pid_file, "r");
+    if (!fp) {
+        return false;  /* No PID file, not running */
+    }
+
+    pid_t pid = 0;
+    if (fscanf(fp, "%d", &pid) != 1) {
+        fclose(fp);
+        unlink(pid_file);  /* Invalid PID file */
+        return false;
+    }
+    fclose(fp);
+
+    /* Check if process is still running */
+    if (kill(pid, 0) == 0) {
+        return true;  /* Process exists */
+    }
+
+    /* Process doesn't exist, clean up stale PID file */
+    unlink(pid_file);
+    return false;
+}
+
+/* Create PID file for this instance */
+static bool create_tray_pid_file(void) {
+    const char *pid_file = get_tray_pid_file_path();
+
+    FILE *fp = fopen(pid_file, "w");
+    if (!fp) {
+        TRAY_LOG_ERROR(COMPONENT, "Failed to create PID file %s: %s", pid_file, strerror(errno));
+        return false;
+    }
+
+    fprintf(fp, "%d\n", getpid());
+    fclose(fp);
+
+    TRAY_LOG_DEBUG(COMPONENT, "Created PID file: %s", pid_file);
+    return true;
+}
+
+/* Remove PID file */
+static void remove_tray_pid_file(void) {
+    const char *pid_file = get_tray_pid_file_path();
+    if (pid_file[0] != '\0') {
+        unlink(pid_file);
+        TRAY_LOG_DEBUG(COMPONENT, "Removed PID file: %s", pid_file);
+    }
+}
+
 /* Cleanup function */
 static void cleanup(void) {
     TRAY_LOG_INFO(COMPONENT, "Cleaning up tray resources");
@@ -119,6 +200,9 @@ static void cleanup(void) {
         indicator_cleanup(g_indicator);
         g_indicator = NULL;
     }
+
+    /* Remove PID file */
+    remove_tray_pid_file();
 
     TRAY_LOG_INFO(COMPONENT, "Cleanup complete");
 }
@@ -184,6 +268,21 @@ int main(int argc, char *argv[]) {
             print_usage(argv[0]);
             return 1;
         }
+    }
+
+    /* Check if another instance is already running */
+    if (is_tray_already_running()) {
+        TRAY_LOG_ERROR(COMPONENT, "Another instance of neowall_tray is already running");
+        fprintf(stderr, "Error: NeoWall tray is already running\n");
+        fprintf(stderr, "Only one instance of the tray app can run at a time.\n");
+        return 1;
+    }
+
+    /* Create PID file for this instance */
+    if (!create_tray_pid_file()) {
+        TRAY_LOG_ERROR(COMPONENT, "Failed to create PID file");
+        fprintf(stderr, "Error: Failed to create PID file\n");
+        return 1;
     }
 
     /* Initialize GTK */
