@@ -32,19 +32,19 @@ static const command_info_t config_command_registry[] = {
                         "Get configuration value using VIBE path",
                         CMD_CAP_REQUIRES_STATE,
                         "{\"key\": <string>}",
-                        "{\"command\":\"get-config\",\"args\":\"{\\\"key\\\":\\\"default.shader\\\"}\"}"),
+                        "{\"command\":\"get-config\",\"args\":\"{\\\"key\\\":\\\"output.DP-1.shader\\\"}\"}"),
 
     COMMAND_ENTRY_CUSTOM("set-config", cmd_set_config, "config",
                         "Set configuration value using VIBE path (persists to config.vibe)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
                         "{\"key\": <string>, \"value\": <string>}",
-                        "{\"command\":\"set-config\",\"args\":\"{\\\"key\\\":\\\"default.shader\\\",\\\"value\\\":\\\"plasma.glsl\\\"}\"}"),
+                        "{\"command\":\"set-config\",\"args\":\"{\\\"key\\\":\\\"output.DP-1.shader\\\",\\\"value\\\":\\\"plasma.glsl\\\"}\"}"),
 
     COMMAND_ENTRY_CUSTOM("reset-config", cmd_reset_config, "config",
                         "Reset configuration (delete keys from config.vibe)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
                         "{\"key\": <string>} or --all",
-                        "{\"command\":\"reset-config\",\"args\":\"{\\\"key\\\":\\\"default.shader_speed\\\"}\"}"),
+                        "{\"command\":\"reset-config\",\"args\":\"{\\\"key\\\":\\\"output.DP-1.shader_speed\\\"}\"}"),
 
     COMMAND_ENTRY_CUSTOM("list-config-keys", cmd_list_config_keys, "config",
                         "List all configuration keys",
@@ -150,7 +150,7 @@ static const char *get_config_file_path(struct neowall_state *state) {
  * get-config - Get configuration value using VIBE path
  *
  * Examples:
- *   neowall get-config default.shader
+ *   neowall get-config output.DP-1.shader
  *   neowall get-config output.DP-1.mode
  *   neowall get-config output.HDMI-A-1.duration
  */
@@ -238,9 +238,9 @@ command_result_t cmd_get_config(struct neowall_state *state,
  * set-config - Set configuration value using VIBE path (persists!)
  *
  * Examples:
- *   neowall set-config default.shader plasma.glsl
+ *   neowall set-config output.DP-1.shader plasma.glsl
  *   neowall set-config output.DP-1.mode fill
- *   neowall set-config default.shader_speed 2.0
+ *   neowall set-config output.HDMI-A-1.shader_speed 2.0
  */
 command_result_t cmd_set_config(struct neowall_state *state,
                                 const ipc_request_t *req,
@@ -350,7 +350,7 @@ command_result_t cmd_set_config(struct neowall_state *state,
  * reset-config - Delete keys from config (reset to defaults)
  *
  * Examples:
- *   neowall reset-config default.shader_speed
+ *   neowall reset-config output.DP-1.shader_speed
  *   neowall reset-config output.DP-1
  *   neowall reset-config --all
  */

@@ -19,7 +19,7 @@
 
 /* Per-output/scope settings widgets */
 typedef struct {
-    char scope[64];  /* "default" or output name like "DP-1" */
+    char scope[64];  /* Per-output scope like "output.DP-1" */
 
     /* Widgets */
     GtkWidget *type_combo;
@@ -960,10 +960,13 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
     /* Header */
     GtkWidget *header = gtk_label_new(NULL);
     char header_text[256];
-    if (strcmp(scope->scope, "default") == 0) {
+    /* Extract output name from scope (format: "output.NAME") */
+    const char *output_name = strchr(scope->scope, '.');
+    if (output_name) {
+        output_name++; /* Skip the dot */
         snprintf(header_text, sizeof(header_text),
-                "<big><b>⚙️  Default Settings</b></big>\n"
-                "<small>These settings apply to all outputs unless overridden</small>");
+                "<big><b>🖥️  %s</b></big>\n"
+                "<small>Configuration for this specific output</small>", output_name);
     } else {
         snprintf(header_text, sizeof(header_text),
                 "<big><b>🖥️  Output: %s</b></big>\n"

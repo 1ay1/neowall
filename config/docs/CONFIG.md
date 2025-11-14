@@ -7,9 +7,11 @@ Complete reference for configuring NeoWall.
 Edit `~/.config/neowall/config.vibe`:
 
 ```vibe
-default {
-  shader matrix_real.glsl
-  shader_speed 1.0
+output {
+  eDP-1 {
+    shader matrix_real.glsl
+    shader_speed 1.0
+  }
 }
 ```
 
@@ -41,37 +43,46 @@ section {
 
 ## Configuration Sections
 
-### `default` - Global Settings
+### `output` - Per-Output Configuration (REQUIRED)
 
-Applies to all monitors unless overridden by `output`.
+NeoWall uses **EXPLICIT per-output configuration only**. Each monitor must be configured individually.
 
-```vibe
-default {
-  shader matrix_real.glsl
-  shader_speed 1.0
-  mode fill
-}
+**Important:** There is no `default` section. You must configure each output explicitly.
+
+Find your monitor names:
+```bash
+neowall status                  # NeoWall command
+hyprctl monitors                # Hyprland
+swaymsg -t get_outputs          # Sway
+wlr-randr                       # Generic wlroots
 ```
 
-### `output` - Per-Monitor Settings
-
-Override settings for specific monitors:
+Example configuration:
 
 ```vibe
 output {
   eDP-1 {
     shader matrix_real.glsl
+    shader_speed 1.0
+    mode fill
   }
   HDMI-A-1 {
     path ~/Pictures/wallpaper.png
+    mode fill
+  }
+  DP-1 {
+    path ~/Pictures/Wallpapers/   # Directory cycling
+    duration 300                  # Change every 5 minutes
+    transition fade
   }
 }
 ```
 
-Get monitor names:
-- Hyprland: `hyprctl monitors`
-- Sway: `swaymsg -t get_outputs`
-- Generic: `wlr-randr`
+**Key Points:**
+- Use connector names (eDP-1, DP-1, HDMI-A-1), not model names
+- Each output needs its own configuration block
+- To apply the same settings to all monitors, duplicate the configuration
+- Run `neowall status` to see which outputs need configuration
 
 ## Options Reference
 
