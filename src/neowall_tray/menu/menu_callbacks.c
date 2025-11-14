@@ -91,11 +91,11 @@ void menu_callback_reload_config(GtkMenuItem *item, gpointer user_data) {
     (void)user_data;
 
     if (command_execute("reload")) {
-        dialog_show_info("Configuration Reloaded",
+        dialog_show_info("✅ Configuration Reloaded",
                         "Configuration has been reloaded successfully.",
                         2000);  /* Auto-close after 2 seconds */
     } else {
-        dialog_show_error("Reload Failed",
+        dialog_show_error("❌ Reload Failed",
                          "Failed to reload configuration.\n"
                          "Please check the configuration file for errors.");
     }

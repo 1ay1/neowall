@@ -203,7 +203,7 @@ void status_dialog_show(void) {
             GTK_DIALOG_MODAL,
             GTK_MESSAGE_INFO,
             GTK_BUTTONS_OK,
-            "NeoWall Daemon Stopped"
+            "⭕ NeoWall Daemon Stopped"
         );
 
         gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog),
@@ -218,7 +218,7 @@ void status_dialog_show(void) {
 
     /* Create custom dialog - modal to parent */
     GtkWidget *dialog = gtk_dialog_new_with_buttons(
-        "NeoWall Status",
+        "📊 NeoWall Status",
         NULL,
         GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
         "_Close", GTK_RESPONSE_CLOSE,

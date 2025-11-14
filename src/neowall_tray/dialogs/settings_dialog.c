@@ -883,7 +883,7 @@ static gboolean apply_all_settings(SettingsDialog *dlg) {
                 scopes_applied++;
             } else {
                 show_status(dlg, error_msg, TRUE);
-                dialog_show_error("Settings Error", error_msg);
+                dialog_show_error("❌ Settings Error", error_msg);
                 return FALSE;
             }
         }
@@ -935,7 +935,7 @@ static gboolean apply_all_settings(SettingsDialog *dlg) {
             gtk_widget_set_sensitive(dlg->apply_button, TRUE);
             gtk_widget_set_sensitive(dlg->revert_button, TRUE);
 
-            dialog_show_error("Reload Failed",
+            dialog_show_error("❌ Reload Failed",
                             "Settings were saved but failed to reload.\n"
                             "Try using 'Reload Configuration' from the menu.");
             return FALSE;
@@ -962,11 +962,11 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
     char header_text[256];
     if (strcmp(scope->scope, "default") == 0) {
         snprintf(header_text, sizeof(header_text),
-                "<big><b>Default Settings</b></big>\n"
+                "<big><b>⚙️  Default Settings</b></big>\n"
                 "<small>These settings apply to all outputs unless overridden</small>");
     } else {
         snprintf(header_text, sizeof(header_text),
-                "<big><b>Output: %s</b></big>\n"
+                "<big><b>🖥️  Output: %s</b></big>\n"
                 "<small>Settings specific to this output (overrides defaults)</small>",
                 scope->scope);
     }
@@ -978,7 +978,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
 
     /* Wallpaper type */
     GtkWidget *type_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(type_label), "<b>Wallpaper Type:</b>");
+    gtk_label_set_markup(GTK_LABEL(type_label), "<b>🎨 Wallpaper Type:</b>");
     gtk_widget_set_halign(type_label, GTK_ALIGN_START);
     gtk_widget_set_tooltip_text(type_label, "Select image or shader type");
     gtk_box_pack_start(GTK_BOX(box), type_label, FALSE, FALSE, 0);
@@ -995,7 +995,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
 
     /* Wallpaper folder */
     GtkWidget *folder_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(folder_label), "<b>Wallpaper Folder:</b>");
+    gtk_label_set_markup(GTK_LABEL(folder_label), "<b>📁 Wallpaper Folder:</b>");
     gtk_widget_set_halign(folder_label, GTK_ALIGN_START);
     gtk_widget_set_tooltip_text(folder_label, "Folder containing images or shaders");
     gtk_box_pack_start(GTK_BOX(box), folder_label, FALSE, FALSE, 0);
@@ -1010,7 +1010,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
 
     /* Duration */
     GtkWidget *duration_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(duration_label), "<b>Cycle Duration (seconds):</b>");
+    gtk_label_set_markup(GTK_LABEL(duration_label), "<b>⏱️  Cycle Duration (seconds):</b>");
     gtk_widget_set_halign(duration_label, GTK_ALIGN_START);
     gtk_widget_set_tooltip_text(duration_label, "Time between wallpaper changes (0 = manual only)");
     gtk_box_pack_start(GTK_BOX(box), duration_label, FALSE, FALSE, 0);
@@ -1027,7 +1027,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
     scope->mode_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
 
     GtkWidget *mode_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(mode_label), "<b>Display Mode:</b> <small>(Static images only)</small>");
+    gtk_label_set_markup(GTK_LABEL(mode_label), "<b>🖼️  Display Mode:</b> <small>(Static images only)</small>");
     gtk_widget_set_halign(mode_label, GTK_ALIGN_START);
     gtk_widget_set_tooltip_text(mode_label, "How wallpapers are displayed (not applicable to shaders/animations)");
     gtk_box_pack_start(GTK_BOX(scope->mode_container), mode_label, FALSE, FALSE, 0);
@@ -1054,7 +1054,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
     scope->transition_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
 
     GtkWidget *transition_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(transition_label), "<b>Transition Effect:</b> <small>(Static images only)</small>");
+    gtk_label_set_markup(GTK_LABEL(transition_label), "<b>✨ Transition Effect:</b> <small>(Static images only)</small>");
     gtk_widget_set_halign(transition_label, GTK_ALIGN_START);
     gtk_widget_set_tooltip_text(transition_label, "Transition effect when changing wallpapers");
     gtk_box_pack_start(GTK_BOX(scope->transition_container), transition_label, FALSE, FALSE, 0);
@@ -1078,7 +1078,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
     gtk_box_pack_start(GTK_BOX(scope->transition_container), scope->transition_combo, FALSE, FALSE, 0);
 
     GtkWidget *transition_duration_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(transition_duration_label), "<b>Transition Duration (seconds):</b>");
+    gtk_label_set_markup(GTK_LABEL(transition_duration_label), "<b>⏲️  Transition Duration (seconds):</b>");
     gtk_widget_set_halign(transition_duration_label, GTK_ALIGN_START);
     gtk_widget_set_tooltip_text(transition_duration_label, "How long the transition takes");
     gtk_box_pack_start(GTK_BOX(scope->transition_container), transition_duration_label, FALSE, FALSE, 0);
@@ -1098,7 +1098,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
     scope->speed_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
 
     GtkWidget *speed_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(speed_label), "<b>Animation Speed:</b> <small>(Live wallpapers only)</small>");
+    gtk_label_set_markup(GTK_LABEL(speed_label), "<b>⚡ Animation Speed:</b> <small>(Live wallpapers only)</small>");
     gtk_widget_set_halign(speed_label, GTK_ALIGN_START);
     gtk_widget_set_tooltip_text(speed_label, "Speed multiplier for shader/animation playback");
     gtk_box_pack_start(GTK_BOX(scope->speed_container), speed_label, FALSE, FALSE, 0);
@@ -1118,7 +1118,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
     scope->fps_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
 
     GtkWidget *fps_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(fps_label), "<b>Target FPS:</b> <small>(Live wallpapers only)</small>");
+    gtk_label_set_markup(GTK_LABEL(fps_label), "<b>🎯 Target FPS:</b> <small>(Live wallpapers only)</small>");
     gtk_widget_set_halign(fps_label, GTK_ALIGN_START);
     gtk_widget_set_tooltip_text(fps_label, "Target frames per second for live wallpapers");
     gtk_box_pack_start(GTK_BOX(scope->fps_container), fps_label, FALSE, FALSE, 0);
@@ -1209,7 +1209,7 @@ void settings_dialog_show(void) {
 
     /* Check daemon */
     if (!daemon_is_running()) {
-        dialog_show_error("Daemon Not Running",
+        dialog_show_error("⭕ Daemon Not Running",
                          "The NeoWall daemon is not running.\n"
                          "Please start the daemon before changing settings.");
         return;
@@ -1224,7 +1224,7 @@ void settings_dialog_show(void) {
 
     /* Create dialog - modal to parent */
     dlg->dialog = gtk_dialog_new_with_buttons(
-        "NeoWall Settings",
+        "⚙️  NeoWall Settings",
         NULL,
         GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
         NULL, NULL

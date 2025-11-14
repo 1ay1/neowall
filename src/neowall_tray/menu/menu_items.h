@@ -42,40 +42,40 @@ typedef struct {
 #define MENU_ID_SYSTEM              "system"
 
 /* Menu item labels - centralized for easy updates */
-#define MENU_LABEL_STATUS_RUNNING   "● NeoWall Running"
-#define MENU_LABEL_STATUS_STOPPED   "○ NeoWall Stopped"
+#define MENU_LABEL_STATUS_RUNNING   "✅ NeoWall Running"
+#define MENU_LABEL_STATUS_STOPPED   "⭕ NeoWall Stopped"
 
 /* Wallpaper submenu */
-#define MENU_LABEL_WALLPAPER        "Wallpaper"
-#define MENU_LABEL_NEXT             "Next Wallpaper"
-#define MENU_LABEL_PREV             "Previous Wallpaper"
-#define MENU_LABEL_CURRENT          "Show Current"
+#define MENU_LABEL_WALLPAPER        "🖼️  Wallpaper"
+#define MENU_LABEL_NEXT             "⏭️  Next Wallpaper"
+#define MENU_LABEL_PREV             "⏮️  Previous Wallpaper"
+#define MENU_LABEL_CURRENT          "👁️  Show Current"
 
 /* Cycling submenu */
-#define MENU_LABEL_CYCLING          "Cycling"
-#define MENU_LABEL_PAUSE_CYCLE      "Pause Cycling"
-#define MENU_LABEL_RESUME_CYCLE     "Resume Cycling"
+#define MENU_LABEL_CYCLING          "🔄 Cycling"
+#define MENU_LABEL_PAUSE_CYCLE      "⏸️  Pause Cycling"
+#define MENU_LABEL_RESUME_CYCLE     "▶️  Resume Cycling"
 
 /* Live/Shader animation submenu */
-#define MENU_LABEL_SHADER           "Live Animation"
-#define MENU_LABEL_EDIT_SHADER      "Edit Shader..."
-#define MENU_LABEL_LIVE_PAUSE       "Pause Animation"
-#define MENU_LABEL_LIVE_RESUME      "Resume Animation"
-#define MENU_LABEL_SPEED_UP         "Speed Up"
-#define MENU_LABEL_SPEED_DOWN       "Speed Down"
+#define MENU_LABEL_SHADER           "✨ Live Animation"
+#define MENU_LABEL_EDIT_SHADER      "🎨 Edit Shader..."
+#define MENU_LABEL_LIVE_PAUSE       "⏸️  Pause Animation"
+#define MENU_LABEL_LIVE_RESUME      "▶️  Resume Animation"
+#define MENU_LABEL_SPEED_UP         "⚡ Speed Up"
+#define MENU_LABEL_SPEED_DOWN       "🐌 Speed Down"
 
 /* System controls */
-#define MENU_LABEL_STATUS_FULL      "Show Full Status"
-#define MENU_LABEL_SETTINGS         "Settings..."
-#define MENU_LABEL_RELOAD           "Reload Configuration"
-#define MENU_LABEL_CONFIG           "Edit Configuration..."
-#define MENU_LABEL_START            "Start Daemon"
-#define MENU_LABEL_RESTART          "Restart Daemon"
-#define MENU_LABEL_STOP             "Stop Daemon"
+#define MENU_LABEL_STATUS_FULL      "📊 Show Full Status"
+#define MENU_LABEL_SETTINGS         "⚙️  Settings..."
+#define MENU_LABEL_RELOAD           "🔄 Reload Configuration"
+#define MENU_LABEL_CONFIG           "📝 Edit Configuration..."
+#define MENU_LABEL_START            "🚀 Start Daemon"
+#define MENU_LABEL_RESTART          "🔁 Restart Daemon"
+#define MENU_LABEL_STOP             "🛑 Stop Daemon"
 
 /* Info section */
-#define MENU_LABEL_ABOUT            "About NeoWall"
-#define MENU_LABEL_QUIT             "Quit Tray"
+#define MENU_LABEL_ABOUT            "ℹ️  About NeoWall"
+#define MENU_LABEL_QUIT             "🚪 Quit Tray"
 
 /* Function declarations */
 

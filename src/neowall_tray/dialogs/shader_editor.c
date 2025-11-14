@@ -705,7 +705,7 @@ static void on_save_clicked(GtkButton *button, gpointer user_data) {
     (void)user_data;
 
     GtkWidget *dialog = gtk_file_chooser_dialog_new(
-        "Save Shader",
+        "💾 Save Shader",
         GTK_WINDOW(editor_window),
         GTK_FILE_CHOOSER_ACTION_SAVE,
         "_Cancel", GTK_RESPONSE_CANCEL,
@@ -762,7 +762,7 @@ static void on_load_clicked(GtkButton *button, gpointer user_data) {
     (void)user_data;
 
     GtkWidget *dialog = gtk_file_chooser_dialog_new(
-        "Load Shader",
+        "📂 Load Shader",
         GTK_WINDOW(editor_window),
         GTK_FILE_CHOOSER_ACTION_OPEN,
         "_Cancel", GTK_RESPONSE_CANCEL,
@@ -1014,7 +1014,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     (void)user_data;
 
     GtkWidget *dialog = gtk_dialog_new_with_buttons(
-        "Editor Settings",
+        "⚙️  Editor Settings",
         GTK_WINDOW(editor_window),
         GTK_DIALOG_DESTROY_WITH_PARENT,
         "_Close", GTK_RESPONSE_CLOSE,
@@ -1033,7 +1033,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     int row = 0;
 
     /* Font family */
-    GtkWidget *font_family_label = gtk_label_new("Font Family:");
+    GtkWidget *font_family_label = gtk_label_new("🔤 Font Family:");
     gtk_widget_set_halign(font_family_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), font_family_label, 0, row, 1, 1);
 
@@ -1048,7 +1048,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     row++;
 
     /* Font size */
-    GtkWidget *font_label = gtk_label_new("Font Size:");
+    GtkWidget *font_label = gtk_label_new("📏 Font Size:");
     gtk_widget_set_halign(font_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), font_label, 0, row, 1, 1);
 
@@ -1059,7 +1059,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     row++;
 
     /* Tab width */
-    GtkWidget *tab_label = gtk_label_new("Tab Width:");
+    GtkWidget *tab_label = gtk_label_new("↹ Tab Width:");
     gtk_widget_set_halign(tab_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), tab_label, 0, row, 1, 1);
 
@@ -1070,7 +1070,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     row++;
 
     /* Word wrap */
-    GtkWidget *wrap_label = gtk_label_new("Word Wrap:");
+    GtkWidget *wrap_label = gtk_label_new("📄 Word Wrap:");
     gtk_widget_set_halign(wrap_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), wrap_label, 0, row, 1, 1);
 
@@ -1081,7 +1081,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     row++;
 
     /* Auto compile */
-    GtkWidget *auto_label = gtk_label_new("Auto Compile:");
+    GtkWidget *auto_label = gtk_label_new("⚡ Auto Compile:");
     gtk_widget_set_halign(auto_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), auto_label, 0, row, 1, 1);
 
@@ -1092,7 +1092,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     row++;
 
     /* Line numbers */
-    GtkWidget *numbers_label = gtk_label_new("Show Line Numbers:");
+    GtkWidget *numbers_label = gtk_label_new("🔢 Show Line Numbers:");
     gtk_widget_set_halign(numbers_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), numbers_label, 0, row, 1, 1);
 
@@ -1104,7 +1104,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     row++;
 
     /* Preview FPS */
-    GtkWidget *fps_label = gtk_label_new("Preview FPS:");
+    GtkWidget *fps_label = gtk_label_new("🎯 Preview FPS:");
     gtk_widget_set_halign(fps_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), fps_label, 0, row, 1, 1);
 
@@ -1121,13 +1121,13 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     row++;
 
     GtkWidget *shader_header = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(shader_header), "<b>Shader Settings</b>");
+    gtk_label_set_markup(GTK_LABEL(shader_header), "<b>✨ Shader Settings</b>");
     gtk_widget_set_halign(shader_header, GTK_ALIGN_START);
     gtk_grid_attach(GTK_GRID(grid), shader_header, 0, row, 2, 1);
     row++;
 
     /* VSync */
-    GtkWidget *vsync_label = gtk_label_new("Enable VSync:");
+    GtkWidget *vsync_label = gtk_label_new("🔄 Enable VSync:");
     gtk_widget_set_halign(vsync_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), vsync_label, 0, row, 1, 1);
 
@@ -1138,7 +1138,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     row++;
 
     /* Time speed */
-    GtkWidget *speed_label = gtk_label_new("Time Speed:");
+    GtkWidget *speed_label = gtk_label_new("⏱️  Time Speed:");
     gtk_widget_set_halign(speed_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), speed_label, 0, row, 1, 1);
 
@@ -1150,7 +1150,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     row++;
 
     /* Mouse tracking */
-    GtkWidget *mouse_label = gtk_label_new("Mouse Tracking:");
+    GtkWidget *mouse_label = gtk_label_new("🖱️  Mouse Tracking:");
     gtk_widget_set_halign(mouse_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), mouse_label, 0, row, 1, 1);
 
@@ -1161,7 +1161,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     row++;
 
     /* Background color */
-    GtkWidget *bg_label = gtk_label_new("Background Color:");
+    GtkWidget *bg_label = gtk_label_new("🎨 Background Color:");
     gtk_widget_set_halign(bg_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), bg_label, 0, row, 1, 1);
 
@@ -1278,7 +1278,7 @@ void shader_editor_show(void) {
 
     /* Create main window */
     editor_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(editor_window), "NeoWall Shader Playground");
+    gtk_window_set_title(GTK_WINDOW(editor_window), "🎨 NeoWall Shader Playground");
     gtk_window_set_default_size(GTK_WINDOW(editor_window), 1400, 800);
     gtk_window_set_position(GTK_WINDOW(editor_window), GTK_WIN_POS_CENTER);
     gtk_window_set_type_hint(GTK_WINDOW(editor_window), GDK_WINDOW_TYPE_HINT_DIALOG);
@@ -1333,23 +1333,23 @@ void shader_editor_show(void) {
 
     GtkWidget *examples_menu = gtk_menu_new();
 
-    GtkWidget *example1 = gtk_menu_item_new_with_label("Animated Gradient (Default)");
+    GtkWidget *example1 = gtk_menu_item_new_with_label("🌈 Animated Gradient (Default)");
     g_signal_connect(example1, "activate", G_CALLBACK(on_example_selected), (gpointer)DEFAULT_SHADER);
     gtk_menu_shell_append(GTK_MENU_SHELL(examples_menu), example1);
 
-    GtkWidget *example2 = gtk_menu_item_new_with_label("Plasma Effect");
+    GtkWidget *example2 = gtk_menu_item_new_with_label("🔮 Plasma Effect");
     g_signal_connect(example2, "activate", G_CALLBACK(on_example_selected), (gpointer)EXAMPLE_PLASMA);
     gtk_menu_shell_append(GTK_MENU_SHELL(examples_menu), example2);
 
-    GtkWidget *example3 = gtk_menu_item_new_with_label("Tunnel");
+    GtkWidget *example3 = gtk_menu_item_new_with_label("🚇 Tunnel");
     g_signal_connect(example3, "activate", G_CALLBACK(on_example_selected), (gpointer)EXAMPLE_TUNNEL);
     gtk_menu_shell_append(GTK_MENU_SHELL(examples_menu), example3);
 
-    GtkWidget *example4 = gtk_menu_item_new_with_label("Waves");
+    GtkWidget *example4 = gtk_menu_item_new_with_label("🌊 Waves");
     g_signal_connect(example4, "activate", G_CALLBACK(on_example_selected), (gpointer)EXAMPLE_WAVES);
     gtk_menu_shell_append(GTK_MENU_SHELL(examples_menu), example4);
 
-    GtkWidget *example5 = gtk_menu_item_new_with_label("Mandelbrot Set");
+    GtkWidget *example5 = gtk_menu_item_new_with_label("🔢 Mandelbrot Set");
     g_signal_connect(example5, "activate", G_CALLBACK(on_example_selected), (gpointer)EXAMPLE_MANDELBROT);
     gtk_menu_shell_append(GTK_MENU_SHELL(examples_menu), example5);
 
@@ -1430,7 +1430,7 @@ void shader_editor_show(void) {
     GtkWidget *editor_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 
     GtkWidget *editor_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(editor_label), "<b>Shader Code</b>");
+    gtk_label_set_markup(GTK_LABEL(editor_label), "<b>📝 Shader Code</b>");
     gtk_widget_set_halign(editor_label, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(editor_header), editor_label, FALSE, FALSE, 0);
 
@@ -1532,7 +1532,7 @@ void shader_editor_show(void) {
     GtkWidget *preview_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 
     GtkWidget *preview_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(preview_label), "<b>Preview</b>");
+    gtk_label_set_markup(GTK_LABEL(preview_label), "<b>👁️  Preview</b>");
     gtk_widget_set_halign(preview_label, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(preview_header), preview_label, FALSE, FALSE, 0);
 

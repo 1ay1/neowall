@@ -78,7 +78,7 @@ static GtkWidget *create_link_button(const char *icon_name, const char *label, c
 void about_dialog_show(void) {
     /* Create custom dialog */
     GtkWidget *dialog = gtk_dialog_new_with_buttons(
-        "About NeoWall",
+        "ℹ️  About NeoWall",
         NULL,
         GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
         "_Close", GTK_RESPONSE_CLOSE,
