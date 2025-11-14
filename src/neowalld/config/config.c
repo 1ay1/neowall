@@ -1497,8 +1497,6 @@ bool config_load(struct neowall_state *state, const char *config_path) {
     }
 
     /* Store modification time temporarily for comparison */
-    time_t new_mtime = st.st_mtime;
-
     /* Validate file is a regular file before opening (security check) */
     if (!S_ISREG(st.st_mode)) {
         log_error("Config path is not a regular file (mode=0%o), using built-in defaults",
@@ -1590,59 +1588,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
     /* Track if we successfully applied any configuration */
     bool config_applied = false;
 
-    /* Parse default configuration */
-    VibeValue *default_obj = vibe_object_get(root->as_object, "default");
-    struct wallpaper_config default_config = {0};
-    bool has_valid_default = false;
-
-    if (default_obj && default_obj->type == VIBE_TYPE_OBJECT) {
-        if (parse_wallpaper_config(state, default_obj, &default_config, "default", NULL)) {
-            has_valid_default = true;
-
-            const char *type_str = (default_config.type == WALLPAPER_SHADER) ? "shader" : "image";
-            const char *path_str = default_config.path;
-
-            log_info("Valid default configuration: type=%s, path=%s, mode=%s",
-                     type_str, path_str, wallpaper_mode_to_string(default_config.mode));
-
-            /* Apply default config to all outputs */
-            struct output_state *output = state->outputs;
-            while (output) {
-                /* Copy default config */
-                struct wallpaper_config config_copy;
-                memcpy(&config_copy, &default_config, sizeof(struct wallpaper_config));
-
-                /* Duplicate cycle paths if present */
-                if (default_config.cycle && default_config.cycle_count > 0) {
-                    config_copy.cycle_paths = calloc(default_config.cycle_count, sizeof(char *));
-                    if (config_copy.cycle_paths) {
-                        for (size_t i = 0; i < default_config.cycle_count; i++) {
-                            config_copy.cycle_paths[i] = strdup(default_config.cycle_paths[i]);
-                        }
-                    }
-                }
-
-                /* Duplicate channel paths if present */
-                if (default_config.channel_count > 0) {
-                    config_copy.channel_paths = calloc(default_config.channel_count, sizeof(char *));
-                    if (config_copy.channel_paths) {
-                        for (size_t i = 0; i < default_config.channel_count; i++) {
-                            config_copy.channel_paths[i] = strdup(default_config.channel_paths[i]);
-                        }
-                    }
-                }
-
-                output_apply_config(output, &config_copy);
-                output = output->next;
-            }
-
-            config_applied = true;
-        } else {
-            log_error("Default configuration validation failed");
-        }
-    } else {
-        log_debug("No default configuration block found");
-    }
+    log_info("Loading per-output configurations (no default/global config)");
 
     /* Parse output-specific configurations - accept both "output" and "outputs" */
     VibeValue *outputs_obj = vibe_object_get(root->as_object, "output");
@@ -1714,63 +1660,57 @@ bool config_load(struct neowall_state *state, const char *config_path) {
     }
 
     /* Clean up */
-    if (has_valid_default) {
-        config_free_wallpaper(&default_config);
-    }
     vibe_value_free(root);
     vibe_parser_free(parser);
 
-    if (config_applied) {
-        /* Only update mtime if config was successfully loaded */
-        /* config_mtime removed - hot reload disabled */
-        log_info("========================================");
-        log_info("[OK] Configuration loaded successfully from %s", config_path);
-        log_debug("Config mtime updated to %ld", (long)new_mtime);
+    if (!config_applied) {
+        log_info("⚠️  No per-output configurations found in config file");
+        log_info("⚠️  Add output-specific configs in the 'output' section");
+        log_info("⚠️  Use 'neowall status' to see detected monitor names");
+    }
 
-        /* Print summary of what was configured - use read lock for safe traversal */
-        pthread_rwlock_rdlock(&state->output_list_lock);
-        int output_count = 0;
-        int shader_count = 0;
-        int image_count = 0;
-        struct output_state *summary_output = state->outputs;
-        while (summary_output) {
-            output_count++;
-            /* Safety check: ensure config pointer is valid */
-            /* config is now embedded struct, always valid */
+    /* Print summary of what was configured - use read lock for safe traversal */
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    int output_count = 0;
+    int configured_count = 0;
+    int shader_count = 0;
+    int image_count = 0;
+    struct output_state *summary_output = state->outputs;
+    while (summary_output) {
+        output_count++;
+        if (summary_output->config.path[0] != '\0') {
+            configured_count++;
             if (summary_output->config.type == WALLPAPER_SHADER) {
                 shader_count++;
-                log_info("  Output %s: SHADER mode - %s",
+                log_info("  ✓ %s (%s): SHADER - %s",
+                         summary_output->connector_name[0] ? summary_output->connector_name : "unknown",
                          summary_output->model[0] ? summary_output->model : "unknown",
                          summary_output->config.path);
             } else {
                 image_count++;
-                log_info("  Output %s: IMAGE mode - %s (mode=%s)",
+                log_info("  ✓ %s (%s): IMAGE - %s (mode=%s)",
+                         summary_output->connector_name[0] ? summary_output->connector_name : "unknown",
                          summary_output->model[0] ? summary_output->model : "unknown",
                          summary_output->config.path,
                          wallpaper_mode_to_string(summary_output->config.mode));
             }
             if (summary_output->config.cycle && summary_output->config.cycle_count > 1) {
-                log_info("    -> Cycling through %zu items, duration=%.0fs",
+                log_info("      → Cycling through %zu items, duration=%.0fs",
                          summary_output->config.cycle_count, summary_output->config.duration);
             }
-            summary_output = summary_output->next;
+        } else {
+            log_info("  ✗ %s (%s): No configuration found",
+                     summary_output->connector_name[0] ? summary_output->connector_name : "unknown",
+                     summary_output->model[0] ? summary_output->model : "unknown");
         }
-        pthread_rwlock_unlock(&state->output_list_lock);
-        log_info("Total: %d output(s) configured (%d shader, %d image)",
-                 output_count, shader_count, image_count);
-        log_info("========================================");
-        return true;
-    } else {
-        log_error("========================================");
-        log_error("[ERROR] No valid configuration found in file");
-        log_error("========================================");
-        log_error("The config file was parsed but contains no valid settings");
-        log_error("Using built-in default configuration");
-        log_error("========================================");
-        /* Update mtime to prevent repeated reloading of the same invalid config */
-        /* config_mtime removed - hot reload disabled */
-        return apply_builtin_default_config(state);
+        summary_output = summary_output->next;
     }
+    pthread_rwlock_unlock(&state->output_list_lock);
+
+    log_info("Summary: %d/%d output(s) configured (%d shader, %d image)",
+             configured_count, output_count, shader_count, image_count);
+    log_info("========================================");
+    return true;
 }
 
 /* ============================================================================

@@ -1271,30 +1271,35 @@ void settings_dialog_show(void) {
     char output_names[MAX_OUTPUTS][64];
     int output_count = get_output_list(output_names, MAX_OUTPUTS);
 
-    /* Add Default tab */
-    strncpy(dlg->scopes[0].scope, "default", sizeof(dlg->scopes[0].scope) - 1);
-    GtkWidget *default_tab = create_scope_tab(dlg, &dlg->scopes[0]);
-    gtk_notebook_append_page(GTK_NOTEBOOK(dlg->notebook), default_tab,
-                            gtk_label_new("Default"));
-    dlg->scope_count = 1;
+    if (output_count == 0) {
+        TRAY_LOG_INFO(COMPONENT, "⚠️  No outputs detected - settings may not apply");
+    }
 
-    /* Add per-output tabs */
+    /* Add per-output tabs only (no default tab) */
+    dlg->scope_count = 0;
     for (int i = 0; i < output_count && dlg->scope_count < MAX_OUTPUTS; i++) {
-        size_t len = strlen(output_names[i]);
-        if (len >= sizeof(dlg->scopes[dlg->scope_count].scope)) {
-            len = sizeof(dlg->scopes[dlg->scope_count].scope) - 1;
+        /* Build scope name as "output.NAME" */
+        /* Need to ensure "output." (7 chars) + name + null fits in 64 bytes */
+        size_t name_len = strlen(output_names[i]);
+        size_t scope_size = sizeof(dlg->scopes[dlg->scope_count].scope);
+
+        if (name_len + 8 > scope_size) {  /* 7 for "output." + 1 for null */
+            TRAY_LOG_ERROR(COMPONENT, "Output name too long: %s", output_names[i]);
+            continue;
         }
-        memcpy(dlg->scopes[dlg->scope_count].scope, output_names[i], len);
-        dlg->scopes[dlg->scope_count].scope[len] = '\0';
+
+        snprintf(dlg->scopes[dlg->scope_count].scope, scope_size,
+                 "output.%s", output_names[i]);
 
         GtkWidget *output_tab = create_scope_tab(dlg, &dlg->scopes[dlg->scope_count]);
-        gtk_notebook_append_page(GTK_NOTEBOOK(dlg->notebook), output_tab,
-                                gtk_label_new(output_names[i]));
+
+        /* Create a label showing just the output name (not the full scope) */
+        GtkWidget *tab_label = gtk_label_new(output_names[i]);
+        gtk_notebook_append_page(GTK_NOTEBOOK(dlg->notebook), output_tab, tab_label);
         dlg->scope_count++;
     }
 
-    TRAY_LOG_INFO(COMPONENT, "Created %d tabs (1 default + %d outputs)",
-                 dlg->scope_count, output_count);
+    TRAY_LOG_INFO(COMPONENT, "Created %d per-output tab(s)", dlg->scope_count);
 
     /* Connect revert button */
     g_signal_connect(dlg->revert_button, "clicked",
