@@ -295,12 +295,21 @@ static gboolean on_gl_render(GtkGLArea *area, GdkGLContext *context, gpointer us
     }
 
     /* Draw fullscreen quad */
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
     GLint loc_position = glGetAttribLocation(shader_program, "position");
     if (loc_position >= 0) {
-        glBindVertexArray(vao);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        glBindVertexArray(0);
+        glVertexAttribPointer(loc_position, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(loc_position);
     }
+
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+    if (loc_position >= 0) {
+        glDisableVertexAttribArray(loc_position);
+    }
+    glBindVertexArray(0);
 
     return TRUE;
 }

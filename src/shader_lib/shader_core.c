@@ -92,6 +92,15 @@ static const char *shadertoy_wrapper_prefix_es3 =
     "\n"
     "// GLSL ES 3.0 output\n"
     "out vec4 fragColor;\n"
+    "\n"
+    "// Helper function: Convert vec3 direction to spherical/equirectangular UV coordinates\n"
+    "// This enables environment mapping with 2D textures using 3D normals/directions\n"
+    "vec2 directionToUV(vec3 dir) {\n"
+    "    vec3 n = normalize(dir);\n"
+    "    float u = 0.5 + atan(n.z, n.x) / (2.0 * 3.14159265359);\n"
+    "    float v = 0.5 - asin(n.y) / 3.14159265359;\n"
+    "    return vec2(u, v);\n"
+    "}\n"
     "\n";
 
 /* Build dynamic iChannel declarations based on channel count */
@@ -1372,6 +1381,134 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
     strcat(wrapped, suffix);
 
     free(channel_decls);
+
+    /* Fix vec3 to vec2 texture coordinate issues for ES3 */
+    if (use_es3) {
+        log_debug("Checking for vec3 texture coordinate usage in ES3 shader...");
+        /* Convert texture(iChannelN, vec3_expr) to texture(iChannelN, directionToUV(vec3_expr)) */
+        char *fixed = malloc(strlen(wrapped) * 2 + 1024);
+        if (fixed) {
+            const char *src = wrapped;
+            char *dst = fixed;
+            bool made_changes = false;
+            int conversion_count = 0;
+
+            while (*src) {
+                /* Look for texture(iChannel pattern */
+                if (strncmp(src, "texture(iChannel", 16) == 0) {
+                    const char *check = src + 16;
+                    /* Get channel number */
+                    if (isdigit(*check)) {
+                        int channel_num = *check - '0';
+                        check++;
+                        while (*check && isspace(*check)) check++;
+                        if (*check == ',') {
+                            check++;
+                            /* Now find the coordinate expression */
+                            const char *coord_start = check;
+                            int paren_depth = 1;
+                            const char *coord_end = NULL;
+
+                            /* Skip to the coordinate parameter */
+                            while (*check && isspace(*check)) check++;
+                            coord_start = check;
+
+                            /* Find the end of the coordinate parameter (next comma or closing paren) */
+                            while (*check) {
+                                if (*check == '(') paren_depth++;
+                                else if (*check == ')') {
+                                    paren_depth--;
+                                    if (paren_depth == 0) {
+                                        coord_end = check;
+                                        break;
+                                    }
+                                }
+                                check++;
+                            }
+
+                            if (coord_end) {
+                                /* Extract the coordinate expression */
+                                size_t coord_len = coord_end - coord_start;
+                                char coord_expr[1024];
+                                if (coord_len < sizeof(coord_expr) - 1) {
+                                    strncpy(coord_expr, coord_start, coord_len);
+                                    coord_expr[coord_len] = '\0';
+
+                                    /* Trim trailing whitespace */
+                                    char *trim = coord_expr + strlen(coord_expr) - 1;
+                                    while (trim > coord_expr && isspace(*trim)) *trim-- = '\0';
+
+                                    log_debug("Found texture(iChannel%d, '%s')", channel_num, coord_expr);
+
+                                    /* Check if it looks like a vec3 (contains getNormal, or is just 'n' variable, or other common vec3 patterns) */
+                                    bool is_vec3 = false;
+                                    if (strstr(coord_expr, "getNormal")) {
+                                        log_debug("  -> Detected vec3 (contains getNormal)");
+                                        is_vec3 = true;
+                                    } else if (strcmp(coord_expr, "n") == 0) {
+                                        /* Single letter 'n' is commonly a normal vector */
+                                        log_debug("  -> Detected vec3 (variable 'n')");
+                                        is_vec3 = true;
+                                    } else if (strstr(coord_expr, "normal") || strstr(coord_expr, "Normal")) {
+                                        /* Contains 'normal' or 'Normal' */
+                                        log_debug("  -> Detected vec3 (contains 'normal')");
+                                        is_vec3 = true;
+                                    } else {
+                                        /* Check if it ends with .p, .xyz, or other vec3-like patterns */
+                                        size_t len = strlen(coord_expr);
+                                        if (len >= 2) {
+                                            if (strstr(coord_expr, ".p)") || strstr(coord_expr, ".xyz") ||
+                                                strstr(coord_expr, "vec3") || strstr(coord_expr, "reflect") ||
+                                                strstr(coord_expr, "refract") || strstr(coord_expr, "cross")) {
+                                                log_debug("  -> Detected vec3 (contains vec3-like pattern)");
+                                                is_vec3 = true;
+                                            }
+                                        }
+                                    }
+
+                                    if (is_vec3) {
+                                        log_info("Converting texture(iChannel%d, %s) to use directionToUV()", channel_num, coord_expr);
+
+                                        /* Copy texture(iChannelN, */
+                                        size_t prefix_len = coord_start - src;
+                                        strncpy(dst, src, prefix_len);
+                                        dst += prefix_len;
+
+                                        /* Wrap coordinate with directionToUV() */
+                                        strcpy(dst, "directionToUV(");
+                                        dst += 14;
+                                        strcpy(dst, coord_expr);
+                                        dst += strlen(coord_expr);
+                                        *dst++ = ')';
+
+                                        src = coord_end;
+                                        made_changes = true;
+                                        conversion_count++;
+                                        continue;
+                                    } else {
+                                        log_debug("  -> Skipping (appears to be vec2)");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                /* Copy character as-is */
+                *dst++ = *src++;
+            }
+            *dst = '\0';
+
+            if (made_changes) {
+                log_info("Applied %d vec3->vec2 texture coordinate conversion(s) for environment mapping", conversion_count);
+                free(wrapped);
+                wrapped = fixed;
+            } else {
+                log_debug("No vec3 texture coordinate conversions needed");
+                free(fixed);
+            }
+        }
+    }
 
     /* Clean up the conflict-resolution allocated source */
     if (needs_cleanup && cleaned_source) {
