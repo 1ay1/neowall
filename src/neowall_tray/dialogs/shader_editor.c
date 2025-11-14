@@ -46,6 +46,16 @@ static int preview_fps = 60;
 static float preview_zoom = 1.0f;
 static char editor_font_family[64] = "Monospace";
 
+/* Shader rendering settings */
+static bool shader_vsync = false;
+static float shader_time_speed = 1.0f;
+static bool shader_paused = false;
+static double shader_pause_time = 0.0;
+static bool shader_mouse_tracking = false;
+static float shader_mouse_x = 0.0f;
+static float shader_mouse_y = 0.0f;
+static float shader_bg_color[3] = {0.1f, 0.1f, 0.1f};
+
 /* OpenGL state */
 static GLuint shader_program = 0;
 static GLuint vao = 0;
@@ -164,6 +174,9 @@ static void on_example_selected(GtkMenuItem *item, gpointer user_data);
 static void on_settings_clicked(GtkButton *button, gpointer user_data);
 static void on_cursor_moved(GtkTextBuffer *buffer, GParamSpec *pspec, gpointer user_data);
 static void on_zoom_changed(GtkRange *range, gpointer user_data);
+static void on_pause_toggled(GtkToggleButton *button, gpointer user_data);
+static void on_reset_time_clicked(GtkButton *button, gpointer user_data);
+static gboolean on_preview_motion(GtkWidget *widget, GdkEventMotion *event, gpointer user_data);
 
 /* Helper: Get current time in seconds */
 static double get_time(void) {
@@ -472,18 +485,24 @@ static gboolean on_gl_render(GtkGLArea *area, GdkGLContext *context, gpointer us
     update_fps_display();
 
     if (!gl_initialized || !shader_valid) {
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClearColor(shader_bg_color[0], shader_bg_color[1], shader_bg_color[2], 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         return TRUE;
     }
 
     glClear(GL_COLOR_BUFFER_BIT);
 
-    /* Calculate shader time */
+    /* Calculate shader time with pause and speed control */
     double current_time = get_time();
     int width = gtk_widget_get_allocated_width(GTK_WIDGET(area));
     int height = gtk_widget_get_allocated_height(GTK_WIDGET(area));
-    float shader_time = (float)(current_time - start_time);
+
+    float shader_time;
+    if (shader_paused) {
+        shader_time = (float)(shader_pause_time - start_time) * shader_time_speed;
+    } else {
+        shader_time = (float)(current_time - start_time) * shader_time_speed;
+    }
 
     /* Apply zoom to viewport */
     int zoomed_width = (int)(width * preview_zoom);
@@ -509,6 +528,16 @@ static gboolean on_gl_render(GtkGLArea *area, GdkGLContext *context, gpointer us
     if (loc_iresolution >= 0) {
         float aspect = (width > 0 && height > 0) ? (float)width / (float)height : 1.0f;
         glUniform3f(loc_iresolution, (float)width, (float)height, aspect);
+    }
+
+    /* Set mouse uniforms if tracking is enabled */
+    GLint loc_imouse = glGetUniformLocation(shader_program, "iMouse");
+    if (loc_imouse >= 0) {
+        if (shader_mouse_tracking) {
+            glUniform4f(loc_imouse, shader_mouse_x, shader_mouse_y, shader_mouse_x, shader_mouse_y);
+        } else {
+            glUniform4f(loc_imouse, 0.0f, 0.0f, 0.0f, 0.0f);
+        }
     }
 
     /* Draw fullscreen quad */
@@ -862,6 +891,75 @@ static void on_fps_changed(GtkSpinButton *spin, gpointer user_data) {
     }
 }
 
+/* VSync toggle callback */
+static void on_vsync_toggled(GtkSwitch *sw, GParamSpec *pspec, gpointer user_data) {
+    (void)pspec;
+    (void)user_data;
+    shader_vsync = gtk_switch_get_active(sw);
+    if (gl_area) {
+        gtk_gl_area_set_use_es(GTK_GL_AREA(gl_area), !shader_vsync);
+    }
+}
+
+/* Time speed change callback */
+static void on_time_speed_changed(GtkSpinButton *spin, gpointer user_data) {
+    (void)user_data;
+    shader_time_speed = (float)gtk_spin_button_get_value(spin);
+}
+
+/* Mouse tracking toggle callback */
+static void on_mouse_tracking_toggled(GtkSwitch *sw, GParamSpec *pspec, gpointer user_data) {
+    (void)pspec;
+    (void)user_data;
+    shader_mouse_tracking = gtk_switch_get_active(sw);
+}
+
+/* Background color change callback */
+static void on_bg_color_set(GtkColorButton *button, gpointer user_data) {
+    (void)user_data;
+    GdkRGBA color;
+    gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(button), &color);
+    shader_bg_color[0] = (float)color.red;
+    shader_bg_color[1] = (float)color.green;
+    shader_bg_color[2] = (float)color.blue;
+}
+
+/* Pause/Resume shader animation */
+static void on_pause_toggled(GtkToggleButton *button, gpointer user_data) {
+    (void)user_data;
+    shader_paused = gtk_toggle_button_get_active(button);
+
+    if (shader_paused) {
+        shader_pause_time = get_time();
+        tray_log_info("[ShaderEditor] Shader paused at %.2fs", shader_pause_time - start_time);
+    } else {
+        double pause_duration = get_time() - shader_pause_time;
+        start_time += pause_duration;
+        tray_log_info("[ShaderEditor] Shader resumed");
+    }
+}
+
+/* Reset shader time to 0 */
+static void on_reset_time_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+    (void)user_data;
+    start_time = get_time();
+    shader_pause_time = start_time;
+    tray_log_info("[ShaderEditor] Shader time reset to 0");
+}
+
+/* Track mouse motion in preview */
+static gboolean on_preview_motion(GtkWidget *widget, GdkEventMotion *event, gpointer user_data) {
+    (void)widget;
+    (void)user_data;
+
+    if (shader_mouse_tracking) {
+        shader_mouse_x = (float)event->x;
+        shader_mouse_y = (float)(gtk_widget_get_allocated_height(widget) - event->y); // Flip Y
+    }
+    return FALSE;
+}
+
 static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     (void)button;
     (void)user_data;
@@ -965,6 +1063,67 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(fps_spin), preview_fps);
     g_signal_connect(fps_spin, "value-changed", G_CALLBACK(on_fps_changed), NULL);
     gtk_grid_attach(GTK_GRID(grid), fps_spin, 1, row, 1, 1);
+    row++;
+
+    /* Separator */
+    GtkWidget *sep1 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_grid_attach(GTK_GRID(grid), sep1, 0, row, 2, 1);
+    row++;
+
+    GtkWidget *shader_header = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(shader_header), "<b>Shader Settings</b>");
+    gtk_widget_set_halign(shader_header, GTK_ALIGN_START);
+    gtk_grid_attach(GTK_GRID(grid), shader_header, 0, row, 2, 1);
+    row++;
+
+    /* VSync */
+    GtkWidget *vsync_label = gtk_label_new("Enable VSync:");
+    gtk_widget_set_halign(vsync_label, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), vsync_label, 0, row, 1, 1);
+
+    GtkWidget *vsync_switch = gtk_switch_new();
+    gtk_switch_set_active(GTK_SWITCH(vsync_switch), shader_vsync);
+    g_signal_connect(vsync_switch, "notify::active", G_CALLBACK(on_vsync_toggled), NULL);
+    gtk_grid_attach(GTK_GRID(grid), vsync_switch, 1, row, 1, 1);
+    row++;
+
+    /* Time speed */
+    GtkWidget *speed_label = gtk_label_new("Time Speed:");
+    gtk_widget_set_halign(speed_label, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), speed_label, 0, row, 1, 1);
+
+    GtkWidget *speed_spin = gtk_spin_button_new_with_range(0.1, 5.0, 0.1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(speed_spin), shader_time_speed);
+    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(speed_spin), 1);
+    g_signal_connect(speed_spin, "value-changed", G_CALLBACK(on_time_speed_changed), NULL);
+    gtk_grid_attach(GTK_GRID(grid), speed_spin, 1, row, 1, 1);
+    row++;
+
+    /* Mouse tracking */
+    GtkWidget *mouse_label = gtk_label_new("Mouse Tracking:");
+    gtk_widget_set_halign(mouse_label, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), mouse_label, 0, row, 1, 1);
+
+    GtkWidget *mouse_switch = gtk_switch_new();
+    gtk_switch_set_active(GTK_SWITCH(mouse_switch), shader_mouse_tracking);
+    g_signal_connect(mouse_switch, "notify::active", G_CALLBACK(on_mouse_tracking_toggled), NULL);
+    gtk_grid_attach(GTK_GRID(grid), mouse_switch, 1, row, 1, 1);
+    row++;
+
+    /* Background color */
+    GtkWidget *bg_label = gtk_label_new("Background Color:");
+    gtk_widget_set_halign(bg_label, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), bg_label, 0, row, 1, 1);
+
+    GdkRGBA bg_rgba;
+    bg_rgba.red = shader_bg_color[0];
+    bg_rgba.green = shader_bg_color[1];
+    bg_rgba.blue = shader_bg_color[2];
+    bg_rgba.alpha = 1.0;
+
+    GtkWidget *bg_button = gtk_color_button_new_with_rgba(&bg_rgba);
+    g_signal_connect(bg_button, "color-set", G_CALLBACK(on_bg_color_set), NULL);
+    gtk_grid_attach(GTK_GRID(grid), bg_button, 1, row, 1, 1);
     row++;
 
     gtk_widget_show_all(dialog);
@@ -1372,6 +1531,18 @@ void shader_editor_show(void) {
     GtkWidget *preview_spacer = gtk_label_new("");
     gtk_box_pack_start(GTK_BOX(preview_header), preview_spacer, TRUE, TRUE, 0);
 
+    /* Pause/Resume button */
+    GtkWidget *pause_btn = gtk_toggle_button_new_with_label("⏸ Pause");
+    gtk_widget_set_tooltip_text(pause_btn, "Pause/Resume shader animation");
+    g_signal_connect(pause_btn, "toggled", G_CALLBACK(on_pause_toggled), NULL);
+    gtk_box_pack_start(GTK_BOX(preview_header), pause_btn, FALSE, FALSE, 4);
+
+    /* Reset time button */
+    GtkWidget *reset_time_btn = gtk_button_new_with_label("↻ Reset");
+    gtk_widget_set_tooltip_text(reset_time_btn, "Reset shader time to 0");
+    g_signal_connect(reset_time_btn, "clicked", G_CALLBACK(on_reset_time_clicked), NULL);
+    gtk_box_pack_start(GTK_BOX(preview_header), reset_time_btn, FALSE, FALSE, 4);
+
     /* Zoom control */
     GtkWidget *zoom_label = gtk_label_new("Zoom:");
     gtk_box_pack_start(GTK_BOX(preview_header), zoom_label, FALSE, FALSE, 0);
@@ -1396,10 +1567,12 @@ void shader_editor_show(void) {
     gl_area = gtk_gl_area_new();
     gtk_widget_set_size_request(gl_area, 400, 400);
     gtk_gl_area_set_required_version(GTK_GL_AREA(gl_area), 3, 0);
+    gtk_widget_add_events(gl_area, GDK_POINTER_MOTION_MASK);
 
     g_signal_connect(gl_area, "realize", G_CALLBACK(on_gl_realize), NULL);
     g_signal_connect(gl_area, "render", G_CALLBACK(on_gl_render), NULL);
     g_signal_connect(gl_area, "unrealize", G_CALLBACK(on_gl_unrealize), NULL);
+    g_signal_connect(gl_area, "motion-notify-event", G_CALLBACK(on_preview_motion), NULL);
 
     GtkWidget *frame = gtk_frame_new(NULL);
     gtk_container_add(GTK_CONTAINER(frame), gl_area);
