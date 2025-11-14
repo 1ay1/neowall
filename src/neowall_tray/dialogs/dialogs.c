@@ -161,6 +161,9 @@ static gboolean progress_check_timer(gpointer user_data) {
 
     /* Check if operation is complete */
     if (data->check_callback && data->check_callback()) {
+        /* Clear timer ID to prevent double-removal */
+        data->check_timer_id = 0;
+
         /* Operation complete - schedule dialog close after delay */
         if (data->auto_close_delay_ms > 0) {
             g_timeout_add(data->auto_close_delay_ms, destroy_widget_callback, data->dialog);
@@ -168,8 +171,7 @@ static gboolean progress_check_timer(gpointer user_data) {
             gtk_widget_destroy(data->dialog);
         }
 
-        /* Clean up and stop timer */
-        g_free(data);
+        /* Don't free data here - let the destroy signal handler do it */
         return FALSE;
     }
 
