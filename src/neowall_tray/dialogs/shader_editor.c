@@ -847,11 +847,18 @@ static void on_line_numbers_toggled(GtkSwitch *sw, GParamSpec *pspec, gpointer u
 static void on_fps_changed(GtkSpinButton *spin, gpointer user_data) {
     (void)user_data;
     preview_fps = gtk_spin_button_get_value_as_int(spin);
+
+    /* Always restart timer if it exists */
     if (animation_timer_id) {
         g_source_remove(animation_timer_id);
         animation_timer_id = 0;
+    }
+
+    /* Restart with new FPS if GL area is ready */
+    if (gl_area && gl_initialized) {
         int interval = 1000 / preview_fps;
         animation_timer_id = g_timeout_add(interval, animation_timer_cb, gl_area);
+        tray_log_info("[ShaderEditor] Preview FPS updated to %d", preview_fps);
     }
 }
 
