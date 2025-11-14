@@ -17,8 +17,36 @@
 #include "ipc/socket.h"
 #include "commands/commands.h"
 
+/* Daemon Kill Constants */
+#define DAEMON_SHUTDOWN_MAX_ATTEMPTS 50
+#define DAEMON_SHUTDOWN_CHECK_INTERVAL_MS 100
+#define DAEMON_SHUTDOWN_MAX_WAIT_SECONDS 5
+
+/* File naming constants */
+#define PID_FILE_NAME "neowalld.pid"
+#define READY_MARKER_NAME "neowalld.ready"
+
 static struct neowall_state *global_state = NULL;
 static volatile bool event_loop_running = false;  /* Flag to protect PID file during operation */
+
+/* Helper: Get runtime directory and construct path for a file */
+static bool get_runtime_file_path(char *buffer, size_t size, const char *filename) {
+    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+    int result;
+
+    if (runtime_dir) {
+        result = snprintf(buffer, size, "%s/%s", runtime_dir, filename);
+    } else {
+        const char *home = getenv("HOME");
+        if (home) {
+            result = snprintf(buffer, size, "%s/.%s", home, filename);
+        } else {
+            result = snprintf(buffer, size, "/tmp/%s-%d", filename, getuid());
+        }
+    }
+
+    return (result >= 0 && (size_t)result < size);
+}
 
 /* Forward declarations */
 static void handle_crash(int signum);
@@ -58,19 +86,7 @@ static void init_command_signals(void) {
 /* Get PID file path */
 static const char *get_pid_file_path(void) {
     static char pid_path[MAX_PATH_LENGTH];
-    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-
-    if (runtime_dir) {
-        snprintf(pid_path, sizeof(pid_path), "%s/neowalld.pid", runtime_dir);
-    } else {
-        const char *home = getenv("HOME");
-        if (home) {
-            snprintf(pid_path, sizeof(pid_path), "%s/.neowalld.pid", home);
-        } else {
-            snprintf(pid_path, sizeof(pid_path), "/tmp/neowalld-%d.pid", getuid());
-        }
-    }
-
+    get_runtime_file_path(pid_path, sizeof(pid_path), PID_FILE_NAME);
     return pid_path;
 }
 
@@ -94,19 +110,7 @@ static bool write_pid_file(void) {
 /* Get ready marker file path */
 static const char *get_ready_marker_path(void) {
     static char path[MAX_PATH_LENGTH];
-    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-
-    if (runtime_dir) {
-        snprintf(path, sizeof(path), "%s/neowalld.ready", runtime_dir);
-    } else {
-        const char *home = getenv("HOME");
-        if (home) {
-            snprintf(path, sizeof(path), "%s/.neowalld.ready", home);
-        } else {
-            snprintf(path, sizeof(path), "/tmp/neowalld-%d.ready", getuid());
-        }
-    }
-
+    get_runtime_file_path(path, sizeof(path), READY_MARKER_NAME);
     return path;
 }
 
@@ -228,9 +232,9 @@ static bool kill_daemon(void) {
     }
 
     /* Wait a bit for graceful shutdown */
-    struct timespec sleep_time = {0, SLEEP_100MS_NS};  /* 100ms */
+    struct timespec sleep_time = {0, SLEEP_100MS_NS};
     int attempts = 0;
-    while (attempts < 50) {  /* Wait up to 5 seconds */
+    while (attempts < DAEMON_SHUTDOWN_MAX_ATTEMPTS) {
         if (kill(pid, 0) == -1 && errno == ESRCH) {
             printf("NeoWall daemon stopped successfully.\n");
             remove_pid_file();

@@ -24,6 +24,26 @@
 #include <time.h>
 #include <unistd.h>
 
+/* UI Layout Constants */
+#define EDITOR_TOOLBAR_SPACING 8
+#define EDITOR_TOOLBAR_MARGIN 12
+#define BUTTON_MARGIN 4
+#define SEPARATOR_SPACING 8
+#define PANED_MARGIN 8
+#define STATUSBAR_SPACING 12
+#define STATUSBAR_MARGIN_H 12
+#define STATUSBAR_MARGIN_V 6
+#define EDITOR_SETTINGS_ROW_SPACING 16
+#define EDITOR_SETTINGS_COL_SPACING 16
+#define EDITOR_SETTINGS_MARGIN 8
+
+/* Dialog Dimensions */
+#define DIALOG_WIDTH_STANDARD 800
+#define DIALOG_HEIGHT_STANDARD 600
+
+/* Timing Constants (milliseconds) */
+#define DIALOG_AUTO_CLOSE_SUCCESS 1500
+
 /* Window state */
 static GtkWidget *editor_window = NULL;
 static GtkSourceBuffer *source_buffer = NULL;
@@ -170,6 +190,38 @@ static const char *EXAMPLE_MANDELBROT =
 static gboolean animation_timer_cb(gpointer user_data);
 static void on_theme_changed(GtkComboBox *combo, gpointer user_data);
 static void update_shader_program(void);
+
+/* Helper for auto-close dialogs */
+/* Helper: Auto-close dialog callback */
+static gboolean destroy_widget_callback(gpointer user_data) {
+    GtkWidget *widget = GTK_WIDGET(user_data);
+    if (widget && GTK_IS_WIDGET(widget)) {
+        gtk_widget_destroy(widget);
+    }
+    return FALSE;  /* One-shot timer */
+}
+
+/* Helper: Create modal error dialog */
+static GtkWidget* create_error_dialog(const char *title, const char *message) {
+    GtkWidget *dialog = gtk_message_dialog_new(
+        GTK_WINDOW(editor_window),
+        GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+        GTK_MESSAGE_ERROR,
+        GTK_BUTTONS_OK,
+        "%s", title
+    );
+    if (message) {
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", message);
+    }
+    return dialog;
+}
+
+/* Helper: Show error and wait */
+static void show_error_dialog(const char *title, const char *message) {
+    GtkWidget *dialog = create_error_dialog(title, message);
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+}
 static void on_save_clicked(GtkButton *button, gpointer user_data);
 static void on_load_clicked(GtkButton *button, gpointer user_data);
 static void on_apply_clicked(GtkButton *button, gpointer user_data);
@@ -713,6 +765,7 @@ static void on_save_clicked(GtkButton *button, gpointer user_data) {
         NULL
     );
 
+    gtk_window_set_default_size(GTK_WINDOW(dialog), DIALOG_WIDTH_STANDARD, DIALOG_HEIGHT_STANDARD);
     gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog), TRUE);
 
     if (current_file_path) {
@@ -739,6 +792,11 @@ static void on_save_clicked(GtkButton *button, gpointer user_data) {
         if (!g_file_set_contents(filename, text, -1, &error)) {
             tray_log_error("[ShaderEditor] Failed to save shader: %s", error->message);
             update_status("✗ Failed to save", TRUE);
+
+            char error_msg[512];
+            snprintf(error_msg, sizeof(error_msg), "Could not save shader file:\n\n%s", error->message);
+            show_error_dialog("❌ Save Failed", error_msg);
+
             g_error_free(error);
         } else {
             tray_log_info("[ShaderEditor] Shader saved to %s", filename);
@@ -770,16 +828,19 @@ static void on_load_clicked(GtkButton *button, gpointer user_data) {
         NULL
     );
 
+    gtk_window_set_default_size(GTK_WINDOW(dialog), DIALOG_WIDTH_STANDARD, DIALOG_HEIGHT_STANDARD);
+    gtk_file_chooser_set_use_preview_label(GTK_FILE_CHOOSER(dialog), FALSE);
+
     /* Add file filter for GLSL files */
     GtkFileFilter *filter = gtk_file_filter_new();
-    gtk_file_filter_set_name(filter, "GLSL Shaders");
+    gtk_file_filter_set_name(filter, "GLSL Shaders (*.glsl, *.frag, *.fs)");
     gtk_file_filter_add_pattern(filter, "*.glsl");
     gtk_file_filter_add_pattern(filter, "*.frag");
     gtk_file_filter_add_pattern(filter, "*.fs");
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
 
     filter = gtk_file_filter_new();
-    gtk_file_filter_set_name(filter, "All Files");
+    gtk_file_filter_set_name(filter, "All Files (*)");
     gtk_file_filter_add_pattern(filter, "*");
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
 
@@ -809,6 +870,11 @@ static void on_load_clicked(GtkButton *button, gpointer user_data) {
         } else {
             tray_log_error("[ShaderEditor] Failed to load shader: %s", error->message);
             update_status("✗ Failed to load", TRUE);
+
+            char error_msg[512];
+            snprintf(error_msg, sizeof(error_msg), "Could not load shader file:\n\n%s", error->message);
+            show_error_dialog("❌ Load Failed", error_msg);
+
             g_error_free(error);
         }
 
@@ -1023,11 +1089,15 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     gtk_window_set_default_size(GTK_WINDOW(dialog), 500, 400);
 
     GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
-    gtk_container_set_border_width(GTK_CONTAINER(content), 6);
+    gtk_container_set_border_width(GTK_CONTAINER(content), 12);
 
     GtkWidget *grid = gtk_grid_new();
-    gtk_grid_set_row_spacing(GTK_GRID(grid), 12);
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), EDITOR_SETTINGS_ROW_SPACING);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), EDITOR_SETTINGS_COL_SPACING);
+    gtk_widget_set_margin_start(grid, EDITOR_SETTINGS_MARGIN);
+    gtk_widget_set_margin_end(grid, EDITOR_SETTINGS_MARGIN);
+    gtk_widget_set_margin_top(grid, EDITOR_SETTINGS_MARGIN);
+    gtk_widget_set_margin_bottom(grid, EDITOR_SETTINGS_MARGIN);
     gtk_container_add(GTK_CONTAINER(content), grid);
 
     int row = 0;
@@ -1187,6 +1257,9 @@ static void on_apply_clicked(GtkButton *button, gpointer user_data) {
 
     if (!shader_valid) {
         update_status("✗ Cannot apply - shader has errors", TRUE);
+        show_error_dialog("❌ Cannot Apply Shader",
+            "The shader has compilation errors that must be fixed first.\n\n"
+            "Please review the error messages below the editor.");
         return;
     }
 
@@ -1212,6 +1285,12 @@ static void on_apply_clicked(GtkButton *button, gpointer user_data) {
                 current_file_path = g_strdup(temp_path);
             } else {
                 update_status("✗ Failed to save temp shader", TRUE);
+
+                char error_msg[512];
+                snprintf(error_msg, sizeof(error_msg),
+                    "Could not save temporary shader file:\n\n%s", error->message);
+                show_error_dialog("❌ Save Failed", error_msg);
+
                 g_error_free(error);
                 g_free(text);
                 return;
@@ -1230,12 +1309,41 @@ static void on_apply_clicked(GtkButton *button, gpointer user_data) {
         if (command_execute("reload")) {
             update_status("✓ Shader applied and active!", FALSE);
             tray_log_info("[ShaderEditor] Applied shader: %s", current_file_path);
+
+            /* Show success notification */
+            GtkWidget *success_dialog = gtk_message_dialog_new(
+                GTK_WINDOW(editor_window),
+                GTK_DIALOG_DESTROY_WITH_PARENT,
+                GTK_MESSAGE_INFO,
+                GTK_BUTTONS_NONE,
+                "✅ Shader Applied Successfully"
+            );
+            gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(success_dialog),
+                "Your shader is now active on all outputs.");
+            gtk_widget_show_all(success_dialog);
+            g_timeout_add(DIALOG_AUTO_CLOSE_SUCCESS, destroy_widget_callback, success_dialog);
+
         } else {
             update_status("⚠ Shader set but reload failed", TRUE);
+
+            GtkWidget *warn_dialog = gtk_message_dialog_new(
+                GTK_WINDOW(editor_window),
+                GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                GTK_MESSAGE_WARNING,
+                GTK_BUTTONS_OK,
+                "⚠️ Reload Failed"
+            );
+            gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(warn_dialog),
+                "The shader was saved to configuration but the daemon\n"
+                "could not be reloaded. Try restarting the daemon.");
+            gtk_dialog_run(GTK_DIALOG(warn_dialog));
+            gtk_widget_destroy(warn_dialog);
         }
     } else {
         update_status("✗ Failed to apply shader", TRUE);
-        tray_log_error("[ShaderEditor] Failed to apply shader");
+        show_error_dialog("❌ Apply Failed",
+            "Could not apply shader to configuration.\n\n"
+            "Make sure the daemon is running.");
     }
 }
 
@@ -1295,28 +1403,41 @@ void shader_editor_show(void) {
     gtk_container_add(GTK_CONTAINER(editor_window), vbox);
 
     /* Toolbar */
-    GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_margin_start(toolbar, 4);
-    gtk_widget_set_margin_end(toolbar, 4);
-    gtk_widget_set_margin_top(toolbar, 2);
-    gtk_widget_set_margin_bottom(toolbar, 2);
+    GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, EDITOR_TOOLBAR_SPACING);
+    gtk_widget_set_margin_start(toolbar, EDITOR_TOOLBAR_MARGIN);
+    gtk_widget_set_margin_end(toolbar, EDITOR_TOOLBAR_MARGIN);
+    gtk_widget_set_margin_top(toolbar, EDITOR_TOOLBAR_SPACING);
+    gtk_widget_set_margin_bottom(toolbar, EDITOR_TOOLBAR_SPACING);
     gtk_box_pack_start(GTK_BOX(vbox), toolbar, FALSE, FALSE, 0);
 
-    /* Buttons with tooltips */
+    /* Buttons with tooltips and better spacing */
     GtkWidget *load_btn = gtk_button_new_with_label("📂 Load");
     gtk_widget_set_tooltip_text(load_btn, "Load shader (Ctrl+O)");
+    gtk_widget_set_margin_start(load_btn, BUTTON_MARGIN);
+    gtk_widget_set_margin_end(load_btn, BUTTON_MARGIN);
 
     GtkWidget *save_btn = gtk_button_new_with_label("💾 Save");
     gtk_widget_set_tooltip_text(save_btn, "Save shader (Ctrl+S)");
+    gtk_widget_set_margin_start(save_btn, BUTTON_MARGIN);
+    gtk_widget_set_margin_end(save_btn, BUTTON_MARGIN);
 
     GtkWidget *apply_btn = gtk_button_new_with_label("▶ Apply");
     gtk_widget_set_tooltip_text(apply_btn, "Apply to wallpaper (Ctrl+Enter)");
+    gtk_widget_set_margin_start(apply_btn, BUTTON_MARGIN);
+    gtk_widget_set_margin_end(apply_btn, BUTTON_MARGIN);
+    /* Style as suggested action */
+    GtkStyleContext *apply_ctx = gtk_widget_get_style_context(apply_btn);
+    gtk_style_context_add_class(apply_ctx, "suggested-action");
 
-    GtkWidget *reset_btn = gtk_button_new_with_label("⟲");
+    GtkWidget *reset_btn = gtk_button_new_with_label("🔄 Reset");
     gtk_widget_set_tooltip_text(reset_btn, "Reset shader (Ctrl+R)");
+    gtk_widget_set_margin_start(reset_btn, BUTTON_MARGIN);
+    gtk_widget_set_margin_end(reset_btn, BUTTON_MARGIN);
 
-    GtkWidget *settings_btn = gtk_button_new_with_label("⚙");
+    GtkWidget *settings_btn = gtk_button_new_with_label("⚙️ Settings");
     gtk_widget_set_tooltip_text(settings_btn, "Editor settings");
+    gtk_widget_set_margin_start(settings_btn, BUTTON_MARGIN);
+    gtk_widget_set_margin_end(settings_btn, BUTTON_MARGIN);
 
     /* Manual compile button (hidden by default when auto-compile is on) */
     compile_btn = gtk_button_new_with_label("▶ Compile");
@@ -1363,15 +1484,15 @@ void shader_editor_show(void) {
     g_signal_connect(settings_btn, "clicked", G_CALLBACK(on_settings_clicked), NULL);
 
     gtk_box_pack_start(GTK_BOX(toolbar), compile_btn, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
+    gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, SEPARATOR_SPACING);
     gtk_box_pack_start(GTK_BOX(toolbar), examples_btn, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
+    gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, SEPARATOR_SPACING);
     gtk_box_pack_start(GTK_BOX(toolbar), load_btn, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), save_btn, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
+    gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, SEPARATOR_SPACING);
     gtk_box_pack_start(GTK_BOX(toolbar), apply_btn, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), reset_btn, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
+    gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, SEPARATOR_SPACING);
     gtk_box_pack_start(GTK_BOX(toolbar), settings_btn, FALSE, FALSE, 0);
 
     /* Spacer */
@@ -1417,9 +1538,11 @@ void shader_editor_show(void) {
 
     /* Horizontal paned for editor and preview */
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_set_margin_start(paned, PANED_MARGIN);
+    gtk_widget_set_margin_end(paned, PANED_MARGIN);
+    gtk_widget_set_margin_bottom(paned, PANED_MARGIN);
     gtk_box_pack_start(GTK_BOX(vbox), paned, TRUE, TRUE, 0);
 
-    /* Left pane: Source editor */
     /* Left pane: Editor */
     GtkWidget *editor_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_set_margin_start(editor_box, 2);
@@ -1591,11 +1714,11 @@ void shader_editor_show(void) {
     gtk_box_pack_start(GTK_BOX(vbox), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 0);
 
     /* Status bar */
-    GtkWidget *status_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_margin_start(status_box, 4);
-    gtk_widget_set_margin_end(status_box, 4);
-    gtk_widget_set_margin_top(status_box, 2);
-    gtk_widget_set_margin_bottom(status_box, 2);
+    GtkWidget *status_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, STATUSBAR_SPACING);
+    gtk_widget_set_margin_start(status_box, STATUSBAR_MARGIN_H);
+    gtk_widget_set_margin_end(status_box, STATUSBAR_MARGIN_H);
+    gtk_widget_set_margin_top(status_box, STATUSBAR_MARGIN_V);
+    gtk_widget_set_margin_bottom(status_box, STATUSBAR_MARGIN_V);
 
     status_label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(status_label), "<small>Ready</small>");
@@ -1606,7 +1729,9 @@ void shader_editor_show(void) {
     cursor_label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(cursor_label), "<small>Ln 1, Col 1</small>");
     gtk_widget_set_tooltip_text(cursor_label, "Cursor position");
-    gtk_box_pack_start(GTK_BOX(status_box), cursor_label, FALSE, FALSE, 6);
+    gtk_box_pack_start(GTK_BOX(status_box), cursor_label, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(vbox), status_box, FALSE, FALSE, 0);
 
     /* Add a help icon */
     GtkWidget *help_label = gtk_label_new(NULL);

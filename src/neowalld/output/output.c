@@ -1174,10 +1174,11 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
              config->transition,
              config->duration);
 
-    /* Save old path to check if it changed */
+    /* Save old values to detect changes */
     char old_path[MAX_PATH_LENGTH];
     strncpy(old_path, output->config.path, sizeof(old_path) - 1);
     old_path[sizeof(old_path) - 1] = '\0';
+    float old_duration = output->config.duration;
 
     /* Clean up old resources when switching modes */
     if (output->config.type != config->type) {
@@ -1261,6 +1262,18 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
               inactive,
               output->config.transition,
               output->config.transition_duration);
+
+    /* Reset cycle timer when duration changes to apply new value immediately */
+    if (old_duration != output->config.duration) {
+        output->last_cycle_time = get_time_ms();
+        log_info("Output %s cycle timer reset due to duration change (%.0fs -> %.0fs), cycle=%d",
+                 output->model[0] ? output->model : "unknown",
+                 old_duration, output->config.duration, output->config.cycle);
+    } else {
+        log_debug("Output %s duration unchanged (%.0fs), cycle timer not reset",
+                 output->model[0] ? output->model : "unknown",
+                 output->config.duration);
+    }
 
     /* Deep copy channel_paths array if present */
     output->config.channel_paths = NULL;

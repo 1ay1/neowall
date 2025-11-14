@@ -44,6 +44,14 @@
  *    - What you write is exactly what you get
  * ============================================================================ */
 
+/* File Extension Constants */
+#define EXT_PNG ".png"
+#define EXT_JPG ".jpg"
+#define EXT_JPEG ".jpeg"
+#define EXT_GLSL ".glsl"
+#define EXT_FRAG ".frag"
+#define EXT_FS ".fs"
+
 /* Get default configuration file path */
 const char *config_get_default_path(void) {
     static char path[MAX_PATH_LENGTH];
@@ -189,14 +197,15 @@ static bool has_extension(const char *filename, const char *ext) {
 }
 
 static bool is_image_file(const char *filename) {
-    return has_extension(filename, ".png") ||
-           has_extension(filename, ".jpg") ||
-           has_extension(filename, ".jpeg");
+    return has_extension(filename, EXT_PNG) ||
+           has_extension(filename, EXT_JPG) ||
+           has_extension(filename, EXT_JPEG);
 }
 
 static bool is_shader_file(const char *filename) {
-    return has_extension(filename, ".glsl") ||
-           has_extension(filename, ".frag");
+    return has_extension(filename, EXT_GLSL) ||
+           has_extension(filename, EXT_FRAG) ||
+           has_extension(filename, EXT_FS);
 }
 
 /* Comparison function for qsort */
@@ -2063,6 +2072,8 @@ void config_reload(struct neowall_state *state) {
         output->shader_start_time = 0;
         output->shader_fade_start_time = 0;
         output->last_cycle_time = get_time_ms();  /* Reset cycle timer */
+        log_info("🔄 CYCLE TIMER RESET during config reload for output %s (last_cycle_time=%lu)",
+                 output->model[0] ? output->model : "unknown", output->last_cycle_time);
         output->pending_shader_path[0] = '\0';
 
         log_info("[OK] Cleaned up all GPU resources for output %s",

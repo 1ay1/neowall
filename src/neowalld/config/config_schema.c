@@ -735,11 +735,34 @@ static bool apply_shader_speed(struct neowall_state *state, const char *value) {
 
 static bool apply_output_cycle_interval(struct output_state *output, const char *value) {
     int64_t interval;
-    if (!config_parse_int(value, &interval)) return false;
+    if (!config_parse_int(value, &interval)) {
+        log_error("Failed to parse cycle interval value: %s", value);
+        return false;
+    }
+
+    /* Store old duration to detect changes */
+    float old_duration = output->config.duration;
+    uint64_t old_last_cycle_time = output->last_cycle_time;
+    uint64_t now = get_time_ms();
+
+    log_info("apply_output_cycle_interval called: output=%s, old_duration=%.0fs, new_interval=%ld, old_last_cycle_time=%lu, now=%lu",
+             output->connector_name, old_duration, interval, old_last_cycle_time, now);
 
     output->config.duration = (float)interval;
-    log_info("Output %s cycle interval set to %ld seconds",
-             output->connector_name, interval);
+
+    /* Reset cycle timer when duration changes to apply new value immediately */
+    if (old_duration != output->config.duration) {
+        output->last_cycle_time = now;
+        log_info("✓ Output %s cycle timer RESET: duration changed %.0fs -> %.0fs, last_cycle_time %lu -> %lu",
+                 output->connector_name, old_duration, output->config.duration,
+                 old_last_cycle_time, output->last_cycle_time);
+    } else {
+        log_debug("Output %s duration unchanged (%.0fs), cycle timer NOT reset",
+                 output->connector_name, output->config.duration);
+    }
+
+    log_info("Output %s cycle interval set to %ld seconds (cycle=%d, cycle_count=%zu)",
+             output->connector_name, interval, output->config.cycle, output->config.cycle_count);
     return true;
 }
 

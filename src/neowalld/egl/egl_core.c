@@ -14,6 +14,12 @@
  * EGL Core Dispatch System - Simplified for compilation
  */
 
+/* EGL Configuration Constants */
+#define EGL_COLOR_COMPONENT_SIZE 8
+#define EGL_CONTEXT_ES3_MAJOR_VERSION 3
+#define EGL_CONTEXT_ES3_MINOR_VERSION 0
+#define EGL_CONTEXT_ES2_VERSION 2
+
 const char *egl_error_string(EGLint error) {
     switch (error) {
         case EGL_SUCCESS: return "Success";
@@ -47,6 +53,62 @@ bool egl_check_error(const char *context) {
     return false;
 }
 
+/* Helper: Create EGL config attributes */
+static void create_config_attribs_es3(EGLint *attribs) {
+    attribs[0] = EGL_SURFACE_TYPE;
+    attribs[1] = EGL_WINDOW_BIT;
+    attribs[2] = EGL_RENDERABLE_TYPE;
+    attribs[3] = EGL_OPENGL_ES3_BIT;
+    attribs[4] = EGL_RED_SIZE;
+    attribs[5] = EGL_COLOR_COMPONENT_SIZE;
+    attribs[6] = EGL_GREEN_SIZE;
+    attribs[7] = EGL_COLOR_COMPONENT_SIZE;
+    attribs[8] = EGL_BLUE_SIZE;
+    attribs[9] = EGL_COLOR_COMPONENT_SIZE;
+    attribs[10] = EGL_ALPHA_SIZE;
+    attribs[11] = EGL_COLOR_COMPONENT_SIZE;
+    attribs[12] = EGL_NONE;
+}
+
+static void create_config_attribs_es2(EGLint *attribs) {
+    attribs[0] = EGL_SURFACE_TYPE;
+    attribs[1] = EGL_WINDOW_BIT;
+    attribs[2] = EGL_RENDERABLE_TYPE;
+    attribs[3] = EGL_OPENGL_ES2_BIT;
+    attribs[4] = EGL_RED_SIZE;
+    attribs[5] = EGL_COLOR_COMPONENT_SIZE;
+    attribs[6] = EGL_GREEN_SIZE;
+    attribs[7] = EGL_COLOR_COMPONENT_SIZE;
+    attribs[8] = EGL_BLUE_SIZE;
+    attribs[9] = EGL_COLOR_COMPONENT_SIZE;
+    attribs[10] = EGL_ALPHA_SIZE;
+    attribs[11] = EGL_COLOR_COMPONENT_SIZE;
+    attribs[12] = EGL_NONE;
+}
+
+/* Helper: Create ES3 context attributes */
+static void create_context_attribs_es3(EGLint *attribs) {
+    attribs[0] = EGL_CONTEXT_MAJOR_VERSION;
+    attribs[1] = EGL_CONTEXT_ES3_MAJOR_VERSION;
+    attribs[2] = EGL_CONTEXT_MINOR_VERSION;
+    attribs[3] = EGL_CONTEXT_ES3_MINOR_VERSION;
+    attribs[4] = EGL_NONE;
+}
+
+/* Helper: Create ES2 context attributes */
+static void create_context_attribs_es2(EGLint *attribs) {
+    attribs[0] = EGL_CONTEXT_CLIENT_VERSION;
+    attribs[1] = EGL_CONTEXT_ES2_VERSION;
+    attribs[2] = EGL_NONE;
+}
+
+/* Helper: Cleanup EGL resources on failure */
+static void cleanup_egl_display(EGLDisplay display) {
+    if (display != EGL_NO_DISPLAY) {
+        eglTerminate(display);
+    }
+}
+
 /* Simple implementation - uses new modular system */
 bool egl_core_init(struct neowall_state *state) {
     if (!state || !state->display) {
@@ -75,7 +137,7 @@ bool egl_core_init(struct neowall_state *state) {
     /* Bind OpenGL ES API */
     if (!eglBindAPI(EGL_OPENGL_ES_API)) {
         log_error("Failed to bind OpenGL ES API");
-        eglTerminate(state->egl_display);
+        cleanup_egl_display(state->egl_display);
         return false;
     }
 
@@ -83,25 +145,10 @@ bool egl_core_init(struct neowall_state *state) {
     egl_detect_capabilities(state->egl_display, &state->gl_caps);
 
     /* Try ES 3.0 first, then ES 2.0 */
-    const EGLint config_attribs_es3[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-        EGL_RED_SIZE, 8,
-        EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE, 8,
-        EGL_ALPHA_SIZE, 8,
-        EGL_NONE
-    };
-
-    const EGLint config_attribs_es2[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-        EGL_RED_SIZE, 8,
-        EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE, 8,
-        EGL_ALPHA_SIZE, 8,
-        EGL_NONE
-    };
+    EGLint config_attribs_es3[13];
+    EGLint config_attribs_es2[13];
+    create_config_attribs_es3(config_attribs_es3);
+    create_config_attribs_es2(config_attribs_es2);
 
     EGLint num_configs;
     bool using_es3 = false;
@@ -109,11 +156,8 @@ bool egl_core_init(struct neowall_state *state) {
     /* Try ES 3.0 */
     if (eglChooseConfig(state->egl_display, config_attribs_es3,
                         &state->egl_config, 1, &num_configs) && num_configs > 0) {
-        const EGLint context_attribs_es3[] = {
-            EGL_CONTEXT_MAJOR_VERSION, 3,
-            EGL_CONTEXT_MINOR_VERSION, 0,
-            EGL_NONE
-        };
+        EGLint context_attribs_es3[5];
+        create_context_attribs_es3(context_attribs_es3);
 
         state->egl_context = eglCreateContext(state->egl_display,
                                              state->egl_config,
@@ -133,14 +177,12 @@ bool egl_core_init(struct neowall_state *state) {
         if (!eglChooseConfig(state->egl_display, config_attribs_es2,
                             &state->egl_config, 1, &num_configs) || num_configs == 0) {
             log_error("No suitable EGL configs found");
-            eglTerminate(state->egl_display);
+            cleanup_egl_display(state->egl_display);
             return false;
         }
 
-        const EGLint context_attribs_es2[] = {
-            EGL_CONTEXT_CLIENT_VERSION, 2,
-            EGL_NONE
-        };
+        EGLint context_attribs_es2[3];
+        create_context_attribs_es2(context_attribs_es2);
 
         state->egl_context = eglCreateContext(state->egl_display,
                                              state->egl_config,

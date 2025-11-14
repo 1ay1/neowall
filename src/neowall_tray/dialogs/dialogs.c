@@ -24,6 +24,14 @@
 #define LOGO_PATH "/usr/share/pixmaps/neowall.svg"
 #define ICON_PATH "/usr/share/pixmaps/neowall-icon.svg"
 
+/* Dialog timing constants (milliseconds) */
+#define DIALOG_AUTO_CLOSE_SHORT 1000
+#define DIALOG_AUTO_CLOSE_MEDIUM 1500
+#define DIALOG_AUTO_CLOSE_LONG 2000
+#define DIALOG_CHECK_INTERVAL 500
+#define DIALOG_BORDER_WIDTH 12
+#define DIALOG_CONTENT_MARGIN 16
+
 
 
 /* Show the daemon status dialog with detailed information */
@@ -40,19 +48,41 @@ void dialog_show_about(void) {
     about_dialog_show();
 }
 
+/* Helper: Configure basic dialog properties */
+static void configure_dialog_base(GtkWidget *dialog) {
+    ui_utils_set_window_icon(GTK_WINDOW(dialog));
+    gtk_window_set_resizable(GTK_WINDOW(dialog), FALSE);
+}
+
+/* Helper: Add padding to dialog content area */
+static void add_dialog_padding(GtkWidget *dialog) {
+    GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    gtk_container_set_border_width(GTK_CONTAINER(content_area), DIALOG_BORDER_WIDTH);
+}
+
 /* Show a confirmation dialog for stopping the daemon */
 gint dialog_confirm_stop_daemon(void) {
     GtkWidget *dialog = gtk_message_dialog_new(
         NULL,
-        GTK_DIALOG_MODAL,
+        GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
         GTK_MESSAGE_QUESTION,
-        GTK_BUTTONS_YES_NO,
-        "Stop NeoWall Daemon?"
+        GTK_BUTTONS_NONE,
+        "🛑 Stop NeoWall Daemon?"
     );
 
-    ui_utils_set_window_icon(GTK_WINDOW(dialog));
+    configure_dialog_base(dialog);
+
     gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog),
         "This will stop the wallpaper daemon. The tray will remain open.");
+
+    /* Add custom buttons with better styling */
+    GtkWidget *cancel_btn = gtk_dialog_add_button(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_NO);
+    GtkWidget *stop_btn = gtk_dialog_add_button(GTK_DIALOG(dialog), "Stop Daemon", GTK_RESPONSE_YES);
+
+    /* Style the stop button as destructive */
+    GtkStyleContext *context = gtk_widget_get_style_context(stop_btn);
+    gtk_style_context_add_class(context, "destructive-action");
+    (void)cancel_btn;
 
     gint result = gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
@@ -64,17 +94,20 @@ gint dialog_confirm_stop_daemon(void) {
 void dialog_show_error(const char *title, const char *message) {
     GtkWidget *dialog = gtk_message_dialog_new(
         NULL,
-        GTK_DIALOG_MODAL,
+        GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
         GTK_MESSAGE_ERROR,
         GTK_BUTTONS_OK,
         "%s",
-        title ? title : "Error"
+        title ? title : "❌ Error"
     );
 
-    ui_utils_set_window_icon(GTK_WINDOW(dialog));
+    configure_dialog_base(dialog);
+
     if (message) {
         gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", message);
     }
+
+    add_dialog_padding(dialog);
 
     gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
@@ -106,13 +139,17 @@ void dialog_show_info(const char *title, const char *message, guint auto_close_m
         GTK_MESSAGE_INFO,
         GTK_BUTTONS_NONE,  /* No buttons for auto-close dialogs */
         "%s",
-        title ? title : "Information"
+        title ? title : "ℹ️ Information"
     );
 
-    ui_utils_set_window_icon(GTK_WINDOW(dialog));
+    configure_dialog_base(dialog);
+    gtk_window_set_position(GTK_WINDOW(dialog), GTK_WIN_POS_CENTER);
+
     if (message) {
         gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", message);
     }
+
+    add_dialog_padding(dialog);
 
     gtk_widget_show_all(dialog);
 
@@ -126,17 +163,20 @@ void dialog_show_info(const char *title, const char *message, guint auto_close_m
 void dialog_show_warning(const char *title, const char *message) {
     GtkWidget *dialog = gtk_message_dialog_new(
         NULL,
-        GTK_DIALOG_MODAL,
+        GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
         GTK_MESSAGE_WARNING,
         GTK_BUTTONS_OK,
         "%s",
-        title ? title : "Warning"
+        title ? title : "⚠️ Warning"
     );
 
-    ui_utils_set_window_icon(GTK_WINDOW(dialog));
+    configure_dialog_base(dialog);
+
     if (message) {
         gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", message);
     }
+
+    add_dialog_padding(dialog);
 
     gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
@@ -204,15 +244,28 @@ GtkWidget *dialog_show_progress_auto_close(const char *title, const char *messag
         GTK_MESSAGE_INFO,
         GTK_BUTTONS_NONE,
         "%s",
-        title ? title : "Progress"
+        title ? title : "⏳ Progress"
     );
 
-    ui_utils_set_window_icon(GTK_WINDOW(dialog));
+    configure_dialog_base(dialog);
+    gtk_window_set_position(GTK_WINDOW(dialog), GTK_WIN_POS_CENTER);
+    gtk_window_set_type_hint(GTK_WINDOW(dialog), GDK_WINDOW_TYPE_HINT_DIALOG);
+
     if (message) {
         gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s", message);
     }
 
-    gtk_widget_show_all(dialog);
+    /* Add padding and better styling */
+    GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    gtk_container_set_border_width(GTK_CONTAINER(content_area), DIALOG_CONTENT_MARGIN);
+
+    /* Add a spinner to show progress */
+    GtkWidget *spinner = gtk_spinner_new();
+    gtk_spinner_start(GTK_SPINNER(spinner));
+    gtk_widget_set_margin_top(spinner, 12);
+    gtk_widget_set_margin_bottom(spinner, 12);
+    gtk_box_pack_start(GTK_BOX(content_area), spinner, FALSE, FALSE, 0);
+
     /* Create data structure for timer callback */
     ProgressDialogData *data = g_malloc0(sizeof(ProgressDialogData));
     data->dialog = dialog;
@@ -227,7 +280,7 @@ GtkWidget *dialog_show_progress_auto_close(const char *title, const char *messag
 
     /* Start timer to check for completion */
     if (check_callback) {
-        data->check_timer_id = g_timeout_add(500, progress_check_timer, data);  /* Check every 500ms */
+        data->check_timer_id = g_timeout_add(DIALOG_CHECK_INTERVAL, progress_check_timer, data);
     }
 
     return dialog;
