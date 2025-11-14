@@ -59,14 +59,35 @@ add_project_arguments('-D_DEFAULT_SOURCE', language: 'c')
 # Compiler
 cc = meson.get_compiler('c')
 
-# Dependencies - Required
-wayland_client = dependency('wayland-client', version: '>=1.20')
-wayland_egl = dependency('wayland-egl')
-wayland_protocols = dependency('wayland-protocols', version: '>=1.25')
-egl = dependency('egl')
-glesv2 = dependency('glesv2')
+# Dependencies - Always required
 threads = dependency('threads')
 libm = cc.find_library('m', required: true)
+
+# Backend-specific dependencies (only for neowalld)
+# Check if we're building the daemon
+build_daemon = get_option('build-daemon')
+
+if build_daemon
+  wayland_client = dependency('wayland-client', version: '>=1.20')
+  wayland_egl = dependency('wayland-egl')
+  wayland_protocols = dependency('wayland-protocols', version: '>=1.25')
+  egl = dependency('egl')
+  glesv2 = dependency('glesv2')
+else
+  # Dummy variables for when daemon is not built
+  wayland_client = disabler()
+  wayland_egl = disabler()
+  wayland_protocols = disabler()
+  egl = disabler()
+  glesv2 = dependency('glesv2', required: false)
+  if not glesv2.found()
+    # Fallback to OpenGL for non-Wayland platforms
+    glesv2 = dependency('gl', required: false)
+  endif
+  if not glesv2.found()
+    warning('OpenGL ES or OpenGL not found - shader editor will not work')
+  endif
+endif
 
 # Dependencies - Optional
 libpng = dependency('libpng', required: false)
@@ -80,58 +101,60 @@ if libjpeg.found()
   add_project_arguments('-DHAVE_JPEG', language: 'c')
 endif
 
-# Wayland scanner
-wayland_scanner = find_program('wayland-scanner')
-wl_protocol_dir = wayland_protocols.get_variable(pkgconfig: 'pkgdatadir')
-
-# Protocol generation
-wayland_scanner_code = generator(
-  wayland_scanner,
-  output: '@BASENAME@-client-protocol.c',
-  arguments: ['private-code', '@INPUT@', '@OUTPUT@']
-)
-
-wayland_scanner_client = generator(
-  wayland_scanner,
-  output: '@BASENAME@-client-protocol.h',
-  arguments: ['client-header', '@INPUT@', '@OUTPUT@']
-)
-
-# Protocols
-protocol_files = [
-  'protocols/plasma-shell.xml',
-  'protocols/tearing-control-v1.xml',
-]
-
-# Generate stable protocols from wayland-protocols
-xdg_shell_xml = join_paths(wl_protocol_dir, 'stable/xdg-shell/xdg-shell.xml')
-viewporter_xml = join_paths(wl_protocol_dir, 'stable/viewporter/viewporter.xml')
-
-# Generate unstable protocols
-xdg_output_xml = join_paths(wl_protocol_dir, 'unstable/xdg-output/xdg-output-unstable-v1.xml')
-wlr_layer_shell_xml = 'protocols/wlr-layer-shell-unstable-v1.xml'
-
-# Check if wlr-layer-shell exists locally, otherwise skip
-fs = import('fs')
-if not fs.exists(wlr_layer_shell_xml)
-  warning('wlr-layer-shell-unstable-v1.xml not found in protocols/, layer-shell support may be limited')
-  wlr_layer_shell_xml = ''
-endif
-
-# Collect all protocol XMLs
-all_protocols = protocol_files + [xdg_shell_xml, viewporter_xml, xdg_output_xml]
-if wlr_layer_shell_xml != ''
-  all_protocols += [wlr_layer_shell_xml]
-endif
-
-# Generate protocol sources
+# Wayland protocols (only if building daemon)
 proto_sources = []
 proto_headers = []
 
-foreach xml : all_protocols
-  proto_sources += wayland_scanner_code.process(xml)
-  proto_headers += wayland_scanner_client.process(xml)
-endforeach
+if build_daemon
+  wayland_scanner = find_program('wayland-scanner')
+  wl_protocol_dir = wayland_protocols.get_variable(pkgconfig: 'pkgdatadir')
+
+  # Protocol generation
+  wayland_scanner_code = generator(
+    wayland_scanner,
+    output: '@BASENAME@-client-protocol.c',
+    arguments: ['private-code', '@INPUT@', '@OUTPUT@']
+  )
+
+  wayland_scanner_client = generator(
+    wayland_scanner,
+    output: '@BASENAME@-client-protocol.h',
+    arguments: ['client-header', '@INPUT@', '@OUTPUT@']
+  )
+
+  # Protocols
+  protocol_files = [
+    'protocols/plasma-shell.xml',
+    'protocols/tearing-control-v1.xml',
+  ]
+
+  # Generate stable protocols from wayland-protocols
+  xdg_shell_xml = join_paths(wl_protocol_dir, 'stable/xdg-shell/xdg-shell.xml')
+  viewporter_xml = join_paths(wl_protocol_dir, 'stable/viewporter/viewporter.xml')
+
+  # Generate unstable protocols
+  xdg_output_xml = join_paths(wl_protocol_dir, 'unstable/xdg-output/xdg-output-unstable-v1.xml')
+  wlr_layer_shell_xml = 'protocols/wlr-layer-shell-unstable-v1.xml'
+
+  # Check if wlr-layer-shell exists locally, otherwise skip
+  fs = import('fs')
+  if not fs.exists(wlr_layer_shell_xml)
+    warning('wlr-layer-shell-unstable-v1.xml not found in protocols/, layer-shell support may be limited')
+    wlr_layer_shell_xml = ''
+  endif
+
+  # Collect all protocol XMLs
+  all_protocols = protocol_files + [xdg_shell_xml, viewporter_xml, xdg_output_xml]
+  if wlr_layer_shell_xml != ''
+    all_protocols += [wlr_layer_shell_xml]
+  endif
+
+  # Generate protocol sources
+  foreach xml : all_protocols
+    proto_sources += wayland_scanner_code.process(xml)
+    proto_headers += wayland_scanner_client.process(xml)
+  endforeach
+endif
 
 # Include directories (add builddir for generated headers)
 inc_dirs = [
@@ -145,25 +168,43 @@ run_command('mkdir', '-p', meson.project_build_root() / 'bin', check: false)
 # Subdirectories
 subdir('src/shader_lib')
 subdir('src/ipc')
-subdir('src/neowalld')
+if build_daemon
+  subdir('src/neowalld')
+  subdir('data')
+endif
 subdir('src/neowall')
 subdir('src/neowall_tray')
-subdir('data')
 
 # Summary
-summary({
+summary_config = {
   'Version': project_version,
   'C Compiler': cc.get_id(),
-  'Wayland': wayland_client.version(),
-  'EGL': egl.version(),
-  'OpenGL ES': glesv2.version(),
   'PNG support': libpng.found(),
   'JPEG support': libjpeg.found(),
-}, section: 'Configuration')
+}
 
-summary({
-  'Daemon': 'neowalld',
+if build_daemon
+  summary_config += {
+    'Wayland': wayland_client.version(),
+    'EGL': egl.version(),
+    'OpenGL ES': glesv2.version(),
+  }
+else
+  summary_config += {
+    'OpenGL': glesv2.found() ? 'found' : 'not found',
+  }
+endif
+
+summary(summary_config, section: 'Configuration')
+
+binaries_built = {
   'Client': 'neowall',
   'System Tray': 'neowall_tray',
-  'IPC': 'Unix domain sockets (JSON)',
-}, section: 'Binaries')
+}
+
+if build_daemon
+  binaries_built = {'Daemon': 'neowalld'} + binaries_built
+  binaries_built += {'IPC': 'Unix domain sockets (JSON)'}
+endif
+
+summary(binaries_built, section: 'Binaries')

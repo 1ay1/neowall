@@ -3,8 +3,15 @@
 
 # GTK3 and AppIndicator dependencies
 gtk3 = dependency('gtk+-3.0', version: '>=3.22', required: true)
-appindicator3 = dependency('appindicator3-0.1', required: true)
 gtksourceview = dependency('gtksourceview-3.0', required: true)
+
+# AppIndicator is Linux-specific (uses D-Bus and libdbusmenu)
+# On other platforms, we'll use a simple GtkStatusIcon fallback
+appindicator3 = dependency('appindicator3-0.1', required: false)
+if not appindicator3.found()
+  warning('AppIndicator not found - system tray will use fallback implementation')
+  add_project_arguments('-DNO_APPINDICATOR', language: 'c')
+endif
 
 
 
@@ -42,11 +49,17 @@ tray_sources = [
 # Include directories
 tray_inc = include_directories('.')
 
+# Collect dependencies
+tray_deps = [gtk3, gtksourceview, shader_lib_dep]
+if appindicator3.found()
+  tray_deps += [appindicator3]
+endif
+
 # Build executable
 neowall_tray = executable(
   'neowall_tray',
   tray_sources,
-  dependencies: [gtk3, appindicator3, gtksourceview, glesv2, shader_lib_dep],
+  dependencies: tray_deps,
   include_directories: [tray_inc, inc_dirs, include_directories('../shader_lib')],
   install: true,
   install_dir: get_option('bindir'),
