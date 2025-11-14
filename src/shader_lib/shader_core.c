@@ -1486,6 +1486,17 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
                                                 log_debug("  -> Detected vec3 (contains vec3-like pattern)");
                                                 is_vec3 = true;
                                             }
+                                            /* Check for common vec3 arithmetic patterns */
+                                            if (!is_vec3 && (strchr(coord_expr, '+') || strchr(coord_expr, '-') || strchr(coord_expr, '*'))) {
+                                                /* Contains arithmetic - likely vec3 if it has common vec3 variable names */
+                                                if (strstr(coord_expr, " u") || strstr(coord_expr, "u*") || strstr(coord_expr, "u+") || strstr(coord_expr, "u-") ||
+                                                    strstr(coord_expr, " o") || strstr(coord_expr, "o*") || strstr(coord_expr, "o+") || strstr(coord_expr, "o-") ||
+                                                    strstr(coord_expr, " p") || strstr(coord_expr, "p*") || strstr(coord_expr, "p+") || strstr(coord_expr, "p-") ||
+                                                    strstr(coord_expr, "ray") || strstr(coord_expr, "dir") || strstr(coord_expr, "pos")) {
+                                                    log_debug("  -> Detected vec3 (arithmetic with vec3-like variables)");
+                                                    is_vec3 = true;
+                                                }
+                                            }
                                         }
                                     }
 
