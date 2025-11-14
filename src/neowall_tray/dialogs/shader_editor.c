@@ -1240,29 +1240,46 @@ void shader_editor_show(void) {
     GtkCssProvider *css_provider = gtk_css_provider_new();
     const char *css_data =
         "button {"
-        "  padding: 4px 12px;"
-        "  min-height: 28px;"
+        "  padding: 2px 8px;"
+        "  min-height: 24px;"
+        "  font-size: 12px;"
+        "  margin: 0 2px;"
+        "}"
+        "button label {"
+        "  font-size: 11px;"
+        "}"
+        "combobox {"
+        "  font-size: 11px;"
         "}"
         "combobox button {"
-        "  padding: 2px 8px;"
-        "  min-height: 28px;"
+        "  padding: 2px 6px;"
+        "  min-height: 24px;"
+        "}"
+        "spinbutton {"
+        "  font-size: 11px;"
         "}"
         "label {"
-        "  font-size: 13px;"
+        "  font-size: 12px;"
         "}"
         "toolbar {"
-        "  padding: 4px;"
+        "  padding: 3px 6px;"
         "  background: linear-gradient(to bottom, #f5f5f5, #e8e8e8);"
         "  border-bottom: 1px solid #ccc;"
+        "  min-height: 32px;"
         "}"
         "statusbar {"
         "  background: #2c2c2c;"
         "  color: #e8e8e8;"
-        "  padding: 6px 8px;"
+        "  padding: 4px 8px;"
+        "  font-size: 11px;"
         "}"
         ".fps-label {"
         "  color: #4CAF50;"
         "  font-weight: bold;"
+        "  font-size: 11px;"
+        "}"
+        "separator {"
+        "  margin: 0 4px;"
         "}";
 
         gtk_css_provider_load_from_data(css_provider, css_data, -1, NULL);
@@ -1287,19 +1304,19 @@ void shader_editor_show(void) {
 
     /* Buttons with tooltips */
     GtkWidget *load_btn = gtk_button_new_with_label("📂 Load");
-    gtk_widget_set_tooltip_text(load_btn, "Load shader from file (Ctrl+O)");
+    gtk_widget_set_tooltip_text(load_btn, "Load shader (Ctrl+O)");
 
     GtkWidget *save_btn = gtk_button_new_with_label("💾 Save");
-    gtk_widget_set_tooltip_text(save_btn, "Save shader to file (Ctrl+S)");
+    gtk_widget_set_tooltip_text(save_btn, "Save shader (Ctrl+S)");
 
-    GtkWidget *apply_btn = gtk_button_new_with_label("⚡ Apply");
-    gtk_widget_set_tooltip_text(apply_btn, "Apply shader to wallpaper (Ctrl+Enter)");
+    GtkWidget *apply_btn = gtk_button_new_with_label("▶ Apply");
+    gtk_widget_set_tooltip_text(apply_btn, "Apply to wallpaper (Ctrl+Enter)");
 
-    GtkWidget *reset_btn = gtk_button_new_with_label("↻ Reset");
-    gtk_widget_set_tooltip_text(reset_btn, "Reset to default shader (Ctrl+R)");
+    GtkWidget *reset_btn = gtk_button_new_with_label("⟲");
+    gtk_widget_set_tooltip_text(reset_btn, "Reset shader (Ctrl+R)");
 
-    GtkWidget *settings_btn = gtk_button_new_with_label("⚙ Settings");
-    gtk_widget_set_tooltip_text(settings_btn, "Configure editor settings");
+    GtkWidget *settings_btn = gtk_button_new_with_label("⚙");
+    gtk_widget_set_tooltip_text(settings_btn, "Editor settings");
 
     /* Manual compile button (hidden by default when auto-compile is on) */
     compile_btn = gtk_button_new_with_label("▶ Compile");
@@ -1391,18 +1408,11 @@ void shader_editor_show(void) {
 
     /* FPS Counter */
     fps_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(fps_label), "<small>--.- FPS</small>");
-    gtk_widget_set_tooltip_text(fps_label, "Frames per second and compilation time");
+    gtk_label_set_markup(GTK_LABEL(fps_label), "<small>-- FPS</small>");
+    gtk_widget_set_tooltip_text(fps_label, "Preview performance");
     GtkStyleContext *fps_context = gtk_widget_get_style_context(fps_label);
     gtk_style_context_add_class(fps_context, "fps-label");
-    gtk_box_pack_start(GTK_BOX(toolbar), fps_label, FALSE, FALSE, 8);
-
-    /* Info label */
-    GtkWidget *info_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(info_label),
-        "<small><b>⚡ Live Preview</b></small>");
-    gtk_widget_set_tooltip_text(info_label, "Changes compile automatically");
-    gtk_box_pack_start(GTK_BOX(toolbar), info_label, FALSE, FALSE, 8);
+    gtk_box_pack_start(GTK_BOX(toolbar), fps_label, FALSE, FALSE, 6);
 
     /* Separator */
     gtk_box_pack_start(GTK_BOX(vbox), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 0);
@@ -1422,7 +1432,7 @@ void shader_editor_show(void) {
     GtkWidget *editor_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 
     GtkWidget *editor_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(editor_label), "<b>📝 Shader Code (GLSL)</b>");
+    gtk_label_set_markup(GTK_LABEL(editor_label), "<b>Shader Code</b>");
     gtk_widget_set_halign(editor_label, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(editor_header), editor_label, FALSE, FALSE, 0);
 
@@ -1431,7 +1441,7 @@ void shader_editor_show(void) {
 
     GtkWidget *shortcuts_label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(shortcuts_label),
-        "<small><i>Ctrl+S: Save | Ctrl+Enter: Apply</i></small>");
+        "<small><span alpha='60%'>Ctrl+S: Save  •  Ctrl+Enter: Apply</span></small>");
     gtk_widget_set_halign(shortcuts_label, GTK_ALIGN_END);
     gtk_box_pack_start(GTK_BOX(editor_header), shortcuts_label, FALSE, FALSE, 0);
 
@@ -1521,45 +1531,41 @@ void shader_editor_show(void) {
     gtk_widget_set_margin_top(preview_box, 4);
     gtk_widget_set_margin_bottom(preview_box, 4);
 
-    GtkWidget *preview_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *preview_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 
     GtkWidget *preview_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(preview_label), "<b>👁 Live Preview</b>");
+    gtk_label_set_markup(GTK_LABEL(preview_label), "<b>Preview</b>");
     gtk_widget_set_halign(preview_label, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(preview_header), preview_label, FALSE, FALSE, 0);
+
+    /* Pause/Resume button */
+    GtkWidget *pause_btn = gtk_toggle_button_new_with_label("⏸");
+    gtk_widget_set_tooltip_text(pause_btn, "Pause/Resume (Space)");
+    g_signal_connect(pause_btn, "toggled", G_CALLBACK(on_pause_toggled), NULL);
+    gtk_box_pack_start(GTK_BOX(preview_header), pause_btn, FALSE, FALSE, 2);
+
+    /* Reset time button */
+    GtkWidget *reset_time_btn = gtk_button_new_with_label("⟲");
+    gtk_widget_set_tooltip_text(reset_time_btn, "Reset time");
+    g_signal_connect(reset_time_btn, "clicked", G_CALLBACK(on_reset_time_clicked), NULL);
+    gtk_box_pack_start(GTK_BOX(preview_header), reset_time_btn, FALSE, FALSE, 2);
 
     GtkWidget *preview_spacer = gtk_label_new("");
     gtk_box_pack_start(GTK_BOX(preview_header), preview_spacer, TRUE, TRUE, 0);
 
-    /* Pause/Resume button */
-    GtkWidget *pause_btn = gtk_toggle_button_new_with_label("⏸ Pause");
-    gtk_widget_set_tooltip_text(pause_btn, "Pause/Resume shader animation");
-    g_signal_connect(pause_btn, "toggled", G_CALLBACK(on_pause_toggled), NULL);
-    gtk_box_pack_start(GTK_BOX(preview_header), pause_btn, FALSE, FALSE, 4);
-
-    /* Reset time button */
-    GtkWidget *reset_time_btn = gtk_button_new_with_label("↻ Reset");
-    gtk_widget_set_tooltip_text(reset_time_btn, "Reset shader time to 0");
-    g_signal_connect(reset_time_btn, "clicked", G_CALLBACK(on_reset_time_clicked), NULL);
-    gtk_box_pack_start(GTK_BOX(preview_header), reset_time_btn, FALSE, FALSE, 4);
-
     /* Zoom control */
-    GtkWidget *zoom_label = gtk_label_new("Zoom:");
+    GtkWidget *zoom_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(zoom_label), "<small>Zoom:</small>");
     gtk_box_pack_start(GTK_BOX(preview_header), zoom_label, FALSE, FALSE, 0);
 
     GtkWidget *zoom_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0.5, 3.0, 0.1);
     gtk_scale_set_value_pos(GTK_SCALE(zoom_scale), GTK_POS_RIGHT);
+    gtk_scale_set_draw_value(GTK_SCALE(zoom_scale), FALSE);
     gtk_range_set_value(GTK_RANGE(zoom_scale), preview_zoom);
-    gtk_widget_set_size_request(zoom_scale, 100, -1);
-    gtk_widget_set_tooltip_text(zoom_scale, "Zoom preview (0.5x - 3.0x)");
+    gtk_widget_set_size_request(zoom_scale, 80, -1);
+    gtk_widget_set_tooltip_text(zoom_scale, "Zoom: 0.5x - 3.0x");
     g_signal_connect(zoom_scale, "value-changed", G_CALLBACK(on_zoom_changed), NULL);
-    gtk_box_pack_start(GTK_BOX(preview_header), zoom_scale, FALSE, FALSE, 6);
-
-    GtkWidget *res_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(res_label), "<small><i>Auto-resize</i></small>");
-    gtk_widget_set_halign(res_label, GTK_ALIGN_END);
-    gtk_widget_set_tooltip_text(res_label, "Preview updates in real-time as you type");
-    gtk_box_pack_start(GTK_BOX(preview_header), res_label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(preview_header), zoom_scale, FALSE, FALSE, 4);
 
     gtk_box_pack_start(GTK_BOX(preview_box), preview_header, FALSE, FALSE, 0);
 
@@ -1594,7 +1600,7 @@ void shader_editor_show(void) {
     gtk_widget_set_margin_bottom(status_box, 4);
 
     status_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(status_label), "<small>✓ Ready - Edit shader and see live preview!</small>");
+    gtk_label_set_markup(GTK_LABEL(status_label), "<small>Ready</small>");
     gtk_widget_set_halign(status_label, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(status_box), status_label, TRUE, TRUE, 0);
 
@@ -1602,12 +1608,12 @@ void shader_editor_show(void) {
     cursor_label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(cursor_label), "<small>Ln 1, Col 1</small>");
     gtk_widget_set_tooltip_text(cursor_label, "Cursor position");
-    gtk_box_pack_start(GTK_BOX(status_box), cursor_label, FALSE, FALSE, 8);
+    gtk_box_pack_start(GTK_BOX(status_box), cursor_label, FALSE, FALSE, 6);
 
     /* Add a help icon */
     GtkWidget *help_label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(help_label),
-        "<small>💡 <i>Tip: Use Shadertoy-compatible GLSL code</i></small>");
+        "<small><span alpha='60%'>💡 Shadertoy-compatible GLSL</span></small>");
     gtk_widget_set_halign(help_label, GTK_ALIGN_END);
     gtk_box_pack_start(GTK_BOX(status_box), help_label, FALSE, FALSE, 0);
 
