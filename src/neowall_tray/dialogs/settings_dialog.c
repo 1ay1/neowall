@@ -788,7 +788,7 @@ static gboolean apply_scope_settings(ScopeSettings *scope, char *error_msg, size
 
     /* Set shader speed if changed (LIVE TYPES ONLY) */
     if (success && is_live_type(type_index) && fabs(speed - scope->original_speed) > 0.01) {
-        snprintf(cmd, sizeof(cmd), "set-config \"%s.shader_speed\" \"%.2f\"", scope->scope, speed);
+        snprintf(cmd, sizeof(cmd), "set-speed {\"speed\":\"%.2f\"}", speed);
         if (command_execute(cmd)) {
             changes_applied++;
         } else {

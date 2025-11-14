@@ -14,6 +14,8 @@
 #include <stdint.h>
 #include <time.h>
 #include <unistd.h>
+#include <ctype.h>
+#include <stdlib.h>
 
 /* Forward declarations of command handlers */
 static command_result_t cmd_next(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
@@ -22,6 +24,7 @@ static command_result_t cmd_cycle_pause(struct neowall_state *state, const ipc_r
 static command_result_t cmd_cycle_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_live_pause(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 static command_result_t cmd_live_resume(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
+static command_result_t cmd_set_speed(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
 
 /* Status & information */
 static command_result_t cmd_status(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp);
@@ -61,6 +64,11 @@ static const command_info_t command_registry_core[] = {
     COMMAND_ENTRY_CUSTOM("live-resume", cmd_live_resume, "live",
                         "Resume live wallpaper animation (optional: output name)",
                         CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE, NULL, NULL),
+    COMMAND_ENTRY_CUSTOM("set-speed", cmd_set_speed, "shader",
+                        "Set shader animation speed (0.1 - 10.0)",
+                        CMD_CAP_REQUIRES_STATE | CMD_CAP_MODIFIES_STATE,
+                        "{\"speed\": <float>}",
+                        "{\"command\":\"set-speed\",\"args\":\"{\\\"speed\\\":\\\"2.0\\\"}\"}"),
 
     /* Status & Information */
     COMMAND_ENTRY(status, "info", "Get daemon status and wallpaper info",
@@ -710,6 +718,62 @@ static command_result_t cmd_live_resume(struct neowall_state *state, const ipc_r
 
         commands_build_success(resp, "Resumed shader animation", NULL);
     }
+
+    return CMD_SUCCESS;
+}
+
+static command_result_t cmd_set_speed(struct neowall_state *state, const ipc_request_t *req, ipc_response_t *resp) {
+    if (!state) {
+        commands_build_error(resp, CMD_ERROR_STATE, "Daemon state not available");
+        return CMD_ERROR_STATE;
+    }
+
+    /* Parse speed from request args */
+    if (req->args[0] == '\0') {
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Missing speed argument");
+        return CMD_ERROR_INVALID_ARGS;
+    }
+
+    /* Parse JSON args: {"speed": 2.0} */
+    char speed_str[32] = {0};
+    const char *speed_key = strstr(req->args, "\"speed\"");
+    if (speed_key) {
+        const char *colon = strchr(speed_key, ':');
+        if (colon) {
+            /* Skip whitespace and quotes */
+            colon++;
+            while (*colon == ' ' || *colon == '"') colon++;
+
+            /* Extract number */
+            int i = 0;
+            while (i < 31 && (isdigit(*colon) || *colon == '.' || *colon == '-')) {
+                speed_str[i++] = *colon++;
+            }
+            speed_str[i] = '\0';
+        }
+    }
+
+    if (speed_str[0] == '\0') {
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Could not parse speed value");
+        return CMD_ERROR_INVALID_ARGS;
+    }
+
+    float speed = atof(speed_str);
+
+    if (speed < 0.1f || speed > 10.0f) {
+        commands_build_error(resp, CMD_ERROR_INVALID_ARGS, "Speed must be between 0.1 and 10.0");
+        return CMD_ERROR_INVALID_ARGS;
+    }
+
+    /* Update runtime atomic */
+    atomic_store(&state->shader_speed, speed);
+
+    /* Persist state to disk */
+    save_global_state(state);
+
+    char data[128];
+    snprintf(data, sizeof(data), "{\"speed\":%.2f}", speed);
+    commands_build_success(resp, "Shader speed updated", data);
 
     return CMD_SUCCESS;
 }

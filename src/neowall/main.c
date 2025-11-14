@@ -45,6 +45,7 @@ int cmd_reload(int argc, char *argv[]);
 int cmd_current(int argc, char *argv[]);
 int cmd_shader_pause(int argc, char *argv[]);
 int cmd_shader_resume(int argc, char *argv[]);
+int cmd_set_speed(int argc, char **argv);
 int cmd_config(int argc, char *argv[]);
 int cmd_tray(int argc, char *argv[]);
 int cmd_version(int argc, char *argv[]);
@@ -86,6 +87,7 @@ static Command commands[] = {
     {"current",            "Show current wallpaper [output]",        cmd_current},
     {"live-pause",         "Pause live wallpaper animation [output]", cmd_shader_pause},
     {"live-resume",        "Resume live wallpaper animation [output]", cmd_shader_resume},
+    {"set-speed",          "Set shader speed <speed>",               cmd_set_speed},
 
     /* Output-specific commands */
     {"list-outputs",       "List all connected outputs",             cmd_list_outputs},
@@ -915,13 +917,25 @@ int cmd_shader_pause(int argc, char *argv[]) {
     return send_ipc_command("live-pause", NULL, 0) ? 0 : 1;
 }
 
-int cmd_shader_resume(int argc, char *argv[]) {
+int cmd_shader_resume(int argc, char **argv) {
     if (argc >= 2) {
         char args[512];
         snprintf(args, sizeof(args), "{\"output\":\"%s\"}", argv[1]);
         return send_ipc_command("live-resume", args, strlen(args)) ? 0 : 1;
     }
     return send_ipc_command("live-resume", NULL, 0) ? 0 : 1;
+}
+
+int cmd_set_speed(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: neowall set-speed <speed>\n");
+        fprintf(stderr, "Speed range: 0.1 - 10.0\n");
+        return 1;
+    }
+
+    char args[256];
+    snprintf(args, sizeof(args), "{\"speed\":\"%s\"}", argv[1]);
+    return send_ipc_command("set-speed", args, strlen(args)) ? 0 : 1;
 }
 
 int cmd_prev(int argc, char *argv[]) {

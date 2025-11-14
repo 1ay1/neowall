@@ -788,9 +788,15 @@ static bool apply_output_shader_speed(struct output_state *output, const char *v
     double speed;
     if (!config_parse_float(value, &speed)) return false;
 
-    output->config.shader_speed = (float)speed;
-    log_info("Output %s shader speed set to %.2f",
-             output->connector_name, speed);
+    /* Update global runtime shader speed (shared across all outputs) */
+    if (output->state) {
+        atomic_store(&output->state->shader_speed, (float)speed);
+        log_info("Output %s shader speed set to %.2f (updates global runtime speed)",
+                 output->connector_name, speed);
+    } else {
+        log_error("Cannot set shader speed: output state is NULL");
+        return false;
+    }
     return true;
 }
 
