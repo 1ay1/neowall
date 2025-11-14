@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 160" width="560" height="160">
+  <defs>
+    <!-- === SHADER-LEVEL BACKGROUND === -->
+    <!-- Animated plasma-like gradient (like plasma.glsl) -->
+    <radialGradient id="plasmaCore" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#1a0033">
+        <animate attributeName="stop-color" values="#1a0033;#2a0055;#1a0033" dur="7s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+
+    <!-- Moving nebula cloud (turbulence + blend) -->
+    <filter id="nebula">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="5" result="clouds">
+        <animate attributeName="baseFrequency" values="0.012;0.014;0.012" dur="12s" repeatCount="indefinite"/>
+      </feTurbulence>
+      <feColorMatrix in="clouds" type="matrix" values="
+        0 0 0 0 0.1
+        0 0 0 0 0.15
+        0 0 0 0 0.2
+        0 0 0 1 0" result="purpleNebula"/>
+      <feGaussianBlur stdDeviation="2"/>
+    </filter>
+
+    <!-- Subtle animated grid (matrix_rain style) -->
+    <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+      <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#00ffff" stroke-width="0.4" opacity="0.08"/>
+      <animateTransform attributeName="transform" type="translate" values="0,0;0,30;0,0" dur="6s" repeatCount="indefinite"/>
+    </pattern>
+
+    <!-- === FOREGROUND EFFECTS (unchanged) === -->
+    <filter id="shaderWave">
+      <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="4" result="noise">
+        <animate attributeName="baseFrequency" values="0.03;0.035;0.03" dur="8s" repeatCount="indefinite"/>
+      </feTurbulence>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="10"/>
+    </filter>
+
+    <filter id="neon">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#00ffff" flood-opacity="0.8"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="neonMagenta">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#ff00ff" flood-opacity="0.8"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- === LAYERED BACKGROUND === -->
+  <!-- 1. Deep void -->
+  <rect width="560" height="160" fill="#000000"/>
+
+  <!-- 2. Animated plasma core -->
+  <rect width="560" height="160" fill="url(#plasmaCore)" opacity="0.8"/>
+
+  <!-- 3. Moving purple nebula -->
+  <rect width="560" height="160" filter="url(#nebula)" opacity="0.5"/>
+
+  <!-- 4. Animated grid overlay -->
+  <rect width="560" height="160" fill="url(#grid)"/>
+
+  <!-- 5. Subtle scanline -->
+  <rect x="0" y="0" width="560" height="1.5" fill="#00ffff" opacity="0.07">
+    <animate attributeName="y" values="0;160;0" dur="5s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- === TEXT (unchanged, perfect) === -->
+  <g filter="url(#shaderWave) url(#neon)">
+    <text x="60" y="115"
+          font-family="'Rajdhani', 'Orbitron', sans-serif"
+          font-weight="800" font-size="98"
+          fill="#00ffff"
+          letter-spacing="14"
+          paint-order="stroke fill"
+          stroke="#00ffff" stroke-width="1">
+      Neo
+      <animate attributeName="opacity" values="0.95;1;0.95" dur="2s" repeatCount="indefinite"/>
+    </text>
+  </g>
+
+  <g filter="url(#shaderWave) url(#neonMagenta)">
+    <text x="240" y="115"
+          font-family="'Rajdhani', 'Orbitron', sans-serif"
+          font-weight="800" font-size="98"
+          fill="#ff00ff"
+          letter-spacing="14"
+          paint-order="stroke fill"
+          stroke="#ff00ff" stroke-width="1">
+      Wall
+      <animate attributeName="opacity" values="1;0.95;1" dur="2s" repeatCount="indefinite"/>
+    </text>
+  </g>
+
+  <!-- === Animated particle (plasma accent) === -->
+  <circle cx="500" cy="80" r="6" fill="#00ffff" opacity="0.9">
+    <animate attributeName="r" values="6;12;6" dur="1.8s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.9;0.3;0.9" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="500" cy="80" r="18" fill="none" stroke="#ff00ff" stroke-width="1" opacity="0.4">
+    <animate attributeName="r" values="18;30;18" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+</svg>
