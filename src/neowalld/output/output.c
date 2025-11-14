@@ -186,7 +186,6 @@ struct output_state *output_create(struct neowall_state *state,
         out->config.current_cycle_index = 0;
         out->config.type = WALLPAPER_IMAGE;
         out->config.path[0] = '\0';
-        out->config.shader_speed = 1.0f;
         out->config.shader_fps = 60;  /* Default 60 FPS */
         out->config.show_fps = false;  /* Default: no FPS watermark */
         out->config.channel_paths = NULL;

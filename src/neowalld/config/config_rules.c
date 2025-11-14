@@ -373,7 +373,6 @@ size_t config_get_applicable_keys(
 
     /* Shader-only keys */
     if (wallpaper_type == WALLPAPER_TYPE_SHADER || wallpaper_type == WALLPAPER_TYPE_ANY) {
-        ADD_KEY("shader_speed");
         ADD_KEY("shader_fps");
         ADD_KEY("vsync");
         ADD_KEY("channels");

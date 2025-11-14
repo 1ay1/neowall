@@ -429,25 +429,7 @@ static ValidationResult validate_duration(double duration) {
     return VALIDATION_OK();
 }
 
-static ValidationResult validate_shader_speed(double speed) {
-    ValidationResult result;
 
-    if (speed <= 0.0) {
-        result.valid = false;
-        snprintf(result.error_message, sizeof(result.error_message),
-                "Shader speed must be positive (got %.2f)", speed);
-        return result;
-    }
-
-    if (speed > 100.0) {  /* Reasonable upper limit */
-        result.valid = false;
-        snprintf(result.error_message, sizeof(result.error_message),
-                "Shader speed too large (got %.2f, max 100.0)", speed);
-        return result;
-    }
-
-    return VALIDATION_OK();
-}
 
 static ValidationResult validate_transition_duration(double duration) {
     ValidationResult result;
@@ -477,7 +459,7 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->duration = 0.0f;  /* No cycling by default */
     config->transition = TRANSITION_FADE;
     config->transition_duration = 0.3f;  /* 0.3 seconds default transition */
-    config->shader_speed = 1.0f;
+
     config->shader_fps = 60;  /* Default 60 FPS for shaders */
     config->vsync = false;  /* Default: vsync off, use custom FPS with tearing control */
     config->show_fps = false;  /* Default: no FPS watermark */
@@ -870,40 +852,6 @@ parse_optional_params:
         log_info("[%s] Transition duration set to: %.2f seconds", context_name, config->transition_duration);
     }
 
-    /* Parse shader_speed (only relevant for shader mode) */
-    VibeValue *shader_speed_val = vibe_object_get(obj->as_object, "shader_speed");
-    if (shader_speed_val) {
-        double speed = 0.0;
-
-        if (shader_speed_val->type == VIBE_TYPE_FLOAT) {
-            speed = shader_speed_val->as_float;
-        } else if (shader_speed_val->type == VIBE_TYPE_INTEGER) {
-            speed = (double)shader_speed_val->as_integer;
-        } else {
-            log_error("[%s] 'shader_speed' must be a number", context_name);
-            return false;
-        }
-
-        ValidationResult speed_validation = validate_shader_speed(speed);
-        if (!speed_validation.valid) {
-            log_error("[%s] Invalid shader_speed: %s", context_name,
-                     speed_validation.error_message);
-            return false;
-        }
-
-        /* Validate using rules system */
-        char speed_str[32];
-        snprintf(speed_str, sizeof(speed_str), "%.2f", speed);
-        char error[512];
-        if (!config_validate_rules(state, output_name, "shader_speed", speed_str, error, sizeof(error))) {
-            log_error("[%s] %s", context_name, error);
-            return false;
-        }
-
-        config->shader_speed = (float)speed;
-        log_info("[%s] Shader speed multiplier set to: %.2f", context_name, config->shader_speed);
-    }
-
     /* Parse shader_fps (only relevant for shader mode) */
     VibeValue *shader_fps_val = vibe_object_get(obj->as_object, "shader_fps");
     if (shader_fps_val) {
@@ -1037,7 +985,7 @@ parse_optional_params:
     /* Warn about unknown keys */
     const char *known_keys[] = {
         "path", "shader", "mode", "duration", "transition",
-        "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps"
+        "transition_duration", "channels", "shader_fps", "vsync", "show_fps"
     };
     size_t known_key_count = sizeof(known_keys) / sizeof(known_keys[0]);
 
@@ -1782,10 +1730,9 @@ bool config_load(struct neowall_state *state, const char *config_path) {
             /* config is now embedded struct, always valid */
             if (summary_output->config.type == WALLPAPER_SHADER) {
                 shader_count++;
-                log_info("  Output %s: SHADER mode - %s (speed=%.1fx)",
+                log_info("  Output %s: SHADER mode - %s",
                          summary_output->model[0] ? summary_output->model : "unknown",
-                         summary_output->config.path,
-                         summary_output->config.shader_speed);
+                         summary_output->config.path);
             } else {
                 image_count++;
                 log_info("  Output %s: IMAGE mode - %s (mode=%s)",

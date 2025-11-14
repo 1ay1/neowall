@@ -861,8 +861,14 @@ bool render_frame_shader(struct output_state *output) {
     uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : output->last_frame_time;
     float time = (current_time - start_time) / (float)MS_PER_SECOND;
 
-    /* Apply shader speed multiplier from config only */
-    float shader_speed = output->config.shader_speed > 0.0f ? output->config.shader_speed : 1.0f;
+    /* Apply global runtime shader speed multiplier from state */
+    float shader_speed = 1.0f;
+    if (output->state) {
+        float global_speed = atomic_load(&output->state->shader_speed);
+        if (global_speed > 0.0f) {
+            shader_speed = global_speed;
+        }
+    }
     time *= shader_speed;
 
     /* Apply global shader pause - freeze time if paused */

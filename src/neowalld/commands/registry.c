@@ -727,11 +727,12 @@ static command_result_t cmd_status(struct neowall_state *state, const ipc_reques
 
     /* Start JSON object */
     offset += snprintf(data + offset, sizeof(data) - offset,
-                      "{\"daemon\":\"running\",\"pid\":%d,\"outputs\":%u,\"paused\":%s,\"shader_paused\":%s",
+                      "{\"daemon\":\"running\",\"pid\":%d,\"outputs\":%u,\"paused\":%s,\"shader_paused\":%s,\"shader_speed\":%.2f",
                       getpid(),
                       state->output_count,
                       atomic_load(&state->paused) ? "true" : "false",
-                      atomic_load(&state->shader_paused) ? "true" : "false");
+                      atomic_load(&state->shader_paused) ? "true" : "false",
+                      atomic_load(&state->shader_speed));
 
     /* Add wallpaper information */
     offset += snprintf(data + offset, sizeof(data) - offset, ",\"wallpapers\":[");

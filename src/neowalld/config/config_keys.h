@@ -63,7 +63,6 @@
     X(CONFIG_KEY_DEFAULT_TRANSITION_DURATION, "default", "transition_duration", CONFIG_TYPE_INTEGER, CONFIG_SCOPE_GLOBAL) \
     /* Default section - Shader wallpaper keys */ \
     X(CONFIG_KEY_DEFAULT_SHADER,              "default", "shader",              CONFIG_TYPE_PATH,    CONFIG_SCOPE_GLOBAL) \
-    X(CONFIG_KEY_DEFAULT_SHADER_SPEED,        "default", "shader_speed",        CONFIG_TYPE_FLOAT,   CONFIG_SCOPE_GLOBAL) \
     X(CONFIG_KEY_DEFAULT_SHADER_FPS,          "default", "shader_fps",          CONFIG_TYPE_INTEGER, CONFIG_SCOPE_GLOBAL) \
     X(CONFIG_KEY_DEFAULT_VSYNC,               "default", "vsync",               CONFIG_TYPE_BOOLEAN, CONFIG_SCOPE_GLOBAL) \
     X(CONFIG_KEY_DEFAULT_CHANNELS,            "default", "channels",            CONFIG_TYPE_STRING,  CONFIG_SCOPE_GLOBAL) \
@@ -77,7 +76,6 @@
     X(CONFIG_KEY_OUTPUT_TRANSITION_DURATION,  "output",  "transition_duration", CONFIG_TYPE_INTEGER, CONFIG_SCOPE_OUTPUT) \
     /* Output section - Shader wallpaper keys */ \
     X(CONFIG_KEY_OUTPUT_SHADER,               "output",  "shader",              CONFIG_TYPE_PATH,    CONFIG_SCOPE_OUTPUT) \
-    X(CONFIG_KEY_OUTPUT_SHADER_SPEED,         "output",  "shader_speed",        CONFIG_TYPE_FLOAT,   CONFIG_SCOPE_OUTPUT) \
     X(CONFIG_KEY_OUTPUT_SHADER_FPS,           "output",  "shader_fps",          CONFIG_TYPE_INTEGER, CONFIG_SCOPE_OUTPUT) \
     X(CONFIG_KEY_OUTPUT_VSYNC,                "output",  "vsync",               CONFIG_TYPE_BOOLEAN, CONFIG_SCOPE_OUTPUT) \
     X(CONFIG_KEY_OUTPUT_CHANNELS,             "output",  "channels",            CONFIG_TYPE_STRING,  CONFIG_SCOPE_OUTPUT) \

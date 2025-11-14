@@ -78,7 +78,6 @@ struct wallpaper_config {
     float transition_duration;          /* Transition duration in seconds */
     
     /* Live wallpaper settings (shaders, gifs, videos) */
-    float shader_speed;                 /* Animation speed multiplier (default 1.0) */
     int shader_fps;                     /* Target FPS for rendering (default 60) */
     bool vsync;                         /* Enable vsync (sync to monitor refresh, ignores shader_fps) */
     bool show_fps;                      /* Show FPS watermark on screen (default false) */

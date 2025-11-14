@@ -330,11 +330,6 @@ static VibeValue *build_vibe_from_state(struct neowall_state *state) {
                               vibe_value_new_string(mode_str));
             }
 
-            if (output->config.shader_speed != 1.0f) {
-                vibe_object_set(output_section_obj, "shader_speed",
-                              vibe_value_new_float(output->config.shader_speed));
-            }
-
             if (output->config.shader_fps != 60) {
                 vibe_object_set(output_section_obj, "fps_limit",
                               vibe_value_new_integer(output->config.shader_fps));
@@ -733,8 +728,6 @@ bool config_get_output_value(struct neowall_state *state,
     } else if (strcmp(key, "wallpaper_mode") == 0) {
         const char *mode = wallpaper_mode_to_string(output->config.mode);
         snprintf(value_buf, value_len, "%s", mode ? mode : "fill");
-    } else if (strcmp(key, "shader_speed") == 0) {
-        snprintf(value_buf, value_len, "%.2f", output->config.shader_speed);
     } else {
         found = false;
     }
