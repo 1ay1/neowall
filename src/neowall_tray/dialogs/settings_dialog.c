@@ -1169,7 +1169,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
 static int get_output_list(char outputs[][64], int max_outputs) {
     char cmd_output[8192];
 
-    if (!command_execute_with_output("status", cmd_output, sizeof(cmd_output))) {
+    if (!command_execute_with_output("list-outputs", cmd_output, sizeof(cmd_output))) {
         TRAY_LOG_ERROR(COMPONENT, "Failed to get output list from daemon");
         return 0;
     }
@@ -1178,7 +1178,7 @@ static int get_output_list(char outputs[][64], int max_outputs) {
     int count = 0;
     const char *outputs_start = strstr(cmd_output, "\"outputs\":[");
     if (!outputs_start) {
-        TRAY_LOG_DEBUG(COMPONENT, "No outputs found in status response");
+        TRAY_LOG_DEBUG(COMPONENT, "No outputs found in list-outputs response");
         return 0;
     }
 
@@ -1259,38 +1259,13 @@ void settings_dialog_show(void) {
     GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dlg->dialog));
     gtk_container_set_border_width(GTK_CONTAINER(content_area), 10);
 
-    /* Info banner explaining modern format */
-    GtkWidget *info_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    gtk_container_set_border_width(GTK_CONTAINER(info_box), 8);
-
-    GtkWidget *info_icon = gtk_label_new("ℹ️");
-    gtk_box_pack_start(GTK_BOX(info_box), info_icon, FALSE, FALSE, 0);
-
-    GtkWidget *info_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(info_label),
-        "<b>Per-Output Configuration</b>\n"
-        "<small>Each monitor must be configured individually using <b>type + path</b> format.\n"
-        "Run <tt>neowall list-outputs</tt> to see your monitors.</small>");
-    gtk_label_set_line_wrap(GTK_LABEL(info_label), TRUE);
-    gtk_widget_set_halign(info_label, GTK_ALIGN_START);
-    gtk_box_pack_start(GTK_BOX(info_box), info_label, TRUE, TRUE, 0);
-
-    /* Style the info box */
-    GtkStyleContext *info_context = gtk_widget_get_style_context(info_box);
-    gtk_style_context_add_class(info_context, "info");
-
-    gtk_box_pack_start(GTK_BOX(content_area), info_box, FALSE, FALSE, 5);
-
-    GtkWidget *sep1 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-    gtk_box_pack_start(GTK_BOX(content_area), sep1, FALSE, FALSE, 5);
-
     /* Status label - styled with UI utils */
     dlg->status_label = ui_utils_create_status_label("Ready", UI_STATUS_INFO);
     gtk_widget_set_halign(dlg->status_label, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(content_area), dlg->status_label, FALSE, FALSE, 5);
 
-    GtkWidget *sep2 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-    gtk_box_pack_start(GTK_BOX(content_area), sep2, FALSE, FALSE, 5);
+    GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_pack_start(GTK_BOX(content_area), sep, FALSE, FALSE, 5);
 
     /* Create notebook */
     dlg->notebook = gtk_notebook_new();
@@ -1301,8 +1276,30 @@ void settings_dialog_show(void) {
     int output_count = get_output_list(output_names, MAX_OUTPUTS);
 
     if (output_count == 0) {
-        TRAY_LOG_INFO(COMPONENT, "⚠️  No outputs detected - settings may not apply");
-    }
+        TRAY_LOG_INFO(COMPONENT, "⚠️  No outputs detected - showing placeholder");
+        /* Add a placeholder tab explaining how to use the settings */
+        GtkWidget *placeholder_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 20);
+        gtk_container_set_border_width(GTK_CONTAINER(placeholder_box), 30);
+
+        GtkWidget *placeholder_icon = gtk_label_new("🖥️");
+        g_object_set(placeholder_icon, "margin", 20, NULL);
+        gtk_box_pack_start(GTK_BOX(placeholder_box), placeholder_icon, FALSE, FALSE, 0);
+
+        GtkWidget *placeholder_label = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(placeholder_label),
+            "<big><b>No Outputs Detected</b></big>\n\n"
+            "Make sure the NeoWall daemon is running:\n"
+            "<tt>neowall start</tt>\n\n"
+            "Then check your monitors with:\n"
+            "<tt>neowall list-outputs</tt>");
+        gtk_label_set_justify(GTK_LABEL(placeholder_label), GTK_JUSTIFY_CENTER);
+        gtk_label_set_line_wrap(GTK_LABEL(placeholder_label), TRUE);
+        gtk_box_pack_start(GTK_BOX(placeholder_box), placeholder_label, TRUE, TRUE, 0);
+
+        gtk_notebook_append_page(GTK_NOTEBOOK(dlg->notebook), placeholder_box,
+                                gtk_label_new("No Outputs"));
+        dlg->scope_count = 0;
+    } else {
 
     /* Add per-output tabs only (no default tab) */
     dlg->scope_count = 0;
@@ -1329,6 +1326,7 @@ void settings_dialog_show(void) {
     }
 
     TRAY_LOG_INFO(COMPONENT, "Created %d per-output tab(s)", dlg->scope_count);
+    }
 
     /* Connect revert button */
     g_signal_connect(dlg->revert_button, "clicked",
