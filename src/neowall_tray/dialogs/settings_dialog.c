@@ -966,11 +966,11 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
         output_name++; /* Skip the dot */
         snprintf(header_text, sizeof(header_text),
                 "<big><b>🖥️  %s</b></big>\n"
-                "<small>Configuration for this specific output</small>", output_name);
+                "<small>Per-output configuration (modern format: type + path)</small>", output_name);
     } else {
         snprintf(header_text, sizeof(header_text),
                 "<big><b>🖥️  Output: %s</b></big>\n"
-                "<small>Settings specific to this output (overrides defaults)</small>",
+                "<small>Per-output configuration (modern format: type + path)</small>",
                 scope->scope);
     }
     gtk_label_set_markup(GTK_LABEL(header), header_text);
@@ -983,7 +983,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
     GtkWidget *type_label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(type_label), "<b>🎨 Wallpaper Type:</b>");
     gtk_widget_set_halign(type_label, GTK_ALIGN_START);
-    gtk_widget_set_tooltip_text(type_label, "Select image or shader type");
+    gtk_widget_set_tooltip_text(type_label, "Select wallpaper type (modern format uses type + path)");
     gtk_box_pack_start(GTK_BOX(box), type_label, FALSE, FALSE, 0);
 
     scope->type_combo = gtk_combo_box_text_new();
@@ -991,6 +991,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(scope->type_combo), "Shader");
     gtk_combo_box_set_active(GTK_COMBO_BOX(scope->type_combo), 0);
     gtk_widget_set_tooltip_text(scope->type_combo,
+                               "Modern format: type + path\n"
                                "Image: Static wallpapers (PNG, JPG, etc.)\n"
                                "Shader: Animated GLSL shaders (.glsl files)");
     g_signal_connect(scope->type_combo, "changed", G_CALLBACK(on_type_changed), dlg);
@@ -998,16 +999,16 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
 
     /* Wallpaper folder */
     GtkWidget *folder_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(folder_label), "<b>📁 Wallpaper Folder:</b>");
+    gtk_label_set_markup(GTK_LABEL(folder_label), "<b>📁 Wallpaper Path:</b>");
     gtk_widget_set_halign(folder_label, GTK_ALIGN_START);
-    gtk_widget_set_tooltip_text(folder_label, "Folder containing images or shaders");
+    gtk_widget_set_tooltip_text(folder_label, "Path to folder or file (works with all types)");
     gtk_box_pack_start(GTK_BOX(box), folder_label, FALSE, FALSE, 0);
 
     scope->folder_chooser = gtk_file_chooser_button_new(
-        "Select Wallpaper Folder",
+        "Select Wallpaper Path",
         GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER
     );
-    gtk_widget_set_tooltip_text(scope->folder_chooser, "Choose folder with images or .glsl shaders");
+    gtk_widget_set_tooltip_text(scope->folder_chooser, "Modern format: path works for all types (images, shaders, etc.)");
     g_signal_connect(scope->folder_chooser, "file-set", G_CALLBACK(on_folder_selected), dlg);
     gtk_box_pack_start(GTK_BOX(box), scope->folder_chooser, FALSE, FALSE, 0);
 
@@ -1032,7 +1033,7 @@ static GtkWidget *create_scope_tab(SettingsDialog *dlg, ScopeSettings *scope) {
     GtkWidget *mode_label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(mode_label), "<b>🖼️  Display Mode:</b> <small>(Static images only)</small>");
     gtk_widget_set_halign(mode_label, GTK_ALIGN_START);
-    gtk_widget_set_tooltip_text(mode_label, "How wallpapers are displayed (not applicable to shaders/animations)");
+    gtk_widget_set_tooltip_text(mode_label, "How images are scaled/positioned (not applicable to shaders)");
     gtk_box_pack_start(GTK_BOX(scope->mode_container), mode_label, FALSE, FALSE, 0);
 
     scope->mode_combo = gtk_combo_box_text_new();
@@ -1258,13 +1259,38 @@ void settings_dialog_show(void) {
     GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dlg->dialog));
     gtk_container_set_border_width(GTK_CONTAINER(content_area), 10);
 
+    /* Info banner explaining modern format */
+    GtkWidget *info_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_container_set_border_width(GTK_CONTAINER(info_box), 8);
+
+    GtkWidget *info_icon = gtk_label_new("ℹ️");
+    gtk_box_pack_start(GTK_BOX(info_box), info_icon, FALSE, FALSE, 0);
+
+    GtkWidget *info_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(info_label),
+        "<b>Per-Output Configuration</b>\n"
+        "<small>Each monitor must be configured individually using <b>type + path</b> format.\n"
+        "Run <tt>neowall list-outputs</tt> to see your monitors.</small>");
+    gtk_label_set_line_wrap(GTK_LABEL(info_label), TRUE);
+    gtk_widget_set_halign(info_label, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(info_box), info_label, TRUE, TRUE, 0);
+
+    /* Style the info box */
+    GtkStyleContext *info_context = gtk_widget_get_style_context(info_box);
+    gtk_style_context_add_class(info_context, "info");
+
+    gtk_box_pack_start(GTK_BOX(content_area), info_box, FALSE, FALSE, 5);
+
+    GtkWidget *sep1 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_pack_start(GTK_BOX(content_area), sep1, FALSE, FALSE, 5);
+
     /* Status label - styled with UI utils */
     dlg->status_label = ui_utils_create_status_label("Ready", UI_STATUS_INFO);
     gtk_widget_set_halign(dlg->status_label, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(content_area), dlg->status_label, FALSE, FALSE, 5);
 
-    GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-    gtk_box_pack_start(GTK_BOX(content_area), sep, FALSE, FALSE, 5);
+    GtkWidget *sep2 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_pack_start(GTK_BOX(content_area), sep2, FALSE, FALSE, 5);
 
     /* Create notebook */
     dlg->notebook = gtk_notebook_new();
