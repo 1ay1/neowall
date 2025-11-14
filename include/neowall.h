@@ -56,23 +56,15 @@ struct neowall_state {
 
     /* Configuration */
     char config_path[MAX_PATH_LENGTH];
-    time_t config_mtime;        /* Last modification time */
-    bool watch_config;          /* Watch for config changes */
 
     /* Runtime state - ALL flags must be atomic for thread safety */
     atomic_bool_t running;           /* Main loop running flag - accessed from signal handlers */
-    atomic_bool_t reload_requested;  /* Config reload request - set by watch thread, read by main */
     atomic_bool_t paused;            /* Pause wallpaper cycling - set by signal handlers */
     atomic_bool_t outputs_need_init; /* Flag when new outputs need initialization */
     atomic_int_t next_requested;     /* Counter for skip to next wallpaper requests */
-    pthread_t watch_thread;
     pthread_mutex_t state_mutex;     /* Protects output list and config data */
     pthread_rwlock_t output_list_lock; /* Read-write lock for output linked list traversal */
     pthread_mutex_t state_file_lock; /* Mutex for state file I/O operations */
-    
-    /* BUG FIX #5: Condition variable for clean config watch thread shutdown */
-    pthread_mutex_t watch_mutex;     /* Mutex for watch condition variable */
-    pthread_cond_t watch_cond;       /* Condition variable to wake watch thread */
     
     /* BUG FIX #9: LOCK ORDERING POLICY (to prevent deadlock)
      * ========================================================
