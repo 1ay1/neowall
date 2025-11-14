@@ -126,30 +126,34 @@ static GtkWidget *create_status_section(const char *title, const char *icon_name
 
 /* Create a status item row */
 static GtkWidget *create_status_item(const char *label, const char *value, bool bold_value) {
-    GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_set_margin_start(hbox, 16);
-    gtk_widget_set_margin_top(hbox, 4);
-    gtk_widget_set_margin_bottom(hbox, 4);
+    GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 16);
+    gtk_widget_set_margin_start(hbox, 20);
+    gtk_widget_set_margin_end(hbox, 20);
+    gtk_widget_set_margin_top(hbox, 6);
+    gtk_widget_set_margin_bottom(hbox, 6);
 
     /* Label */
-    GtkWidget *label_widget = gtk_label_new(label);
+    GtkWidget *label_widget = gtk_label_new(NULL);
+    char label_markup[256];
+    snprintf(label_markup, sizeof(label_markup), "<span weight='500'>%s</span>", label);
+    gtk_label_set_markup(GTK_LABEL(label_widget), label_markup);
     gtk_widget_set_halign(label_widget, GTK_ALIGN_START);
-    gtk_widget_set_opacity(label_widget, 0.8);
-    gtk_label_set_width_chars(GTK_LABEL(label_widget), 15);
+    gtk_widget_set_opacity(label_widget, 0.85);
+    gtk_label_set_width_chars(GTK_LABEL(label_widget), 20);
     gtk_box_pack_start(GTK_BOX(hbox), label_widget, FALSE, FALSE, 0);
 
     /* Value */
     GtkWidget *value_widget = gtk_label_new(NULL);
     char markup[512];
     if (bold_value) {
-        snprintf(markup, sizeof(markup), "<b>%s</b>", value);
+        snprintf(markup, sizeof(markup), "<span size='large' weight='600'>%s</span>", value);
     } else {
-        snprintf(markup, sizeof(markup), "%s", value);
+        snprintf(markup, sizeof(markup), "<span>%s</span>", value);
     }
     gtk_label_set_markup(GTK_LABEL(value_widget), markup);
-    gtk_widget_set_halign(value_widget, GTK_ALIGN_CENTER);
+    gtk_widget_set_halign(value_widget, GTK_ALIGN_START);
     gtk_label_set_line_wrap(GTK_LABEL(value_widget), TRUE);
-    gtk_label_set_max_width_chars(GTK_LABEL(value_widget), 70);
+    gtk_label_set_max_width_chars(GTK_LABEL(value_widget), 60);
     gtk_label_set_selectable(GTK_LABEL(value_widget), TRUE);
     gtk_box_pack_start(GTK_BOX(hbox), value_widget, TRUE, TRUE, 0);
 
@@ -158,38 +162,82 @@ static GtkWidget *create_status_item(const char *label, const char *value, bool 
 
 /* Create wallpaper item */
 static GtkWidget *create_wallpaper_item(int num, const char *output, const char *type, const char *path) {
-    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_set_margin_start(vbox, 16);
-    gtk_widget_set_margin_top(vbox, 6);
-    gtk_widget_set_margin_bottom(vbox, 6);
+    (void)num;  /* No longer displaying item numbers */
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_margin_start(vbox, 20);
+    gtk_widget_set_margin_end(vbox, 20);
+    gtk_widget_set_margin_top(vbox, 8);
+    gtk_widget_set_margin_bottom(vbox, 8);
 
-    /* Header line */
+    /* Container with subtle frame */
+    GtkWidget *frame = gtk_frame_new(NULL);
+    gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_NONE);
+
+    GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_margin_start(content, 12);
+    gtk_widget_set_margin_end(content, 12);
+    gtk_widget_set_margin_top(content, 8);
+    gtk_widget_set_margin_bottom(content, 8);
+
+    /* Header line with output info */
+    GtkWidget *header_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+
     GtkWidget *header = gtk_label_new(NULL);
     char markup[256];
 
-    /* Choose icon based on type */
-    const char *icon = strcmp(type, "shader") == 0 ? "🎨" : "🖼";
+    /* Choose icon and label based on type */
+    const char *icon = strcmp(type, "shader") == 0 ? "✨" : "🖼️";
+    const char *type_label = strcmp(type, "shader") == 0 ? "Live Shader" : "Static Image";
 
-    snprintf(markup, sizeof(markup), "<b>%s %d. %s</b> <span size='small'>(%s)</span>",
-             icon, num, output, type);
+    snprintf(markup, sizeof(markup),
+             "<span size='large'>%s</span> <b>%s</b>",
+             icon, output);
     gtk_label_set_markup(GTK_LABEL(header), markup);
     gtk_widget_set_halign(header, GTK_ALIGN_START);
-    gtk_box_pack_start(GTK_BOX(vbox), header, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(header_box), header, FALSE, FALSE, 0);
 
-    /* Path */
+    /* Spacer */
+    GtkWidget *spacer = gtk_label_new("");
+    gtk_box_pack_start(GTK_BOX(header_box), spacer, TRUE, TRUE, 0);
+
+    /* Type badge */
+    GtkWidget *type_badge = gtk_label_new(NULL);
+    char type_markup[64];
+    snprintf(type_markup, sizeof(type_markup),
+             "<span size='small' weight='600'>%s</span>", type_label);
+    gtk_label_set_markup(GTK_LABEL(type_badge), type_markup);
+    gtk_widget_set_opacity(type_badge, 0.7);
+    gtk_box_pack_start(GTK_BOX(header_box), type_badge, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(content), header_box, FALSE, FALSE, 0);
+
+    /* Path display */
     const char *basename = strrchr(path, '/');
     basename = basename ? basename + 1 : path;
 
+    GtkWidget *path_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+
+    /* File icon */
+    GtkWidget *file_icon = gtk_label_new("📄");
+    gtk_widget_set_opacity(file_icon, 0.6);
+    gtk_box_pack_start(GTK_BOX(path_box), file_icon, FALSE, FALSE, 0);
+
+    /* Path label */
     GtkWidget *path_label = gtk_label_new(NULL);
     char path_markup[512];
-    snprintf(path_markup, sizeof(path_markup), "<small><tt>%s</tt></small>", basename);
+    snprintf(path_markup, sizeof(path_markup), "<tt>%s</tt>", basename);
     gtk_label_set_markup(GTK_LABEL(path_label), path_markup);
     gtk_widget_set_halign(path_label, GTK_ALIGN_START);
-    gtk_widget_set_opacity(path_label, 0.7);
+    gtk_widget_set_opacity(path_label, 0.65);
     gtk_label_set_selectable(GTK_LABEL(path_label), TRUE);
-    gtk_label_set_ellipsize(GTK_LABEL(path_label), PANGO_ELLIPSIZE_START);
-    gtk_label_set_max_width_chars(GTK_LABEL(path_label), 80);
-    gtk_box_pack_start(GTK_BOX(vbox), path_label, FALSE, FALSE, 0);
+    gtk_label_set_ellipsize(GTK_LABEL(path_label), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_label_set_max_width_chars(GTK_LABEL(path_label), 70);
+    gtk_box_pack_start(GTK_BOX(path_box), path_label, TRUE, TRUE, 0);
+
+    gtk_box_pack_start(GTK_BOX(content), path_box, FALSE, FALSE, 0);
+
+    gtk_container_add(GTK_CONTAINER(frame), content);
+    gtk_box_pack_start(GTK_BOX(vbox), frame, FALSE, FALSE, 0);
 
     return vbox;
 }
@@ -240,11 +288,11 @@ void status_dialog_show(void) {
                                    GTK_POLICY_AUTOMATIC);
     gtk_box_pack_start(GTK_BOX(content_area), scrolled, TRUE, TRUE, 0);
 
-    GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_start(main_box, 20);
-    gtk_widget_set_margin_end(main_box, 20);
-    gtk_widget_set_margin_top(main_box, 20);
-    gtk_widget_set_margin_bottom(main_box, 20);
+    GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+    gtk_widget_set_margin_start(main_box, 24);
+    gtk_widget_set_margin_end(main_box, 24);
+    gtk_widget_set_margin_top(main_box, 24);
+    gtk_widget_set_margin_bottom(main_box, 24);
     gtk_container_add(GTK_CONTAINER(scrolled), main_box);
 
     /* Get status via IPC */
