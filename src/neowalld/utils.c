@@ -642,8 +642,6 @@ bool save_global_state(struct neowall_state *state) {
             atomic_load(&state->paused) ? "true" : "false");
     fprintf(fp, "shader_paused=%s\n",
             atomic_load(&state->shader_paused) ? "true" : "false");
-    fprintf(fp, "shader_speed=%.2f\n",
-            atomic_load(&state->shader_speed));
     fprintf(fp, "timestamp=%ld\n", (long)time(NULL));
 
     fclose(fp);
@@ -716,13 +714,7 @@ bool restore_global_state(struct neowall_state *state) {
                 atomic_store(&state->shader_paused, paused);
                 log_info("Restored shader pause state: %s", paused ? "paused" : "active");
                 restored_any = true;
-            } else if (strncmp(line, "shader_speed=", 13) == 0) {
-                float speed = atof(line + 13);
-                if (speed >= 0.1f && speed <= 5.0f) {
-                    atomic_store(&state->shader_speed, speed);
-                    log_info("Restored shader speed: %.2f", speed);
-                    restored_any = true;
-                }
+            } else if (strncmp(line, "timestamp=", 10) == 0) {
             }
         }
     }

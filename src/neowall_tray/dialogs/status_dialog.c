@@ -82,21 +82,7 @@ static bool json_get_bool(const char *json, const char *key, bool *out) {
     return false;
 }
 
-static bool json_get_float(const char *json, const char *key, float *out) {
-    char search[128];
-    snprintf(search, sizeof(search), "\"%s\":", key);
 
-    const char *start = strstr(json, search);
-    if (!start) {
-        return false;
-    }
-
-    start += strlen(search);
-    while (*start && isspace(*start)) start++;
-
-    *out = atof(start);
-    return true;
-}
 
 /* Create a status section */
 static GtkWidget *create_status_section(const char *title, const char *icon_name) {
@@ -313,13 +299,11 @@ void status_dialog_show(void) {
         /* Parse data */
         int pid = 0, output_count = 0;
         bool paused = false, shader_paused = false;
-        float shader_speed = 1.0f;
 
         json_get_int(daemon_data, "pid", &pid);
         json_get_int(daemon_data, "outputs", &output_count);
         json_get_bool(daemon_data, "paused", &paused);
         json_get_bool(daemon_data, "shader_paused", &shader_paused);
-        json_get_float(daemon_data, "shader_speed", &shader_speed);
 
         /* === DAEMON SECTION === */
         GtkWidget *daemon_section = create_status_section("⚙️  Daemon Information", "system-run");
@@ -359,11 +343,6 @@ void status_dialog_show(void) {
         const char *shader_status = shader_paused ? "⏸️  Paused" : "▶️  Active";
         gtk_box_pack_start(GTK_BOX(shader_section),
             create_status_item("📊 Status:", shader_status, true), FALSE, FALSE, 0);
-
-        char speed_str[32];
-        snprintf(speed_str, sizeof(speed_str), "%.2fx", shader_speed);
-        gtk_box_pack_start(GTK_BOX(shader_section),
-            create_status_item("⚡ Animation Speed:", speed_str, false), FALSE, FALSE, 0);
 
         gtk_box_pack_start(GTK_BOX(main_box), shader_section, FALSE, FALSE, 0);
 
