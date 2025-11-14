@@ -190,11 +190,31 @@ command_result_t cmd_list_outputs(struct neowall_state *state,
     bool first = true;
 
     while (output) {
-        written = snprintf(ptr, remaining, "%s{\"name\":\"%s\",\"width\":%d,\"height\":%d}",
+        /* Determine wallpaper type and path */
+        const char *wallpaper_type = "none";
+        const char *wallpaper_path = "";
+
+        if (output->config.path[0] != '\0') {
+            if (output->config.type == WALLPAPER_SHADER) {
+                wallpaper_type = "shader";
+            } else {
+                wallpaper_type = "image";
+            }
+            wallpaper_path = output->config.path;
+        }
+
+        written = snprintf(ptr, remaining,
+                          "%s{\"name\":\"%s\",\"width\":%d,\"height\":%d,"
+                          "\"wallpaper_type\":\"%s\",\"wallpaper_path\":\"%s\","
+                          "\"cycle_index\":%zu,\"cycle_total\":%zu}",
                           first ? "" : ",",
                           output->connector_name,
                           output->width,
-                          output->height);
+                          output->height,
+                          wallpaper_type,
+                          wallpaper_path,
+                          output->config.current_cycle_index,
+                          output->config.cycle_count);
 
         if (written < 0 || (size_t)written >= remaining) {
             pthread_rwlock_unlock(&state->output_list_lock);
