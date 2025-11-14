@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <sys/time.h>
 #include <time.h>
@@ -64,10 +65,10 @@ static bool gl_initialized = false;
 static bool shader_valid = false;
 static double start_time = 0.0;
 
-/* Animation timer for 60 FPS updates */
+/* Animation timer ID */
 static guint animation_timer_id = 0;
 
-/* Shader compilation debounce */
+/* Compile debounce timer */
 static guint compile_timeout_id = 0;
 
 /* FPS tracking */
@@ -75,6 +76,9 @@ static double last_fps_update_time = 0.0;
 static int frame_count = 0;
 static double current_fps = 0.0;
 static double last_compile_time = 0.0;
+static double last_render_time = 0.0;
+static double render_interval_sum = 0.0;
+static int render_interval_count = 0;
 
 /* Default simple shader template - exactly as NeoWall expects it */
 static const char *DEFAULT_SHADER =
@@ -239,25 +243,47 @@ static void update_fps_display(void) {
     if (!fps_label) return;
 
     double now = get_time();
+
+    /* Track actual render intervals */
+    if (last_render_time > 0.0) {
+        double interval = now - last_render_time;
+        render_interval_sum += interval;
+        render_interval_count++;
+    }
+    last_render_time = now;
+
     frame_count++;
 
     /* Update FPS every 0.5 seconds */
     if (now - last_fps_update_time >= 0.5) {
         current_fps = frame_count / (now - last_fps_update_time);
+
+        /* Calculate average interval and actual FPS */
+        double avg_interval_ms = 0.0;
+        double measured_fps = 0.0;
+        if (render_interval_count > 0) {
+            avg_interval_ms = (render_interval_sum / render_interval_count) * 1000.0;
+            measured_fps = 1.0 / (render_interval_sum / render_interval_count);
+        }
+
         frame_count = 0;
         last_fps_update_time = now;
+        render_interval_sum = 0.0;
+        render_interval_count = 0;
 
-        char fps_text[128];
-        if (last_compile_time > 0) {
-            snprintf(fps_text, sizeof(fps_text),
-                    "<small><span color='#4CAF50'><b>%.1f FPS</b></span> • <span color='#888'>Compile: %.0fms</span></small>",
-                    current_fps, last_compile_time);
-        } else {
-            snprintf(fps_text, sizeof(fps_text),
-                    "<small><span color='#4CAF50'><b>%.1f FPS</b></span></small>",
-                    current_fps);
-        }
+        char fps_text[256];
+        int target_fps = preview_fps;
+        snprintf(fps_text, sizeof(fps_text),
+                "<small><span color='#4CAF50'><b>%.1f FPS</b></span> • "
+                "<span color='#888'>Target: %d (%.1fms avg interval)</span></small>",
+                measured_fps, target_fps, avg_interval_ms);
         gtk_label_set_markup(GTK_LABEL(fps_label), fps_text);
+
+        /* Log discrepancy if significant */
+        if (fabs(measured_fps - target_fps) > 5.0) {
+            tray_log_info("[ShaderEditor] FPS discrepancy: measured=%.1f target=%d interval=%.2fms timer_id=%u",
+                         measured_fps, target_fps, avg_interval_ms, animation_timer_id);
+        }
     }
 }
 
@@ -389,10 +415,12 @@ static void update_shader_program(void) {
         g_free(markup);
     }
 
-    /* Start animation timer at configured FPS */
-    if (!animation_timer_id) {
+    /* Start animation timer if not already running */
+    if (!animation_timer_id && gl_area) {
         int interval = 1000 / preview_fps;
         animation_timer_id = g_timeout_add(interval, animation_timer_cb, gl_area);
+        tray_log_info("[ShaderEditor] Started animation timer: %dms interval (%d FPS), timer_id=%u",
+                     interval, preview_fps, animation_timer_id);
     }
 
     /* Trigger initial redraw */
@@ -462,14 +490,17 @@ static void on_gl_realize(GtkGLArea *area, gpointer user_data) {
     gl_initialized = true;
     start_time = get_time();
     last_fps_update_time = start_time;
+    last_render_time = 0.0;
     frame_count = 0;
     current_fps = 0.0;
+    render_interval_sum = 0.0;
+    render_interval_count = 0;
 
     /* Compile initial shader */
     update_shader_program();
 }
 
-/* Animation timer callback - drives preview at 60 FPS */
+/* Animation timer callback - drives preview at configured FPS */
 static gboolean animation_timer_cb(gpointer user_data) {
     GtkWidget *area = GTK_WIDGET(user_data);
     gtk_widget_queue_draw(area);
@@ -568,6 +599,7 @@ static void on_gl_unrealize(GtkGLArea *area, gpointer user_data) {
 
     /* Stop animation timer */
     if (animation_timer_id) {
+        tray_log_info("[ShaderEditor] Stopping animation timer %u", animation_timer_id);
         g_source_remove(animation_timer_id);
         animation_timer_id = 0;
     }
@@ -875,19 +907,31 @@ static void on_line_numbers_toggled(GtkSwitch *sw, GParamSpec *pspec, gpointer u
 
 static void on_fps_changed(GtkSpinButton *spin, gpointer user_data) {
     (void)user_data;
+    int old_fps = preview_fps;
     preview_fps = gtk_spin_button_get_value_as_int(spin);
 
-    /* Always restart timer if it exists */
+    /* Clamp FPS to valid range */
+    if (preview_fps < 15) preview_fps = 15;
+    if (preview_fps > 120) preview_fps = 120;
+
+    tray_log_info("[ShaderEditor] Preview FPS changed from %d to %d", old_fps, preview_fps);
+
+    /* Restart timer with new interval */
     if (animation_timer_id) {
+        tray_log_info("[ShaderEditor] Removing old timer %u", animation_timer_id);
         g_source_remove(animation_timer_id);
         animation_timer_id = 0;
     }
 
-    /* Restart with new FPS if GL area is ready */
     if (gl_area && gl_initialized) {
         int interval = 1000 / preview_fps;
         animation_timer_id = g_timeout_add(interval, animation_timer_cb, gl_area);
-        tray_log_info("[ShaderEditor] Preview FPS updated to %d", preview_fps);
+        tray_log_info("[ShaderEditor] Created new timer %u with %dms interval (%d FPS)",
+                     animation_timer_id, interval, preview_fps);
+        gtk_widget_queue_draw(gl_area);
+    } else {
+        tray_log_info("[ShaderEditor] GL area not ready (gl_area=%p, gl_initialized=%d)",
+                     (void*)gl_area, gl_initialized);
     }
 }
 
@@ -896,8 +940,13 @@ static void on_vsync_toggled(GtkSwitch *sw, GParamSpec *pspec, gpointer user_dat
     (void)pspec;
     (void)user_data;
     shader_vsync = gtk_switch_get_active(sw);
+    tray_log_info("[ShaderEditor] VSync toggled: %s", shader_vsync ? "enabled" : "disabled");
+
+    /* Note: GtkGLArea doesn't provide direct VSync control API.
+     * VSync is typically controlled by the driver/compositor.
+     * For the tray preview, vsync mainly affects swap behavior. */
     if (gl_area) {
-        gtk_gl_area_set_use_es(GTK_GL_AREA(gl_area), !shader_vsync);
+        gtk_widget_queue_draw(gl_area);
     }
 }
 
@@ -1059,8 +1108,9 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     gtk_widget_set_halign(fps_label, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), fps_label, 0, row, 1, 1);
 
-    GtkWidget *fps_spin = gtk_spin_button_new_with_range(15, 120, 5);
+    GtkWidget *fps_spin = gtk_spin_button_new_with_range(15, 120, 1);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(fps_spin), preview_fps);
+    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(fps_spin), 0);
     g_signal_connect(fps_spin, "value-changed", G_CALLBACK(on_fps_changed), NULL);
     gtk_grid_attach(GTK_GRID(grid), fps_spin, 1, row, 1, 1);
     row++;
