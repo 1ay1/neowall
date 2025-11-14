@@ -1236,57 +1236,7 @@ void shader_editor_show(void) {
     /* Connect keyboard shortcuts */
     g_signal_connect(editor_window, "key-press-event", G_CALLBACK(on_key_press), NULL);
 
-    /* Apply compact styling */
-    GtkCssProvider *css_provider = gtk_css_provider_new();
-    const char *css_data =
-        "button {"
-        "  padding: 2px 8px;"
-        "  min-height: 24px;"
-        "  font-size: 12px;"
-        "  margin: 0 2px;"
-        "}"
-        "button label {"
-        "  font-size: 11px;"
-        "}"
-        "combobox {"
-        "  font-size: 11px;"
-        "}"
-        "combobox button {"
-        "  padding: 2px 6px;"
-        "  min-height: 24px;"
-        "}"
-        "spinbutton {"
-        "  font-size: 11px;"
-        "}"
-        "label {"
-        "  font-size: 12px;"
-        "}"
-        "toolbar {"
-        "  padding: 3px 6px;"
-        "  background: linear-gradient(to bottom, #f5f5f5, #e8e8e8);"
-        "  border-bottom: 1px solid #ccc;"
-        "  min-height: 32px;"
-        "}"
-        "statusbar {"
-        "  background: #2c2c2c;"
-        "  color: #e8e8e8;"
-        "  padding: 4px 8px;"
-        "  font-size: 11px;"
-        "}"
-        ".fps-label {"
-        "  color: #4CAF50;"
-        "  font-weight: bold;"
-        "  font-size: 11px;"
-        "}"
-        "separator {"
-        "  margin: 0 4px;"
-        "}";
 
-        gtk_css_provider_load_from_data(css_provider, css_data, -1, NULL);
-    gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
-                                               GTK_STYLE_PROVIDER(css_provider),
-                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    g_object_unref(css_provider);
 
     g_signal_connect(editor_window, "destroy", G_CALLBACK(on_window_destroy), NULL);
 
@@ -1410,8 +1360,6 @@ void shader_editor_show(void) {
     fps_label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(fps_label), "<small>-- FPS</small>");
     gtk_widget_set_tooltip_text(fps_label, "Preview performance");
-    GtkStyleContext *fps_context = gtk_widget_get_style_context(fps_label);
-    gtk_style_context_add_class(fps_context, "fps-label");
     gtk_box_pack_start(GTK_BOX(toolbar), fps_label, FALSE, FALSE, 6);
 
     /* Separator */
@@ -1616,10 +1564,6 @@ void shader_editor_show(void) {
         "<small><span alpha='60%'>💡 Shadertoy-compatible GLSL</span></small>");
     gtk_widget_set_halign(help_label, GTK_ALIGN_END);
     gtk_box_pack_start(GTK_BOX(status_box), help_label, FALSE, FALSE, 0);
-
-    /* Style the status bar */
-    GtkStyleContext *status_context = gtk_widget_get_style_context(status_box);
-    gtk_style_context_add_class(status_context, "statusbar");
 
     gtk_box_pack_start(GTK_BOX(vbox), status_box, FALSE, FALSE, 0);
 
