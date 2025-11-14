@@ -852,36 +852,6 @@ int cmd_restart(int argc, char *argv[]) {
     return cmd_start(argc, argv);
 }
 
-/* Simple JSON parser helpers */
-static const char* json_find_key(const char *json, const char *key) {
-    char search[128];
-    snprintf(search, sizeof(search), "\"%s\":", key);
-    return strstr(json, search);
-}
-
-static bool json_get_int(const char *json, const char *key, int *out) {
-    const char *pos = json_find_key(json, key);
-    if (!pos) return false;
-    pos += strlen(key) + 3;  /* Skip "key": */
-    while (*pos && (*pos == ' ' || *pos == '"')) pos++;
-    *out = atoi(pos);
-    return true;
-}
-
-static bool json_get_bool(const char *json, const char *key) {
-    const char *pos = json_find_key(json, key);
-    if (!pos) return false;
-    return strstr(pos, "true") != NULL;
-}
-
-static float json_get_float(const char *json, const char *key) {
-    const char *pos = json_find_key(json, key);
-    if (!pos) return 0.0f;
-    pos += strlen(key) + 3;
-    while (*pos && (*pos == ' ' || *pos == '"')) pos++;
-    return atof(pos);
-}
-
 int cmd_status(int argc, char *argv[]) {
     (void)argc; (void)argv;
 
@@ -894,107 +864,10 @@ int cmd_status(int argc, char *argv[]) {
         return 3;
     }
 
-    char data[8192];
-    if (send_ipc_command("status", data, sizeof(data))) {
-        if (flag_json_output) {
-            printf("%s\n", data);
-        } else {
-            /* Parse and display status nicely */
-            int pid = 0, outputs = 0;
-            bool paused = false, shader_paused = false;
-            float shader_speed = 1.0f;
-
-            json_get_int(data, "pid", &pid);
-            json_get_int(data, "outputs", &outputs);
-            paused = json_get_bool(data, "paused");
-            shader_paused = json_get_bool(data, "shader_paused");
-            shader_speed = json_get_float(data, "shader_speed");
-
-            printf("● neowalld is running\n\n");
-            printf("Process Information:\n");
-            printf("  PID:     %d\n", pid);
-            printf("  Outputs: %d\n\n", outputs);
-
-            printf("Wallpaper State:\n");
-            printf("  Cycling: %s\n\n", paused ? "⏸  Paused" : "▶  Active");
-
-            printf("Shader State:\n");
-            printf("  Animation: %s\n", shader_paused ? "⏸  Paused" : "▶  Active");
-            printf("  Speed:     %.2fx\n\n", shader_speed);
-
-            /* Parse and display wallpapers */
-            const char *wallpapers = strstr(data, "\"wallpapers\":[");
-            if (wallpapers) {
-                printf("Current Wallpapers:\n");
-                wallpapers += 14;  /* Skip "wallpapers":[ */
-
-                const char *obj_start = wallpapers;
-                int wp_num = 1;
-                while ((obj_start = strchr(obj_start, '{')) != NULL) {
-                    const char *obj_end = strchr(obj_start, '}');
-                    if (!obj_end) break;
-
-                    char obj[2048];
-                    size_t len = obj_end - obj_start + 1;
-                    if (len >= sizeof(obj)) len = sizeof(obj) - 1;
-                    strncpy(obj, obj_start, len);
-                    obj[len] = '\0';
-
-                    /* Extract wallpaper info */
-                    const char *output_pos = strstr(obj, "\"output\":\"");
-                    const char *type_pos = strstr(obj, "\"type\":\"");
-                    const char *path_pos = strstr(obj, "\"path\":\"");
-                    int cycle_index = 0, cycle_total = 0;
-                    json_get_int(obj, "cycle_index", &cycle_index);
-                    json_get_int(obj, "cycle_total", &cycle_total);
-
-                    if (output_pos && type_pos && path_pos) {
-                        output_pos += 10;
-                        type_pos += 8;
-                        path_pos += 8;
-
-                        /* Extract output name */
-                        char output_name[64] = {0};
-                        const char *q = strchr(output_pos, '"');
-                        if (q && (q - output_pos) < 63) {
-                            strncpy(output_name, output_pos, q - output_pos);
-                        }
-
-                        /* Extract type */
-                        char type[16] = {0};
-                        q = strchr(type_pos, '"');
-                        if (q && (q - type_pos) < 15) {
-                            strncpy(type, type_pos, q - type_pos);
-                        }
-
-                        /* Extract path */
-                        char path[512] = {0};
-                        q = path_pos;
-                        size_t pi = 0;
-                        while (*q && *q != '"' && pi < sizeof(path) - 1) {
-                            if (*q == '\\' && *(q+1) == '"') {
-                                path[pi++] = '"';
-                                q += 2;
-                            } else if (*q == '\\' && *(q+1) == '\\') {
-                                path[pi++] = '\\';
-                                q += 2;
-                            } else {
-                                path[pi++] = *q++;
-                            }
-                        }
-                        path[pi] = '\0';
-
-                        printf("  %d. %s (%s)\n", wp_num++, output_name, type);
-                        printf("     Path:  %s\n", path);
-                        if (cycle_total > 0) {
-                            printf("     Cycle: %d/%d\n", cycle_index + 1, cycle_total);
-                        }
-                    }
-
-                    obj_start = obj_end + 1;
-                }
-            }
-        }
+    /* send_ipc_command handles formatting and printing the status */
+    /* In JSON mode, it outputs the full response */
+    /* In non-JSON mode, it calls format_data_output which handles the display */
+    if (send_ipc_command("status", NULL, 0)) {
         return 0;
     }
 
