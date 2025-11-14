@@ -15,7 +15,7 @@
     <a href="#-create-your-own"><strong>Create Shaders</strong></a>
   </p>
 
-  <img src="https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560" alt="NeoWall Demo" width="100%"/>
+  https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560
 </div>
 
 ---
