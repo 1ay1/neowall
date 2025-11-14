@@ -547,8 +547,18 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             config->cycle_count = image_count;
             config->cycle_paths = image_paths;
 
-            /* Use first image as initial path */
-            strncpy(config->path, image_paths[0], sizeof(config->path) - 1);
+            /* Restore cycle index from state file if available */
+            int saved_index = restore_cycle_index_from_state(context_name);
+            if (saved_index >= 0 && saved_index < (int)image_count) {
+                config->current_cycle_index = saved_index;
+                log_info("[%s] Restored cycle position from state: %d/%zu",
+                        context_name, saved_index, image_count);
+            } else {
+                config->current_cycle_index = 0;
+            }
+
+            /* Use current image from cycle as initial path */
+            strncpy(config->path, image_paths[config->current_cycle_index], sizeof(config->path) - 1);
             config->path[sizeof(config->path) - 1] = '\0';
 
             log_info("[%s] IMAGE MODE: Loaded %zu images from directory for cycling",
@@ -596,8 +606,18 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             config->cycle_count = shader_count;
             config->cycle_paths = shader_paths;
 
-            /* Use first shader as initial shader_path */
-            strncpy(config->shader_path, shader_paths[0], sizeof(config->shader_path) - 1);
+            /* Restore cycle index from state file if available */
+            int saved_index = restore_cycle_index_from_state(context_name);
+            if (saved_index >= 0 && saved_index < (int)shader_count) {
+                config->current_cycle_index = saved_index;
+                log_info("[%s] Restored cycle position from state: %d/%zu",
+                        context_name, saved_index, shader_count);
+            } else {
+                config->current_cycle_index = 0;
+            }
+
+            /* Use current shader from cycle as initial shader_path */
+            strncpy(config->shader_path, shader_paths[config->current_cycle_index], sizeof(config->shader_path) - 1);
             config->shader_path[sizeof(config->shader_path) - 1] = '\0';
 
             log_info("[%s] SHADER MODE: Loaded %zu shaders from directory for cycling",
