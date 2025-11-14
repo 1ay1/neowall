@@ -507,6 +507,19 @@ static bool is_shadertoy_format(const char *source) {
 
         /* Check if 'void' appears before 'mainImage' in the search window */
         if (voidKeyword && voidKeyword < mainImage) {
+            /* Check for duplicate mainImage definitions */
+            const char *second_mainImage = strstr(mainImage + 1, "void mainImage");
+            if (second_mainImage) {
+                log_error("╔══════════════════════════════════════════════════════════════╗");
+                log_error("║ ERROR: Duplicate mainImage Function Detected                ║");
+                log_error("╠══════════════════════════════════════════════════════════════╣");
+                log_error("║ Your shader has multiple 'void mainImage(...)' functions.   ║");
+                log_error("║ Shadertoy shaders should have only ONE mainImage function.  ║");
+                log_error("║                                                               ║");
+                log_error("║ Please remove duplicate function definitions.                ║");
+                log_error("╚══════════════════════════════════════════════════════════════╝");
+                return false;
+            }
             log_debug("Detected Shadertoy format shader (mainImage function found)");
             return true;
         }
