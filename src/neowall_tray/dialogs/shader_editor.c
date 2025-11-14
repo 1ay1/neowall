@@ -30,6 +30,7 @@ static GtkWidget *gl_area = NULL;
 static GtkWidget *error_label = NULL;
 static GtkWidget *status_label = NULL;
 static GtkWidget *theme_combo = NULL;
+static GtkWidget *fps_label = NULL;
 static char *current_file_path = NULL;
 static char *saved_theme_preference = NULL;
 
@@ -47,6 +48,12 @@ static guint animation_timer_id = 0;
 /* Shader compilation debounce */
 static guint compile_timeout_id = 0;
 
+/* FPS tracking */
+static double last_fps_update_time = 0.0;
+static int frame_count = 0;
+static double current_fps = 0.0;
+static double last_compile_time = 0.0;
+
 /* Default simple shader template - exactly as NeoWall expects it */
 static const char *DEFAULT_SHADER =
 "// Simple animated gradient shader\n"
@@ -63,9 +70,85 @@ static const char *DEFAULT_SHADER =
 "    fragColor = vec4(col, 1.0);\n"
 "}\n";
 
+/* Example shader templates */
+static const char *EXAMPLE_PLASMA =
+"// Plasma effect\n"
+"void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n"
+"    vec2 uv = fragCoord / iResolution.xy;\n"
+"    float t = iTime * 0.5;\n"
+"    \n"
+"    float c = sin(uv.x * 10.0 + t);\n"
+"    c += sin(uv.y * 10.0 + t);\n"
+"    c += sin((uv.x + uv.y) * 10.0 + t);\n"
+"    c += sin(length(uv - 0.5) * 20.0 + t);\n"
+"    \n"
+"    vec3 col = vec3(0.5, 0.3, 0.8) + 0.5 * cos(c + vec3(0.0, 1.0, 2.0));\n"
+"    fragColor = vec4(col, 1.0);\n"
+"}\n";
+
+static const char *EXAMPLE_TUNNEL =
+"// Tunnel effect\n"
+"void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n"
+"    vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;\n"
+"    float a = atan(uv.y, uv.x);\n"
+"    float r = length(uv);\n"
+"    \n"
+"    vec2 tuv = vec2(a / 6.28318, 1.0 / r + iTime * 0.3);\n"
+"    \n"
+"    vec3 col = vec3(0.5) + 0.5 * cos(tuv.xyx * 20.0 + vec3(0, 2, 4));\n"
+"    col *= 0.5 + 0.5 * sin(r * 10.0 - iTime * 2.0);\n"
+"    \n"
+"    fragColor = vec4(col, 1.0);\n"
+"}\n";
+
+static const char *EXAMPLE_WAVES =
+"// Animated waves\n"
+"void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n"
+"    vec2 uv = fragCoord / iResolution.xy;\n"
+"    float t = iTime * 0.5;\n"
+"    \n"
+"    float y = uv.y;\n"
+"    y += sin(uv.x * 10.0 + t) * 0.1;\n"
+"    y += sin(uv.x * 20.0 - t * 2.0) * 0.05;\n"
+"    y += sin(uv.x * 5.0 + t * 0.5) * 0.15;\n"
+"    \n"
+"    float d = abs(y - 0.5);\n"
+"    vec3 col = mix(vec3(0.1, 0.3, 0.8), vec3(0.9, 0.5, 0.2), smoothstep(0.0, 0.1, d));\n"
+"    \n"
+"    fragColor = vec4(col, 1.0);\n"
+"}\n";
+
+static const char *EXAMPLE_MANDELBROT =
+"// Mandelbrot set zoom\n"
+"void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n"
+"    vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;\n"
+"    float zoom = 0.5 + 0.5 * sin(iTime * 0.3);\n"
+"    vec2 c = uv * zoom * 3.0 + vec2(-0.5, 0.0);\n"
+"    \n"
+"    vec2 z = vec2(0.0);\n"
+"    float iter = 0.0;\n"
+"    const float maxIter = 100.0;\n"
+"    \n"
+"    for (float i = 0.0; i < maxIter; i++) {\n"
+"        if (length(z) > 2.0) break;\n"
+"        z = vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;\n"
+"        iter++;\n"
+"    }\n"
+"    \n"
+"    float f = iter / maxIter;\n"
+"    vec3 col = 0.5 + 0.5 * cos(3.0 + f * 10.0 + vec3(0.0, 1.0, 2.0));\n"
+"    fragColor = vec4(col, 1.0);\n"
+"}\n";
+
 /* Forward declarations */
 static gboolean animation_timer_cb(gpointer user_data);
 static void on_theme_changed(GtkComboBox *combo, gpointer user_data);
+static void update_shader_program(void);
+static void on_save_clicked(GtkButton *button, gpointer user_data);
+static void on_load_clicked(GtkButton *button, gpointer user_data);
+static void on_apply_clicked(GtkButton *button, gpointer user_data);
+static void on_reset_clicked(GtkButton *button, gpointer user_data);
+static void on_example_selected(GtkMenuItem *item, gpointer user_data);
 
 /* Helper: Get current time in seconds */
 static double get_time(void) {
@@ -89,6 +172,67 @@ static void update_status(const char *message, bool is_error) {
     }
 }
 
+/* Keyboard shortcuts handler */
+static gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data) {
+    (void)widget;
+    (void)user_data;
+    guint modifiers = gtk_accelerator_get_default_mod_mask();
+
+    /* Ctrl+S - Save */
+    if ((event->state & modifiers) == GDK_CONTROL_MASK && event->keyval == GDK_KEY_s) {
+        on_save_clicked(NULL, NULL);
+        return TRUE;
+    }
+
+    /* Ctrl+O - Load */
+    if ((event->state & modifiers) == GDK_CONTROL_MASK && event->keyval == GDK_KEY_o) {
+        on_load_clicked(NULL, NULL);
+        return TRUE;
+    }
+
+    /* Ctrl+R - Reset */
+    if ((event->state & modifiers) == GDK_CONTROL_MASK && event->keyval == GDK_KEY_r) {
+        on_reset_clicked(NULL, NULL);
+        return TRUE;
+    }
+
+    /* Ctrl+Return - Apply */
+    if ((event->state & modifiers) == GDK_CONTROL_MASK &&
+        (event->keyval == GDK_KEY_Return || event->keyval == GDK_KEY_KP_Enter)) {
+        on_apply_clicked(NULL, NULL);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+/* Update FPS display */
+static void update_fps_display(void) {
+    if (!fps_label) return;
+
+    double now = get_time();
+    frame_count++;
+
+    /* Update FPS every 0.5 seconds */
+    if (now - last_fps_update_time >= 0.5) {
+        current_fps = frame_count / (now - last_fps_update_time);
+        frame_count = 0;
+        last_fps_update_time = now;
+
+        char fps_text[128];
+        if (last_compile_time > 0) {
+            snprintf(fps_text, sizeof(fps_text),
+                    "<small><span color='#4CAF50'><b>%.1f FPS</b></span> • <span color='#888'>Compile: %.0fms</span></small>",
+                    current_fps, last_compile_time);
+        } else {
+            snprintf(fps_text, sizeof(fps_text),
+                    "<small><span color='#4CAF50'><b>%.1f FPS</b></span></small>",
+                    current_fps);
+        }
+        gtk_label_set_markup(GTK_LABEL(fps_label), fps_text);
+    }
+}
+
 /* Compile shader using NeoWall's modular shader library */
 static void update_shader_program(void) {
     if (!gl_initialized) {
@@ -96,6 +240,9 @@ static void update_shader_program(void) {
     }
 
     gtk_gl_area_make_current(GTK_GL_AREA(gl_area));
+
+    /* Track compilation time */
+    double compile_start = get_time();
 
     /* Clear previous error */
     if (error_label) {
@@ -171,10 +318,17 @@ static void update_shader_program(void) {
     shader_program = new_program;
     shader_valid = true;
 
+    /* Calculate and store compilation time */
+    last_compile_time = (get_time() - compile_start) * 1000.0; // Convert to ms
+
     /* Update status */
     if (status_label) {
-        gtk_label_set_markup(GTK_LABEL(status_label),
-            "<span foreground='green'>✓ Shader compiled successfully (using NeoWall shader library)</span>");
+        char status_text[256];
+        snprintf(status_text, sizeof(status_text),
+                 "✓ Shader compiled successfully in %.0fms", last_compile_time);
+        char *markup = g_markup_printf_escaped("<span foreground='green'>%s</span>", status_text);
+        gtk_label_set_markup(GTK_LABEL(status_label), markup);
+        g_free(markup);
     }
 
     /* Start animation timer at 60 FPS (16.67ms per frame) */
@@ -244,6 +398,9 @@ static void on_gl_realize(GtkGLArea *area, gpointer user_data) {
 
     gl_initialized = true;
     start_time = get_time();
+    last_fps_update_time = start_time;
+    frame_count = 0;
+    current_fps = 0.0;
 
     /* Compile initial shader */
     update_shader_program();
@@ -260,6 +417,9 @@ static gboolean animation_timer_cb(gpointer user_data) {
 static gboolean on_gl_render(GtkGLArea *area, GdkGLContext *context, gpointer user_data) {
     (void)context;
     (void)user_data;
+
+    /* Update FPS counter */
+    update_fps_display();
 
     if (!gl_initialized || !shader_valid) {
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
@@ -540,6 +700,24 @@ static void on_load_clicked(GtkButton *button, gpointer user_data) {
     gtk_widget_destroy(dialog);
 }
 
+/* Example shader selection handler */
+static void on_example_selected(GtkMenuItem *item, gpointer user_data) {
+    (void)item;
+    const char *example_code = (const char *)user_data;
+
+    if (!source_buffer || !example_code) {
+        return;
+    }
+
+    /* Set the example shader code */
+    gtk_text_buffer_set_text(GTK_TEXT_BUFFER(source_buffer), example_code, -1);
+
+    /* Update status */
+    update_status("✓ Example shader loaded", FALSE);
+
+    tray_log_info("[ShaderEditor] Loaded example shader");
+}
+
 static void on_apply_clicked(GtkButton *button, gpointer user_data) {
     (void)button;
     (void)user_data;
@@ -638,9 +816,12 @@ void shader_editor_show(void) {
     /* Create main window */
     editor_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(editor_window), "NeoWall Shader Playground");
-    gtk_window_set_default_size(GTK_WINDOW(editor_window), 1200, 700);
+    gtk_window_set_default_size(GTK_WINDOW(editor_window), 1400, 800);
     gtk_window_set_position(GTK_WINDOW(editor_window), GTK_WIN_POS_CENTER);
     gtk_window_set_type_hint(GTK_WINDOW(editor_window), GDK_WINDOW_TYPE_HINT_DIALOG);
+
+    /* Connect keyboard shortcuts */
+    g_signal_connect(editor_window, "key-press-event", G_CALLBACK(on_key_press), NULL);
 
     /* Apply compact styling */
     GtkCssProvider *css_provider = gtk_css_provider_new();
@@ -658,9 +839,20 @@ void shader_editor_show(void) {
         "}"
         "toolbar {"
         "  padding: 4px;"
+        "  background: linear-gradient(to bottom, #f5f5f5, #e8e8e8);"
+        "  border-bottom: 1px solid #ccc;"
+        "}"
+        "statusbar {"
+        "  background: #2c2c2c;"
+        "  color: #e8e8e8;"
+        "  padding: 6px 8px;"
+        "}"
+        ".fps-label {"
+        "  color: #4CAF50;"
+        "  font-weight: bold;"
         "}";
 
-    gtk_css_provider_load_from_data(css_provider, css_data, -1, NULL);
+        gtk_css_provider_load_from_data(css_provider, css_data, -1, NULL);
     gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
                                                GTK_STYLE_PROVIDER(css_provider),
                                                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -680,19 +872,59 @@ void shader_editor_show(void) {
     gtk_widget_set_margin_bottom(toolbar, 6);
     gtk_box_pack_start(GTK_BOX(vbox), toolbar, FALSE, FALSE, 0);
 
-    /* Buttons */
+    /* Buttons with tooltips */
     GtkWidget *load_btn = gtk_button_new_with_label("📂 Load");
+    gtk_widget_set_tooltip_text(load_btn, "Load shader from file (Ctrl+O)");
+
     GtkWidget *save_btn = gtk_button_new_with_label("💾 Save");
-    GtkWidget *apply_btn = gtk_button_new_with_label("✓ Apply");
+    gtk_widget_set_tooltip_text(save_btn, "Save shader to file (Ctrl+S)");
+
+    GtkWidget *apply_btn = gtk_button_new_with_label("⚡ Apply");
+    gtk_widget_set_tooltip_text(apply_btn, "Apply shader to wallpaper (Ctrl+Enter)");
+
     GtkWidget *reset_btn = gtk_button_new_with_label("↻ Reset");
+    gtk_widget_set_tooltip_text(reset_btn, "Reset to default shader (Ctrl+R)");
+
+    /* Examples menu button */
+    GtkWidget *examples_btn = gtk_menu_button_new();
+    gtk_button_set_label(GTK_BUTTON(examples_btn), "📚 Examples");
+    gtk_widget_set_tooltip_text(examples_btn, "Load example shaders");
+
+    GtkWidget *examples_menu = gtk_menu_new();
+
+    GtkWidget *example1 = gtk_menu_item_new_with_label("Animated Gradient (Default)");
+    g_signal_connect(example1, "activate", G_CALLBACK(on_example_selected), (gpointer)DEFAULT_SHADER);
+    gtk_menu_shell_append(GTK_MENU_SHELL(examples_menu), example1);
+
+    GtkWidget *example2 = gtk_menu_item_new_with_label("Plasma Effect");
+    g_signal_connect(example2, "activate", G_CALLBACK(on_example_selected), (gpointer)EXAMPLE_PLASMA);
+    gtk_menu_shell_append(GTK_MENU_SHELL(examples_menu), example2);
+
+    GtkWidget *example3 = gtk_menu_item_new_with_label("Tunnel");
+    g_signal_connect(example3, "activate", G_CALLBACK(on_example_selected), (gpointer)EXAMPLE_TUNNEL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(examples_menu), example3);
+
+    GtkWidget *example4 = gtk_menu_item_new_with_label("Waves");
+    g_signal_connect(example4, "activate", G_CALLBACK(on_example_selected), (gpointer)EXAMPLE_WAVES);
+    gtk_menu_shell_append(GTK_MENU_SHELL(examples_menu), example4);
+
+    GtkWidget *example5 = gtk_menu_item_new_with_label("Mandelbrot Set");
+    g_signal_connect(example5, "activate", G_CALLBACK(on_example_selected), (gpointer)EXAMPLE_MANDELBROT);
+    gtk_menu_shell_append(GTK_MENU_SHELL(examples_menu), example5);
+
+    gtk_widget_show_all(examples_menu);
+    gtk_menu_button_set_popup(GTK_MENU_BUTTON(examples_btn), examples_menu);
 
     g_signal_connect(load_btn, "clicked", G_CALLBACK(on_load_clicked), NULL);
     g_signal_connect(save_btn, "clicked", G_CALLBACK(on_save_clicked), NULL);
     g_signal_connect(apply_btn, "clicked", G_CALLBACK(on_apply_clicked), NULL);
     g_signal_connect(reset_btn, "clicked", G_CALLBACK(on_reset_clicked), NULL);
 
+    gtk_box_pack_start(GTK_BOX(toolbar), examples_btn, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
     gtk_box_pack_start(GTK_BOX(toolbar), load_btn, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), save_btn, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
     gtk_box_pack_start(GTK_BOX(toolbar), apply_btn, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), reset_btn, FALSE, FALSE, 0);
 
@@ -728,10 +960,19 @@ void shader_editor_show(void) {
     /* Connect signal AFTER buffer is created to avoid NULL buffer */
     gtk_box_pack_start(GTK_BOX(toolbar), theme_combo, FALSE, FALSE, 0);
 
+    /* FPS Counter */
+    fps_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(fps_label), "<small>--.- FPS</small>");
+    gtk_widget_set_tooltip_text(fps_label, "Frames per second and compilation time");
+    GtkStyleContext *fps_context = gtk_widget_get_style_context(fps_label);
+    gtk_style_context_add_class(fps_context, "fps-label");
+    gtk_box_pack_start(GTK_BOX(toolbar), fps_label, FALSE, FALSE, 8);
+
     /* Info label */
     GtkWidget *info_label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(info_label),
-        "<small><b>100% NeoWall Compatible</b></small>");
+        "<small><b>⚡ Live Preview</b></small>");
+    gtk_widget_set_tooltip_text(info_label, "Changes compile automatically");
     gtk_box_pack_start(GTK_BOX(toolbar), info_label, FALSE, FALSE, 8);
 
     /* Separator */
@@ -749,10 +990,23 @@ void shader_editor_show(void) {
     gtk_widget_set_margin_top(editor_box, 4);
     gtk_widget_set_margin_bottom(editor_box, 4);
 
+    GtkWidget *editor_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+
     GtkWidget *editor_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(editor_label), "<b>Shader Code (GLSL)</b>");
+    gtk_label_set_markup(GTK_LABEL(editor_label), "<b>📝 Shader Code (GLSL)</b>");
     gtk_widget_set_halign(editor_label, GTK_ALIGN_START);
-    gtk_box_pack_start(GTK_BOX(editor_box), editor_label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(editor_header), editor_label, FALSE, FALSE, 0);
+
+    GtkWidget *editor_spacer = gtk_label_new("");
+    gtk_box_pack_start(GTK_BOX(editor_header), editor_spacer, TRUE, TRUE, 0);
+
+    GtkWidget *shortcuts_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(shortcuts_label),
+        "<small><i>Ctrl+S: Save | Ctrl+Enter: Apply</i></small>");
+    gtk_widget_set_halign(shortcuts_label, GTK_ALIGN_END);
+    gtk_box_pack_start(GTK_BOX(editor_header), shortcuts_label, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(editor_box), editor_header, FALSE, FALSE, 0);
 
     /* Source view with syntax highlighting */
     GtkSourceLanguageManager *lang_manager = gtk_source_language_manager_get_default();
@@ -791,6 +1045,7 @@ void shader_editor_show(void) {
     gtk_source_view_set_highlight_current_line(GTK_SOURCE_VIEW(source_view), TRUE);
     gtk_source_view_set_show_right_margin(GTK_SOURCE_VIEW(source_view), TRUE);
     gtk_source_view_set_right_margin_position(GTK_SOURCE_VIEW(source_view), 100);
+    gtk_source_view_set_background_pattern(GTK_SOURCE_VIEW(source_view), GTK_SOURCE_BACKGROUND_PATTERN_TYPE_GRID);
     gtk_text_view_set_monospace(GTK_TEXT_VIEW(source_view), TRUE);
 
     /* Enable auto-completion */
@@ -829,10 +1084,23 @@ void shader_editor_show(void) {
     gtk_widget_set_margin_top(preview_box, 4);
     gtk_widget_set_margin_bottom(preview_box, 4);
 
+    GtkWidget *preview_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+
     GtkWidget *preview_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(preview_label), "<b>Live Preview</b>");
+    gtk_label_set_markup(GTK_LABEL(preview_label), "<b>👁 Live Preview</b>");
     gtk_widget_set_halign(preview_label, GTK_ALIGN_START);
-    gtk_box_pack_start(GTK_BOX(preview_box), preview_label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(preview_header), preview_label, FALSE, FALSE, 0);
+
+    GtkWidget *preview_spacer = gtk_label_new("");
+    gtk_box_pack_start(GTK_BOX(preview_header), preview_spacer, TRUE, TRUE, 0);
+
+    GtkWidget *res_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(res_label), "<small><i>Auto-resize</i></small>");
+    gtk_widget_set_halign(res_label, GTK_ALIGN_END);
+    gtk_widget_set_tooltip_text(res_label, "Preview updates in real-time as you type");
+    gtk_box_pack_start(GTK_BOX(preview_header), res_label, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(preview_box), preview_header, FALSE, FALSE, 0);
 
     /* GL Area for rendering */
     gl_area = gtk_gl_area_new();
@@ -863,9 +1131,20 @@ void shader_editor_show(void) {
     gtk_widget_set_margin_bottom(status_box, 4);
 
     status_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(status_label), "<small>Ready - Edit shader and see live preview!</small>");
+    gtk_label_set_markup(GTK_LABEL(status_label), "<small>✓ Ready - Edit shader and see live preview!</small>");
     gtk_widget_set_halign(status_label, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(status_box), status_label, TRUE, TRUE, 0);
+
+    /* Add a help icon */
+    GtkWidget *help_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(help_label),
+        "<small>💡 <i>Tip: Use Shadertoy-compatible GLSL code</i></small>");
+    gtk_widget_set_halign(help_label, GTK_ALIGN_END);
+    gtk_box_pack_start(GTK_BOX(status_box), help_label, FALSE, FALSE, 0);
+
+    /* Style the status bar */
+    GtkStyleContext *status_context = gtk_widget_get_style_context(status_box);
+    gtk_style_context_add_class(status_context, "statusbar");
 
     gtk_box_pack_start(GTK_BOX(vbox), status_box, FALSE, FALSE, 0);
 
