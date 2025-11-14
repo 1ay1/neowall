@@ -1198,14 +1198,37 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
                 }
             }
         }
+
+        /* Restore cycle index from state file for this specific output */
+        const char *output_id = output_get_identifier(output);
+        int saved_index = restore_cycle_index_from_state(output_id);
+        if (saved_index >= 0 && saved_index < (int)output->config->cycle_count) {
+            output->config->current_cycle_index = saved_index;
+            log_info("Restored cycle position for %s: %d/%zu",
+                    output_id, saved_index, output->config->cycle_count);
+
+            /* Update the initial path to use the restored index */
+            if (output->config->type == WALLPAPER_SHADER) {
+                strncpy(output->config->shader_path,
+                       output->config->cycle_paths[saved_index],
+                       sizeof(output->config->shader_path) - 1);
+                output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
+            } else {
+                strncpy(output->config->path,
+                       output->config->cycle_paths[saved_index],
+                       sizeof(output->config->path) - 1);
+                output->config->path[sizeof(output->config->path) - 1] = '\0';
+            }
+        }
     }
 
-    log_debug("Config applied - type=%d, cycle=%d, cycle_count=%zu",
-              output->config->type, output->config->cycle, output->config->cycle_count);
+    log_debug("Config applied - type=%d, cycle=%d, cycle_count=%zu, cycle_index=%zu",
+              output->config->type, output->config->cycle, output->config->cycle_count,
+              output->config->current_cycle_index);
 
     /* If we don't have a compositor surface yet, defer actual wallpaper loading */
     if (!output->compositor_surface || !output->configured) {
-        log_debug("Output %s not yet configured, deferring wallpaper load", 
+        log_debug("Output %s not yet configured, deferring wallpaper load",
                   output->model[0] ? output->model : "unknown");
         return true;
     }
