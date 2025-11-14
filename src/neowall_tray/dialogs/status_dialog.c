@@ -274,17 +274,17 @@ void status_dialog_show(void) {
         json_get_float(daemon_data, "shader_speed", &shader_speed);
 
         /* === DAEMON SECTION === */
-        GtkWidget *daemon_section = create_status_section("Daemon Information", "system-run");
+        GtkWidget *daemon_section = create_status_section("⚙️  Daemon Information", "system-run");
 
         char pid_str[32];
         snprintf(pid_str, sizeof(pid_str), "%d", pid);
         gtk_box_pack_start(GTK_BOX(daemon_section),
-            create_status_item("Process ID:", pid_str, true), FALSE, FALSE, 0);
+            create_status_item("🆔 Process ID:", pid_str, true), FALSE, FALSE, 0);
 
         char outputs_str[32];
         snprintf(outputs_str, sizeof(outputs_str), "%d", output_count);
         gtk_box_pack_start(GTK_BOX(daemon_section),
-            create_status_item("Active Outputs:", outputs_str, true), FALSE, FALSE, 0);
+            create_status_item("🖥️  Active Outputs:", outputs_str, true), FALSE, FALSE, 0);
 
         gtk_box_pack_start(GTK_BOX(main_box), daemon_section, FALSE, FALSE, 0);
 
@@ -293,11 +293,11 @@ void status_dialog_show(void) {
         gtk_box_pack_start(GTK_BOX(main_box), sep1, FALSE, FALSE, 0);
 
         /* === CYCLING SECTION === */
-        GtkWidget *cycling_section = create_status_section("Wallpaper Cycling", "media-playlist-repeat");
+        GtkWidget *cycling_section = create_status_section("🔄 Wallpaper Cycling", "media-playlist-repeat");
 
-        const char *cycle_status = paused ? "⏸ Paused" : "▶ Active";
+        const char *cycle_status = paused ? "⏸️  Paused" : "▶️  Active";
         gtk_box_pack_start(GTK_BOX(cycling_section),
-            create_status_item("Status:", cycle_status, true), FALSE, FALSE, 0);
+            create_status_item("📊 Status:", cycle_status, true), FALSE, FALSE, 0);
 
         gtk_box_pack_start(GTK_BOX(main_box), cycling_section, FALSE, FALSE, 0);
 
@@ -306,16 +306,16 @@ void status_dialog_show(void) {
         gtk_box_pack_start(GTK_BOX(main_box), sep2, FALSE, FALSE, 0);
 
         /* === SHADER SECTION === */
-        GtkWidget *shader_section = create_status_section("Shader Animation", "video-display");
+        GtkWidget *shader_section = create_status_section("✨ Live Animation", "video-display");
 
-        const char *shader_status = shader_paused ? "⏸ Paused" : "▶ Active";
+        const char *shader_status = shader_paused ? "⏸️  Paused" : "▶️  Active";
         gtk_box_pack_start(GTK_BOX(shader_section),
-            create_status_item("Status:", shader_status, true), FALSE, FALSE, 0);
+            create_status_item("📊 Status:", shader_status, true), FALSE, FALSE, 0);
 
         char speed_str[32];
         snprintf(speed_str, sizeof(speed_str), "%.2fx", shader_speed);
         gtk_box_pack_start(GTK_BOX(shader_section),
-            create_status_item("Speed:", speed_str, false), FALSE, FALSE, 0);
+            create_status_item("⚡ Animation Speed:", speed_str, false), FALSE, FALSE, 0);
 
         gtk_box_pack_start(GTK_BOX(main_box), shader_section, FALSE, FALSE, 0);
 
@@ -326,7 +326,7 @@ void status_dialog_show(void) {
             GtkWidget *sep3 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
             gtk_box_pack_start(GTK_BOX(main_box), sep3, FALSE, FALSE, 0);
 
-            GtkWidget *wallpaper_section = create_status_section("Current Wallpapers", "image-x-generic");
+            GtkWidget *wallpaper_section = create_status_section("🖼️  Current Wallpapers", "image-x-generic");
 
             wallpapers += 14;  /* Skip "wallpapers":[ */
             const char *obj_start = wallpapers;
