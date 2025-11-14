@@ -9,9 +9,6 @@ proto_headers_dep = declare_dependency(
 neowalld_sources = files(
   'main.c',
   'eventloop.c',
-  'shader.c',
-  'shader_adaptation.c',
-  'shadertoy_compat.c',
   'utils.c',
 )
 
@@ -121,6 +118,7 @@ daemon_deps = [
   libm,
   ipc_dep,
   proto_headers_dep,
+  shader_lib_dep,
 ]
 
 if libpng.found()

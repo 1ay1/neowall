@@ -82,7 +82,22 @@ static const MenuItemDef shader_items[] = {
         .submenu_id = MENU_ID_SHADER,
         .order = 3
     },
-
+    {
+        .label = MENU_LABEL_SPEED_UP,
+        .id = "speed_up",
+        .type = MENU_ITEM_TYPE_NORMAL,
+        .callback = G_CALLBACK(menu_callback_speed_up),
+        .submenu_id = MENU_ID_SHADER,
+        .order = 4
+    },
+    {
+        .label = MENU_LABEL_SPEED_DOWN,
+        .id = "speed_down",
+        .type = MENU_ITEM_TYPE_NORMAL,
+        .callback = G_CALLBACK(menu_callback_speed_down),
+        .submenu_id = MENU_ID_SHADER,
+        .order = 5
+    }
 };
 
 /* ============================================================================
@@ -187,12 +202,20 @@ static const MenuItemDef info_items[] = {
         .order = 1
     },
     {
+        .label = MENU_LABEL_EDIT_SHADER,
+        .id = "edit_shader",
+        .type = MENU_ITEM_TYPE_NORMAL,
+        .callback = G_CALLBACK(menu_callback_edit_shader),
+        .submenu_id = NULL,
+        .order = 2
+    },
+    {
         .label = MENU_LABEL_SETTINGS,
         .id = "settings",
         .type = MENU_ITEM_TYPE_NORMAL,
         .callback = G_CALLBACK(menu_callback_show_settings),
         .submenu_id = NULL,
-        .order = 2
+        .order = 3
     },
     {
         .label = MENU_LABEL_ABOUT,
@@ -200,7 +223,7 @@ static const MenuItemDef info_items[] = {
         .type = MENU_ITEM_TYPE_NORMAL,
         .callback = G_CALLBACK(menu_callback_about),
         .submenu_id = NULL,
-        .order = 3
+        .order = 4
     },
     {
         .label = MENU_LABEL_QUIT,
@@ -208,7 +231,7 @@ static const MenuItemDef info_items[] = {
         .type = MENU_ITEM_TYPE_NORMAL,
         .callback = G_CALLBACK(menu_callback_quit),
         .submenu_id = NULL,
-        .order = 4
+        .order = 5
     }
 };
 

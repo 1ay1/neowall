@@ -238,6 +238,11 @@ static GtkWidget *build_submenu_by_id(GtkWidget *menu, const char *submenu_id) {
         return submenu;
     } else if (strcmp(submenu_id, MENU_ID_SHADER) == 0) {
         items = menu_items_get_shader_submenu(&count);
+        printf("[DEBUG] Building shader submenu with %d items\n", count);
+        for (int i = 0; i < count; i++) {
+            printf("[DEBUG]   Item %d: label='%s' type=%d\n", i,
+                   items[i].label ? items[i].label : "(separator)", items[i].type);
+        }
         GtkWidget *submenu = menu_builder_add_submenu(menu, MENU_LABEL_SHADER);
         build_menu_items(submenu, items, count);
         return submenu;

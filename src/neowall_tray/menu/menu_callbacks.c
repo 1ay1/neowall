@@ -6,6 +6,7 @@
 #include "../daemon/command_exec.h"
 #include "../dialogs/dialogs.h"
 #include "../dialogs/settings_dialog.h"
+#include "../dialogs/shader_editor.h"
 #include <stdio.h>
 
 /* Forward declaration for menu update functions */
@@ -40,6 +41,12 @@ void menu_callback_resume_cycling(GtkMenuItem *item, gpointer user_data) {
 }
 
 /* Live/Shader animation control callbacks */
+void menu_callback_edit_shader(GtkMenuItem *item, gpointer user_data) {
+    (void)item;
+    (void)user_data;
+    shader_editor_show();
+}
+
 void menu_callback_live_pause(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
@@ -50,6 +57,18 @@ void menu_callback_live_resume(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
     command_execute("live-resume");
+}
+
+void menu_callback_speed_up(GtkMenuItem *item, gpointer user_data) {
+    (void)item;
+    (void)user_data;
+    command_execute("speed-up");
+}
+
+void menu_callback_speed_down(GtkMenuItem *item, gpointer user_data) {
+    (void)item;
+    (void)user_data;
+    command_execute("speed-down");
 }
 
 

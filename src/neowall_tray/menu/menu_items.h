@@ -58,6 +58,7 @@ typedef struct {
 
 /* Live/Shader animation submenu */
 #define MENU_LABEL_SHADER           "Live Animation"
+#define MENU_LABEL_EDIT_SHADER      "Edit Shader..."
 #define MENU_LABEL_LIVE_PAUSE       "Pause Animation"
 #define MENU_LABEL_LIVE_RESUME      "Resume Animation"
 #define MENU_LABEL_SPEED_UP         "Speed Up"

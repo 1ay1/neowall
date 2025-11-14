@@ -143,6 +143,7 @@ inc_dirs = [
 run_command('mkdir', '-p', meson.project_build_root() / 'bin', check: false)
 
 # Subdirectories
+subdir('src/shader_lib')
 subdir('src/ipc')
 subdir('src/neowalld')
 subdir('src/neowall')

@@ -16,6 +16,7 @@ void menu_callback_pause_cycling(GtkMenuItem *item, gpointer user_data);
 void menu_callback_resume_cycling(GtkMenuItem *item, gpointer user_data);
 
 /* Live/Shader animation control callbacks */
+void menu_callback_edit_shader(GtkMenuItem *item, gpointer user_data);
 void menu_callback_live_pause(GtkMenuItem *item, gpointer user_data);
 void menu_callback_live_resume(GtkMenuItem *item, gpointer user_data);
 void menu_callback_speed_up(GtkMenuItem *item, gpointer user_data);

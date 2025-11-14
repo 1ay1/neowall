@@ -4,6 +4,9 @@
 # GTK3 and AppIndicator dependencies
 gtk3 = dependency('gtk+-3.0', version: '>=3.22', required: true)
 appindicator3 = dependency('appindicator3-0.1', required: true)
+gtksourceview = dependency('gtksourceview-3.0', required: true)
+
+
 
 # Source files organized by component
 tray_sources = [
@@ -30,6 +33,7 @@ tray_sources = [
   'dialogs/settings_dialog.c',
   'dialogs/about_dialog.c',
   'dialogs/status_dialog.c',
+  'dialogs/shader_editor.c',
 
   # UI component
   'ui/ui_utils.c',
@@ -42,8 +46,8 @@ tray_inc = include_directories('.')
 neowall_tray = executable(
   'neowall_tray',
   tray_sources,
-  dependencies: [gtk3, appindicator3],
-  include_directories: [tray_inc, inc_dirs],
+  dependencies: [gtk3, appindicator3, gtksourceview, glesv2, shader_lib_dep],
+  include_directories: [tray_inc, inc_dirs, include_directories('../shader_lib')],
   install: true,
   install_dir: get_option('bindir'),
 )
