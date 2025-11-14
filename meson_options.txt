@@ -1,6 +1,6 @@
 # NeoWall build options
 
-option('build-daemon',
+option('build_daemon',
   type: 'boolean',
   value: true,
   description: 'Build the neowalld daemon (requires Wayland/X11 backend)')

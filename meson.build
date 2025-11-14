@@ -65,7 +65,7 @@ libm = cc.find_library('m', required: true)
 
 # Backend-specific dependencies (only for neowalld)
 # Check if we're building the daemon
-build_daemon = get_option('build-daemon')
+build_daemon = get_option('build_daemon')
 
 if build_daemon
   wayland_client = dependency('wayland-client', version: '>=1.20')
