@@ -9,7 +9,8 @@ Edit `~/.config/neowall/config.vibe`:
 ```vibe
 output {
   eDP-1 {
-    shader matrix_real.glsl
+    type shader
+    path ~/.config/neowall/shaders/matrix_real.glsl
     shader_speed 1.0
   }
 }
@@ -62,15 +63,18 @@ Example configuration:
 ```vibe
 output {
   eDP-1 {
-    shader matrix_real.glsl
+    type shader
+    path ~/.config/neowall/shaders/matrix_real.glsl
     shader_speed 1.0
     mode fill
   }
   HDMI-A-1 {
+    type image
     path ~/Pictures/wallpaper.png
     mode fill
   }
   DP-1 {
+    type image
     path ~/Pictures/Wallpapers/   # Directory cycling
     duration 300                  # Change every 5 minutes
     transition fade
@@ -86,16 +90,49 @@ output {
 
 ## Options Reference
 
-### Shader Options
+### Modern Unified Format
 
-#### `shader` - GLSL Shader File
-
-Run GPU shader as wallpaper:
+**Important:** NeoWall uses a unified format - always use `type` + `path`:
 
 ```vibe
-shader matrix_real.glsl           # From ~/.config/neowall/shaders/
-shader ~/custom/shader.glsl       # Absolute path
-shader /usr/share/shaders/x.glsl  # System path
+output {
+  eDP-1 {
+    type shader                              # Specify the type
+    path ~/.config/neowall/shaders/          # Use path for everything
+    shader_speed 1.0
+  }
+  
+  HDMI-A-1 {
+    type image                               # Specify the type
+    path ~/Pictures/wallpaper.png            # Use path for everything
+    mode fill
+  }
+}
+```
+
+### Available Types
+
+- `shader` - GLSL shader wallpapers (GPU-accelerated)
+- `image` - Static images (PNG, JPEG)
+- `gif` - Animated GIFs
+- `video` - Video wallpapers
+- `svg` - SVG vector graphics
+
+### Shader Options
+
+#### `type shader` + `path` - GLSL Shader Wallpaper
+
+Run GPU shader as animated wallpaper:
+
+```vibe
+type shader
+path ~/.config/neowall/shaders/matrix_real.glsl   # Single shader
+```
+
+```vibe
+type shader
+path ~/.config/neowall/shaders/                   # Directory - cycles all shaders
+duration 300                                      # Change every 5 minutes
 ```
 
 Included shaders:

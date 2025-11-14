@@ -41,29 +41,34 @@ output {
   # Uncomment and modify for your setup
   # eDP-1 {
   #   # Option 1: Static Image Wallpaper
+  #   type image
   #   path ~/.local/share/neowall/default.png
   #   mode fill
   #
   #   # Option 2: Directory Cycling (Recommended!)
   #   # Point to a folder to cycle through ALL images
+  #   # type image
   #   # path ~/Pictures/Wallpapers/    # Must end with / for directories!
   #   # duration 600                   # Change every 10 minutes
   #   # transition fade                # Smooth transitions (default)
   #   # transition_duration 500        # 500ms transition
   #
   #   # Option 3: Live Shader Wallpaper
-  #   # shader retro_wave.glsl         # Animated GPU shader
+  #   # type shader                    # Modern format: type + path
+  #   # path ~/.config/neowall/shaders/retro_wave.glsl
   #   # shader_speed 1.0               # Animation speed multiplier
   # }
 
   # Example: External monitor via HDMI
   # HDMI-A-1 {
+  #   type image
   #   path ~/Pictures/monitor-wallpaper.png
   #   mode fill
   # }
 
   # Example: DisplayPort monitor with cycling wallpapers
   # DP-1 {
+  #   type image
   #   path ~/Pictures/Nature/        # Directory mode - cycles all images
   #   mode fill
   #   duration 300                   # Change every 5 minutes
@@ -73,7 +78,8 @@ output {
 
   # Example: Second DisplayPort monitor with shader
   # DP-2 {
-  #   shader retro_wave.glsl         # Live animated shader
+  #   type shader                    # Modern format: type + path
+  #   path ~/.config/neowall/shaders/retro_wave.glsl
   #   shader_speed 1.5               # Run animations 1.5x faster
   #   shader_fps 60                  # Target 60 FPS
   #   vsync false                    # Disable vsync for lower latency
@@ -86,10 +92,12 @@ output {
 #
 # FOR EACH OUTPUT, YOU CAN SET:
 #
-# Image/Shader Source (choose ONE):
-#   path <file>         - Single image file (PNG/JPEG)
-#   path <directory>/   - Directory of images (must end with /)
-#   shader <filename>   - Live shader wallpaper (e.g., retro_wave.glsl)
+# Source Configuration (MODERN FORMAT):
+#   type <type>         - Wallpaper type: image, shader, gif, video, svg
+#   path <file>         - File path (used for ALL types)
+#   path <directory>/   - Directory path (for cycling, must end with /)
+#
+# IMPORTANT: Always use "type" + "path" (don't use legacy "shader" keyword)
 #
 # Display Mode (optional, default: fill):
 #   mode fill           - Scale to fill screen, crop if needed (recommended)
@@ -110,7 +118,7 @@ output {
 #   transition_duration <ms> - Transition length in milliseconds (default: 300)
 #                              Examples: 100 (fast), 500 (smooth), 1000 (slow)
 #
-# Shader Options (only for shader wallpapers):
+# Shader Options (only when type is "shader"):
 #   shader_speed <multiplier> - Animation speed (default: 1.0)
 #                               Examples: 0.5 (slower), 2.0 (faster)
 #   shader_fps <fps>          - Target frame rate (default: 60)
@@ -124,6 +132,7 @@ output {
 # --- Example 1: Simple Single Monitor Setup ---
 # output {
 #   eDP-1 {
+#     type image
 #     path ~/.local/share/neowall/default.png
 #     mode fill
 #   }
@@ -132,10 +141,12 @@ output {
 # --- Example 2: Laptop + External Monitor ---
 # output {
 #   eDP-1 {
+#     type image
 #     path ~/Pictures/laptop-bg.jpg
 #     mode fill
 #   }
 #   HDMI-A-1 {
+#     type image
 #     path ~/Pictures/monitor-bg.jpg
 #     mode fill
 #   }
@@ -144,6 +155,7 @@ output {
 # --- Example 3: Directory Cycling (RECOMMENDED!) ---
 # output {
 #   eDP-1 {
+#     type image
 #     path ~/Pictures/Wallpapers/      # Trailing / = directory mode
 #     mode fill
 #     duration 600                     # Change every 10 minutes
@@ -155,14 +167,17 @@ output {
 # --- Example 4: Multi-Monitor Gaming Setup ---
 # output {
 #   DP-1 {
+#     type image
 #     path ~/Pictures/Gaming/main.png
 #     mode fill
 #   }
 #   DP-2 {
+#     type image
 #     path ~/Pictures/Gaming/left.png
 #     mode fill
 #   }
 #   DP-3 {
+#     type image
 #     path ~/Pictures/Gaming/right.png
 #     mode fill
 #   }
@@ -171,7 +186,8 @@ output {
 # --- Example 5: Live Shader Wallpapers ---
 # output {
 #   eDP-1 {
-#     shader retro_wave.glsl           # Synthwave aesthetic
+#     type shader
+#     path ~/.config/neowall/shaders/retro_wave.glsl
 #     shader_speed 0.8                 # Slower, smoother animations
 #   }
 # }
@@ -179,10 +195,12 @@ output {
 # --- Example 6: Mix Shaders and Images ---
 # output {
 #   eDP-1 {
-#     shader plasma.glsl               # Animated shader on laptop
+#     type shader
+#     path ~/.config/neowall/shaders/plasma.glsl
 #     shader_speed 1.2
 #   }
 #   HDMI-A-1 {
+#     type image
 #     path ~/Pictures/static.png       # Static image on monitor
 #     mode fill
 #   }
@@ -191,10 +209,12 @@ output {
 # --- Example 7: Work Setup with Minimal Distractions ---
 # output {
 #   eDP-1 {
+#     type image
 #     path ~/Pictures/Work/solid-dark.png
 #     mode fill
 #   }
 #   DP-1 {
+#     type image
 #     path ~/Pictures/Work/logo.png
 #     mode center
 #   }
@@ -203,11 +223,13 @@ output {
 # --- Example 8: Different Cycling Speeds per Monitor ---
 # output {
 #   eDP-1 {
+#     type image
 #     path ~/Pictures/Laptop/
 #     duration 300                     # 5 minutes
 #     mode fill
 #   }
 #   HDMI-A-1 {
+#     type image
 #     path ~/Pictures/Monitor/
 #     duration 1800                    # 30 minutes
 #     mode fill
@@ -247,11 +269,15 @@ output {
 # Shaders are installed to ~/.config/neowall/shaders/ on first run.
 # Use just the filename in the shader option.
 #
-# Available shaders:
+# Available shaders (use with "type shader" + "path"):
 #   - retro_wave.glsl     : Retro synthwave aesthetic with neon colors
 #   - plasma.glsl         : Colorful animated plasma effect
 #   - matrix_rain.glsl    : Matrix-style falling characters
 #   - synthwave.glsl      : Classic 80s synthwave vibes
+#
+# Example usage:
+#   type shader
+#   path ~/.config/neowall/shaders/retro_wave.glsl
 #
 # Create your own! See ~/.config/neowall/shaders/README.md for details.
 #

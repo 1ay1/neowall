@@ -1,6 +1,10 @@
 # Simple NeoWall Configuration Example
 # Per-output configuration only (no default/global config)
 
+# MODERN FORMAT: Always use "type" + "path"
+# - type: image, shader, gif, video, svg
+# - path: file or directory (for ALL types)
+
 # Find your output names with: neowall status
 # Common names: eDP-1 (laptop), HDMI-A-1, DP-1, DP-2
 
@@ -8,18 +12,21 @@ output {
   # Example: Primary display with shader wallpaper
   # Uncomment and adjust for your setup
   # eDP-1 {
-  #   shader retro_wave.glsl
+  #   type shader
+  #   path ~/.config/neowall/shaders/retro_wave.glsl
   #   shader_speed 0.5
   # }
 
   # Example: External monitor with static image
   # HDMI-A-1 {
+  #   type image
   #   path ~/Pictures/wallpaper.png
   #   mode fill
   # }
 
   # Example: Directory cycling
   # DP-1 {
+  #   type image
   #   path ~/Pictures/Wallpapers/
   #   duration 300
   #   mode fill
