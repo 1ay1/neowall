@@ -775,7 +775,7 @@ static void on_example_selected(GtkMenuItem *item, gpointer user_data) {
     tray_log_info("[ShaderEditor] Loaded example shader");
 }
 
-/* Settings panel callbacks */
+/* Settings dialog with live auto-apply */
 static void apply_font_settings(void) {
     if (!source_view) return;
 
@@ -858,7 +858,111 @@ static void on_fps_changed(GtkSpinButton *spin, gpointer user_data) {
 static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     (void)button;
     (void)user_data;
-    // Settings panel is now always visible - this is just a placeholder
+
+    GtkWidget *dialog = gtk_dialog_new_with_buttons(
+        "Editor Settings",
+        GTK_WINDOW(editor_window),
+        GTK_DIALOG_DESTROY_WITH_PARENT,
+        "_Close", GTK_RESPONSE_CLOSE,
+        NULL);
+
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 500, 400);
+
+    GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    gtk_container_set_border_width(GTK_CONTAINER(content), 12);
+
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 12);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
+    gtk_container_add(GTK_CONTAINER(content), grid);
+
+    int row = 0;
+
+    /* Font family */
+    GtkWidget *font_family_label = gtk_label_new("Font Family:");
+    gtk_widget_set_halign(font_family_label, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), font_family_label, 0, row, 1, 1);
+
+    GtkWidget *font_family_combo = gtk_combo_box_text_new();
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(font_family_combo), "Monospace");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(font_family_combo), "Courier New");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(font_family_combo), "Ubuntu Mono");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(font_family_combo), "Fira Code");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(font_family_combo), 0);
+    g_signal_connect(font_family_combo, "changed", G_CALLBACK(on_font_family_changed), NULL);
+    gtk_grid_attach(GTK_GRID(grid), font_family_combo, 1, row, 1, 1);
+    row++;
+
+    /* Font size */
+    GtkWidget *font_label = gtk_label_new("Font Size:");
+    gtk_widget_set_halign(font_label, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), font_label, 0, row, 1, 1);
+
+    GtkWidget *font_spin = gtk_spin_button_new_with_range(8, 20, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(font_spin), editor_font_size);
+    g_signal_connect(font_spin, "value-changed", G_CALLBACK(on_font_size_changed), NULL);
+    gtk_grid_attach(GTK_GRID(grid), font_spin, 1, row, 1, 1);
+    row++;
+
+    /* Tab width */
+    GtkWidget *tab_label = gtk_label_new("Tab Width:");
+    gtk_widget_set_halign(tab_label, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), tab_label, 0, row, 1, 1);
+
+    GtkWidget *tab_spin = gtk_spin_button_new_with_range(2, 8, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(tab_spin), editor_tab_width);
+    g_signal_connect(tab_spin, "value-changed", G_CALLBACK(on_tab_width_changed), NULL);
+    gtk_grid_attach(GTK_GRID(grid), tab_spin, 1, row, 1, 1);
+    row++;
+
+    /* Word wrap */
+    GtkWidget *wrap_label = gtk_label_new("Word Wrap:");
+    gtk_widget_set_halign(wrap_label, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), wrap_label, 0, row, 1, 1);
+
+    GtkWidget *wrap_switch = gtk_switch_new();
+    gtk_switch_set_active(GTK_SWITCH(wrap_switch), editor_line_wrap);
+    g_signal_connect(wrap_switch, "notify::active", G_CALLBACK(on_wrap_toggled), NULL);
+    gtk_grid_attach(GTK_GRID(grid), wrap_switch, 1, row, 1, 1);
+    row++;
+
+    /* Auto compile */
+    GtkWidget *auto_label = gtk_label_new("Auto Compile:");
+    gtk_widget_set_halign(auto_label, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), auto_label, 0, row, 1, 1);
+
+    GtkWidget *auto_switch = gtk_switch_new();
+    gtk_switch_set_active(GTK_SWITCH(auto_switch), editor_auto_compile);
+    g_signal_connect(auto_switch, "notify::active", G_CALLBACK(on_auto_compile_toggled), NULL);
+    gtk_grid_attach(GTK_GRID(grid), auto_switch, 1, row, 1, 1);
+    row++;
+
+    /* Line numbers */
+    GtkWidget *numbers_label = gtk_label_new("Show Line Numbers:");
+    gtk_widget_set_halign(numbers_label, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), numbers_label, 0, row, 1, 1);
+
+    GtkWidget *numbers_switch = gtk_switch_new();
+    gtk_switch_set_active(GTK_SWITCH(numbers_switch),
+        gtk_source_view_get_show_line_numbers(GTK_SOURCE_VIEW(source_view)));
+    g_signal_connect(numbers_switch, "notify::active", G_CALLBACK(on_line_numbers_toggled), NULL);
+    gtk_grid_attach(GTK_GRID(grid), numbers_switch, 1, row, 1, 1);
+    row++;
+
+    /* Preview FPS */
+    GtkWidget *fps_label = gtk_label_new("Preview FPS:");
+    gtk_widget_set_halign(fps_label, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), fps_label, 0, row, 1, 1);
+
+    GtkWidget *fps_spin = gtk_spin_button_new_with_range(15, 120, 5);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(fps_spin), preview_fps);
+    g_signal_connect(fps_spin, "value-changed", G_CALLBACK(on_fps_changed), NULL);
+    gtk_grid_attach(GTK_GRID(grid), fps_spin, 1, row, 1, 1);
+    row++;
+
+    gtk_widget_show_all(dialog);
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
 }
 
 static void on_apply_clicked(GtkButton *button, gpointer user_data) {
@@ -1084,107 +1188,12 @@ void shader_editor_show(void) {
     gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
     gtk_box_pack_start(GTK_BOX(toolbar), apply_btn, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(toolbar), reset_btn, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(toolbar), gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 4);
+    gtk_box_pack_start(GTK_BOX(toolbar), settings_btn, FALSE, FALSE, 0);
 
     /* Spacer */
     GtkWidget *spacer = gtk_label_new("");
     gtk_box_pack_start(GTK_BOX(toolbar), spacer, TRUE, TRUE, 0);
-
-    /* Settings expander in toolbar */
-    GtkWidget *settings_expander = gtk_expander_new("⚙ Editor Settings");
-    gtk_expander_set_expanded(GTK_EXPANDER(settings_expander), FALSE);
-
-    GtkWidget *settings_grid = gtk_grid_new();
-    gtk_grid_set_row_spacing(GTK_GRID(settings_grid), 6);
-    gtk_grid_set_column_spacing(GTK_GRID(settings_grid), 8);
-    gtk_widget_set_margin_start(settings_grid, 12);
-    gtk_widget_set_margin_end(settings_grid, 12);
-    gtk_widget_set_margin_top(settings_grid, 6);
-    gtk_widget_set_margin_bottom(settings_grid, 6);
-
-    int srow = 0;
-
-    /* Font family */
-    GtkWidget *font_family_label = gtk_label_new("Font:");
-    gtk_widget_set_halign(font_family_label, GTK_ALIGN_END);
-    gtk_grid_attach(GTK_GRID(settings_grid), font_family_label, 0, srow, 1, 1);
-
-    GtkWidget *font_family_combo = gtk_combo_box_text_new();
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(font_family_combo), "Monospace");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(font_family_combo), "Courier New");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(font_family_combo), "Ubuntu Mono");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(font_family_combo), "Fira Code");
-    gtk_combo_box_set_active(GTK_COMBO_BOX(font_family_combo), 0);
-    g_signal_connect(font_family_combo, "changed", G_CALLBACK(on_font_family_changed), NULL);
-    gtk_grid_attach(GTK_GRID(settings_grid), font_family_combo, 1, srow, 1, 1);
-
-    /* Font size */
-    GtkWidget *font_size_label = gtk_label_new("Size:");
-    gtk_widget_set_halign(font_size_label, GTK_ALIGN_END);
-    gtk_grid_attach(GTK_GRID(settings_grid), font_size_label, 2, srow, 1, 1);
-
-    GtkWidget *font_spin = gtk_spin_button_new_with_range(8, 20, 1);
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(font_spin), editor_font_size);
-    gtk_widget_set_size_request(font_spin, 60, -1);
-    g_signal_connect(font_spin, "value-changed", G_CALLBACK(on_font_size_changed), NULL);
-    gtk_grid_attach(GTK_GRID(settings_grid), font_spin, 3, srow, 1, 1);
-    srow++;
-
-    /* Tab width */
-    GtkWidget *tab_label = gtk_label_new("Tab Width:");
-    gtk_widget_set_halign(tab_label, GTK_ALIGN_END);
-    gtk_grid_attach(GTK_GRID(settings_grid), tab_label, 0, srow, 1, 1);
-
-    GtkWidget *tab_spin = gtk_spin_button_new_with_range(2, 8, 1);
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(tab_spin), editor_tab_width);
-    gtk_widget_set_size_request(tab_spin, 60, -1);
-    g_signal_connect(tab_spin, "value-changed", G_CALLBACK(on_tab_width_changed), NULL);
-    gtk_grid_attach(GTK_GRID(settings_grid), tab_spin, 1, srow, 1, 1);
-
-    /* Word wrap */
-    GtkWidget *wrap_label = gtk_label_new("Word Wrap:");
-    gtk_widget_set_halign(wrap_label, GTK_ALIGN_END);
-    gtk_grid_attach(GTK_GRID(settings_grid), wrap_label, 2, srow, 1, 1);
-
-    GtkWidget *wrap_switch = gtk_switch_new();
-    gtk_switch_set_active(GTK_SWITCH(wrap_switch), editor_line_wrap);
-    g_signal_connect(wrap_switch, "notify::active", G_CALLBACK(on_wrap_toggled), NULL);
-    gtk_grid_attach(GTK_GRID(settings_grid), wrap_switch, 3, srow, 1, 1);
-    srow++;
-
-    /* Auto compile */
-    GtkWidget *auto_label = gtk_label_new("Auto Compile:");
-    gtk_widget_set_halign(auto_label, GTK_ALIGN_END);
-    gtk_grid_attach(GTK_GRID(settings_grid), auto_label, 0, srow, 1, 1);
-
-    GtkWidget *auto_switch = gtk_switch_new();
-    gtk_switch_set_active(GTK_SWITCH(auto_switch), editor_auto_compile);
-    g_signal_connect(auto_switch, "notify::active", G_CALLBACK(on_auto_compile_toggled), NULL);
-    gtk_grid_attach(GTK_GRID(settings_grid), auto_switch, 1, srow, 1, 1);
-
-    /* Line numbers */
-    GtkWidget *numbers_label = gtk_label_new("Line Numbers:");
-    gtk_widget_set_halign(numbers_label, GTK_ALIGN_END);
-    gtk_grid_attach(GTK_GRID(settings_grid), numbers_label, 2, srow, 1, 1);
-
-    GtkWidget *numbers_switch = gtk_switch_new();
-    gtk_switch_set_active(GTK_SWITCH(numbers_switch), TRUE);
-    g_signal_connect(numbers_switch, "notify::active", G_CALLBACK(on_line_numbers_toggled), NULL);
-    gtk_grid_attach(GTK_GRID(settings_grid), numbers_switch, 3, srow, 1, 1);
-    srow++;
-
-    /* Preview FPS */
-    GtkWidget *fps_setting_label = gtk_label_new("Preview FPS:");
-    gtk_widget_set_halign(fps_setting_label, GTK_ALIGN_END);
-    gtk_grid_attach(GTK_GRID(settings_grid), fps_setting_label, 0, srow, 1, 1);
-
-    GtkWidget *fps_spin = gtk_spin_button_new_with_range(15, 120, 5);
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(fps_spin), preview_fps);
-    gtk_widget_set_size_request(fps_spin, 60, -1);
-    g_signal_connect(fps_spin, "value-changed", G_CALLBACK(on_fps_changed), NULL);
-    gtk_grid_attach(GTK_GRID(settings_grid), fps_spin, 1, srow, 1, 1);
-
-    gtk_container_add(GTK_CONTAINER(settings_expander), settings_grid);
-    gtk_box_pack_start(GTK_BOX(toolbar), settings_expander, FALSE, FALSE, 8);
 
     /* Theme selector */
     GtkWidget *theme_label = gtk_label_new("Theme:");
