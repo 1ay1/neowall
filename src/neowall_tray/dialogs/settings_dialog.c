@@ -1174,13 +1174,18 @@ static int get_output_list(char outputs[][64], int max_outputs) {
         return 0;
     }
 
+    TRAY_LOG_DEBUG(COMPONENT, "list-outputs response: %s", cmd_output);
+
     /* Parse JSON to find outputs */
     int count = 0;
     const char *outputs_start = strstr(cmd_output, "\"outputs\":[");
     if (!outputs_start) {
-        TRAY_LOG_DEBUG(COMPONENT, "No outputs found in list-outputs response");
+        TRAY_LOG_ERROR(COMPONENT, "No outputs found in list-outputs response");
+        TRAY_LOG_ERROR(COMPONENT, "Response was: %s", cmd_output);
         return 0;
     }
+
+    TRAY_LOG_INFO(COMPONENT, "Found outputs array in response");
 
     /* Simple parsing - look for "name":"..." patterns */
     const char *pos = outputs_start;
@@ -1204,6 +1209,7 @@ static int get_output_list(char outputs[][64], int max_outputs) {
         pos = name_end + 1;
     }
 
+    TRAY_LOG_INFO(COMPONENT, "Parsed %d output(s) from daemon", count);
     return count;
 }
 
