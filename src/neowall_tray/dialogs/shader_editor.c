@@ -974,7 +974,7 @@ static void on_settings_clicked(GtkButton *button, gpointer user_data) {
     gtk_window_set_default_size(GTK_WINDOW(dialog), 500, 400);
 
     GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
-    gtk_container_set_border_width(GTK_CONTAINER(content), 12);
+    gtk_container_set_border_width(GTK_CONTAINER(content), 6);
 
     GtkWidget *grid = gtk_grid_new();
     gtk_grid_set_row_spacing(GTK_GRID(grid), 12);
@@ -1246,10 +1246,10 @@ void shader_editor_show(void) {
 
     /* Toolbar */
     GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_margin_start(toolbar, 8);
-    gtk_widget_set_margin_end(toolbar, 8);
-    gtk_widget_set_margin_top(toolbar, 6);
-    gtk_widget_set_margin_bottom(toolbar, 6);
+    gtk_widget_set_margin_start(toolbar, 4);
+    gtk_widget_set_margin_end(toolbar, 4);
+    gtk_widget_set_margin_top(toolbar, 2);
+    gtk_widget_set_margin_bottom(toolbar, 2);
     gtk_box_pack_start(GTK_BOX(vbox), toolbar, FALSE, FALSE, 0);
 
     /* Buttons with tooltips */
@@ -1372,10 +1372,10 @@ void shader_editor_show(void) {
     /* Left pane: Source editor */
     /* Left pane: Editor */
     GtkWidget *editor_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_set_margin_start(editor_box, 6);
-    gtk_widget_set_margin_end(editor_box, 3);
-    gtk_widget_set_margin_top(editor_box, 4);
-    gtk_widget_set_margin_bottom(editor_box, 4);
+    gtk_widget_set_margin_start(editor_box, 2);
+    gtk_widget_set_margin_end(editor_box, 1);
+    gtk_widget_set_margin_top(editor_box, 2);
+    gtk_widget_set_margin_bottom(editor_box, 2);
 
     GtkWidget *editor_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 
@@ -1474,10 +1474,10 @@ void shader_editor_show(void) {
 
     /* Right pane: GL preview */
     GtkWidget *preview_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_set_margin_start(preview_box, 3);
-    gtk_widget_set_margin_end(preview_box, 6);
-    gtk_widget_set_margin_top(preview_box, 4);
-    gtk_widget_set_margin_bottom(preview_box, 4);
+    gtk_widget_set_margin_start(preview_box, 1);
+    gtk_widget_set_margin_end(preview_box, 2);
+    gtk_widget_set_margin_top(preview_box, 2);
+    gtk_widget_set_margin_bottom(preview_box, 2);
 
     GtkWidget *preview_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 
@@ -1542,10 +1542,10 @@ void shader_editor_show(void) {
 
     /* Status bar */
     GtkWidget *status_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_margin_start(status_box, 8);
-    gtk_widget_set_margin_end(status_box, 8);
-    gtk_widget_set_margin_top(status_box, 4);
-    gtk_widget_set_margin_bottom(status_box, 4);
+    gtk_widget_set_margin_start(status_box, 4);
+    gtk_widget_set_margin_end(status_box, 4);
+    gtk_widget_set_margin_top(status_box, 2);
+    gtk_widget_set_margin_bottom(status_box, 2);
 
     status_label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(status_label), "<small>Ready</small>");
