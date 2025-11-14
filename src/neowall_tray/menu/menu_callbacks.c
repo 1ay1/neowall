@@ -4,6 +4,7 @@
 
 #include "menu_callbacks.h"
 #include "../daemon/command_exec.h"
+#include "../daemon/daemon_check.h"
 #include "../dialogs/dialogs.h"
 #include "../dialogs/settings_dialog.h"
 #include "../dialogs/shader_editor.h"
@@ -93,7 +94,7 @@ void menu_callback_reload_config(GtkMenuItem *item, gpointer user_data) {
     if (command_execute("reload")) {
         dialog_show_info("✅ Configuration Reloaded",
                         "Configuration has been reloaded successfully.",
-                        2000);  /* Auto-close after 2 seconds */
+                        1000);  /* Auto-close after 1 second */
     } else {
         dialog_show_error("❌ Reload Failed",
                          "Failed to reload configuration.\n"
@@ -183,22 +184,30 @@ void menu_callback_edit_config(GtkMenuItem *item, gpointer user_data) {
     }
 }
 
+/* Check callback for daemon start */
+static gboolean daemon_started_check(void) {
+    return daemon_is_running();
+}
+
+/* Check callback for daemon stop */
+static gboolean daemon_stopped_check(void) {
+    return !daemon_is_running();
+}
+
 void menu_callback_start_daemon(GtkMenuItem *item, gpointer user_data) {
     (void)item;
     (void)user_data;
 
     if (command_execute("start")) {
-        dialog_show_info("Starting Daemon",
-                        "NeoWall daemon is starting...\n"
-                        "Please wait a moment.",
-                        2000);  /* Auto-close after 2 seconds */
+        dialog_show_progress_auto_close("🚀 Starting Daemon",
+                                       "Starting NeoWall daemon...",
+                                       daemon_started_check,
+                                       500);  /* Auto-close 500ms after started */
 
         /* Schedule full menu refresh after daemon starts (menu structure changes) */
         menu_schedule_refresh();
     } else {
-        dialog_show_error("Start Failed",
-                         "Failed to start NeoWall daemon.\n"
-                         "Please check the logs for details.");
+        dialog_show_error("❌ Start Failed", "Failed to start NeoWall daemon.");
     }
 }
 
@@ -207,17 +216,15 @@ void menu_callback_restart_daemon(GtkMenuItem *item, gpointer user_data) {
     (void)user_data;
 
     if (command_execute("restart")) {
-        dialog_show_info("Restarting Daemon",
-                        "NeoWall daemon is restarting...\n"
-                        "Please wait a moment.",
-                        2000);  /* Auto-close after 2 seconds */
+        dialog_show_progress_auto_close("🔁 Restarting Daemon",
+                                       "Restarting NeoWall daemon...",
+                                       daemon_started_check,
+                                       500);  /* Auto-close 500ms after restarted */
 
         /* Schedule full menu refresh after daemon restarts (menu structure changes) */
         menu_schedule_refresh();
     } else {
-        dialog_show_error("Restart Failed",
-                         "Failed to restart NeoWall daemon.\n"
-                         "Please check the logs for details.");
+        dialog_show_error("❌ Restart Failed", "Failed to restart NeoWall daemon.");
     }
 }
 
@@ -230,16 +237,15 @@ void menu_callback_stop_daemon(GtkMenuItem *item, gpointer user_data) {
 
     if (result == GTK_RESPONSE_YES) {
         if (command_execute("stop")) {
-            dialog_show_info("Stopping Daemon",
-                            "NeoWall daemon is stopping...",
-                            2000);  /* Auto-close after 2 seconds */
+            dialog_show_progress_auto_close("🛑 Stopping Daemon",
+                                           "Stopping NeoWall daemon...",
+                                           daemon_stopped_check,
+                                           500);  /* Auto-close 500ms after stopped */
 
             /* Schedule full menu refresh after daemon stops (menu structure changes) */
             menu_schedule_refresh();
         } else {
-            dialog_show_error("Stop Failed",
-                             "Failed to stop NeoWall daemon.\n"
-                             "The daemon may not be running.");
+            dialog_show_error("❌ Stop Failed", "Failed to stop NeoWall daemon.");
         }
     }
 }
