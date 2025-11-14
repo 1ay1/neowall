@@ -18,9 +18,9 @@ Watch fractals breathe, waves ripple, and neon cities pulse—all at silky 60 FP
 - 🔥 **60 FPS animations** that make your desktop feel alive  
 - ⚡ **2% CPU usage** - your GPU does the heavy lifting
 - 🎨 **30+ included shaders** - retro synthwave, plasma storms, matrix rain
-- 🔄 **Hot-reload configs** - changes apply instantly
 - 🖥️ **Multi-monitor magic** - different shaders per display
 - 🌊 **Smooth transitions** - fade, glitch, pixelate between wallpapers
+- 📝 **Simple config** - edit once, restart to apply
 
 **Perfect for:** r/unixporn enthusiasts, shader artists, anyone tired of boring desktops
 
@@ -97,18 +97,36 @@ output {
 }
 ```
 
-Config auto-reloads on save. No daemon restarts needed.
-
-## 🎮 Real-Time Control
-
+**Configuration changes require daemon restart:**
 ```bash
-neowall next         # Switch to next wallpaper
-neowall pause        # Freeze current animation  
-neowall reload       # Apply config changes
-neowall current      # What's running now?
+neowall kill && neowall
 ```
 
-Perfect for switching vibes mid-session.
+## 🎮 Runtime Controls
+
+**Navigate and control** your wallpapers without restarting:
+
+```bash
+neowall next         # Switch to next wallpaper/shader in cycle
+neowall pause        # Pause wallpaper cycling
+neowall resume       # Resume wallpaper cycling
+neowall current      # Show currently active wallpaper
+```
+
+### Configuration vs Runtime Controls
+
+**Configuration** (requires restart):
+- Which wallpapers/shaders to display
+- Shader speed, FPS, transitions
+- Monitor assignments
+- Edit `~/.config/neowall/config.vibe` and restart daemon
+
+**Runtime Controls** (temporary, instant):
+- Navigation (`next`) - cycle through configured wallpapers
+- Pause/resume - temporarily control cycling
+- Query (`current`) - check current state
+
+Perfect for switching vibes mid-session without editing config.
 
 ## 🛠️ Create Your Own Magic
 
@@ -118,12 +136,12 @@ Drop any shader into `~/.config/neowall/shaders/`:
 #version 100
 precision highp float;
 
-uniform float time;
-uniform vec2 resolution;
+uniform float iTime;
+uniform vec2 iResolution;
 
 void main() {
-    vec2 uv = gl_FragCoord.xy / resolution.xy;
-    vec3 color = 0.5 + 0.5 * cos(time + uv.xyx + vec3(0,2,4));
+    vec2 uv = gl_FragCoord.xy / iResolution.xy;
+    vec3 color = 0.5 + 0.5 * cos(iTime + uv.xyx + vec3(0,2,4));
     gl_FragColor = vec4(color, 1.0);
 }
 ```
@@ -162,9 +180,10 @@ sudo make install
 - **Battery life**: Animations pause when screen locks automatically  
 - **Multi-monitor**: Each display can run different content independently
 - **Transitions**: `glitch` and `pixelate` effects add serious style points
-- **Hot-reload**: Edit configs with live preview - no restarts
+- **Config philosophy**: Configuration is immutable - defines what the daemon should do. Edit config file and restart to apply changes. Use runtime controls (`next`, `pause`, `resume`) for temporary interactions.
 - **Vsync control**: Set `vsync true` to sync to monitor refresh rate (ignores shader_fps), or `vsync false` for custom FPS with tearing control. Vsync disabled by default for precise FPS control.
 - **FPS monitoring**: Use `show_fps true` to display real-time frame rate in bottom-right corner
+- **Shader speed**: Set once in config based on your preference - no runtime adjustments needed. Restart daemon to apply new speed values.
 
 ## 🤝 Contributing
 

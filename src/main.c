@@ -31,37 +31,17 @@ typedef struct {
     bool check_cycle;           /* Whether to check if cycling is possible before sending signal */
 } DaemonCommand;
 
-/* Special signal numbers for shader speed control (runtime-initialized) */
-static int SHADER_SPEED_UP_SIGNAL = 0;
-static int SHADER_SPEED_DOWN_SIGNAL = 0;
-
 /* Centralized command registry - Single source of truth */
 static DaemonCommand daemon_commands[] = {
     {"next",              SIGUSR1,      "Skip to next wallpaper",                  "Skipping to next wallpaper...",      NULL,  false, true},   /* check_cycle = true */
     {"pause",             SIGUSR2,      "Pause wallpaper cycling",                 "Pausing wallpaper cycling...",       NULL,  false, false},
     {"resume",            SIGCONT,      "Resume wallpaper cycling",                "Resuming wallpaper cycling...",      NULL,  false, false},
-    {"reload",            SIGHUP,       "Reload configuration",                    "Reloading configuration...",         NULL,  false, false},
-    {"shader_speed_up",   0,            "Increase shader animation speed by 1.0x", "Increasing shader speed...",         NULL,  false, false},  /* Initialized at runtime */
-    {"shader_speed_down", 0,            "Decrease shader animation speed by 1.0x", "Decreasing shader speed...",         NULL,  false, false},  /* Initialized at runtime */
     {"current",           0,            "Show current wallpaper",                  NULL,                                 NULL,  true,  false},
     {"status",            0,            "Show current wallpaper",                  NULL,                                 NULL,  true,  false},
     {NULL, 0, NULL, NULL, NULL, false, false}  /* Sentinel */
 };
 
-/* Initialize runtime signal values */
-static void init_command_signals(void) {
-    SHADER_SPEED_UP_SIGNAL = SIGRTMIN;
-    SHADER_SPEED_DOWN_SIGNAL = SIGRTMIN + 1;
 
-    /* Update command table with runtime values */
-    for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
-        if (strcmp(daemon_commands[i].name, "shader_speed_up") == 0) {
-            daemon_commands[i].signal = SHADER_SPEED_UP_SIGNAL;
-        } else if (strcmp(daemon_commands[i].name, "shader_speed_down") == 0) {
-            daemon_commands[i].signal = SHADER_SPEED_DOWN_SIGNAL;
-        }
-    }
-}
 
 /* Get PID file path */
 static const char *get_pid_file_path(void) {
@@ -211,11 +191,11 @@ static bool can_cycle_wallpaper(void) {
      * process. We need file-level locking (flock/fcntl) for cross-process sync. */
     const char *state_path = get_state_file_path();
     FILE *fp = fopen(state_path, "r");
-    
+
     if (!fp) {
         return false;  /* No state file = unknown, let daemon handle it */
     }
-    
+
     /* Acquire read lock on the file */
     int fd = fileno(fp);
     struct flock lock = {
@@ -224,15 +204,15 @@ static bool can_cycle_wallpaper(void) {
         .l_start = 0,
         .l_len = 0              /* Lock entire file */
     };
-    
+
     if (fcntl(fd, F_SETLKW, &lock) == -1) {
         /* Failed to lock, but continue anyway (non-critical) */
         log_debug("Failed to lock state file for reading: %s", strerror(errno));
     }
-    
+
     char line[MAX_PATH_LENGTH];
     int cycle_total = 0;
-    
+
     while (fgets(line, sizeof(line), fp)) {
         line[strcspn(line, "\n")] = 0;
         if (strncmp(line, "cycle_total=", 12) == 0) {
@@ -240,11 +220,11 @@ static bool can_cycle_wallpaper(void) {
             break;
         }
     }
-    
+
     /* Release lock */
     lock.l_type = F_UNLCK;
     fcntl(fd, F_SETLK, &lock);
-    
+
     fclose(fp);
     return cycle_total > 1;  /* Can cycle if we have more than 1 wallpaper */
 }
@@ -306,7 +286,6 @@ static void print_usage(const char *program_name) {
     printf("Options:\n");
     printf("  -c, --config PATH     Path to configuration file\n");
     printf("  -f, --foreground      Run in foreground (for debugging)\n");
-    printf("  -w, --watch           Watch config file for changes and reload\n");
     printf("  -v, --verbose         Enable verbose logging\n");
     printf("  -h, --help            Show this help message\n");
     printf("  -V, --version         Show version information\n");
@@ -355,7 +334,6 @@ static void print_version(void) {
     printf("  - 2%% CPU usage (lighter than video wallpapers)\n");
     printf("  - Multi-monitor support\n");
     printf("  - Smooth transitions (fade, slide, glitch, pixelate)\n");
-    printf("  - Hot-reload configuration\n");
     printf("  - Works on Hyprland, Sway, River, and other Wayland compositors\n");
     printf("\nSupported image formats:\n");
     printf("  - PNG\n");
@@ -365,16 +343,16 @@ static void print_version(void) {
 /* ============================================================================
  * Signal Handling Using signalfd - RACE-FREE APPROACH
  * ============================================================================
- * 
+ *
  * Instead of traditional signal handlers, we use signalfd which converts
  * signals into file descriptor events. This approach:
- * 
+ *
  * 1. Eliminates ALL signal handler race conditions
  * 2. No async-signal-safe restrictions (can use any functions)
  * 3. Integrates cleanly with poll() event loop
  * 4. Guaranteed signal delivery and ordering
  * 5. No signal handler execution context issues
- * 
+ *
  * Signals are blocked for all threads and read from signalfd in main loop.
  * ============================================================================ */
 
@@ -386,18 +364,13 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
             log_info("Received shutdown signal %d, exiting gracefully...", signum);
             atomic_store_explicit(&state->running, false, memory_order_release);
             break;
-            
-        case SIGHUP:
-            log_info("Received SIGHUP, reloading configuration...");
-            atomic_store_explicit(&state->reload_requested, true, memory_order_release);
-            break;
-            
+
         case SIGUSR1: {
             int old_count = atomic_fetch_add_explicit(&state->next_requested, 1, memory_order_acq_rel);
             int new_count = old_count + 1;
             log_info("Received SIGUSR1, skipping to next wallpaper (queue: %d -> %d)",
                      old_count, new_count);
-            
+
             /* Prevent counter overflow */
             if (new_count > MAX_NEXT_REQUESTS) {
                 log_error("Too many queued next requests (%d), resetting to 10", new_count);
@@ -406,64 +379,19 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
             }
             break;
         }
-        
+
         case SIGUSR2:
             log_info("Received SIGUSR2, pausing wallpaper cycling...");
             atomic_store_explicit(&state->paused, true, memory_order_release);
             break;
-            
+
         case SIGCONT:
             log_info("Received SIGCONT, resuming wallpaper cycling...");
             atomic_store_explicit(&state->paused, false, memory_order_release);
             break;
-            
+
         default:
-            /* Check if it's a shader speed signal */
-            if (signum == SHADER_SPEED_UP_SIGNAL) {
-                log_info("Increasing shader speed...");
-                
-                /* Safe to use locking here - we're NOT in signal handler context */
-                if (pthread_rwlock_tryrdlock(&state->output_list_lock) == 0) {
-                    struct output_state *output = state->outputs;
-                    while (output) {
-                        if (output->config->type == WALLPAPER_SHADER) {
-                            pthread_mutex_lock(&state->state_mutex);
-                            output->config->shader_speed += 1.0f;
-                            pthread_mutex_unlock(&state->state_mutex);
-                            
-                            log_info("Increased shader speed to %.1fx for output %s",
-                                     output->config->shader_speed,
-                                     output->model[0] ? output->model : "unknown");
-                        }
-                        output = output->next;
-                    }
-                    pthread_rwlock_unlock(&state->output_list_lock);
-                }
-            } else if (signum == SHADER_SPEED_DOWN_SIGNAL) {
-                log_info("Decreasing shader speed...");
-                
-                if (pthread_rwlock_tryrdlock(&state->output_list_lock) == 0) {
-                    struct output_state *output = state->outputs;
-                    while (output) {
-                        if (output->config->type == WALLPAPER_SHADER) {
-                            pthread_mutex_lock(&state->state_mutex);
-                            output->config->shader_speed -= 1.0f;
-                            if (output->config->shader_speed < 0.1f) {
-                                output->config->shader_speed = 0.1f;
-                            }
-                            pthread_mutex_unlock(&state->state_mutex);
-                            
-                            log_info("Decreased shader speed to %.1fx for output %s",
-                                     output->config->shader_speed,
-                                     output->model[0] ? output->model : "unknown");
-                        }
-                        output = output->next;
-                    }
-                    pthread_rwlock_unlock(&state->output_list_lock);
-                }
-            } else {
-                log_debug("Received signal: %d", signum);
-            }
+            log_debug("Received signal: %d", signum);
             break;
     }
 }
@@ -478,21 +406,21 @@ static void handle_crash(int signum) {
         case SIGFPE: signame = "SIGFPE (Floating point exception)"; break;
         case SIGABRT: signame = "SIGABRT (Abort)"; break;
     }
-    
+
     log_error("CRASH: Received %s (signal %d)", signame, signum);
     log_error("This likely occurred due to GPU/display disconnection or driver issue");
-    log_error("Error count: %lu, Frames rendered: %lu", 
+    log_error("Error count: %lu, Frames rendered: %lu",
               global_state ? global_state->errors_count : 0,
               global_state ? global_state->frames_rendered : 0);
-    
+
     log_error("To get a backtrace, run: gdb -p %d", getpid());
     log_error("Then use 'bt' command in gdb");
-    
+
     if (global_state) {
         log_error("Attempting graceful shutdown...");
         atomic_store_explicit(&global_state->running, false, memory_order_release);
     }
-    
+
     exit(EXIT_FAILURE);
 }
 
@@ -503,36 +431,27 @@ static void handle_crash(int signum) {
 static int setup_signalfd(void) {
     sigset_t mask;
     sigemptyset(&mask);
-    
+
     /* Block all signals we want to handle via signalfd */
     sigaddset(&mask, SIGTERM);
     sigaddset(&mask, SIGINT);
-    sigaddset(&mask, SIGHUP);
     sigaddset(&mask, SIGUSR1);
     sigaddset(&mask, SIGUSR2);
     sigaddset(&mask, SIGCONT);
-    
-    /* Add runtime-determined signals */
-    if (SHADER_SPEED_UP_SIGNAL > 0) {
-        sigaddset(&mask, SHADER_SPEED_UP_SIGNAL);
-    }
-    if (SHADER_SPEED_DOWN_SIGNAL > 0) {
-        sigaddset(&mask, SHADER_SPEED_DOWN_SIGNAL);
-    }
-    
+
     /* Block these signals for all threads */
     if (pthread_sigmask(SIG_BLOCK, &mask, NULL) != 0) {
         log_error("Failed to block signals: %s", strerror(errno));
         return -1;
     }
-    
+
     /* Create signalfd to receive signals as file descriptor events */
     int sfd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
     if (sfd < 0) {
         log_error("Failed to create signalfd: %s", strerror(errno));
         return -1;
     }
-    
+
     log_info("Signal handling configured with signalfd (race-free)");
     return sfd;
 }
@@ -544,16 +463,16 @@ static void setup_crash_handlers(void) {
     crash_sa.sa_handler = handle_crash;
     sigemptyset(&crash_sa.sa_mask);
     crash_sa.sa_flags = SA_RESETHAND;  /* Reset to default after first crash */
-    
+
     sigaction(SIGSEGV, &crash_sa, NULL);
     sigaction(SIGBUS, &crash_sa, NULL);
     sigaction(SIGILL, &crash_sa, NULL);
     sigaction(SIGFPE, &crash_sa, NULL);
     sigaction(SIGABRT, &crash_sa, NULL);
-    
+
     /* Ignore SIGPIPE */
     signal(SIGPIPE, SIG_IGN);
-    
+
     log_debug("Crash signal handlers installed");
 }
 
@@ -665,13 +584,10 @@ static bool create_config_directory(void) {
 }
 
 int main(int argc, char *argv[]) {
-    /* Initialize runtime signal values for command table */
-    init_command_signals();
 
     struct neowall_state state = {0};
     char config_path[MAX_PATH_LENGTH] = {0};
     bool daemon_mode = true;  /* Default to daemon mode */
-    bool watch_config = false;  /* Only enable when -w flag is provided */
     bool verbose = false;
     int opt;
 
@@ -717,7 +633,6 @@ int main(int argc, char *argv[]) {
     static struct option long_options[] = {
         {"config",     required_argument, 0, 'c'},
         {"foreground", no_argument,       0, 'f'},
-        {"watch",      no_argument,       0, 'w'},
         {"verbose",    no_argument,       0, 'v'},
         {"help",       no_argument,       0, 'h'},
         {"version",    no_argument,       0, 'V'},
@@ -725,16 +640,13 @@ int main(int argc, char *argv[]) {
     };
 
     /* Parse command line arguments */
-    while ((opt = getopt_long(argc, argv, "c:fwvhV", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:fvhV", long_options, NULL)) != -1) {
         switch (opt) {
             case 'c':
                 strncpy(config_path, optarg, sizeof(config_path) - 1);
                 break;
             case 'f':
                 daemon_mode = false;  /* Explicit foreground */
-                break;
-            case 'w':
-                watch_config = true;
                 break;
             case 'v':
                 /* Verbose mode - enable debug logging */
@@ -814,11 +726,9 @@ int main(int argc, char *argv[]) {
 
     /* Initialize atomic state flags - MUST use atomic_init before any access */
     atomic_init(&state.running, true);
-    atomic_init(&state.reload_requested, false);
     atomic_init(&state.paused, false);
     atomic_init(&state.outputs_need_init, false);
     atomic_init(&state.next_requested, 0);
-    state.watch_config = watch_config;
     state.timer_fd = -1;
     state.wakeup_fd = -1;
     strncpy(state.config_path, config_path, sizeof(state.config_path) - 1);
@@ -826,10 +736,6 @@ int main(int argc, char *argv[]) {
     pthread_mutex_init(&state.state_mutex, NULL);
     pthread_rwlock_init(&state.output_list_lock, NULL);
     pthread_mutex_init(&state.state_file_lock, NULL);
-    
-    /* BUG FIX #5: Initialize watch thread condition variable */
-    pthread_mutex_init(&state.watch_mutex, NULL);
-    pthread_cond_init(&state.watch_cond, NULL);
 
     /* Set up signalfd for race-free signal handling */
     state.signal_fd = setup_signalfd();
@@ -862,49 +768,32 @@ int main(int argc, char *argv[]) {
 
     log_info("Initialization complete, entering main loop...");
 
-    /* Start config watcher thread if requested */
-    if (watch_config) {
-        log_info("Starting configuration file watcher...");
-        pthread_create(&state.watch_thread, NULL, config_watch_thread, &state);
-    }
-
     /* Run main event loop */
     event_loop_run(&state);
 
     /* Cleanup */
     log_info("Shutting down...");
-    
+
     /* Set alarm as last resort - force exit after 2 seconds if cleanup hangs */
     alarm(2);
-
-    if (watch_config) {
-        /* During shutdown, just cancel and detach the watch thread for fast exit
-         * The OS will clean up the resources when the process exits */
-        log_debug("Canceling config watch thread for fast shutdown...");
-        pthread_cancel(state.watch_thread);
-        pthread_detach(state.watch_thread);
-        log_debug("Config watch thread detached");
-    }
 
     /* Quick cleanup - don't spend too much time on this during shutdown */
     egl_core_cleanup(&state);
     wayland_cleanup(&state);
-    
+
     /* Close signal fd */
     if (state.signal_fd >= 0) {
         close(state.signal_fd);
     }
-    
+
     /* Skip mutex/lock destruction during fast shutdown - OS will clean up */
     pthread_rwlock_destroy(&state.output_list_lock);
     pthread_mutex_destroy(&state.state_mutex);
     pthread_mutex_destroy(&state.state_file_lock);
-    pthread_cond_destroy(&state.watch_cond);
-    pthread_mutex_destroy(&state.watch_mutex);
 
     /* Remove PID file */
     remove_pid_file();
-    
+
     /* Cancel alarm - we finished cleanup in time */
     alarm(0);
 

@@ -3,10 +3,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <time.h>
-
-/* Constants */
-#define CONFIG_WATCH_INTERVAL 1
 
 /* Forward declarations */
 struct neowall_state;
@@ -19,10 +15,5 @@ void config_free_wallpaper(struct wallpaper_config *config);
 const char *config_get_default_path(void);
 char **load_images_from_directory(const char *dir_path, size_t *count);
 char **load_shaders_from_directory(const char *dir_path, size_t *count);
-
-/* Config watching */
-void *config_watch_thread(void *arg);
-bool config_has_changed(struct neowall_state *state);
-void config_reload(struct neowall_state *state);
 
 #endif /* CONFIG_H */
