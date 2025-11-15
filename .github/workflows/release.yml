@@ -3,11 +3,11 @@ name: Create Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version number (e.g., 0.3.0)'
+        description: "Version number (e.g., 0.3.0)"
         required: true
         type: string
 
@@ -46,6 +46,8 @@ jobs:
             libjpeg-dev \
             libgl1-mesa-dev \
             libegl1-mesa-dev \
+            libx11-dev \
+            libxrandr-dev \
             pkg-config \
             make \
             gcc
