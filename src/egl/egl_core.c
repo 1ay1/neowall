@@ -49,15 +49,23 @@ bool egl_check_error(const char *context) {
 
 /* Simple implementation - uses new modular system */
 bool egl_core_init(struct neowall_state *state) {
-    if (!state || !state->display) {
-        log_error("Invalid state or Wayland display");
+    if (!state) {
+        log_error("Invalid state");
         return false;
     }
     
     log_info("Initializing EGL with multi-version support...");
     
-    /* Get EGL display */
-    state->egl_display = eglGetDisplay((EGLNativeDisplayType)state->display);
+    /* Get EGL display - handle both Wayland and X11 */
+    if (state->display) {
+        /* Wayland display */
+        state->egl_display = eglGetDisplay((EGLNativeDisplayType)state->display);
+    } else {
+        /* X11 display - use default display */
+        log_info("Using X11 EGL display (default)");
+        state->egl_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    }
+    
     if (state->egl_display == EGL_NO_DISPLAY) {
         log_error("Failed to get EGL display");
         return false;

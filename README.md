@@ -1,7 +1,7 @@
 <div align="center">
   <img src="packaging/neowall.svg" alt="NeoWall Logo" width="560"/>
   
-  <h3>GPU-Accelerated Live Wallpapers for Wayland</h3>
+  <h3>GPU-Accelerated Live Wallpapers for Wayland & X11</h3>
   
   <p>
     <strong>Transform your desktop into a living canvas.</strong><br/>
@@ -38,6 +38,7 @@
 **Compatibility**
 - 🖥️ **Multi-monitor** with independent configs
 - 🌊 **Wayland-native** (Hyprland, Sway, River, KDE)
+- 🪟 **Full X11 support** (i3, bspwm, dwm, awesome, xmonad, qtile)
 - 🎨 **Shadertoy-compatible** shaders
 - 📦 **30+ included shaders** ready to use
 
@@ -59,13 +60,13 @@ yay -S neowall-git
 git clone https://github.com/1ay1/neowall
 cd neowall && make -j$(nproc) && sudo make install
 
-# Launch
+# Launch (auto-detects Wayland or X11)
 neowall
 ```
 
 Your first run creates `~/.config/neowall/config.vibe` with a gorgeous retro synthwave shader.
 
-> **Note:** Requires a Wayland compositor. X11 is not supported.
+> **Wayland & X11:** Automatically detects your environment. Works on Wayland compositors (Hyprland, Sway, River, KDE) and X11 tiling window managers (i3, bspwm, dwm, awesome, xmonad, qtile). See [X11 Backend Documentation](src/compositor/backends/x11/README.md) for X11-specific details.
 
 ---
 
@@ -200,17 +201,33 @@ Most Shadertoy shaders work with minimal adaptation!
 
 **Debian/Ubuntu:**
 ```bash
+# Wayland + X11 (recommended)
+sudo apt install build-essential libwayland-dev libgles2-mesa-dev \
+    libpng-dev libjpeg-dev wayland-protocols libx11-dev libxrandr-dev
+
+# Wayland only
 sudo apt install build-essential libwayland-dev libgles2-mesa-dev \
     libpng-dev libjpeg-dev wayland-protocols
 ```
 
 **Arch Linux:**
 ```bash
+# Wayland + X11 (recommended)
+sudo pacman -S base-devel wayland mesa libpng libjpeg-turbo \
+    wayland-protocols libx11 libxrandr
+
+# Wayland only
 sudo pacman -S base-devel wayland mesa libpng libjpeg-turbo wayland-protocols
 ```
 
 **Fedora:**
 ```bash
+# Wayland + X11 (recommended)
+sudo dnf install gcc make wayland-devel mesa-libGLES-devel \
+    libpng-devel libjpeg-turbo-devel wayland-protocols-devel \
+    libX11-devel libXrandr-devel
+
+# Wayland only
 sudo dnf install gcc make wayland-devel mesa-libGLES-devel \
     libpng-devel libjpeg-turbo-devel wayland-protocols-devel
 ```
@@ -225,9 +242,17 @@ sudo make install
 ```
 
 **System Requirements:**
-- Wayland compositor (Hyprland, Sway, River, KDE Plasma, etc.)
+- **Wayland:** Hyprland, Sway, River, KDE Plasma, GNOME Shell, or any wlroots-based compositor
+- **X11:** i3, bspwm, dwm, awesome, xmonad, qtile, herbstluftwm (tiling WMs)
 - OpenGL ES 2.0+ GPU
 - Linux kernel 3.17+ (for `timerfd` support)
+
+**Backend Auto-Detection:**
+NeoWall automatically detects your environment and uses the appropriate backend:
+- Wayland compositors → wlr-layer-shell or compositor-specific backend
+- X11 tiling WMs → X11 backend with root pixmap integration
+
+See [X11 Backend Documentation](src/compositor/backends/x11/README.md) for X11-specific features and troubleshooting.
 
 ---
 
@@ -240,6 +265,14 @@ sudo make install
 - **FPS Monitoring:** Use `show_fps true` to verify performance
 - **State Persistence:** Wallpaper cycle position is remembered across restarts
 - **Config Philosophy:** Treat config as immutable - restart to apply changes
+
+### X11-Specific Notes
+
+- **Root Pixmap Integration:** Renders to root window pixmap for apps like Conky to use pseudo-transparency
+- **Tiling WM Focus:** Designed for tiling WMs (i3, bspwm, dwm) - may not work correctly with floating WMs
+- **Multi-Monitor:** XRandR auto-detection - properly detects ultrawide and multi-monitor setups
+- **Performance:** Uses override_redirect window - bypasses WM for optimal performance
+- **Conky Transparency:** Conky's pseudo-transparency will show the wallpaper (though with refresh lag)
 
 ### Recommended Settings
 

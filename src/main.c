@@ -13,7 +13,9 @@
 #include "neowall.h"
 #include "config_access.h"
 #include "constants.h"
+#include "compositor.h"
 #include "egl/egl_core.h"
+#include "output/output.h"
 
 static struct neowall_state *global_state = NULL;
 
@@ -744,17 +746,36 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* Initialize Wayland connection first */
-    if (!wayland_init(&state)) {
-        log_error("Failed to initialize Wayland");
-        close(state.signal_fd);
-        return EXIT_FAILURE;
+    /* Initialize Wayland connection (optional - will try alternative backend if this fails) */
+    bool wayland_available = wayland_init(&state);
+    if (!wayland_available) {
+        log_info("Wayland not available - attempting alternative backend");
+        /* state.display remains NULL, which triggers alternative backend selection */
+        state.compositor_backend = compositor_backend_init(&state);
+        if (!state.compositor_backend) {
+            log_error("Failed to initialize backend");
+            close(state.signal_fd);
+            return EXIT_FAILURE;
+        }
+        log_info("Backend initialized successfully");
+        
+        /* Initialize outputs via backend (for X11, creates synthetic output) */
+        if (state.compositor_backend->ops && state.compositor_backend->ops->init_outputs) {
+            if (!state.compositor_backend->ops->init_outputs(state.compositor_backend->data, &state)) {
+                log_error("Failed to initialize outputs");
+                close(state.signal_fd);
+                return EXIT_FAILURE;
+            }
+        }
     }
 
     /* Initialize EGL/OpenGL */
     if (!egl_core_init(&state)) {
         log_error("Failed to initialize EGL");
-        wayland_cleanup(&state);
+        if (wayland_available) {
+            wayland_cleanup(&state);
+        }
+        close(state.signal_fd);
         return EXIT_FAILURE;
     }
 
@@ -762,7 +783,10 @@ int main(int argc, char *argv[]) {
     if (!config_load(&state, config_path)) {
         log_error("Failed to load configuration");
         egl_core_cleanup(&state);
-        wayland_cleanup(&state);
+        if (wayland_available) {
+            wayland_cleanup(&state);
+        }
+        close(state.signal_fd);
         return EXIT_FAILURE;
     }
 
