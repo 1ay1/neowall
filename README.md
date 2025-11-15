@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="packaging/neowall.svg" alt="NeoWall Logo" width="560"/>
+  <img src="packaging/neowall.svg" alt="NeoWall Logo" width="100%"/>
   
   <h3>GPU-Accelerated Live Wallpapers for Wayland & X11</h3>
   
