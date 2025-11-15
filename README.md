@@ -38,6 +38,7 @@
 **Compatibility**
 - 🖥️ **Multi-monitor** with independent configs
 - 🌊 **Wayland-native** (Hyprland, Sway, River, KDE)
+- 🪟 **X11 support** (i3, bspwm, dwm, and other tiling WMs)
 - 🎨 **Shadertoy-compatible** shaders
 - 📦 **30+ included shaders** ready to use
 
@@ -65,7 +66,7 @@ neowall
 
 Your first run creates `~/.config/neowall/config.vibe` with a gorgeous retro synthwave shader.
 
-> **Note:** Requires a Wayland compositor. X11 is not supported.
+> **Note:** Primarily designed for Wayland. X11 support available for tiling window managers (i3, bspwm, dwm, etc.). See [X11 Backend Documentation](src/compositor/backends/x11/README.md) for details.
 
 ---
 
@@ -202,17 +203,26 @@ Most Shadertoy shaders work with minimal adaptation!
 ```bash
 sudo apt install build-essential libwayland-dev libgles2-mesa-dev \
     libpng-dev libjpeg-dev wayland-protocols
+
+# Optional: X11 backend support
+sudo apt install libx11-dev libxrandr-dev
 ```
 
 **Arch Linux:**
 ```bash
 sudo pacman -S base-devel wayland mesa libpng libjpeg-turbo wayland-protocols
+
+# Optional: X11 backend support
+sudo pacman -S libx11 libxrandr
 ```
 
 **Fedora:**
 ```bash
 sudo dnf install gcc make wayland-devel mesa-libGLES-devel \
     libpng-devel libjpeg-turbo-devel wayland-protocols-devel
+
+# Optional: X11 backend support
+sudo dnf install libX11-devel libXrandr-devel
 ```
 
 ### Build from Source
@@ -225,9 +235,15 @@ sudo make install
 ```
 
 **System Requirements:**
-- Wayland compositor (Hyprland, Sway, River, KDE Plasma, etc.)
+- Wayland compositor (Hyprland, Sway, River, KDE Plasma, etc.) **OR** X11 with tiling WM (i3, bspwm, dwm, etc.)
 - OpenGL ES 2.0+ GPU
 - Linux kernel 3.17+ (for `timerfd` support)
+
+**X11 Tiling Window Managers:**
+If running X11, NeoWall automatically uses the X11 backend. Fully supported WMs:
+- i3/i3-gaps, bspwm, dwm, awesome, xmonad, qtile, herbstluftwm
+
+See [X11 Backend Documentation](src/compositor/backends/x11/README.md) for setup and troubleshooting.
 
 ---
 

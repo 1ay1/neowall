@@ -338,11 +338,16 @@ static void render_outputs(struct neowall_state *state) {
                          output->model, eglGetError());
                 state->errors_count++;
             } else {
-                /* Damage the entire surface to tell compositor it needs repainting */
-                wl_surface_damage(output->compositor_surface->wl_surface, 0, 0, INT32_MAX, INT32_MAX);
+                /* Damage the entire surface to tell compositor it needs repainting (Wayland only) */
+                if (output->compositor_surface->wl_surface) {
+                    wl_surface_damage(output->compositor_surface->wl_surface, 0, 0, INT32_MAX, INT32_MAX);
 
-                /* Commit Wayland surface */
-                wl_surface_commit(output->compositor_surface->wl_surface);
+                    /* Commit Wayland surface */
+                    wl_surface_commit(output->compositor_surface->wl_surface);
+                } else {
+                    /* For X11, commit surface to copy pixels to root pixmap */
+                    compositor_surface_commit(output->compositor_surface);
+                }
                 output->last_frame_time = current_time;
                 state->frames_rendered++;
 
@@ -483,11 +488,14 @@ void event_loop_run(struct neowall_state *state) {
     }
     pthread_rwlock_unlock(&state->output_list_lock);
 
-    /* Get Wayland display file descriptor */
-    int wl_fd = wl_display_get_fd(state->display);
-    if (wl_fd < 0) {
-        log_error("Failed to get Wayland display file descriptor");
-        return;
+    /* Get Wayland display file descriptor (if using Wayland) */
+    int wl_fd = -1;
+    if (state->display) {
+        wl_fd = wl_display_get_fd(state->display);
+        if (wl_fd < 0) {
+            log_error("Failed to get Wayland display file descriptor");
+            return;
+        }
     }
 
     /* Base file descriptors - always polled */
@@ -495,8 +503,8 @@ void event_loop_run(struct neowall_state *state) {
     #define MAX_POLL_FDS (BASE_FD_COUNT + MAX_OUTPUTS)
 
     struct pollfd fds[MAX_POLL_FDS];
-    fds[0].fd = wl_fd;
-    fds[0].events = POLLIN;
+    fds[0].fd = wl_fd;  /* -1 for X11 backend, valid fd for Wayland */
+    fds[0].events = wl_fd >= 0 ? POLLIN : 0;  /* Don't poll invalid fd */
     fds[1].fd = state->timer_fd;
     fds[1].events = POLLIN;
     fds[2].fd = state->wakeup_fd;
@@ -522,7 +530,9 @@ void event_loop_run(struct neowall_state *state) {
     log_info("Performing initial wallpaper render");
     render_outputs(state);
     handle_wayland_events(state);
-    wl_display_flush(state->display);
+    if (state->display) {
+        wl_display_flush(state->display);
+    }
 
     /* Set initial timer for cycling */
     update_cycle_timer(state);
@@ -543,26 +553,28 @@ void event_loop_run(struct neowall_state *state) {
             /* Outputs will be initialized through the normal config_load path */
         }
 
-        /* Prepare for reading events */
-        while (wl_display_prepare_read(state->display) != 0) {
-            if (wl_display_dispatch_pending(state->display) < 0) {
-                log_error("Failed to dispatch Wayland events during prepare");
-                wl_display_cancel_read(state->display);
-                break;
+        /* Prepare for reading events (Wayland only) */
+        if (state->display) {
+            while (wl_display_prepare_read(state->display) != 0) {
+                if (wl_display_dispatch_pending(state->display) < 0) {
+                    log_error("Failed to dispatch Wayland events during prepare");
+                    wl_display_cancel_read(state->display);
+                    break;
+                }
+
+                if (!atomic_load_explicit(&state->running, memory_order_acquire)) {
+                    wl_display_cancel_read(state->display);
+                    break;
+                }
             }
 
-            if (!atomic_load_explicit(&state->running, memory_order_acquire)) {
-                wl_display_cancel_read(state->display);
-                break;
-            }
-        }
-
-        /* Flush before polling */
-        if (wl_display_flush(state->display) < 0) {
-            if (errno != EAGAIN) {
-                log_error("Failed to flush Wayland display: %s", strerror(errno));
-                wl_display_cancel_read(state->display);
-                break;
+            /* Flush before polling */
+            if (wl_display_flush(state->display) < 0) {
+                if (errno != EAGAIN) {
+                    log_error("Failed to flush Wayland display: %s", strerror(errno));
+                    wl_display_cancel_read(state->display);
+                    break;
+                }
             }
         }
 
@@ -650,18 +662,20 @@ void event_loop_run(struct neowall_state *state) {
 
         if (ret == 0) {
             /* Timeout - no events */
-            wl_display_cancel_read(state->display);
+            if (state->display) {
+                wl_display_cancel_read(state->display);
+            }
         } else {
-            /* Check for compositor disconnect (POLLHUP/POLLERR on Wayland fd) */
-            if (fds[0].revents & (POLLHUP | POLLERR)) {
+            /* Check for compositor disconnect (POLLHUP/POLLERR on Wayland fd) - Wayland only */
+            if (state->display && fds[0].revents & (POLLHUP | POLLERR)) {
                 log_error("Wayland display disconnected (POLLHUP/POLLERR), compositor shut down");
                 wl_display_cancel_read(state->display);
                 atomic_store_explicit(&state->running, false, memory_order_release);
                 break;
             }
 
-            /* Events available */
-            if (fds[0].revents & POLLIN) {
+            /* Events available (Wayland only) */
+            if (state->display && fds[0].revents & POLLIN) {
                 if (wl_display_read_events(state->display) < 0) {
                     log_error("Failed to read Wayland events");
                     atomic_store_explicit(&state->running, false, memory_order_release);
@@ -675,7 +689,7 @@ void event_loop_run(struct neowall_state *state) {
                     atomic_store_explicit(&state->running, false, memory_order_release);
                     break;
                 }
-            } else {
+            } else if (state->display) {
                 wl_display_cancel_read(state->display);
             }
 
@@ -720,19 +734,21 @@ void event_loop_run(struct neowall_state *state) {
 
         /* Config reload removed - restart daemon to change config */
 
-        /* Dispatch any events that were read */
-        if (!handle_wayland_events(state)) {
-            log_error("Failed to handle Wayland events, compositor may have disconnected");
-            atomic_store_explicit(&state->running, false, memory_order_release);
-            break;
-        }
+        /* Dispatch any events that were read (Wayland only) */
+        if (state->display) {
+            if (!handle_wayland_events(state)) {
+                log_error("Failed to handle Wayland events, compositor may have disconnected");
+                atomic_store_explicit(&state->running, false, memory_order_release);
+                break;
+            }
 
-        /* Additional check for display errors after dispatching events */
-        int display_error = wl_display_get_error(state->display);
-        if (display_error != 0) {
-            log_error("Wayland display error detected (code %d), exiting", display_error);
-            atomic_store_explicit(&state->running, false, memory_order_release);
-            break;
+            /* Additional check for display errors after dispatching events */
+            int display_error = wl_display_get_error(state->display);
+            if (display_error != 0) {
+                log_error("Wayland display error detected (code %d), exiting", display_error);
+                atomic_store_explicit(&state->running, false, memory_order_release);
+                break;
+            }
         }
 
         /* Render outputs that need updating */

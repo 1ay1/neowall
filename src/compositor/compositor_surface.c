@@ -216,14 +216,32 @@ EGLSurface compositor_surface_create_egl(struct compositor_surface *surface,
         return EGL_NO_SURFACE;
     }
     
-    if (!surface->egl_window) {
-        log_error("Backend created EGL window but egl_window is NULL");
+    /* X11 backend uses native window handle directly, Wayland uses egl_window */
+    EGLNativeWindowType native_window;
+    if (surface->egl_window) {
+        /* Wayland: use wl_egl_window */
+        native_window = (EGLNativeWindowType)surface->egl_window;
+    } else if (surface->backend_data) {
+        /* X11: backend_data contains x11_surface_data_t with native_window */
+        /* Cast to get the native window handle from X11 backend data */
+        typedef struct {
+            void *x_window;
+            void *egl_surface;
+            EGLNativeWindowType native_window;
+            bool mapped;
+        } x11_surface_data_t;
+        
+        x11_surface_data_t *x11_data = (x11_surface_data_t *)surface->backend_data;
+        native_window = x11_data->native_window;
+        log_debug("Using X11 native window handle: 0x%lx", (unsigned long)native_window);
+    } else {
+        log_error("Backend created EGL window but no valid window handle available");
         return EGL_NO_SURFACE;
     }
     
-    /* Create EGL surface from EGL window (opaque region handles transparency) */
+    /* Create EGL surface from native window (opaque region handles transparency) */
     EGLSurface egl_surface = eglCreateWindowSurface(egl_display, egl_config,
-                                                    (EGLNativeWindowType)surface->egl_window,
+                                                    native_window,
                                                     NULL);
     
     if (egl_surface == EGL_NO_SURFACE) {

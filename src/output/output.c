@@ -721,7 +721,9 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         return;
     }
 
-    if (!output->compositor_surface || !output->compositor_surface->egl_window) {
+    /* X11 backend uses backend_data instead of egl_window */
+    if (!output->compositor_surface || 
+        (!output->compositor_surface->egl_window && !output->compositor_surface->backend_data)) {
         log_error("EGL window not created for output %s, cannot set shader",
                   output->model[0] ? output->model : "unknown");
         return;

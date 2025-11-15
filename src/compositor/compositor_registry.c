@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <wayland-client.h>
 #include "compositor.h"
+#include "compositor/backends/x11.h"
 #include "neowall.h"
 
 /*
@@ -383,18 +384,30 @@ static struct compositor_backend *select_backend(struct neowall_state *state,
 
 /* Initialize compositor backend */
 struct compositor_backend *compositor_backend_init(struct neowall_state *state) {
-    if (!state || !state->display) {
+    if (!state) {
         log_error("Invalid state for compositor backend initialization");
         return NULL;
     }
     
-    /* Detect compositor */
-    compositor_info_t info = compositor_detect(state->display);
+    compositor_info_t info;
     
-    log_info("Compositor: %s", info.name);
-    log_info("Layer shell support: %s", info.has_layer_shell ? "yes" : "no");
-    log_info("KDE shell support: %s", info.has_kde_shell ? "yes" : "no");
-    log_info("GTK shell support: %s", info.has_gtk_shell ? "yes" : "no");
+    /* Detect compositor (only if Wayland display available) */
+    if (state->display) {
+        info = compositor_detect(state->display);
+    } else {
+        /* No Wayland - will attempt X11 backend */
+        log_info("No Wayland display detected");
+        memset(&info, 0, sizeof(info));
+        info.name = "X11";
+        info.type = COMPOSITOR_TYPE_UNKNOWN;
+    }
+    
+    if (state->display) {
+        log_info("Compositor: %s", info.name);
+        log_info("Layer shell support: %s", info.has_layer_shell ? "yes" : "no");
+        log_info("KDE shell support: %s", info.has_kde_shell ? "yes" : "no");
+        log_info("GTK shell support: %s", info.has_gtk_shell ? "yes" : "no");
+    }
     
     /* KDE-specific information */
     if (info.type == COMPOSITOR_TYPE_KDE_PLASMA) {
@@ -413,7 +426,20 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     /* Register all available backends */
     log_debug("Registering available backends...");
     
-    /* These will be implemented in separate backend files */
+    /* Try X11 backend first (if Wayland not available) */
+    if (!state->display) {
+        log_info("No Wayland display - attempting X11 backend");
+        struct compositor_backend *x11_backend = compositor_backend_x11_init(state);
+        if (x11_backend) {
+            log_info("X11 backend registered successfully");
+            return x11_backend;
+        } else {
+            log_error("Failed to initialize X11 backend");
+            return NULL;
+        }
+    }
+    
+    /* Wayland backends */
     compositor_backend_wlr_layer_shell_init(state);
     compositor_backend_kde_plasma_init(state);
     compositor_backend_gnome_shell_init(state);

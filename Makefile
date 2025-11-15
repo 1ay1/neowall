@@ -84,6 +84,10 @@ endif
 HAS_EGL_KHR_IMAGE := $(shell grep -q "EGL_KHR_image" /usr/include/EGL/eglext.h 2>/dev/null && echo yes)
 HAS_EGL_KHR_FENCE := $(shell grep -q "EGL_KHR_fence_sync" /usr/include/EGL/eglext.h 2>/dev/null && echo yes)
 
+# Detect X11 support
+HAS_X11 := $(shell pkg-config --exists x11 && echo yes)
+HAS_XRANDR := $(shell pkg-config --exists xrandr && echo yes)
+
 # ============================================================================
 # Conditional Compilation Flags
 # ============================================================================
@@ -159,6 +163,19 @@ ifeq ($(HAS_EGL_KHR_FENCE),yes)
     $(info EGL_KHR_fence_sync extension available)
 endif
 
+# X11 backend support
+ifeq ($(HAS_X11),yes)
+    CFLAGS += -DHAVE_X11_BACKEND
+    LDFLAGS += -lX11
+    $(info X11 backend available)
+
+    ifeq ($(HAS_XRANDR),yes)
+        CFLAGS += -DHAVE_XRANDR
+        LDFLAGS += -lXrandr
+        $(info XRandR multi-monitor support enabled)
+    endif
+endif
+
 # ============================================================================
 # Source Files - Conditional Based on Detected Versions
 # ============================================================================
@@ -188,6 +205,14 @@ WAYLAND_COMPOSITOR_SOURCES = $(WAYLAND_COMPOSITOR_DIR)/wlr_layer_shell.c \
 
 # EGL core (always compiled)
 EGL_CORE_SOURCES = $(EGL_DIR)/capability.c $(EGL_DIR)/egl_core.c
+
+# X11 backend sources (conditional)
+ifeq ($(HAS_X11),yes)
+    X11_BACKEND_DIR = $(SRC_DIR)/compositor/backends/x11
+    X11_BACKEND_SOURCES = $(X11_BACKEND_DIR)/x11_core.c
+else
+    X11_BACKEND_SOURCES =
+endif
 
 # Version-specific EGL sources (always include for runtime detection)
 EGL_VERSION_SOURCES = $(EGL_DIR)/egl_v10.c \
@@ -223,7 +248,7 @@ endif
 EGL_SOURCES = $(EGL_CORE_SOURCES) $(EGL_VERSION_SOURCES) $(GLES_SOURCES)
 
 # Combine all sources
-ALL_SOURCES = $(CORE_SOURCES) $(EGL_SOURCES) $(TRANSITION_SOURCES) $(TEXTURE_SOURCES) $(OUTPUT_SOURCES) $(CONFIG_SOURCES) $(RENDER_SOURCES) $(IMAGE_SOURCES) $(PROTO_SOURCES) $(COMPOSITOR_SOURCES) $(WAYLAND_BACKEND_SOURCES) $(WAYLAND_COMPOSITOR_SOURCES)
+ALL_SOURCES = $(CORE_SOURCES) $(EGL_SOURCES) $(TRANSITION_SOURCES) $(TEXTURE_SOURCES) $(OUTPUT_SOURCES) $(CONFIG_SOURCES) $(RENDER_SOURCES) $(IMAGE_SOURCES) $(PROTO_SOURCES) $(COMPOSITOR_SOURCES) $(WAYLAND_BACKEND_SOURCES) $(WAYLAND_COMPOSITOR_SOURCES) $(X11_BACKEND_SOURCES)
 
 # ============================================================================
 # Object Files
@@ -242,7 +267,11 @@ COMPOSITOR_OBJECTS = $(COMPOSITOR_SOURCES:$(COMPOSITOR_DIR)/%.c=$(COMPOSITOR_OBJ
 WAYLAND_BACKEND_OBJECTS = $(WAYLAND_BACKEND_SOURCES:$(WAYLAND_BACKEND_DIR)/%.c=$(WAYLAND_BACKEND_OBJ_DIR)/%.o)
 WAYLAND_COMPOSITOR_OBJECTS = $(WAYLAND_COMPOSITOR_SOURCES:$(WAYLAND_COMPOSITOR_DIR)/%.c=$(WAYLAND_COMPOSITOR_OBJ_DIR)/%.o)
 
-ALL_OBJECTS = $(CORE_OBJECTS) $(EGL_OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJECTS) $(OUTPUT_OBJECTS) $(CONFIG_OBJECTS) $(RENDER_OBJECTS) $(IMAGE_OBJECTS) $(PROTO_OBJECTS) $(COMPOSITOR_OBJECTS) $(WAYLAND_BACKEND_OBJECTS) $(WAYLAND_COMPOSITOR_OBJECTS)
+# X11 backend objects
+X11_BACKEND_OBJ_DIR = $(OBJ_DIR)/compositor/backends/x11
+X11_BACKEND_OBJECTS = $(X11_BACKEND_SOURCES:$(X11_BACKEND_DIR)/%.c=$(X11_BACKEND_OBJ_DIR)/%.o)
+
+ALL_OBJECTS = $(CORE_OBJECTS) $(EGL_OBJECTS) $(TRANSITION_OBJECTS) $(TEXTURE_OBJECTS) $(OUTPUT_OBJECTS) $(CONFIG_OBJECTS) $(RENDER_OBJECTS) $(IMAGE_OBJECTS) $(PROTO_OBJECTS) $(COMPOSITOR_OBJECTS) $(WAYLAND_BACKEND_OBJECTS) $(WAYLAND_COMPOSITOR_OBJECTS) $(X11_BACKEND_OBJECTS)
 
 # ============================================================================
 # Wayland Protocol Files
@@ -329,7 +358,7 @@ endif
 
 # Create necessary directories
 directories:
-	@mkdir -p $(OBJ_DIR) $(EGL_OBJ_DIR) $(COMPOSITOR_OBJ_DIR) $(WAYLAND_BACKEND_OBJ_DIR) $(WAYLAND_COMPOSITOR_OBJ_DIR) $(OUTPUT_OBJ_DIR) $(CONFIG_OBJ_DIR) $(RENDER_OBJ_DIR) $(IMAGE_OBJ_DIR) $(BIN_DIR) $(PROTO_DIR)
+	@mkdir -p $(OBJ_DIR) $(EGL_OBJ_DIR) $(COMPOSITOR_OBJ_DIR) $(WAYLAND_BACKEND_OBJ_DIR) $(WAYLAND_COMPOSITOR_OBJ_DIR) $(X11_BACKEND_OBJ_DIR) $(OUTPUT_OBJ_DIR) $(CONFIG_OBJ_DIR) $(RENDER_OBJ_DIR) $(IMAGE_OBJ_DIR) $(BIN_DIR) $(PROTO_DIR)
 
 # Generate Wayland protocol files
 protocols: $(PROTO_HEADERS) $(PROTO_SRCS)
@@ -436,6 +465,11 @@ $(WAYLAND_BACKEND_OBJ_DIR)/%.o: $(WAYLAND_BACKEND_DIR)/%.c | directories protoco
 # Compile Wayland compositor-specific backend files
 $(WAYLAND_COMPOSITOR_OBJ_DIR)/%.o: $(WAYLAND_COMPOSITOR_DIR)/%.c | directories protocols
 	@echo "Compiling Wayland compositor: $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+# Compile X11 backend files
+$(X11_BACKEND_OBJ_DIR)/%.o: $(X11_BACKEND_DIR)/%.c | directories
+	@echo "Compiling X11 backend: $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 # Link the binary
