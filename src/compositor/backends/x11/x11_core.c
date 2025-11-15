@@ -641,6 +641,135 @@ static void x11_on_output_removed(void *backend_data, struct wl_output *output) 
  * BACKEND OPERATIONS TABLE
  * ============================================================================ */
 
+/* Initialize outputs for X11 backend */
+static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
+    if (!backend_data || !state) {
+        return false;
+    }
+    
+    log_info("Creating X11 output for default screen");
+    
+    /* Create synthetic output for X11 */
+    struct output_state *x11_output = calloc(1, sizeof(struct output_state));
+    if (!x11_output) {
+        log_error("Failed to allocate X11 output");
+        return false;
+    }
+    
+    x11_output->state = state;
+    x11_output->output = NULL;  /* No Wayland output */
+    x11_output->name = 0;
+    snprintf(x11_output->model, sizeof(x11_output->model), "X11 Screen");
+    snprintf(x11_output->connector_name, sizeof(x11_output->connector_name), "X11-0");
+    
+    /* Dimensions will be set to 0 - compositor surface creation will use actual screen size */
+    x11_output->pixel_width = 0;
+    x11_output->pixel_height = 0;
+    x11_output->width = 0;
+    x11_output->height = 0;
+    x11_output->logical_width = 0;
+    x11_output->logical_height = 0;
+    x11_output->scale = 1;
+    x11_output->configured = true;
+    
+    /* Allocate config structure */
+    x11_output->config = calloc(1, sizeof(struct wallpaper_config));
+    if (!x11_output->config) {
+        log_error("Failed to allocate config for X11 output");
+        free(x11_output);
+        return false;
+    }
+    
+    /* Initialize config with defaults */
+    x11_output->config->mode = MODE_FILL;
+    x11_output->config->duration = 0;
+    x11_output->config->transition = TRANSITION_NONE;
+    x11_output->config->transition_duration = 300;
+    x11_output->config->cycle = false;
+    x11_output->config->cycle_paths = NULL;
+    x11_output->config->cycle_count = 0;
+    x11_output->config->current_cycle_index = 0;
+    x11_output->config->type = WALLPAPER_IMAGE;
+    x11_output->config->path[0] = '\0';
+    x11_output->config->shader_path[0] = '\0';
+    x11_output->config->shader_speed = 1.0f;
+    x11_output->config->shader_fps = 60;
+    x11_output->config->show_fps = false;
+    x11_output->config->channel_paths = NULL;
+    x11_output->config->channel_count = 0;
+    
+    /* Initialize preload state */
+    x11_output->preload_texture = 0;
+    x11_output->preload_image = NULL;
+    x11_output->preload_path[0] = '\0';
+    atomic_store(&x11_output->preload_ready, false);
+    
+    /* Initialize background preload thread state */
+    pthread_mutex_init(&x11_output->preload_mutex, NULL);
+    x11_output->preload_decoded_image = NULL;
+    atomic_store(&x11_output->preload_thread_active, false);
+    atomic_store(&x11_output->preload_upload_pending, false);
+    
+    /* Initialize FPS tracking */
+    x11_output->fps_last_log_time = 0;
+    x11_output->fps_frame_count = 0;
+    x11_output->fps_current = 0.0f;
+    
+    /* Initialize frame timer */
+    x11_output->frame_timer_fd = -1;
+    
+    /* Add to output list */
+    pthread_rwlock_wrlock(&state->output_list_lock);
+    x11_output->next = state->outputs;
+    state->outputs = x11_output;
+    state->output_count = 1;
+    pthread_rwlock_unlock(&state->output_list_lock);
+    
+    log_info("X11 output created: %s", x11_output->model);
+    
+    /* Create compositor surface for X11 output */
+    compositor_surface_config_t surface_config = {
+        .output = NULL,  /* No Wayland output */
+        .width = x11_output->pixel_width,
+        .height = x11_output->pixel_height,
+        .layer = COMPOSITOR_LAYER_BACKGROUND,
+        .anchor = COMPOSITOR_ANCHOR_TOP | COMPOSITOR_ANCHOR_BOTTOM | 
+                  COMPOSITOR_ANCHOR_LEFT | COMPOSITOR_ANCHOR_RIGHT,
+        .exclusive_zone = 0,
+        .keyboard_interactivity = false,
+    };
+    
+    x11_output->compositor_surface = compositor_surface_create(
+        state->compositor_backend, &surface_config);
+    
+    if (!x11_output->compositor_surface) {
+        log_error("Failed to create compositor surface for X11 output");
+        pthread_rwlock_wrlock(&state->output_list_lock);
+        state->outputs = NULL;
+        state->output_count = 0;
+        pthread_rwlock_unlock(&state->output_list_lock);
+        free(x11_output->config);
+        free(x11_output);
+        return false;
+    }
+    
+    log_info("Compositor surface created for X11 output");
+    
+    /* Update output dimensions from created surface */
+    if (x11_output->compositor_surface) {
+        x11_output->width = x11_output->compositor_surface->width;
+        x11_output->height = x11_output->compositor_surface->height;
+        x11_output->pixel_width = x11_output->compositor_surface->width;
+        x11_output->pixel_height = x11_output->compositor_surface->height;
+        x11_output->logical_width = x11_output->compositor_surface->width;
+        x11_output->logical_height = x11_output->compositor_surface->height;
+        log_debug("Updated X11 output dimensions to %dx%d", 
+                 x11_output->width, x11_output->height);
+    }
+    
+    return true;
+}
+
 static const compositor_backend_ops_t x11_backend_ops = {
     .init = x11_backend_init,
     .cleanup = x11_backend_cleanup,
@@ -653,6 +782,7 @@ static const compositor_backend_ops_t x11_backend_ops = {
     .get_capabilities = x11_get_capabilities,
     .on_output_added = x11_on_output_added,
     .on_output_removed = x11_on_output_removed,
+    .init_outputs = x11_init_outputs,
 };
 
 /* ============================================================================

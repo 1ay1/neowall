@@ -234,6 +234,16 @@ typedef struct compositor_backend_ops {
      * @param output Removed output
      */
     void (*on_output_removed)(void *backend_data, struct wl_output *output);
+    
+    /**
+     * Initialize outputs for this backend (optional)
+     * Called when no Wayland outputs are available (X11 backend)
+     * 
+     * @param backend_data Data returned from init()
+     * @param state Global state
+     * @return true on success, false on failure
+     */
+    bool (*init_outputs)(void *backend_data, struct neowall_state *state);
 } compositor_backend_ops_t;
 
 /* ============================================================================

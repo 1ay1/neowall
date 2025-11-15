@@ -345,7 +345,7 @@ static void render_outputs(struct neowall_state *state) {
                     /* Commit Wayland surface */
                     wl_surface_commit(output->compositor_surface->wl_surface);
                 } else {
-                    /* For X11, commit surface to copy pixels to root pixmap */
+                    /* Commit surface for non-Wayland backends */
                     compositor_surface_commit(output->compositor_surface);
                 }
                 output->last_frame_time = current_time;
