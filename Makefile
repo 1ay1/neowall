@@ -2,7 +2,7 @@
 # Copyright (C) 2024
 
 PROJECT = neowall
-VERSION = 0.3.0
+VERSION = 0.4.0
 
 # Directories
 SRC_DIR = src
@@ -35,6 +35,7 @@ ASSETS_DIR = assets
 CC = gcc
 CFLAGS = -Wall -Wextra -Werror -pedantic -std=c11 -O2 -D_POSIX_C_SOURCE=200809L
 CFLAGS += -I$(INC_DIR) -I$(PROTO_DIR)
+CFLAGS += -DNEOWALL_VERSION=\"$(VERSION)\"
 LDFLAGS = -lwayland-client -lwayland-egl -lpthread -lm
 
 
@@ -316,7 +317,7 @@ LDFLAGS += $(shell pkg-config --libs $(OPTIONAL_DEPS) 2>/dev/null || echo "-lpng
 TARGET = $(BIN_DIR)/$(PROJECT)
 
 # Default target
-all: banner directories protocols $(TARGET) success
+all: banner directories version_header protocols $(TARGET) success
 
 # Banner
 banner:
@@ -359,6 +360,13 @@ endif
 # Create necessary directories
 directories:
 	@mkdir -p $(OBJ_DIR) $(EGL_OBJ_DIR) $(COMPOSITOR_OBJ_DIR) $(WAYLAND_BACKEND_OBJ_DIR) $(WAYLAND_COMPOSITOR_OBJ_DIR) $(X11_BACKEND_OBJ_DIR) $(OUTPUT_OBJ_DIR) $(CONFIG_OBJ_DIR) $(RENDER_OBJ_DIR) $(IMAGE_OBJ_DIR) $(BIN_DIR) $(PROTO_DIR)
+
+# Generate version.h from version.h.in
+version_header: $(INC_DIR)/version.h
+
+$(INC_DIR)/version.h: $(INC_DIR)/version.h.in
+	@sed 's/@VERSION@/$(VERSION)/g' $< > $@
+	@echo "Generated: $(INC_DIR)/version.h (v$(VERSION))"
 
 # Generate Wayland protocol files
 protocols: $(PROTO_HEADERS) $(PROTO_SRCS)
@@ -513,6 +521,7 @@ uninstall:
 clean:
 	@echo "Cleaning build directory..."
 	rm -rf $(BUILD_DIR)
+	rm -f $(INC_DIR)/version.h
 	@echo "Cleaned"
 
 distclean: clean
@@ -609,7 +618,7 @@ help:
 # Phony Targets
 # ============================================================================
 
-.PHONY: all banner success directories protocols clean distclean install uninstall \
+.PHONY: all banner success directories version_header protocols clean distclean install uninstall \
         run run-verbose run-capabilities debug print-caps format analyze help
 
 # Prevent make from deleting intermediate files

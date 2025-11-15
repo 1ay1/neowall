@@ -10,6 +10,7 @@
 #include <wayland-egl.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+#include "version.h"
 #include "egl/capability.h"
 #include "../src/output/output.h"
 #include "../src/config/config.h"
@@ -18,7 +19,6 @@
 typedef atomic_bool atomic_bool_t;
 typedef atomic_int atomic_int_t;
 
-#define NEOWALL_VERSION "0.3.0"
 #define MAX_PATH_LENGTH OUTPUT_MAX_PATH_LENGTH  /* Compatibility alias */
 #define MAX_OUTPUTS 16
 #define MAX_WALLPAPERS 256

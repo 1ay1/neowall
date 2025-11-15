@@ -283,7 +283,7 @@ static bool send_daemon_signal(int signal, const char *action, bool check_cycle)
 }
 
 static void print_usage(const char *program_name) {
-    printf("NeoWall v%s - GPU-accelerated wallpapers for Wayland. Take the red pill. 🔴\n\n", NEOWALL_VERSION);
+    printf("NeoWall v%s - GPU-accelerated wallpapers for Wayland. Take the red pill. 🔴\n\n", NEOWALL_VERSION_STRING);
     printf("Usage: %s [OPTIONS]\n\n", program_name);
     printf("Options:\n");
     printf("  -c, --config PATH     Path to configuration file\n");
@@ -328,7 +328,7 @@ static void print_usage(const char *program_name) {
 }
 
 static void print_version(void) {
-    printf("NeoWall v%s\n", NEOWALL_VERSION);
+    printf("NeoWall v%s\n", NEOWALL_VERSION_STRING);
     printf("GPU-accelerated wallpapers for Wayland.\n");
     printf("Take the red pill. 🔴💊\n");
     printf("\nSupported features:\n");
@@ -670,7 +670,7 @@ int main(int argc, char *argv[]) {
     if (verbose) {
         log_set_level(LOG_LEVEL_DEBUG);
     }
-    log_info("NeoWall v%s starting...", NEOWALL_VERSION);
+    log_info("NeoWall v%s starting...", NEOWALL_VERSION_STRING);
 
     /* Ensure config directory exists */
     if (!create_config_directory()) {
@@ -758,7 +758,7 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
         log_info("Backend initialized successfully");
-        
+
         /* Initialize outputs via backend (for X11, creates synthetic output) */
         if (state.compositor_backend->ops && state.compositor_backend->ops->init_outputs) {
             if (!state.compositor_backend->ops->init_outputs(state.compositor_backend->data, &state)) {

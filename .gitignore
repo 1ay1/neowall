@@ -6,6 +6,9 @@ build/
 *.so.*
 staticwall
 
+# Generated files
+include/version.h
+
 # Backup files
 *.old
 *.bak
