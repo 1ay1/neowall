@@ -176,6 +176,10 @@ struct output_state {
     uint64_t fps_frame_count;           /* Frames rendered since last FPS log */
     float fps_current;                  /* Current measured FPS */
     
+    /* Mouse tracking (for shader iMouse uniform) */
+    float mouse_x;                      /* Mouse X position in pixels (or -1 for center) */
+    float mouse_y;                      /* Mouse Y position in pixels (or -1 for center) */
+    
     /* High-precision frame pacing for vsync-off mode */
     int frame_timer_fd;                 /* timerfd for precise frame timing when vsync is disabled */
 

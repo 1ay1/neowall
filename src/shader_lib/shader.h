@@ -39,4 +39,11 @@ bool shader_create_slide_program(GLuint *program);
 bool shader_create_glitch_program(GLuint *program);
 bool shader_create_pixelate_program(GLuint *program);
 
+/**
+ * Get the last detailed error log from shader compilation/linking
+ * 
+ * @return Pointer to static error log buffer (valid until next compilation)
+ */
+const char *shader_get_last_error_log(void);
+
 #endif /* SHADER_H */

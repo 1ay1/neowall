@@ -9,6 +9,7 @@
 #include "constants.h"
 #include "transitions.h"
 #include "shader.h"
+#include "neowall_shader_api.h"
 #include "textures.h"
 #include "compositor.h"
 
@@ -903,45 +904,12 @@ bool render_frame_shader(struct output_state *output) {
         log_debug("Re-cached %zu iChannel uniform locations after reset", output->channel_count);
     }
 
-    /* Set uniforms using cached locations */
-    if (output->shader_uniforms.u_time >= 0) {
-        glUniform1f(output->shader_uniforms.u_time, time);
-    }
-
-    if (output->shader_uniforms.u_resolution >= 0) {
-        glUniform2f(output->shader_uniforms.u_resolution, (float)output->width, (float)output->height);
-    }
-    
-    /* Also try direct uniform names for non-Shadertoy shaders (cached on first use) */
-    static GLint time_loc_cached = -2;
-    static GLint resolution_loc_cached = -2;
-    static GLuint cached_program_id = 0;
-    
-    /* Re-cache if program changed */
-    if (cached_program_id != output->live_shader_program) {
-        time_loc_cached = glGetUniformLocation(output->live_shader_program, "time");
-        resolution_loc_cached = glGetUniformLocation(output->live_shader_program, "resolution");
-        cached_program_id = output->live_shader_program;
-    }
-    
-    if (time_loc_cached >= 0) {
-        glUniform1f(time_loc_cached, time);
-    }
-    
-    if (resolution_loc_cached >= 0) {
-        glUniform2f(resolution_loc_cached, (float)output->width, (float)output->height);
-    }
-    
-    /* Update iResolution uniform (Shadertoy vec3) - cache location */
-    static GLint iResolution_loc_cached = -2;
-    if (cached_program_id != output->live_shader_program || iResolution_loc_cached == -2) {
-        iResolution_loc_cached = glGetUniformLocation(output->live_shader_program, "iResolution");
-    }
-    
-    if (iResolution_loc_cached >= 0) {
-        float aspect = (float)output->width / (float)output->height;
-        glUniform3f(iResolution_loc_cached, (float)output->width, (float)output->height, aspect);
-    }
+    /* Set all standard shader uniforms using the unified API from gleditor */
+    neowall_shader_set_uniforms(output->live_shader_program, 
+                                 output->width, 
+                                 output->height, 
+                                 time,
+                                 output->mouse_x, output->mouse_y);  /* Use tracked mouse position */
 
     /* Bind iChannel textures if they exist */
     if (output->channel_textures && output->shader_uniforms.iChannel) {

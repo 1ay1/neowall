@@ -205,6 +205,10 @@ struct output_state *output_create(struct neowall_state *state,
     out->fps_frame_count = 0;
     out->fps_current = 0.0f;
 
+    /* Initialize mouse tracking (-1 means use default center position) */
+    out->mouse_x = -1.0f;
+    out->mouse_y = -1.0f;
+
     /* Initialize frame timer for precise pacing when vsync is disabled */
     out->frame_timer_fd = -1;  /* Will be created when needed */
 

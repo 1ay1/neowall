@@ -1,13 +1,13 @@
+#include "platform_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include "neowall.h"
-#include "constants.h"
+#include <stdbool.h>
 
 /**
  * Intelligent Shadertoy Shader Preprocessor
- * 
+ *
  * This preprocessor deeply analyzes Shadertoy shaders and intelligently transforms them
  * to be compatible with neowall by:
  * 1. Detecting all Shadertoy-specific features and providing fallbacks
@@ -331,13 +331,13 @@ typedef struct {
 static StringBuilder *sb_create(size_t initial_capacity) {
     StringBuilder *sb = malloc(sizeof(StringBuilder));
     if (!sb) return NULL;
-    
+
     sb->data = malloc(initial_capacity);
     if (!sb->data) {
         free(sb);
         return NULL;
     }
-    
+
     sb->data[0] = '\0';
     sb->length = 0;
     sb->capacity = initial_capacity;
@@ -346,19 +346,19 @@ static StringBuilder *sb_create(size_t initial_capacity) {
 
 static bool sb_append(StringBuilder *sb, const char *str, size_t len) {
     if (!sb || !str) return false;
-    
+
     size_t required = sb->length + len + 1;
     if (required > sb->capacity) {
         size_t new_capacity = sb->capacity * 2;
         if (new_capacity < required) new_capacity = required * 2;
-        
+
         char *new_data = realloc(sb->data, new_capacity);
         if (!new_data) return false;
-        
+
         sb->data = new_data;
         sb->capacity = new_capacity;
     }
-    
+
     memcpy(sb->data + sb->length, str, len);
     sb->length += len;
     sb->data[sb->length] = '\0';
@@ -386,44 +386,44 @@ static void sb_free(StringBuilder *sb) {
 /* Replace texture functions intelligently */
 static bool replace_texture_calls(StringBuilder *sb, const char *source) {
     const char *read_ptr = source;
-    
+
     while (*read_ptr) {
         bool found_texture_call = false;
-        
+
         // Check for textureLod with iChannel
         if (strncmp(read_ptr, "textureLod", 10) == 0) {
             const char *check = read_ptr + 10;
             while (*check && isspace(*check)) check++;
-            
+
             if (*check == '(') {
                 check++;
                 while (*check && isspace(*check)) check++;
-                
+
                 if (strncmp(check, "iChannel", 8) == 0) {
                     check += 8;
                     // Parse channel number (0-20)
                     if (isdigit(*check)) {
                         const char *num_start = check;
                         while (isdigit(*check)) check++;
-                        
+
                         // Extract channel number
                         char channel_num[4] = {0};
                         size_t num_len = check - num_start;
                         if (num_len < sizeof(channel_num)) {
                             strncpy(channel_num, num_start, num_len);
                             int ch = atoi(channel_num);
-                            
+
                             if (ch >= 0 && ch <= 4) {
                                 // Found textureLod(iChannel0...20, ...)
                                 sb_append_str(sb, "textureLod_iChannel(");
                                 sb_append_str(sb, channel_num);
                                 sb_append_str(sb, ",");
                                 read_ptr = check;
-                                
+
                                 // Skip the comma after iChannelN
                                 while (*read_ptr && isspace(*read_ptr)) read_ptr++;
                                 if (*read_ptr == ',') read_ptr++;
-                                
+
                                 found_texture_call = true;
                             }
                         }
@@ -431,41 +431,41 @@ static bool replace_texture_calls(StringBuilder *sb, const char *source) {
                 }
             }
         }
-        
+
         // Check for texelFetch with iChannel
         if (!found_texture_call && strncmp(read_ptr, "texelFetch", 10) == 0) {
             const char *check = read_ptr + 10;
             while (*check && isspace(*check)) check++;
-            
+
             if (*check == '(') {
                 check++;
                 while (*check && isspace(*check)) check++;
-                
+
                 if (strncmp(check, "iChannel", 8) == 0) {
                     check += 8;
                     // Parse channel number (0-20)
                     if (isdigit(*check)) {
                         const char *num_start = check;
                         while (isdigit(*check)) check++;
-                        
+
                         // Extract channel number
                         char channel_num[4] = {0};
                         size_t num_len = check - num_start;
                         if (num_len < sizeof(channel_num)) {
                             strncpy(channel_num, num_start, num_len);
                             int ch = atoi(channel_num);
-                            
+
                             if (ch >= 0 && ch <= 4) {
                                 // Found texelFetch(iChannel0...20, ...)
                                 sb_append_str(sb, "texelFetch_iChannel(");
                                 sb_append_str(sb, channel_num);
                                 sb_append_str(sb, ",");
                                 read_ptr = check;
-                                
+
                                 // Skip the comma after iChannelN
                                 while (*read_ptr && isspace(*read_ptr)) read_ptr++;
                                 if (*read_ptr == ',') read_ptr++;
-                                
+
                                 found_texture_call = true;
                             }
                         }
@@ -473,45 +473,45 @@ static bool replace_texture_calls(StringBuilder *sb, const char *source) {
                 }
             }
         }
-        
+
         // Check for texture with iChannel (GLSL ES 3.0 style)
         // Must handle: texture(iChannel0,coord) and avoid: textureLod, texelFetch
         if (!found_texture_call && strncmp(read_ptr, "texture", 7) == 0) {
             const char *check = read_ptr + 7;
-            
+
             // Make sure it's not textureLod, texelFetch, texture2D, etc
             if (*check == '(' || isspace(*check)) {
                 while (*check && isspace(*check)) check++;
-                
+
                 if (*check == '(') {
                     check++;
                     while (*check && isspace(*check)) check++;
-                    
+
                     if (strncmp(check, "iChannel", 8) == 0) {
                         check += 8;
                         // Parse channel number (0-20)
                         if (isdigit(*check)) {
                             const char *num_start = check;
                             while (isdigit(*check)) check++;
-                            
+
                             // Extract channel number
                             char channel_num[4] = {0};
                             size_t num_len = check - num_start;
                             if (num_len < sizeof(channel_num)) {
                                 strncpy(channel_num, num_start, num_len);
                                 int ch = atoi(channel_num);
-                                
+
                                 if (ch >= 0 && ch <= 4) {
                                     // Found texture(iChannel0...20, ...)
                                     sb_append_str(sb, "texture_iChannel(");
                                     sb_append_str(sb, channel_num);
                                     sb_append_str(sb, ",");
                                     read_ptr = check;
-                                    
+
                                     // Skip the comma after iChannelN
                                     while (*read_ptr && isspace(*read_ptr)) read_ptr++;
                                     if (*read_ptr == ',') read_ptr++;
-                                    
+
                                     found_texture_call = true;
                                 }
                             }
@@ -520,16 +520,16 @@ static bool replace_texture_calls(StringBuilder *sb, const char *source) {
                 }
             }
         }
-        
+
         if (found_texture_call) {
             continue;
         }
-        
+
         // Copy character as-is
         sb_append(sb, read_ptr, 1);
         read_ptr++;
     }
-    
+
     return true;
 }
 
@@ -541,21 +541,21 @@ char *shadertoy_preprocess(const char *source) {
     if (!source) {
         return NULL;
     }
-    
+
     log_info("Starting intelligent shader analysis...");
-    
+
     // Analyze what features the shader uses
     bool has_textures = uses_texture_channels(source);
     bool has_conflicts = has_conflicting_hash_functions(source);
     bool needs_derivatives = uses_derivatives(source);
-    
+
     // Build the preprocessed shader
     StringBuilder *sb = sb_create(strlen(source) * 2);
     if (!sb) {
         log_error("Failed to create string builder");
         return NULL;
     }
-    
+
     // Add GL_OES_standard_derivatives extension if needed
     if (needs_derivatives) {
         log_info("Injecting GL_OES_standard_derivatives extension (shader uses fwidth/dFdx/dFdy)");
@@ -563,11 +563,11 @@ char *shadertoy_preprocess(const char *source) {
         sb_append_str(sb, "#extension GL_OES_standard_derivatives : enable\n");
         sb_append_str(sb, "#endif\n\n");
     }
-    
+
     // Always inject common Shadertoy shorthand macros
     log_info("Injecting common Shadertoy shorthand macros");
     sb_append_str(sb, common_shadertoy_macros);
-    
+
     // Add noise functions if textures are used (always needed for texture fallbacks)
     if (has_textures) {
         if (has_conflicts) {
@@ -577,7 +577,7 @@ char *shadertoy_preprocess(const char *source) {
         }
         sb_append_str(sb, advanced_noise_functions);
     }
-    
+
     // Process the source code
     if (has_textures) {
         log_info("Processing texture channel references...");
@@ -590,9 +590,9 @@ char *shadertoy_preprocess(const char *source) {
         // No texture processing needed
         sb_append_str(sb, source);
     }
-    
+
     char *result = sb_finish(sb);
-    
+
     if (result) {
         log_info("Shader preprocessing completed successfully");
         log_info("  - Added common Shadertoy shorthand macros");
@@ -603,7 +603,7 @@ char *shadertoy_preprocess(const char *source) {
             log_info("  - Replaced texture lookups with noise-based fallbacks");
         }
     }
-    
+
     return result;
 }
 
@@ -613,13 +613,13 @@ char *shadertoy_preprocess(const char *source) {
 
 /**
  * Convert GLSL 3.0 texture functions to GLSL ES 1.0 texture2D
- * 
+ *
  * This function intelligently converts:
  * - texture(sampler, uv) -> texture2D(sampler, uv)
  * - textureLod(sampler, uv, lod) -> texture2D(sampler, uv)  [strips LOD parameter]
- * 
+ *
  * Only converts calls to iChannel samplers, leaves other samplers unchanged.
- * 
+ *
  * @param source Shader source code with GLSL 3.0 texture calls
  * @return Converted shader source (must be freed by caller), or NULL on error
  */
@@ -627,9 +627,9 @@ char *shadertoy_convert_texture_calls(const char *source) {
     if (!source) {
         return NULL;
     }
-    
+
     log_info("Converting GLSL 3.0 texture() calls to GLSL ES 1.0 texture2D()...");
-    
+
     /* Allocate buffer with extra space for potential expansions */
     size_t source_len = strlen(source);
     char *converted = malloc(source_len * 2 + 1024);
@@ -637,34 +637,34 @@ char *shadertoy_convert_texture_calls(const char *source) {
         log_error("Failed to allocate memory for texture conversion");
         return NULL;
     }
-    
+
     const char *src = source;
     char *dst = converted;
     int conversions = 0;
-    
+
     while (*src) {
         bool converted_call = false;
-        
+
         /* ================================================================
          * Convert textureLod(iChannel, uv, lod) -> texture2D(iChannel, uv)
          * ================================================================ */
         if (strncmp(src, "textureLod(", 11) == 0) {
             const char *check = src + 11;
             while (*check && isspace(*check)) check++;
-            
+
             /* Only convert if it's an iChannel sampler */
             if (strncmp(check, "iChannel", 8) == 0) {
                 log_debug("Converting textureLod(iChannel...) to texture2D(iChannel...)");
-                
+
                 /* Write replacement: texture2D( */
                 strcpy(dst, "texture2D(");
                 dst += 10;
                 src += 11;
-                
+
                 /* Copy parameters until we find the LOD parameter (after 2nd comma) */
                 int paren_depth = 1;
                 int comma_count = 0;
-                
+
                 while (*src && paren_depth > 0) {
                     if (*src == '(') paren_depth++;
                     else if (*src == ')') {
@@ -691,15 +691,15 @@ char *shadertoy_convert_texture_calls(const char *source) {
                             break;
                         }
                     }
-                    
+
                     *dst++ = *src++;
                 }
-                
+
                 conversions++;
                 converted_call = true;
             }
         }
-        
+
         /* ================================================================
          * Convert texture(iChannel, uv) -> texture2D(iChannel, uv)
          * ================================================================ */
@@ -708,32 +708,32 @@ char *shadertoy_convert_texture_calls(const char *source) {
             if (src == source || !isalpha((unsigned char)src[-1])) {
                 const char *check = src + 8;
                 while (*check && isspace(*check)) check++;
-                
+
                 /* Only convert if it's an iChannel sampler */
                 if (strncmp(check, "iChannel", 8) == 0) {
                     log_debug("Converting texture(iChannel...) to texture2D(iChannel...)");
-                    
+
                     /* Write replacement: texture2D( */
                     strcpy(dst, "texture2D(");
                     dst += 10;
                     src += 8;
-                    
+
                     conversions++;
                     converted_call = true;
                 }
             }
         }
-        
+
         /* If no conversion happened, copy character as-is */
         if (!converted_call) {
             *dst++ = *src++;
         }
     }
-    
+
     *dst = '\0';
-    
+
     log_info("Texture conversion completed: %d calls converted", conversions);
-    
+
     return converted;
 }
 
@@ -745,9 +745,9 @@ void shadertoy_analyze_shader(const char *source) {
     if (!source) {
         return;
     }
-    
+
     log_debug("=== Intelligent Shader Analysis ===");
-    
+
     // Feature detection
     bool has_channels = uses_texture_channels(source);
     bool has_mouse = contains_pattern(source, "iMouse");
@@ -758,7 +758,7 @@ void shadertoy_analyze_shader(const char *source) {
     bool has_mod = contains_pattern(source, "mod(");
     bool has_mul = contains_pattern(source, "mul(");
     bool has_saturate = contains_pattern(source, "saturate(");
-    
+
     // Texture analysis
     int channel_count = 0;
     for (int i = 0; i <= 4; i++) {
@@ -768,36 +768,36 @@ void shadertoy_analyze_shader(const char *source) {
             channel_count++;
         }
     }
-    
+
     // Complexity estimation
     size_t source_len = strlen(source);
     int line_count = 1;
     int function_count = 0;
     int loop_count = 0;
-    
+
     for (const char *p = source; *p; p++) {
         if (*p == '\n') line_count++;
     }
-    
+
     const char *p = source;
     while (p && *p) {
         const char *pf = strstr(p, "float ");
         const char *p2 = strstr(p, "vec2 ");
         const char *p3 = strstr(p, "vec3 ");
         const char *p4 = strstr(p, "vec4 ");
-        
+
         const char *next = NULL;
         if (pf && (!next || pf < next)) next = pf;
         if (p2 && (!next || p2 < next)) next = p2;
         if (p3 && (!next || p3 < next)) next = p3;
         if (p4 && (!next || p4 < next)) next = p4;
-        
+
         if (!next) break;
-        
+
         p = next + 1;
         function_count++;
     }
-    
+
     p = source;
     while (p && *p) {
         p = strstr(p, "for");
@@ -805,47 +805,47 @@ void shadertoy_analyze_shader(const char *source) {
         p += 3;
         loop_count++;
     }
-    
+
     // Report features
     log_debug("Shader Statistics:");
     log_debug("  - Lines: %d", line_count);
     log_debug("  - Size: %zu bytes", source_len);
     log_debug("  - Functions: ~%d", function_count);
     log_debug("  - Loops: %d", loop_count);
-    
+
     log_debug("Features Detected:");
-    
+
     if (has_channels) {
-        log_debug("  + Texture Channels: %d channel%s", 
+        log_debug("  + Texture Channels: %d channel%s",
                  channel_count, channel_count != 1 ? "s" : "");
         log_debug("    -> Will use noise-based fallbacks");
     }
-    
+
     if (has_mouse) {
         log_debug("  + Mouse Input (iMouse)");
         log_debug("    -> Currently fixed at (0,0,0,0)");
     }
-    
+
     if (has_time_delta) {
         log_debug("  + Frame Delta (iTimeDelta)");
         log_debug("    -> Fixed at ~16.67ms (60fps)");
     }
-    
+
     if (has_frame) {
         log_debug("  + Frame Counter (iFrame)");
         log_debug("    -> Currently fixed at 0");
     }
-    
+
     if (has_date) {
         log_debug("  + Date/Time (iDate)");
         log_debug("    -> Static fallback value");
     }
-    
+
     if (has_custom_noise) {
         log_debug("  + Custom Noise Functions");
         log_debug("    -> Shader provides its own noise");
     }
-    
+
     // Compatibility notes
     if (has_mod || has_mul || has_saturate) {
         log_debug("Compatibility Features:");
@@ -853,14 +853,14 @@ void shadertoy_analyze_shader(const char *source) {
         if (has_mul) log_debug("  + HLSL-style mul() detected");
         if (has_saturate) log_debug("  + HLSL-style saturate() detected");
     }
-    
+
     // Performance estimation
     int complexity_score = 0;
     complexity_score += channel_count * 2;
     complexity_score += loop_count;
     complexity_score += (function_count > 30) ? 3 : (function_count > 15) ? 2 : 1;
     complexity_score += (source_len > 10000) ? 2 : (source_len > 5000) ? 1 : 0;
-    
+
     log_debug("Performance Estimate:");
     if (complexity_score <= 3) {
         log_debug("  -> Simple shader - should run very smoothly");
@@ -872,21 +872,21 @@ void shadertoy_analyze_shader(const char *source) {
         log_debug("  -> Very complex shader - performance may vary");
         log_debug("  -> Consider simplifying or reducing quality if needed");
     }
-    
+
     // Optimization suggestions
     if (loop_count > 5) {
         log_debug("Tip: Shader has %d loops - consider reducing iterations if performance is low", loop_count);
     }
-    
+
     if (channel_count > 2) {
         log_debug("Tip: Shader uses %d texture channels - noise fallbacks may not look identical", channel_count);
         log_debug("     Original Shadertoy shaders often look different without real texture data");
     }
-    
+
     if (channel_count > 0) {
         log_debug("Note: This shader expects texture input which neowall doesn't support yet");
         log_debug("      Using procedural noise as fallback - visuals will differ from Shadertoy");
     }
-    
+
     log_debug("=================================");
 }

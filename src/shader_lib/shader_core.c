@@ -1,18 +1,58 @@
+#include "platform_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <GLES2/gl2.h>
 #include <ctype.h>
-#include "neowall.h"
-#include "constants.h"
+#include <stdarg.h>
 #include "shader.h"
 #include "shadertoy_compat.h"
 
+/* Global error log buffer for detailed error reporting */
+#define MAX_ERROR_LOG_SIZE 16384
+static char g_last_error_log[MAX_ERROR_LOG_SIZE];
+static size_t g_error_log_pos = 0;
+
+/* Clear error log */
+static void clear_error_log(void) {
+    g_last_error_log[0] = '\0';
+    g_error_log_pos = 0;
+}
+
+/* Append to error log */
+static void append_to_error_log(const char *format, ...) {
+    if (g_error_log_pos >= MAX_ERROR_LOG_SIZE - 1) {
+        return;
+    }
+
+    va_list args;
+    va_start(args, format);
+    int written = vsnprintf(g_last_error_log + g_error_log_pos,
+                           MAX_ERROR_LOG_SIZE - g_error_log_pos,
+                           format, args);
+    va_end(args);
+
+    if (written > 0) {
+        g_error_log_pos += written;
+        if (g_error_log_pos >= MAX_ERROR_LOG_SIZE) {
+            g_error_log_pos = MAX_ERROR_LOG_SIZE - 1;
+        }
+    }
+}
+
+/* Get last error log */
+const char *shader_get_last_error_log(void) {
+    return g_last_error_log;
+}
+
+/* Shader library doesn't have access to neowall.h constants */
+#ifndef MAX_PATH_LENGTH
+#define MAX_PATH_LENGTH 4096
+#endif
+
 /**
  * Shader Compilation Utilities
- * 
+ *
  * Provides shared shader compilation and program creation utilities
  * for all transitions. Each transition defines its own shader sources
  * and creation functions in their respective files.
@@ -40,26 +80,49 @@ static const char *shadertoy_wrapper_prefix_es2 =
     "precision highp float;\n"
     "precision highp int;\n"
     "\n"
+    "// Shadertoy compatibility defines\n"
+    "#ifndef HW_PERFORMANCE\n"
+    "#define HW_PERFORMANCE 1\n"
+    "#endif\n"
+    "\n"
     "// Shadertoy compatibility uniforms (prefixed to avoid conflicts)\n"
     "uniform float _neowall_time;          // Maps to iTime\n"
     "uniform vec2 _neowall_resolution;     // Maps to iResolution.xy\n"
+    "uniform vec4 _neowall_mouse;          // Maps to iMouse\n"
+    "uniform int _neowall_frame;           // Maps to iFrame\n"
     "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
-    "\n"
-    "// Non-Shadertoy uniforms (for plain shaders)\n"
-    "#define time _neowall_time\n"
-    "#define resolution _neowall_resolution\n"
     "\n"
     "// Shadertoy uniform arrays (must come after precision specifier)\n"
     "uniform vec4 iChannelTime[4];\n"
     "uniform vec3 iChannelResolution[4];\n"
     "\n"
-    "// Shadertoy uniforms - defined with default behavior\n"
-    "#define iTime _neowall_time\n"
-    "#define iTimeDelta 0.016667\n"
-    "#define iFrame 0\n"
-    "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
-    "#define iDate vec4(2024.0, 1.0, 1.0, 0.0)\n"
-    "#define iSampleRate 44100.0\n"
+    "// Shadertoy-compatible global variables (initialized at declaration)\n"
+    "float iTime = 0.0;\n"
+    "float time = 0.0;\n"
+    "vec2 resolution = vec2(0.0);\n"
+    "float iTimeDelta = 0.016667;\n"
+    "int iFrame = 0;\n"
+    "vec4 iMouse = vec4(0.0);\n"
+    "vec4 iDate = vec4(2024.0, 1.0, 1.0, 0.0);\n"
+    "float iSampleRate = 44100.0;\n"
+    "\n"
+    "// Math function polyfills for GLSL ES 1.0\n"
+    "float tanh(float x) {\n"
+    "    float e2x = exp(2.0 * x);\n"
+    "    return (e2x - 1.0) / (e2x + 1.0);\n"
+    "}\n"
+    "\n"
+    "vec2 tanh(vec2 x) {\n"
+    "    return vec2(tanh(x.x), tanh(x.y));\n"
+    "}\n"
+    "\n"
+    "vec3 tanh(vec3 x) {\n"
+    "    return vec3(tanh(x.x), tanh(x.y), tanh(x.z));\n"
+    "}\n"
+    "\n"
+    "vec4 tanh(vec4 x) {\n"
+    "    return vec4(tanh(x.x), tanh(x.y), tanh(x.z), tanh(x.w));\n"
+    "}\n"
     "\n";
 
 /* Shadertoy compatibility wrapper prefix - ES 3.0 version */
@@ -68,29 +131,43 @@ static const char *shadertoy_wrapper_prefix_es3 =
     "precision highp float;\n"
     "precision highp int;\n"
     "\n"
+    "// Shadertoy compatibility defines\n"
+    "#ifndef HW_PERFORMANCE\n"
+    "#define HW_PERFORMANCE 1\n"
+    "#endif\n"
+    "\n"
     "// Shadertoy compatibility uniforms (prefixed to avoid conflicts)\n"
     "uniform float _neowall_time;          // Maps to iTime\n"
     "uniform vec2 _neowall_resolution;     // Maps to iResolution.xy\n"
+    "uniform vec4 _neowall_mouse;          // Maps to iMouse\n"
+    "uniform int _neowall_frame;           // Maps to iFrame\n"
     "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
-    "\n"
-    "// Non-Shadertoy uniforms (for plain shaders)\n"
-    "#define time _neowall_time\n"
-    "#define resolution _neowall_resolution\n"
     "\n"
     "// Shadertoy uniform arrays (must come after precision specifier)\n"
     "uniform vec4 iChannelTime[4];\n"
     "uniform vec3 iChannelResolution[4];\n"
     "\n"
-    "// Shadertoy uniforms - defined with default behavior\n"
-    "#define iTime _neowall_time\n"
-    "#define iTimeDelta 0.016667\n"
-    "#define iFrame 0\n"
-    "#define iMouse vec4(0.0, 0.0, 0.0, 0.0)\n"
-    "#define iDate vec4(2024.0, 1.0, 1.0, 0.0)\n"
-    "#define iSampleRate 44100.0\n"
+    "// Shadertoy-compatible global variables (initialized at declaration)\n"
+    "float iTime = 0.0;\n"
+    "float time = 0.0;\n"
+    "vec2 resolution = vec2(0.0);\n"
+    "float iTimeDelta = 0.016667;\n"
+    "int iFrame = 0;\n"
+    "vec4 iMouse = vec4(0.0);\n"
+    "vec4 iDate = vec4(2024.0, 1.0, 1.0, 0.0);\n"
+    "float iSampleRate = 44100.0;\n"
     "\n"
     "// GLSL ES 3.0 output\n"
     "out vec4 fragColor;\n"
+    "\n"
+    "// Helper function: Convert vec3 direction to spherical/equirectangular UV coordinates\n"
+    "// This enables environment mapping with 2D textures using 3D normals/directions\n"
+    "vec2 directionToUV(vec3 dir) {\n"
+    "    vec3 n = normalize(dir);\n"
+    "    float u = 0.5 + atan(n.z, n.x) / (2.0 * 3.14159265359);\n"
+    "    float v = 0.5 - asin(n.y) / 3.14159265359;\n"
+    "    return vec2(u, v);\n"
+    "}\n"
     "\n";
 
 /* Build dynamic iChannel declarations based on channel count */
@@ -98,37 +175,53 @@ static char *build_ichannel_declarations(size_t channel_count) {
     if (channel_count == 0) {
         channel_count = 5; // Default to 5 channels
     }
-    
+
     size_t buffer_size = channel_count * 64 + 128; // ~64 bytes per channel + header
     char *declarations = malloc(buffer_size);
     if (!declarations) {
         return NULL;
     }
-    
+
     strcpy(declarations, "// Texture samplers for image inputs\n");
-    
+
     for (size_t i = 0; i < channel_count; i++) {
         char line[64];
         snprintf(line, sizeof(line), "uniform sampler2D iChannel%zu;\n", i);
         strcat(declarations, line);
     }
-    
+
     strcat(declarations, "\n");
-    
+
     return declarations;
 }
 
 /* Shadertoy compatibility wrapper suffix - ES 2.0 version */
+/* Shadertoy wrapper suffix - ES 2.0 version */
 static const char *shadertoy_wrapper_suffix_es2 =
     "\n"
     "void main() {\n"
+    "    // Update dynamic uniforms from current frame state\n"
+    "    iTime = _neowall_time;\n"
+    "    time = _neowall_time;\n"
+    "    resolution = _neowall_resolution;\n"
+    "    iMouse = _neowall_mouse;\n"
+    "    iFrame = _neowall_frame;\n"
+    "    \n"
     "    mainImage(gl_FragColor, gl_FragCoord.xy);\n"
     "}\n";
 
 /* Shadertoy compatibility wrapper suffix - ES 3.0 version */
+/* Shadertoy wrapper suffix - ES 3.0 version */
 static const char *shadertoy_wrapper_suffix_es3 =
     "\n"
     "void main() {\n"
+    "    // Update dynamic uniforms from current frame state\n"
+    "    iTime = _neowall_time;\n"
+    "    time = _neowall_time;\n"
+    "    resolution = _neowall_resolution;\n"
+    "    iMouse = _neowall_mouse;\n"
+    "    iFrame = _neowall_frame;\n"
+    "    \n"
     "    vec4 color;\n"
     "    mainImage(color, gl_FragCoord.xy);\n"
     "    fragColor = color;\n"
@@ -139,13 +232,13 @@ static const char *shadertoy_wrapper_suffix_es3 =
  */
 static void print_shader_with_line_numbers(const char *source, const char *type) {
     if (!source) return;
-    
+
     log_debug("========== %s SHADER SOURCE (with line numbers) ==========", type);
-    
+
     const char *line_start = source;
     const char *line_end;
     int line_num = 1;
-    
+
     while (*line_start) {
         line_end = strchr(line_start, '\n');
         if (line_end) {
@@ -159,26 +252,27 @@ static void print_shader_with_line_numbers(const char *source, const char *type)
         }
         line_num++;
     }
-    
+
     log_debug("========== END %s SHADER SOURCE ==========", type);
 }
 
 /**
- * Compile a shader
- * 
+ * Compile a shader from source
+ *
  * @param type Shader type (GL_VERTEX_SHADER or GL_FRAGMENT_SHADER)
  * @param source Shader source code
  * @return Compiled shader ID, or 0 on failure
  */
 static GLuint compile_shader(GLenum type, const char *source) {
     const char *type_str = (type == GL_VERTEX_SHADER) ? "vertex" : "fragment";
-    
+
     // Debug: print shader source with line numbers
     print_shader_with_line_numbers(source, type_str);
-    
+
     GLuint shader = glCreateShader(type);
     if (shader == 0) {
         log_error("Failed to create %s shader", type_str);
+        append_to_error_log("ERROR: Failed to create %s shader (glCreateShader returned 0)\n", type_str);
         return 0;
     }
 
@@ -189,6 +283,9 @@ static GLuint compile_shader(GLenum type, const char *source) {
     GLint compiled;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
     if (!compiled) {
+        append_to_error_log("\n=== %s SHADER COMPILATION FAILED ===\n\n",
+                           (type == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT");
+
         GLint info_len = 0;
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &info_len);
         if (info_len > 1) {
@@ -196,11 +293,33 @@ static GLuint compile_shader(GLenum type, const char *source) {
             if (info_log) {
                 glGetShaderInfoLog(shader, info_len, NULL, info_log);
                 log_error("%s shader compilation failed: %s", type_str, info_log);
+
+                /* Append full error log to global buffer */
+                append_to_error_log("%s", info_log);
+                append_to_error_log("\n\n");
+
                 free(info_log);
             }
         } else {
             log_error("%s shader compilation failed (no log available)", type_str);
+            append_to_error_log("No detailed error information available from OpenGL.\n\n");
         }
+
+        /* Add shader source context */
+        append_to_error_log("=== SHADER SOURCE (with line numbers) ===\n");
+
+        /* Add line numbers to source for error context */
+        char *source_copy = strdup(source);
+        if (source_copy) {
+            char *line = strtok(source_copy, "\n");
+            int line_num = 1;
+            while (line && strlen(g_last_error_log) < MAX_ERROR_LOG_SIZE - 256) {
+                append_to_error_log("%4d | %s\n", line_num++, line);
+                line = strtok(NULL, "\n");
+            }
+            free(source_copy);
+        }
+
         glDeleteShader(shader);
         return 0;
     }
@@ -211,22 +330,25 @@ static GLuint compile_shader(GLenum type, const char *source) {
 
 /**
  * Create a shader program from source code
- * 
+ *
  * Shared utility function that compiles shaders and links them into a program.
  * Called by each transition's shader_create_*_program() function.
- * 
+ *
  * @param vertex_src Vertex shader source code
  * @param fragment_src Fragment shader source code
  * @param program Pointer to store the created program ID
  * @return true on success, false on failure
  */
-bool shader_create_program_from_sources(const char *vertex_src, 
+bool shader_create_program_from_sources(const char *vertex_src,
                                          const char *fragment_src,
                                          GLuint *program) {
     if (!program) {
         log_error("Invalid program pointer");
         return false;
     }
+
+    /* Clear previous error log */
+    clear_error_log();
 
     /* Compile shaders */
     GLuint vertex_shader = compile_shader(GL_VERTEX_SHADER, vertex_src);
@@ -260,6 +382,8 @@ bool shader_create_program_from_sources(const char *vertex_src,
     GLint linked;
     glGetProgramiv(prog, GL_LINK_STATUS, &linked);
     if (!linked) {
+        append_to_error_log("\n=== PROGRAM LINKING FAILED ===\n\n");
+
         GLint info_len = 0;
         glGetProgramiv(prog, GL_INFO_LOG_LENGTH, &info_len);
         if (info_len > 1) {
@@ -267,9 +391,16 @@ bool shader_create_program_from_sources(const char *vertex_src,
             if (info_log) {
                 glGetProgramInfoLog(prog, info_len, NULL, info_log);
                 log_error("Program linking failed: %s", info_log);
+
+                /* Append full linking error to global buffer */
+                append_to_error_log("%s\n", info_log);
+
                 free(info_log);
             }
+        } else {
+            append_to_error_log("No detailed linking error information available.\n");
         }
+
         glDeleteProgram(prog);
         glDeleteShader(vertex_shader);
         glDeleteShader(fragment_shader);
@@ -287,7 +418,7 @@ bool shader_create_program_from_sources(const char *vertex_src,
 
 /**
  * Destroy a shader program
- * 
+ *
  * @param program The program ID to destroy
  */
 void shader_destroy_program(GLuint program) {
@@ -299,7 +430,7 @@ void shader_destroy_program(GLuint program) {
 
 /**
  * Resolve shader path by checking multiple locations
- * 
+ *
  * @param shader_name Shader filename or path
  * @param resolved_path Buffer to store resolved path
  * @param resolved_size Size of resolved_path buffer
@@ -327,27 +458,27 @@ static bool shader_resolve_path(const char *shader_name, char *resolved_path, si
     /* Search in multiple locations for just the shader name */
     const char *home = getenv("HOME");
     const char *xdg_config_home = getenv("XDG_CONFIG_HOME");
-    
+
     /* List of directories to search (in order of preference) */
     char search_paths[4][MAX_PATH_LENGTH];
     int num_paths = 0;
-    
+
     /* 1. XDG_CONFIG_HOME/neowall/shaders/ */
     if (xdg_config_home && home) {
         snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "%s/neowall/shaders/%s", xdg_config_home, shader_name);
     }
-    
+
     /* 2. ~/.config/neowall/shaders/ */
     if (home) {
         snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "%s/.config/neowall/shaders/%s", home, shader_name);
     }
-    
+
     /* 3. /usr/share/neowall/shaders/ */
     snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "/usr/share/neowall/shaders/%s", shader_name);
-    
+
     /* 4. /usr/local/share/neowall/shaders/ */
     snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "/usr/local/share/neowall/shaders/%s", shader_name);
-    
+
     /* Check each path */
     for (int i = 0; i < num_paths; i++) {
         if (access(search_paths[i], R_OK) == 0) {
@@ -362,14 +493,14 @@ static bool shader_resolve_path(const char *shader_name, char *resolved_path, si
             return true;
         }
     }
-    
+
     log_error("Shader not found: %s", shader_name);
     return false;
 }
 
 /**
  * Load shader source from file
- * 
+ *
  * @param path Path to shader file
  * @return Shader source code (must be freed by caller), or NULL on error
  */
@@ -442,7 +573,7 @@ char *shader_load_file(const char *path) {
 
 /**
  * Check if shader source uses Shadertoy format (mainImage function)
- * 
+ *
  * @param source Shader source code
  * @return true if Shadertoy format detected, false otherwise
  */
@@ -450,7 +581,7 @@ static bool is_shadertoy_format(const char *source) {
     if (!source) {
         return false;
     }
-    
+
     /* Look for mainImage function signature */
     /* Shadertoy shaders define a mainImage function with signature:
      *   void mainImage(out vec4 <name>, in vec2 <name>)
@@ -461,25 +592,38 @@ static bool is_shadertoy_format(const char *source) {
     if (!mainImage) {
         return false;
     }
-    
+
     /* Check if it's a function definition (has opening parenthesis after mainImage) */
     const char *openParen = mainImage + strlen("mainImage");
     while (*openParen && isspace(*openParen)) {
         openParen++;
     }
-    
+
     if (*openParen == '(') {
         /* Also check for 'void' keyword before mainImage (within reasonable distance) */
         const char *checkStart = (mainImage - source) > 20 ? (mainImage - 20) : source;
         const char *voidKeyword = strstr(checkStart, "void");
-        
+
         /* Check if 'void' appears before 'mainImage' in the search window */
         if (voidKeyword && voidKeyword < mainImage) {
+            /* Check for duplicate mainImage definitions */
+            const char *second_mainImage = strstr(mainImage + 1, "void mainImage");
+            if (second_mainImage) {
+                log_error("╔══════════════════════════════════════════════════════════════╗");
+                log_error("║ ERROR: Duplicate mainImage Function Detected                ║");
+                log_error("╠══════════════════════════════════════════════════════════════╣");
+                log_error("║ Your shader has multiple 'void mainImage(...)' functions.   ║");
+                log_error("║ Shadertoy shaders should have only ONE mainImage function.  ║");
+                log_error("║                                                               ║");
+                log_error("║ Please remove duplicate function definitions.                ║");
+                log_error("╚══════════════════════════════════════════════════════════════╝");
+                return false;
+            }
             log_debug("Detected Shadertoy format shader (mainImage function found)");
             return true;
         }
     }
-    
+
     return false;
 }
 
@@ -490,14 +634,14 @@ static bool is_shadertoy_format(const char *source) {
  */
 static const char *skip_whitespace_and_comments(const char *p) {
     if (!p) return NULL;
-    
+
     while (*p) {
         /* Skip whitespace */
         if (isspace(*p)) {
             p++;
             continue;
         }
-        
+
         /* Skip single-line comments */
         if (*p == '/' && *(p+1) == '/') {
             p += 2;
@@ -505,7 +649,7 @@ static const char *skip_whitespace_and_comments(const char *p) {
             if (*p) p++;
             continue;
         }
-        
+
         /* Skip multi-line comments */
         if (*p == '/' && *(p+1) == '*') {
             p += 2;
@@ -513,17 +657,17 @@ static const char *skip_whitespace_and_comments(const char *p) {
             if (*p) p += 2;
             continue;
         }
-        
+
         /* Skip preprocessor directives */
         if (*p == '#') {
             while (*p && *p != '\n') p++;
             if (*p) p++;
             continue;
         }
-        
+
         break;
     }
-    
+
     return p;
 }
 
@@ -537,7 +681,7 @@ static inline bool is_identifier_char(char c) {
 /**
  * Intelligent uniform declaration detector
  * Handles comments, preprocessor directives, and multi-line declarations
- * 
+ *
  * @param source Shader source code
  * @param uniform_name Name of uniform to search for
  * @return true if uniform is declared, false otherwise
@@ -546,55 +690,55 @@ static bool has_uniform_declaration(const char *source, const char *uniform_name
     if (!source || !uniform_name) {
         return false;
     }
-    
+
     const char *p = source;
     size_t name_len = strlen(uniform_name);
-    
+
     while (*p) {
         p = skip_whitespace_and_comments(p);
         if (!*p) break;
-        
+
         /* Look for "uniform" keyword */
         if (strncmp(p, "uniform", 7) == 0 && !is_identifier_char(*(p+7))) {
             p += 7;
             p = skip_whitespace_and_comments(p);
-            
+
             /* Skip type declaration (float, vec2, vec3, sampler2D, etc.) */
             /* Could be: float, vec2, vec3, vec4, int, mat3, mat4, sampler2D, etc. */
             while (*p && is_identifier_char(*p)) p++;
-            
+
             /* Skip array brackets if present: float[4] */
             p = skip_whitespace_and_comments(p);
             if (*p == '[') {
                 while (*p && *p != ']') p++;
                 if (*p) p++;
             }
-            
+
             p = skip_whitespace_and_comments(p);
-            
+
             /* Now we should be at the uniform name */
-            if (strncmp(p, uniform_name, name_len) == 0 && 
+            if (strncmp(p, uniform_name, name_len) == 0 &&
                 !is_identifier_char(*(p + name_len))) {
                 /* Verify what follows is valid (semicolon, equals, or array bracket) */
                 const char *after = skip_whitespace_and_comments(p + name_len);
                 if (*after == ';' || *after == '=' || *after == '[' || *after == ',') {
-                    log_debug("Found uniform declaration: %s at position %ld", 
+                    log_debug("Found uniform declaration: %s at position %ld",
                              uniform_name, (long)(p - source));
                     return true;
                 }
             }
         }
-        
+
         p++;
     }
-    
+
     return false;
 }
 
 /**
  * Detect assignment to a uniform-like variable
  * Looks for patterns like: iTime = value; or _neowall_time += value;
- * 
+ *
  * @param source Shader source code
  * @param var_name Variable name to check
  * @return true if assignment found, false otherwise
@@ -603,41 +747,41 @@ static bool has_uniform_assignment(const char *source, const char *var_name) {
     if (!source || !var_name) {
         return false;
     }
-    
+
     const char *p = source;
     size_t name_len = strlen(var_name);
-    
+
     while ((p = strstr(p, var_name)) != NULL) {
         /* Check if this is a complete identifier (not part of another word) */
         bool valid_start = (p == source || !is_identifier_char(*(p-1)));
         bool valid_end = !is_identifier_char(*(p + name_len));
-        
+
         if (valid_start && valid_end) {
             /* Skip whitespace after the identifier */
             const char *after = skip_whitespace_and_comments(p + name_len);
-            
+
             /* Check for assignment operators: =, +=, -=, *=, /= */
-            if (after && (*after == '=' || 
+            if (after && (*after == '=' ||
                          (*after == '+' && *(after+1) == '=') ||
                          (*after == '-' && *(after+1) == '=') ||
                          (*after == '*' && *(after+1) == '=') ||
                          (*after == '/' && *(after+1) == '='))) {
-                log_debug("Found assignment to %s at position %ld", 
+                log_debug("Found assignment to %s at position %ld",
                          var_name, (long)(p - source));
                 return true;
             }
         }
-        
+
         p++;
     }
-    
+
     return false;
 }
 
 /**
  * Detect global variable declaration (non-uniform)
  * Looks for patterns like: float time = 0.0; or vec3 resolution;
- * 
+ *
  * @param source Shader source code
  * @param var_name Variable name to check
  * @return true if global variable declaration found, false otherwise
@@ -646,52 +790,52 @@ static bool has_global_variable_declaration(const char *source, const char *var_
     if (!source || !var_name) {
         return false;
     }
-    
+
     const char *p = source;
     size_t name_len = strlen(var_name);
-    
+
     /* Look for type keywords that indicate variable declarations */
     const char *types[] = {
-        "float", "vec2", "vec3", "vec4", 
+        "float", "vec2", "vec3", "vec4",
         "int", "ivec2", "ivec3", "ivec4",
         "bool", "bvec2", "bvec3", "bvec4",
         "mat2", "mat3", "mat4",
         NULL
     };
-    
+
     while (*p) {
         p = skip_whitespace_and_comments(p);
         if (!*p) break;
-        
+
         /* Check for type keywords (but not uniform or const) */
         for (int i = 0; types[i]; i++) {
             size_t type_len = strlen(types[i]);
-            if (strncmp(p, types[i], type_len) == 0 && 
+            if (strncmp(p, types[i], type_len) == 0 &&
                 !is_identifier_char(*(p + type_len))) {
-                
+
                 /* Make sure this isn't preceded by "uniform" or "const" */
                 const char *check_back = p;
                 while (check_back > source && isspace(*(check_back - 1))) {
                     check_back--;
                 }
-                
-                bool is_uniform = (check_back >= source + 7 && 
+
+                bool is_uniform = (check_back >= source + 7 &&
                                   strncmp(check_back - 7, "uniform", 7) == 0);
-                bool is_const = (check_back >= source + 5 && 
+                bool is_const = (check_back >= source + 5 &&
                                 strncmp(check_back - 5, "const", 5) == 0);
-                
+
                 if (!is_uniform && !is_const) {
                     /* This is a regular variable declaration - check the name */
                     const char *name_pos = p + type_len;
                     name_pos = skip_whitespace_and_comments(name_pos);
-                    
-                    if (strncmp(name_pos, var_name, name_len) == 0 && 
+
+                    if (strncmp(name_pos, var_name, name_len) == 0 &&
                         !is_identifier_char(*(name_pos + name_len))) {
-                        
+
                         /* Check what follows - should be =, ;, or [ */
                         const char *after = skip_whitespace_and_comments(name_pos + name_len);
                         if (*after == '=' || *after == ';' || *after == '[') {
-                            log_debug("Found global variable declaration: %s at position %ld", 
+                            log_debug("Found global variable declaration: %s at position %ld",
                                      var_name, (long)(name_pos - source));
                             return true;
                         }
@@ -700,68 +844,68 @@ static bool has_global_variable_declaration(const char *source, const char *var_
                 break;
             }
         }
-        
+
         p++;
     }
-    
+
     return false;
 }
 
 /**
  * Detect and report all conflicts in shader source
- * 
+ *
  * @param source Shader source code
  * @return Bitmask of conflicts (0 = no conflicts)
  */
 static uint32_t detect_shader_conflicts(const char *source) {
     if (!source) return 0;
-    
+
     uint32_t conflicts = 0;
-    
+
     /* Check for reserved neowall uniform declarations */
     if (has_uniform_declaration(source, "_neowall_time")) {
         conflicts |= (1 << 0);
         log_debug("Shader declares '_neowall_time' uniform (neowall provides this)");
     }
-    
+
     if (has_uniform_declaration(source, "_neowall_resolution")) {
         conflicts |= (1 << 1);
         log_debug("Shader declares '_neowall_resolution' uniform (neowall provides this)");
     }
-    
+
     /* Check for Shadertoy standard uniforms that we provide via macros */
     if (has_uniform_declaration(source, "iTime")) {
         conflicts |= (1 << 2);
         log_debug("Shader declares 'iTime' uniform (neowall provides this via macro)");
     }
-    
+
     if (has_uniform_declaration(source, "iResolution")) {
         conflicts |= (1 << 3);
         log_debug("Shader declares 'iResolution' uniform (neowall provides this)");
     }
-    
+
     /* Check for assignments to uniforms (which are read-only) */
     if (has_uniform_assignment(source, "_neowall_time")) {
         conflicts |= (1 << 4);
         log_debug("Shader attempts to assign to '_neowall_time' (uniforms are read-only)");
     }
-    
+
     if (has_uniform_assignment(source, "iTime")) {
         conflicts |= (1 << 5);
         log_debug("Shader attempts to assign to 'iTime' (expands to uniform, read-only)");
     }
-    
+
     /* Check for global variable shadowing (variables that would conflict with our macros) */
     if (has_global_variable_declaration(source, "time")) {
         conflicts |= (1 << 6);
         log_debug("Shader declares global variable 'time' (conflicts with neowall macro)");
     }
-    
+
     if (has_global_variable_declaration(source, "resolution")) {
         conflicts |= (1 << 7);
         log_debug("Shader declares global variable 'resolution' (conflicts with neowall macro)");
     }
-    
+
     return conflicts;
 }
 
@@ -772,11 +916,11 @@ static uint32_t detect_shader_conflicts(const char *source) {
 static const char *find_global_scope_end(const char *source) {
     const char *p = source;
     int brace_depth = 0;
-    
+
     while (*p) {
         p = skip_whitespace_and_comments(p);
         if (!*p) break;
-        
+
         /* Track brace depth */
         if (*p == '{') {
             brace_depth++;
@@ -792,10 +936,10 @@ static const char *find_global_scope_end(const char *source) {
         } else if (*p == '}') {
             brace_depth--;
         }
-        
+
         p++;
     }
-    
+
     return source + strlen(source);
 }
 
@@ -803,23 +947,23 @@ static const char *find_global_scope_end(const char *source) {
  * Remove conflicting global variable declarations
  * Removes declarations like: float time = 0.0;
  * ONLY operates on GLOBAL scope (before any function definitions)
- * 
+ *
  * @param source Original shader source
  * @return Cleaned shader source (caller must free), or NULL on error
  */
 static char *strip_global_variables(const char *source) {
     if (!source) return NULL;
-    
+
     /* Variables to strip */
     const char *strip_vars[] = {
         "time",
         "resolution",
         NULL
     };
-    
+
     /* Find where global scope ends (before first function body) */
     const char *global_end = find_global_scope_end(source);
-    
+
     /* Allocate result buffer */
     size_t src_len = strlen(source);
     char *result = malloc(src_len + 1);
@@ -827,34 +971,34 @@ static char *strip_global_variables(const char *source) {
         log_error("Failed to allocate memory for global variable cleaning");
         return NULL;
     }
-    
+
     const char *read_ptr = source;
     char *write_ptr = result;
     int removed_count = 0;
-    
+
     /* Process global scope only */
     while (read_ptr < global_end) {
         const char *line_start = read_ptr;
         bool should_remove = false;
         const char *found_var = NULL;
-        
+
         /* Check if this line contains a global variable declaration to remove */
         for (int i = 0; strip_vars[i]; i++) {
             const char *var_pos = strstr(line_start, strip_vars[i]);
-            
+
             /* Only check within current line and before global_end */
             const char *line_end = strchr(line_start, '\n');
             if (!line_end || line_end > global_end) {
                 line_end = global_end;
             }
-            
+
             if (var_pos && var_pos < line_end) {
                 /* Check if it's a variable declaration (not const, not uniform) */
                 const char *check_back = var_pos;
                 while (check_back > line_start && isspace(*(check_back - 1))) {
                     check_back--;
                 }
-                
+
                 /* Look backwards for type keyword */
                 bool is_type_decl = false;
                 const char *types[] = {"float", "vec2", "vec3", "vec4", NULL};
@@ -867,18 +1011,18 @@ static char *strip_global_variables(const char *source) {
                         break;
                     }
                 }
-                
+
                 if (is_type_decl) {
                     /* Make sure it's not const or uniform */
                     while (check_back > source && isspace(*(check_back - 1))) {
                         check_back--;
                     }
-                    
-                    bool is_const = (check_back >= source + 5 && 
+
+                    bool is_const = (check_back >= source + 5 &&
                                     strncmp(check_back - 5, "const", 5) == 0);
-                    bool is_uniform = (check_back >= source + 7 && 
+                    bool is_uniform = (check_back >= source + 7 &&
                                       strncmp(check_back - 7, "uniform", 7) == 0);
-                    
+
                     if (!is_const && !is_uniform) {
                         should_remove = true;
                         found_var = strip_vars[i];
@@ -887,7 +1031,7 @@ static char *strip_global_variables(const char *source) {
                 }
             }
         }
-        
+
         if (should_remove) {
             /* Skip this declaration - find the semicolon */
             const char *semicolon = strchr(read_ptr, ';');
@@ -895,7 +1039,7 @@ static char *strip_global_variables(const char *source) {
                 read_ptr = semicolon + 1;
                 /* Also skip trailing newline if present */
                 if (*read_ptr == '\n') read_ptr++;
-                
+
                 removed_count++;
                 log_debug("Removed conflicting global variable: %s", found_var);
             } else {
@@ -917,31 +1061,31 @@ static char *strip_global_variables(const char *source) {
             }
         }
     }
-    
+
     /* Copy the rest of the source (function definitions, etc.) */
     while (*read_ptr) {
         *write_ptr++ = *read_ptr++;
     }
-    
+
     *write_ptr = '\0';
-    
+
     if (removed_count > 0) {
         log_debug("Automatically removed %d conflicting global variable(s)", removed_count);
     }
-    
+
     return result;
 }
 
 /**
  * Remove conflicting uniform declarations from shader source
  * Strategy: Comment out or remove lines with conflicting declarations
- * 
+ *
  * @param source Original shader source
  * @return Cleaned shader source (caller must free), or NULL on error
  */
 static char *strip_conflicting_uniforms(const char *source) {
     if (!source) return NULL;
-    
+
     /* Names to strip */
     const char *strip_uniforms[] = {
         "_neowall_time",
@@ -950,7 +1094,7 @@ static char *strip_conflicting_uniforms(const char *source) {
         "iResolution",
         NULL
     };
-    
+
     /* Allocate result buffer (same size as original) */
     size_t src_len = strlen(source);
     char *result = malloc(src_len + 1);
@@ -958,31 +1102,31 @@ static char *strip_conflicting_uniforms(const char *source) {
         log_error("Failed to allocate memory for shader cleaning");
         return NULL;
     }
-    
+
     const char *read_ptr = source;
     char *write_ptr = result;
     int removed_count = 0;
-    
+
     while (*read_ptr) {
         const char *line_start = read_ptr;
-        
+
         /* Skip whitespace and comments at line start */
         const char *content_start = skip_whitespace_and_comments(read_ptr);
-        
+
         /* Check if this line contains a uniform declaration to remove */
         bool should_remove = false;
         const char *found_uniform = NULL;
-        
-        if (content_start && strncmp(content_start, "uniform", 7) == 0 && 
+
+        if (content_start && strncmp(content_start, "uniform", 7) == 0 &&
             !is_identifier_char(*(content_start + 7))) {
-            
+
             /* This line starts with "uniform" - check if it declares a conflicting name */
             for (int i = 0; strip_uniforms[i]; i++) {
                 if (has_uniform_declaration(line_start, strip_uniforms[i])) {
                     /* Find if this uniform declaration is on this line */
                     const char *line_end = strchr(line_start, '\n');
                     const char *semicolon = strchr(line_start, ';');
-                    
+
                     if (semicolon && (!line_end || semicolon < line_end)) {
                         should_remove = true;
                         found_uniform = strip_uniforms[i];
@@ -991,7 +1135,7 @@ static char *strip_conflicting_uniforms(const char *source) {
                 }
             }
         }
-        
+
         if (should_remove) {
             /* Skip this line - find the semicolon */
             const char *semicolon = strchr(read_ptr, ';');
@@ -999,7 +1143,7 @@ static char *strip_conflicting_uniforms(const char *source) {
                 read_ptr = semicolon + 1;
                 /* Also skip trailing newline if present */
                 if (*read_ptr == '\n') read_ptr++;
-                
+
                 removed_count++;
                 log_debug("Removed conflicting uniform declaration: %s", found_uniform);
             } else {
@@ -1021,13 +1165,13 @@ static char *strip_conflicting_uniforms(const char *source) {
             }
         }
     }
-    
+
     *write_ptr = '\0';
-    
+
     if (removed_count > 0) {
         log_debug("Automatically removed %d conflicting uniform declaration(s)", removed_count);
     }
-    
+
     return result;
 }
 
@@ -1035,23 +1179,23 @@ static char *strip_conflicting_uniforms(const char *source) {
  * Replace assignments to read-only uniforms with local variables
  * Strategy: Remove or comment out assignments like "time = iTime;"
  * Since these variables will be macros that expand to uniforms, assignments are illegal
- * 
+ *
  * @param source Original shader source
  * @return Fixed shader source (caller must free), or NULL on error
  */
 static char *fix_uniform_assignments(const char *source) {
     if (!source) return NULL;
-    
+
     /* Check if we need to fix anything */
     bool needs_fix = has_uniform_assignment(source, "iTime") ||
                      has_uniform_assignment(source, "_neowall_time") ||
                      has_uniform_assignment(source, "time") ||
                      has_uniform_assignment(source, "resolution");
-    
+
     if (!needs_fix) {
         return strdup(source); /* No changes needed */
     }
-    
+
     /* Allocate result buffer - add extra space for comments we might add */
     size_t src_len = strlen(source);
     char *result = malloc(src_len * 2); /* Double size for safety - comments add text */
@@ -1059,35 +1203,35 @@ static char *fix_uniform_assignments(const char *source) {
         log_error("Failed to allocate memory for fixing uniform assignments");
         return NULL;
     }
-    
+
     const char *read_ptr = source;
     char *write_ptr = result;
     int fix_count = 0;
-    
+
     /* List of variables that map to read-only uniforms */
     const char *readonly_vars[] = {
         "iTime", "_neowall_time", "time",
         "iResolution", "_neowall_resolution", "resolution",
         NULL
     };
-    
+
     while (*read_ptr) {
         const char *line_start = read_ptr;
         bool should_remove = false;
         const char *found_var = NULL;
-        
+
         /* Check if this line contains an assignment to a read-only variable */
         for (int i = 0; readonly_vars[i]; i++) {
             const char *var_name = readonly_vars[i];
             size_t var_len = strlen(var_name);
-            
+
             /* Look for the variable name in this line */
             const char *var_pos = strstr(line_start, var_name);
             if (var_pos) {
                 /* Verify it's a complete identifier */
                 bool valid_start = (var_pos == line_start || !is_identifier_char(*(var_pos-1)));
                 bool valid_end = !is_identifier_char(*(var_pos + var_len));
-                
+
                 if (valid_start && valid_end) {
                     /* Check if followed by assignment operator */
                     const char *after = skip_whitespace_and_comments(var_pos + var_len);
@@ -1100,7 +1244,7 @@ static char *fix_uniform_assignments(const char *source) {
                             while (check_back > line_start && isspace(*(check_back - 1))) {
                                 check_back--;
                             }
-                            
+
                             /* Check for type keywords before the variable name */
                             bool is_local_decl = false;
                             const char *types[] = {"float", "vec2", "vec3", "vec4", "int", "ivec2", "ivec3", "ivec4", NULL};
@@ -1113,12 +1257,12 @@ static char *fix_uniform_assignments(const char *source) {
                                     break;
                                 }
                             }
-                            
+
                             /* Only remove if it's NOT a local variable declaration */
                             if (!is_local_decl) {
                                 const char *line_end = strchr(line_start, '\n');
                                 const char *semicolon = strchr(var_pos, ';');
-                                
+
                                 if (semicolon && (!line_end || semicolon < line_end)) {
                                     should_remove = true;
                                     found_var = var_name;
@@ -1130,20 +1274,20 @@ static char *fix_uniform_assignments(const char *source) {
                 }
             }
         }
-        
+
         if (should_remove) {
             /* Remove this assignment line - skip to semicolon */
             const char *semicolon = strchr(read_ptr, ';');
             if (semicolon) {
                 /* Add a comment explaining what was removed */
                 write_ptr += sprintf(write_ptr, "// [neowall] Removed assignment to read-only uniform: %s", found_var);
-                
+
                 read_ptr = semicolon + 1;
                 /* Preserve newline if present */
                 if (*read_ptr == '\n') {
                     *write_ptr++ = *read_ptr++;
                 }
-                
+
                 fix_count++;
                 log_debug("Removed assignment to read-only uniform: %s", found_var);
             } else {
@@ -1165,19 +1309,19 @@ static char *fix_uniform_assignments(const char *source) {
             }
         }
     }
-    
+
     *write_ptr = '\0';
-    
+
     if (fix_count > 0) {
         log_debug("Fixed %d assignment(s) to read-only uniforms", fix_count);
     }
-    
+
     return result;
 }
 
 /**
  * Strip #version directive from shader source
- * 
+ *
  * @param source Shader source code
  * @return Pointer to source after #version line, or original source if not found
  */
@@ -1185,12 +1329,12 @@ static const char *strip_version_directive(const char *source) {
     if (!source) {
         return source;
     }
-    
+
     /* Skip whitespace at start */
     while (*source && isspace(*source)) {
         source++;
     }
-    
+
     /* Check if starts with #version */
     if (strncmp(source, "#version", 8) == 0) {
         /* Find end of line */
@@ -1199,13 +1343,13 @@ static const char *strip_version_directive(const char *source) {
             return newline + 1;
         }
     }
-    
+
     return source;
 }
 
 /**
  * Wrap Shadertoy format shader with compatibility layer
- * 
+ *
  * @param shadertoy_source Original Shadertoy shader source
  * @param channel_count Number of iChannels to declare (0 = default 5)
  * @return Wrapped shader source (must be freed by caller), or NULL on error
@@ -1214,24 +1358,24 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
     if (!shadertoy_source) {
         return NULL;
     }
-    
+
     /* Strip #version directive from original source if present */
     const char *source_body = strip_version_directive(shadertoy_source);
-    
+
     /* INTELLIGENT CONFLICT RESOLUTION - Strategy 2 & 3 */
-    
+
     /* Step 1: Detect conflicts before processing */
     uint32_t conflicts = detect_shader_conflicts(source_body);
-    
+
     /* Step 2: Apply automatic fixes if conflicts detected */
     char *cleaned_source = NULL;
     bool needs_cleanup = false;
-    
+
     if (conflicts) {
         log_debug("╔══════════════════════════════════════════════════════════════╗");
         log_debug("║ Shader Conflict Detected - Applying Automatic Fixes         ║");
         log_debug("╚══════════════════════════════════════════════════════════════╝");
-        
+
         /* Fix 1: Remove conflicting uniform declarations */
         if (conflicts & ((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3))) {
             log_debug("» Removing conflicting uniform declarations...");
@@ -1245,7 +1389,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
                 return NULL;
             }
         }
-        
+
         /* Fix 2: Remove conflicting global variable declarations */
         if (conflicts & ((1 << 6) | (1 << 7))) {
             log_debug("» Removing conflicting global variables...");
@@ -1258,11 +1402,11 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
                 cleaned_source = cleaned_vars;
                 needs_cleanup = true;
                 log_debug("✓ Successfully removed conflicting global variables");
-                
+
                 /* After removing global variables, check for orphaned assignments */
                 /* Example: "float time = 0;" was removed, but "time = iTime;" remains */
                 /* This will expand to "_neowall_time = iTime" which is an assignment to uniform */
-                if (has_uniform_assignment(source_body, "time") || 
+                if (has_uniform_assignment(source_body, "time") ||
                     has_uniform_assignment(source_body, "resolution")) {
                     log_debug("» Detected orphaned assignments after removing global variables");
                     conflicts |= (1 << 4);  /* Set assignment conflict flag */
@@ -1275,7 +1419,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
                 return NULL;
             }
         }
-        
+
         /* Fix 3: Replace assignments to read-only uniforms */
         if (conflicts & ((1 << 4) | (1 << 5))) {
             log_debug("» Fixing assignments to read-only uniforms...");
@@ -1292,7 +1436,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
                 log_error("✗ Could not fix uniform assignments automatically");
             }
         }
-        
+
         log_debug("╔══════════════════════════════════════════════════════════════╗");
         log_debug("║ Conflict Resolution Complete                                 ║");
         log_debug("╠══════════════════════════════════════════════════════════════╣");
@@ -1303,41 +1447,47 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
         log_debug("║   /tmp/neowall_shader_debug.glsl                              ║");
         log_debug("╚══════════════════════════════════════════════════════════════╝");
     }
-    
+
     /* Build dynamic iChannel declarations */
     char *channel_decls = build_ichannel_declarations(channel_count);
     if (!channel_decls) {
         log_error("Failed to build iChannel declarations");
         return NULL;
     }
-    
+
     /* Detect GL version at runtime to choose appropriate wrapper */
     const GLubyte *version_string = glGetString(GL_VERSION);
     bool use_es3 = false;
-    
+
     if (version_string) {
-        /* Check for ES 3.x in version string */
+        log_info("GL version string: %s", version_string);
+        /* Check for ES 3.x or regular OpenGL 3.x+ */
         if (strstr((const char*)version_string, "ES 3.") != NULL) {
             use_es3 = true;
-            log_debug("Using ES 3.0 Shadertoy wrapper");
+            log_info("Using ES 3.0 Shadertoy wrapper (OpenGL ES 3.x detected)");
+        } else if (strstr((const char*)version_string, "3.") != NULL ||
+                   strstr((const char*)version_string, "4.") != NULL) {
+            /* Regular OpenGL 3.x or 4.x also supports ES 3.0 syntax */
+            use_es3 = true;
+            log_info("Using ES 3.0 Shadertoy wrapper (OpenGL 3.x+ detected)");
         } else {
-            log_debug("Using ES 2.0 Shadertoy wrapper");
+            log_info("Using ES 2.0 Shadertoy wrapper");
         }
     } else {
-        log_debug("Could not detect GL version, defaulting to ES 2.0 wrapper");
+        log_error("Could not detect GL version (glGetString returned NULL), defaulting to ES 2.0 wrapper");
     }
-    
+
     /* Select appropriate wrapper strings */
     const char *prefix = use_es3 ? shadertoy_wrapper_prefix_es3 : shadertoy_wrapper_prefix_es2;
     const char *suffix = use_es3 ? shadertoy_wrapper_suffix_es3 : shadertoy_wrapper_suffix_es2;
-    
+
     /* Calculate total size needed */
     size_t prefix_len = strlen(prefix);
     size_t channel_len = strlen(channel_decls);
     size_t body_len = strlen(source_body);
     size_t suffix_len = strlen(suffix);
     size_t total_len = prefix_len + channel_len + body_len + suffix_len + 1;
-    
+
     /* Allocate buffer */
     char *wrapped = malloc(total_len);
     if (!wrapped) {
@@ -1345,43 +1495,182 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
         free(channel_decls);
         return NULL;
     }
-    
+
     /* Concatenate parts */
     strcpy(wrapped, prefix);
     strcat(wrapped, channel_decls);
     strcat(wrapped, source_body);
     strcat(wrapped, suffix);
-    
+
     free(channel_decls);
-    
+
+    /* Fix vec3 to vec2 texture coordinate issues for ES3 */
+    if (use_es3) {
+        log_debug("Checking for vec3 texture coordinate usage in ES3 shader...");
+        /* Convert texture(iChannelN, vec3_expr) to texture(iChannelN, directionToUV(vec3_expr)) */
+        char *fixed = malloc(strlen(wrapped) * 2 + 1024);
+        if (fixed) {
+            const char *src = wrapped;
+            char *dst = fixed;
+            bool made_changes = false;
+            int conversion_count = 0;
+
+            while (*src) {
+                /* Look for texture(iChannel pattern */
+                if (strncmp(src, "texture(iChannel", 16) == 0) {
+                    const char *check = src + 16;
+                    /* Get channel number */
+                    if (isdigit(*check)) {
+                        int channel_num = *check - '0';
+                        check++;
+                        while (*check && isspace(*check)) check++;
+                        if (*check == ',') {
+                            check++;
+                            /* Now find the coordinate expression */
+                            const char *coord_start = check;
+                            int paren_depth = 1;
+                            const char *coord_end = NULL;
+
+                            /* Skip to the coordinate parameter */
+                            while (*check && isspace(*check)) check++;
+                            coord_start = check;
+
+                            /* Find the end of the coordinate parameter (next comma or closing paren) */
+                            while (*check) {
+                                if (*check == '(') paren_depth++;
+                                else if (*check == ')') {
+                                    paren_depth--;
+                                    if (paren_depth == 0) {
+                                        coord_end = check;
+                                        break;
+                                    }
+                                }
+                                check++;
+                            }
+
+                            if (coord_end) {
+                                /* Extract the coordinate expression */
+                                size_t coord_len = coord_end - coord_start;
+                                char coord_expr[1024];
+                                if (coord_len < sizeof(coord_expr) - 1) {
+                                    strncpy(coord_expr, coord_start, coord_len);
+                                    coord_expr[coord_len] = '\0';
+
+                                    /* Trim trailing whitespace */
+                                    char *trim = coord_expr + strlen(coord_expr) - 1;
+                                    while (trim > coord_expr && isspace(*trim)) *trim-- = '\0';
+
+                                    log_debug("Found texture(iChannel%d, '%s')", channel_num, coord_expr);
+
+                                    /* Check if it looks like a vec3 (contains getNormal, or is just 'n' variable, or other common vec3 patterns) */
+                                    bool is_vec3 = false;
+                                    if (strstr(coord_expr, "getNormal")) {
+                                        log_debug("  -> Detected vec3 (contains getNormal)");
+                                        is_vec3 = true;
+                                    } else if (strcmp(coord_expr, "n") == 0) {
+                                        /* Single letter 'n' is commonly a normal vector */
+                                        log_debug("  -> Detected vec3 (variable 'n')");
+                                        is_vec3 = true;
+                                    } else if (strstr(coord_expr, "normal") || strstr(coord_expr, "Normal")) {
+                                        /* Contains 'normal' or 'Normal' */
+                                        log_debug("  -> Detected vec3 (contains 'normal')");
+                                        is_vec3 = true;
+                                    } else {
+                                        /* Check if it ends with .p, .xyz, or other vec3-like patterns */
+                                        size_t len = strlen(coord_expr);
+                                        if (len >= 2) {
+                                            if (strstr(coord_expr, ".p)") || strstr(coord_expr, ".xyz") ||
+                                                strstr(coord_expr, "vec3") || strstr(coord_expr, "reflect") ||
+                                                strstr(coord_expr, "refract") || strstr(coord_expr, "cross")) {
+                                                log_debug("  -> Detected vec3 (contains vec3-like pattern)");
+                                                is_vec3 = true;
+                                            }
+                                            /* Check for common vec3 arithmetic patterns */
+                                            if (!is_vec3 && (strchr(coord_expr, '+') || strchr(coord_expr, '-') || strchr(coord_expr, '*'))) {
+                                                /* Contains arithmetic - likely vec3 if it has common vec3 variable names */
+                                                if (strstr(coord_expr, " u") || strstr(coord_expr, "u*") || strstr(coord_expr, "u+") || strstr(coord_expr, "u-") ||
+                                                    strstr(coord_expr, " o") || strstr(coord_expr, "o*") || strstr(coord_expr, "o+") || strstr(coord_expr, "o-") ||
+                                                    strstr(coord_expr, " p") || strstr(coord_expr, "p*") || strstr(coord_expr, "p+") || strstr(coord_expr, "p-") ||
+                                                    strstr(coord_expr, "ray") || strstr(coord_expr, "dir") || strstr(coord_expr, "pos")) {
+                                                    log_debug("  -> Detected vec3 (arithmetic with vec3-like variables)");
+                                                    is_vec3 = true;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (is_vec3) {
+                                        log_info("Converting texture(iChannel%d, %s) to use directionToUV()", channel_num, coord_expr);
+
+                                        /* Copy texture(iChannelN, */
+                                        size_t prefix_len = coord_start - src;
+                                        strncpy(dst, src, prefix_len);
+                                        dst += prefix_len;
+
+                                        /* Wrap coordinate with directionToUV() */
+                                        strcpy(dst, "directionToUV(");
+                                        dst += 14;
+                                        strcpy(dst, coord_expr);
+                                        dst += strlen(coord_expr);
+                                        *dst++ = ')';
+
+                                        src = coord_end;
+                                        made_changes = true;
+                                        conversion_count++;
+                                        continue;
+                                    } else {
+                                        log_debug("  -> Skipping (appears to be vec2)");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                /* Copy character as-is */
+                *dst++ = *src++;
+            }
+            *dst = '\0';
+
+            if (made_changes) {
+                log_info("Applied %d vec3->vec2 texture coordinate conversion(s) for environment mapping", conversion_count);
+                free(wrapped);
+                wrapped = fixed;
+            } else {
+                log_debug("No vec3 texture coordinate conversions needed");
+                free(fixed);
+            }
+        }
+    }
+
     /* Clean up the conflict-resolution allocated source */
     if (needs_cleanup && cleaned_source) {
         free(cleaned_source);
     }
-    
+
     /* Only convert texture calls if we're using ES 2.0 wrapper */
     if (!use_es3) {
         /* Use shadertoy_compat to intelligently convert GLSL 3.0 texture calls
          * to GLSL ES 1.0 texture2D calls for iChannel samplers */
         char *converted = shadertoy_convert_texture_calls(wrapped);
         free(wrapped);
-        
+
         if (!converted) {
             log_error("Failed to convert texture calls in Shadertoy shader");
             return NULL;
         }
-        
+
         wrapped = converted;
     }
-    
-    log_info("Wrapped Shadertoy format shader with compatibility layer (%zu channels)", 
+
+    log_info("Wrapped Shadertoy format shader with compatibility layer (%zu channels)",
              channel_count == 0 ? 5 : channel_count);
     return wrapped;
 }
 
 /**
  * Create live wallpaper shader program from file
- * 
+ *
  * @param shader_path Path to fragment shader file
  * @param program Pointer to store the created program ID
  * @param channel_count Number of iChannels to declare (0 = default 5)
@@ -1404,20 +1693,20 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
     /* Check if shader is in Shadertoy format and wrap if needed */
     char *final_fragment_src = fragment_src;
     bool is_shadertoy = is_shadertoy_format(fragment_src);
-    
+
     if (is_shadertoy) {
         log_info("Detected Shadertoy format shader");
-        
+
         /* Analyze shader complexity and features */
         shadertoy_analyze_shader(fragment_src);
-        
+
         /* DISABLED: Preprocessing interferes with real iChannel textures
          * The preprocessor was replacing texture() calls with noise fallbacks
          * Now that we have real texture support, we don't need fallbacks */
         /*
         char *preprocessed = shadertoy_preprocess(fragment_src);
         if (preprocessed) {
-            log_info("Shader preprocessed: %zu bytes -> %zu bytes", 
+            log_info("Shader preprocessed: %zu bytes -> %zu bytes",
                      strlen(fragment_src), strlen(preprocessed));
             free(fragment_src);
             fragment_src = preprocessed;
@@ -1426,18 +1715,18 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
         }
         */
         log_info("Using original shader source (preprocessing disabled to support real iChannel textures)");
-        
+
         /* Wrap with Shadertoy compatibility layer */
         final_fragment_src = wrap_shadertoy_shader(fragment_src, channel_count);
         log_debug("Final wrapped shader source:");
         log_debug("========================");
-        
+
         /* Print shader with line numbers for easier debugging */
         if (final_fragment_src) {
             char *line_start = final_fragment_src;
             char *line_end;
             int line_num = 1;
-            
+
             while (line_start && *line_start) {
                 line_end = strchr(line_start, '\n');
                 if (line_end) {
@@ -1452,16 +1741,16 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
                 line_num++;
             }
         }
-        
+
         log_debug("========================");
         if (!final_fragment_src) {
             log_error("Failed to wrap Shadertoy shader");
             free(fragment_src);
             return false;
         }
-        
+
         log_info("Wrapped shader: %zu bytes final", strlen(final_fragment_src));
-        
+
         /* Save first 500 chars for debugging */
         char preview[501];
         size_t preview_len = strlen(final_fragment_src);
@@ -1474,14 +1763,14 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
     /* Detect GL version to select appropriate vertex shader */
     const GLubyte *version_string = glGetString(GL_VERSION);
     const char *vertex_shader = live_vertex_shader_es2; // Default to ES 2.0
-    
+
     if (version_string && strstr((const char*)version_string, "ES 3.") != NULL) {
         vertex_shader = live_vertex_shader_es3;
         log_debug("Using ES 3.0 vertex shader");
     } else {
         log_debug("Using ES 2.0 vertex shader");
     }
-    
+
     /* Save wrapped shader for debugging on failure */
     FILE *debug_fp = fopen("/tmp/neowall_shader_debug.glsl", "w");
     if (debug_fp) {
@@ -1489,7 +1778,7 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
         fclose(debug_fp);
         log_debug("Saved wrapped shader to /tmp/neowall_shader_debug.glsl for debugging");
     }
-    
+
     /* Create program with standard vertex shader and loaded fragment shader */
     log_info("Compiling shader program...");
     bool success = shader_create_program_from_sources(
@@ -1505,7 +1794,7 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
     free(fragment_src);
 
     if (success) {
-        log_info("Successfully created live wallpaper shader program from: %s%s", 
+        log_info("Successfully created live wallpaper shader program from: %s%s",
                  shader_path, is_shadertoy ? " (Shadertoy format)" : "");
     } else {
         log_error("Failed to create shader program from: %s", shader_path);
