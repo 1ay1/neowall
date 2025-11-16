@@ -40,6 +40,7 @@
 - 🌊 **Wayland-native** (Hyprland, Sway, River, KDE)
 - 🪟 **Full X11 support** (i3, bspwm, dwm, awesome, xmonad, qtile)
 - 🎨 **Shadertoy-compatible** shaders
+- 🖱️ **Mouse event support** (Wayland & X11)
 - 📦 **30+ included shaders** ready to use
 
 </td>
@@ -188,7 +189,7 @@ void main() {
 - `iTime` - Shader playback time
 - `iResolution` - Viewport resolution
 - `iChannel0-4` - Input textures
-- `iMouse` - Mouse position
+- `iMouse` - Mouse position (tracked in real-time on Wayland & X11)
 - `iDate` - Current date/time
 
 Most Shadertoy shaders work with minimal adaptation!
@@ -298,6 +299,75 @@ output {
 
 ---
 
+## 🖱️ Mouse Events & Interactive Shaders
+
+NeoWall now supports **real-time mouse tracking** on both Wayland and X11! Mouse coordinates are captured and can be used in your shaders for interactive effects.
+
+### How It Works
+
+- **Wayland:** Automatic via `wl_seat` and `wl_pointer` protocol
+- **X11:** Event-driven via `XEvent` handling (ButtonPress, MotionNotify, etc.)
+- **Thread-safe:** Mouse position safely updated across all outputs
+- **Performance:** Event-driven architecture with zero polling overhead
+
+### Mouse Position Access
+
+Mouse coordinates are available in your shaders through the `iMouse` uniform:
+
+```glsl
+uniform vec4 iMouse;  // .xy = current position, .zw = click position
+```
+
+### Interactive Shader Example
+
+Create `~/.config/neowall/shaders/interactive.glsl`:
+
+```glsl
+#version 100
+precision highp float;
+
+uniform float iTime;
+uniform vec2 iResolution;
+uniform vec4 iMouse;
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / iResolution;
+    vec2 mouse = iMouse.xy / iResolution;
+    
+    // Distance from mouse cursor
+    float dist = length(uv - mouse);
+    
+    // Ripple effect following mouse
+    float ripple = sin(dist * 20.0 - iTime * 3.0) * 0.5 + 0.5;
+    
+    vec3 color = vec3(ripple);
+    gl_FragColor = vec4(color, 1.0);
+}
+```
+
+### Technical Details
+
+- **Real-time tracking:** Mouse position updated on every motion event
+- **Multi-monitor:** Coordinates in root window space (works across all displays)
+- **Debug logging:** Enable with `-v` flag to see mouse events
+- **Surface focus:** On Wayland, pointer events only when cursor is over wallpaper surface (typically empty desktop space)
+- **Zero overhead:** Events processed only when mouse moves (no polling)
+
+### Limitations
+
+- **Wayland:** Mouse events only trigger when pointer is over the wallpaper layer (background). Windows above the wallpaper block pointer input.
+- **X11:** Similar behavior - mouse events captured when over the root window wallpaper.
+- **Expected behavior:** This is standard for wallpaper applications - they sit below all other windows.
+
+### Documentation
+
+For technical details on the mouse event implementation:
+- **Wayland:** See `docs/features/` for Wayland pointer event handling
+- **X11:** See `docs/X11_MOUSE_EVENTS.md` for X11 implementation details
+- **Testing:** Use `-f -v` flags to run in foreground with debug logging
+
+---
+
 ## 🏗️ Architecture
 
 NeoWall is built with performance and reliability in mind:
@@ -308,6 +378,7 @@ NeoWall is built with performance and reliability in mind:
 - **Runtime capability detection** - Adapts between OpenGL ES 2.0/3.0/3.1/3.2
 - **State persistence** - Remembers your place in wallpaper cycles across restarts
 - **Zero-copy rendering** - Direct GPU upload, minimal memory copies
+- **Mouse event handling** - Real-time mouse tracking on both Wayland and X11 for interactive shaders
 
 ---
 

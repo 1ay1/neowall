@@ -2,8 +2,8 @@
  * Helper functions for common shader operations in the editor
  */
 
-#include "platform_compat.h"
 #include "shader_utils.h"
+#include "shader_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

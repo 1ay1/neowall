@@ -308,7 +308,8 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
     attrs.override_redirect = True;  /* Bypass WM completely */
     attrs.background_pixel = BlackPixel(backend->x_display, backend->screen);
     attrs.border_pixel = 0;
-    attrs.event_mask = ExposureMask | StructureNotifyMask;
+    attrs.event_mask = ExposureMask | StructureNotifyMask |
+                       ButtonPressMask | ButtonReleaseMask | PointerMotionMask;
 
     surf_data->x_window = XCreateWindow(
         backend->x_display,
@@ -531,7 +532,127 @@ static void x11_update_mouse_position(x11_backend_data_t *backend) {
 }
 
 /* ============================================================================
- * SURFACE COMMIT
+ * X11 EVENT HANDLING
+ * ============================================================================ */
+
+/* Get X11 connection file descriptor for event polling */
+static int x11_get_connection_fd(x11_backend_data_t *backend) {
+    if (!backend || !backend->x_display) {
+        return -1;
+    }
+    return ConnectionNumber(backend->x_display);
+}
+
+/* Handle X11 events (mouse, keyboard, etc.) */
+static bool x11_handle_events(x11_backend_data_t *backend) {
+    if (!backend || !backend->x_display) {
+        return false;
+    }
+
+    /* Process all pending X11 events */
+    while (XPending(backend->x_display) > 0) {
+        XEvent event;
+        XNextEvent(backend->x_display, &event);
+
+        switch (event.type) {
+            case ButtonPress:
+                log_debug("X11 mouse button pressed: button %d at (%d, %d)",
+                         event.xbutton.button,
+                         event.xbutton.x_root,
+                         event.xbutton.y_root);
+
+                /* Update mouse position in all outputs */
+                pthread_rwlock_rdlock(&backend->state->output_list_lock);
+                struct output_state *output = backend->state->outputs;
+                while (output) {
+                    output->mouse_x = (float)event.xbutton.x_root;
+                    output->mouse_y = (float)event.xbutton.y_root;
+                    output = output->next;
+                }
+                pthread_rwlock_unlock(&backend->state->output_list_lock);
+                break;
+
+            case ButtonRelease:
+                log_debug("X11 mouse button released: button %d at (%d, %d)",
+                         event.xbutton.button,
+                         event.xbutton.x_root,
+                         event.xbutton.y_root);
+
+                /* Update mouse position in all outputs */
+                pthread_rwlock_rdlock(&backend->state->output_list_lock);
+                output = backend->state->outputs;
+                while (output) {
+                    output->mouse_x = (float)event.xbutton.x_root;
+                    output->mouse_y = (float)event.xbutton.y_root;
+                    output = output->next;
+                }
+                pthread_rwlock_unlock(&backend->state->output_list_lock);
+                break;
+
+            case MotionNotify: {
+                /* Update mouse position for motion events
+                 * Use throttling to avoid log spam */
+                static uint64_t last_motion_log = 0;
+                uint64_t now = get_time_ms();
+                if (now - last_motion_log > 2000) {
+                    log_debug("X11 mouse motion: (%d, %d)",
+                             event.xmotion.x_root,
+                             event.xmotion.y_root);
+                    last_motion_log = now;
+                }
+
+                pthread_rwlock_rdlock(&backend->state->output_list_lock);
+                output = backend->state->outputs;
+                while (output) {
+                    output->mouse_x = (float)event.xmotion.x_root;
+                    output->mouse_y = (float)event.xmotion.y_root;
+                    output = output->next;
+                }
+                pthread_rwlock_unlock(&backend->state->output_list_lock);
+                break;
+            }
+
+            case Expose:
+                log_debug("X11 Expose event received");
+                break;
+
+            case ConfigureNotify:
+                log_debug("X11 ConfigureNotify event: %dx%d",
+                         event.xconfigure.width,
+                         event.xconfigure.height);
+                break;
+
+            case ReparentNotify:
+                log_debug("X11 ReparentNotify event");
+                break;
+
+            case MapNotify:
+                log_debug("X11 MapNotify event");
+                break;
+
+            case UnmapNotify:
+                log_debug("X11 UnmapNotify event");
+                break;
+
+            default:
+                /* Check for XRandR events */
+                if (backend->has_xrandr &&
+                    event.type == backend->xrandr_event_base + RRScreenChangeNotify) {
+                    log_info("X11 XRandR screen change event detected");
+                    /* Screen configuration changed - could trigger output re-initialization */
+                }
+                break;
+        }
+    }
+
+    /* Flush any pending requests */
+    XFlush(backend->x_display);
+
+    return true;
+}
+
+/* ============================================================================
+ * COMMIT SURFACE
  * ============================================================================ */
 
 static void x11_commit_surface(struct compositor_surface *surface) {
@@ -869,4 +990,26 @@ struct compositor_backend *compositor_backend_x11_init(struct neowall_state *sta
     }
 
     return backend;
+}
+
+/* ============================================================================
+ * PUBLIC API FUNCTIONS
+ * ============================================================================ */
+
+int x11_backend_get_fd(struct compositor_backend *backend) {
+    if (!backend || !backend->data) {
+        return -1;
+    }
+
+    x11_backend_data_t *x11_backend = (x11_backend_data_t *)backend->data;
+    return x11_get_connection_fd(x11_backend);
+}
+
+bool x11_backend_handle_events(struct compositor_backend *backend) {
+    if (!backend || !backend->data) {
+        return false;
+    }
+
+    x11_backend_data_t *x11_backend = (x11_backend_data_t *)backend->data;
+    return x11_handle_events(x11_backend);
 }

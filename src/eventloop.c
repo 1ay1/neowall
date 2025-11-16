@@ -12,6 +12,7 @@
 #include "config_access.h"
 #include "constants.h"
 #include "compositor.h"
+#include "compositor/backends/x11.h"
 
 /* Forward declarations */
 extern void handle_signal_from_fd(struct neowall_state *state, int signum);
@@ -488,13 +489,26 @@ void event_loop_run(struct neowall_state *state) {
     }
     pthread_rwlock_unlock(&state->output_list_lock);
 
-    /* Get Wayland display file descriptor (if using Wayland) */
-    int wl_fd = -1;
+    /* Get compositor file descriptor (Wayland or X11) */
+    int compositor_fd = -1;
+    bool is_x11 = false;
+
     if (state->display) {
-        wl_fd = wl_display_get_fd(state->display);
-        if (wl_fd < 0) {
+        /* Wayland backend */
+        compositor_fd = wl_display_get_fd(state->display);
+        if (compositor_fd < 0) {
             log_error("Failed to get Wayland display file descriptor");
             return;
+        }
+        log_info("Using Wayland backend with fd %d", compositor_fd);
+    } else if (state->compositor_backend) {
+        /* X11 backend */
+        compositor_fd = x11_backend_get_fd(state->compositor_backend);
+        if (compositor_fd >= 0) {
+            is_x11 = true;
+            log_info("Using X11 backend with fd %d", compositor_fd);
+        } else {
+            log_debug("No valid compositor file descriptor available");
         }
     }
 
@@ -503,8 +517,8 @@ void event_loop_run(struct neowall_state *state) {
     #define MAX_POLL_FDS (BASE_FD_COUNT + MAX_OUTPUTS)
 
     struct pollfd fds[MAX_POLL_FDS];
-    fds[0].fd = wl_fd;  /* -1 for X11 backend, valid fd for Wayland */
-    fds[0].events = wl_fd >= 0 ? POLLIN : 0;  /* Don't poll invalid fd */
+    fds[0].fd = compositor_fd;  /* -1 if no compositor, valid fd for Wayland/X11 */
+    fds[0].events = compositor_fd >= 0 ? POLLIN : 0;  /* Don't poll invalid fd */
     fds[1].fd = state->timer_fd;
     fds[1].events = POLLIN;
     fds[2].fd = state->wakeup_fd;
@@ -532,6 +546,9 @@ void event_loop_run(struct neowall_state *state) {
     handle_wayland_events(state);
     if (state->display) {
         wl_display_flush(state->display);
+    } else if (is_x11 && state->compositor_backend) {
+        /* Process any initial X11 events */
+        x11_backend_handle_events(state->compositor_backend);
     }
 
     /* Set initial timer for cycling */
@@ -577,6 +594,7 @@ void event_loop_run(struct neowall_state *state) {
                 }
             }
         }
+        /* X11 backend doesn't need prepare_read - events are processed directly */
 
         /* Calculate poll timeout - use 1 second max to ensure signals are processed promptly
          * BUG FIX: Previously used POLL_TIMEOUT_INFINITE (-1) which caused slow signal response
@@ -666,28 +684,42 @@ void event_loop_run(struct neowall_state *state) {
                 wl_display_cancel_read(state->display);
             }
         } else {
-            /* Check for compositor disconnect (POLLHUP/POLLERR on Wayland fd) - Wayland only */
-            if (state->display && fds[0].revents & (POLLHUP | POLLERR)) {
-                log_error("Wayland display disconnected (POLLHUP/POLLERR), compositor shut down");
-                wl_display_cancel_read(state->display);
+            /* Check for compositor disconnect (POLLHUP/POLLERR) */
+            if (fds[0].revents & (POLLHUP | POLLERR)) {
+                if (state->display) {
+                    log_error("Wayland display disconnected (POLLHUP/POLLERR), compositor shut down");
+                    wl_display_cancel_read(state->display);
+                } else if (is_x11) {
+                    log_error("X11 display disconnected (POLLHUP/POLLERR), X server shut down");
+                }
                 atomic_store_explicit(&state->running, false, memory_order_release);
                 break;
             }
 
-            /* Events available (Wayland only) */
-            if (state->display && fds[0].revents & POLLIN) {
-                if (wl_display_read_events(state->display) < 0) {
-                    log_error("Failed to read Wayland events");
-                    atomic_store_explicit(&state->running, false, memory_order_release);
-                    break;
-                }
+            /* Events available */
+            if (fds[0].revents & POLLIN) {
+                if (state->display) {
+                    /* Wayland events */
+                    if (wl_display_read_events(state->display) < 0) {
+                        log_error("Failed to read Wayland events");
+                        atomic_store_explicit(&state->running, false, memory_order_release);
+                        break;
+                    }
 
-                /* Check for display errors after reading events (compositor shutdown) */
-                int display_error = wl_display_get_error(state->display);
-                if (display_error != 0) {
-                    log_error("Wayland display error (code %d), compositor disconnected", display_error);
-                    atomic_store_explicit(&state->running, false, memory_order_release);
-                    break;
+                    /* Check for display errors after reading events (compositor shutdown) */
+                    int display_error = wl_display_get_error(state->display);
+                    if (display_error != 0) {
+                        log_error("Wayland display error (code %d), compositor disconnected", display_error);
+                        atomic_store_explicit(&state->running, false, memory_order_release);
+                        break;
+                    }
+                } else if (is_x11 && state->compositor_backend) {
+                    /* X11 events */
+                    if (!x11_backend_handle_events(state->compositor_backend)) {
+                        log_error("Failed to handle X11 events");
+                        atomic_store_explicit(&state->running, false, memory_order_release);
+                        break;
+                    }
                 }
             } else if (state->display) {
                 wl_display_cancel_read(state->display);

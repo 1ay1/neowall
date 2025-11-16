@@ -1,10 +1,11 @@
-#include "platform_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "platform_compat.h"
 #include <GLES2/gl2.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include "shader_log.h"
 #include "shader.h"
 #include "shadertoy_compat.h"
 
@@ -284,7 +285,7 @@ static GLuint compile_shader(GLenum type, const char *source) {
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
     if (!compiled) {
         append_to_error_log("\n=== %s SHADER COMPILATION FAILED ===\n\n",
-                           (type == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT");
+                           strcmp(type_str, "vertex") == 0 ? "VERTEX" : "FRAGMENT");
 
         GLint info_len = 0;
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &info_len);
@@ -571,6 +572,12 @@ char *shader_load_file(const char *path) {
     return source;
 }
 
+/* Forward declaration */
+/* Forward declarations */
+static const char *skip_whitespace_and_comments(const char *p);
+static inline bool is_identifier_char(char c);
+static const char *skip_whitespace_and_comments(const char *p);
+
 /**
  * Check if shader source uses Shadertoy format (mainImage function)
  *
@@ -606,18 +613,43 @@ static bool is_shadertoy_format(const char *source) {
 
         /* Check if 'void' appears before 'mainImage' in the search window */
         if (voidKeyword && voidKeyword < mainImage) {
-            /* Check for duplicate mainImage definitions */
-            const char *second_mainImage = strstr(mainImage + 1, "void mainImage");
-            if (second_mainImage) {
-                log_error("╔══════════════════════════════════════════════════════════════╗");
-                log_error("║ ERROR: Duplicate mainImage Function Detected                ║");
-                log_error("╠══════════════════════════════════════════════════════════════╣");
-                log_error("║ Your shader has multiple 'void mainImage(...)' functions.   ║");
-                log_error("║ Shadertoy shaders should have only ONE mainImage function.  ║");
-                log_error("║                                                               ║");
-                log_error("║ Please remove duplicate function definitions.                ║");
-                log_error("╚══════════════════════════════════════════════════════════════╝");
-                return false;
+            /* Check for duplicate mainImage definitions (properly skip comments) */
+            const char *search_ptr = mainImage + strlen("mainImage");
+            int count = 1;  /* Already found first mainImage */
+
+            while (*search_ptr) {
+                /* Skip comments and whitespace */
+                search_ptr = skip_whitespace_and_comments(search_ptr);
+                if (!*search_ptr) break;
+
+                /* Look for "void" keyword */
+                if (strncmp(search_ptr, "void", 4) == 0 && !is_identifier_char(*(search_ptr+4))) {
+                    const char *after_void = skip_whitespace_and_comments(search_ptr + 4);
+
+                    /* Check if followed by "mainImage" */
+                    if (strncmp(after_void, "mainImage", 9) == 0 && !is_identifier_char(*(after_void+9))) {
+                        const char *after_name = skip_whitespace_and_comments(after_void + 9);
+
+                        /* Confirm it's a function (has opening parenthesis) */
+                        if (*after_name == '(') {
+                            count++;
+                            log_error("╔══════════════════════════════════════════════════════════════╗");
+                            log_error("║ ERROR: Duplicate mainImage Function Detected                ║");
+                            log_error("╠══════════════════════════════════════════════════════════════╣");
+                            log_error("║ Your shader has multiple 'void mainImage(...)' functions.   ║");
+                            log_error("║ Shadertoy shaders should have only ONE mainImage function.  ║");
+                            log_error("║                                                               ║");
+                            log_error("║ Note: Functions in comments are properly ignored.            ║");
+                            log_error("╚══════════════════════════════════════════════════════════════╝");
+                            return false;
+                        }
+                        search_ptr = after_name + 1;
+                    } else {
+                        search_ptr = after_void + 1;
+                    }
+                } else {
+                    search_ptr++;
+                }
             }
             log_debug("Detected Shadertoy format shader (mainImage function found)");
             return true;
