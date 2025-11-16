@@ -73,4 +73,27 @@ bool compositor_backend_x11_available(void);
  */
 unsigned long compositor_surface_get_x11_window(struct compositor_surface *surface);
 
+/**
+ * Get X11 connection file descriptor
+ *
+ * Returns the file descriptor for the X11 connection, which can be used
+ * with poll/select for event-driven X11 event processing.
+ *
+ * @param backend Compositor backend (must be X11 backend)
+ * @return X11 connection file descriptor, or -1 on error
+ */
+int x11_backend_get_fd(struct compositor_backend *backend);
+
+/**
+ * Handle pending X11 events
+ *
+ * Process all pending X11 events including mouse events (button press/release,
+ * motion), keyboard events, expose events, and structure notifications.
+ * This should be called when the X11 file descriptor is ready for reading.
+ *
+ * @param backend Compositor backend (must be X11 backend)
+ * @return true on success, false on error
+ */
+bool x11_backend_handle_events(struct compositor_backend *backend);
+
 #endif /* COMPOSITOR_BACKENDS_X11_H */
