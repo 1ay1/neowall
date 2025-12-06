@@ -1,8 +1,8 @@
 # NeoWall - A reliable Wayland wallpaper daemon with Multi-Version EGL/OpenGL ES Support
-# Copyright (C) 2024
+# Copyright (C) 2025
 
 PROJECT = neowall
-VERSION = 0.4.1
+VERSION = 0.4.2
 
 # Directories
 SRC_DIR = src
@@ -38,7 +38,11 @@ CC = gcc
 CFLAGS = -Wall -Wextra -Werror -pedantic -std=c11 -O2 -D_POSIX_C_SOURCE=200809L
 CFLAGS += -I$(INC_DIR) -I$(PROTO_DIR) -I$(SHADER_LIB_DIR)
 CFLAGS += -DNEOWALL_VERSION=\"$(VERSION)\"
-LDFLAGS = -lwayland-client -lwayland-egl -lpthread -lm
+LDFLAGS = -lpthread -lm
+
+# Detect Wayland support
+HAS_WAYLAND := $(shell pkg-config --exists wayland-client wayland-egl && echo yes)
+HAS_WAYLAND_PROTOCOLS := $(shell pkg-config --exists wayland-protocols && echo yes)
 
 
 
@@ -166,10 +170,22 @@ ifeq ($(HAS_EGL_KHR_FENCE),yes)
     $(info EGL_KHR_fence_sync extension available)
 endif
 
+# Wayland backend support
+ifeq ($(HAS_WAYLAND),yes)
+    CFLAGS += -DHAVE_WAYLAND_BACKEND
+    LDFLAGS += -lwayland-client -lwayland-egl
+    WAYLAND_BACKEND := yes
+    $(info Wayland backend available)
+else
+    WAYLAND_BACKEND := no
+    $(info Wayland backend not available (wayland-client or wayland-egl not found))
+endif
+
 # X11 backend support
 ifeq ($(HAS_X11),yes)
     CFLAGS += -DHAVE_X11_BACKEND
     LDFLAGS += -lX11
+    X11_BACKEND := yes
     $(info X11 backend available)
 
     ifeq ($(HAS_XRANDR),yes)
@@ -177,6 +193,13 @@ ifeq ($(HAS_X11),yes)
         LDFLAGS += -lXrandr
         $(info XRandR multi-monitor support enabled)
     endif
+else
+    X11_BACKEND := no
+endif
+
+# Ensure at least one backend is available
+ifeq ($(WAYLAND_BACKEND)$(X11_BACKEND),nono)
+    $(error No display server backend available. Install wayland-client/wayland-egl or libx11-dev)
 endif
 
 # ============================================================================
@@ -191,7 +214,6 @@ OUTPUT_SOURCES = $(wildcard $(OUTPUT_DIR)/*.c)
 CONFIG_SOURCES = $(wildcard $(CONFIG_DIR)/*.c)
 RENDER_SOURCES = $(wildcard $(RENDER_DIR)/*.c)
 IMAGE_SOURCES = $(wildcard $(IMAGE_DIR)/*.c)
-PROTO_SOURCES = $(wildcard $(PROTO_DIR)/*.c)
 
 # Shader library sources (from gleditor)
 SHADER_LIB_SOURCES = $(SHADER_LIB_DIR)/shader_core.c \
@@ -204,14 +226,19 @@ SHADER_LIB_SOURCES = $(SHADER_LIB_DIR)/shader_core.c \
 COMPOSITOR_SOURCES = $(COMPOSITOR_DIR)/compositor_registry.c \
                      $(COMPOSITOR_DIR)/compositor_surface.c
 
-# Wayland backend sources
-WAYLAND_BACKEND_SOURCES = $(WAYLAND_BACKEND_DIR)/wayland_core.c
-
-# Wayland compositor-specific backend sources
-WAYLAND_COMPOSITOR_SOURCES = $(WAYLAND_COMPOSITOR_DIR)/wlr_layer_shell.c \
-                             $(WAYLAND_COMPOSITOR_DIR)/kde_plasma.c \
-                             $(WAYLAND_COMPOSITOR_DIR)/gnome_shell.c \
-                             $(WAYLAND_COMPOSITOR_DIR)/fallback.c
+# Wayland backend sources (conditional)
+ifeq ($(WAYLAND_BACKEND),yes)
+    WAYLAND_BACKEND_SOURCES = $(WAYLAND_BACKEND_DIR)/wayland_core.c
+    WAYLAND_COMPOSITOR_SOURCES = $(WAYLAND_COMPOSITOR_DIR)/wlr_layer_shell.c \
+                                 $(WAYLAND_COMPOSITOR_DIR)/kde_plasma.c \
+                                 $(WAYLAND_COMPOSITOR_DIR)/gnome_shell.c \
+                                 $(WAYLAND_COMPOSITOR_DIR)/fallback.c
+    PROTO_SOURCES = $(wildcard $(PROTO_DIR)/*.c)
+else
+    WAYLAND_BACKEND_SOURCES =
+    WAYLAND_COMPOSITOR_SOURCES =
+    PROTO_SOURCES =
+endif
 
 # EGL core (always compiled)
 EGL_CORE_SOURCES = $(EGL_DIR)/capability.c $(EGL_DIR)/egl_core.c

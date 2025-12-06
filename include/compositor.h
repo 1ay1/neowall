@@ -3,28 +3,29 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <wayland-client.h>
-#include <wayland-egl.h>
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 
 /*
  * ============================================================================
  * COMPOSITOR ABSTRACTION LAYER
  * ============================================================================
  *
- * This abstraction layer allows NeoWall to work with ANY Wayland compositor
+ * This abstraction layer allows NeoWall to work with ANY display server
  * by providing a unified interface for wallpaper surface management.
  *
  * DESIGN GOALS:
- * 1. Backend-agnostic API - same interface for all compositors
+ * 1. Backend-agnostic API - same interface for all compositors/display servers
  * 2. Runtime detection - automatically select correct backend
  * 3. Extensible - easy to add new compositor backends
  * 4. Zero overhead - direct function pointers, no indirection in hot paths
+ * 5. Platform-agnostic - no Wayland/X11 types in public API
  *
  * SUPPORTED BACKENDS:
  * - wlroots-based (Hyprland, Sway, River, etc.) - via wlr-layer-shell
  * - KDE Plasma - via org_kde_plasma_shell
  * - GNOME Shell/Mutter - via fallback subsurface method
+ * - X11 - via Xlib with EWMH hints
  * - Generic fallback - works on any compositor (limited features)
  *
  * ADDING NEW BACKENDS:
@@ -56,6 +57,21 @@ typedef enum {
     COMPOSITOR_CAP_ANCHOR           = (1 << 5),  /* Supports surface anchoring */
     COMPOSITOR_CAP_MULTI_OUTPUT     = (1 << 6),  /* Can bind surfaces to specific outputs */
 } compositor_capabilities_t;
+
+/**
+ * Output transform - rotation/flip applied to output
+ * Platform-agnostic version of display server transform values
+ */
+typedef enum {
+    COMPOSITOR_TRANSFORM_NORMAL      = 0,
+    COMPOSITOR_TRANSFORM_90          = 1,
+    COMPOSITOR_TRANSFORM_180         = 2,
+    COMPOSITOR_TRANSFORM_270         = 3,
+    COMPOSITOR_TRANSFORM_FLIPPED     = 4,
+    COMPOSITOR_TRANSFORM_FLIPPED_90  = 5,
+    COMPOSITOR_TRANSFORM_FLIPPED_180 = 6,
+    COMPOSITOR_TRANSFORM_FLIPPED_270 = 7,
+} compositor_transform_t;
 
 /* ============================================================================
  * SURFACE CONFIGURATION
@@ -94,7 +110,7 @@ typedef struct {
     bool keyboard_interactivity;        /* Whether surface accepts keyboard input */
     int32_t width;                      /* Desired width (0 = auto) */
     int32_t height;                     /* Desired height (0 = auto) */
-    struct wl_output *output;           /* Target output (NULL = all outputs) */
+    void *output;                       /* Target output handle (NULL = all outputs) */
 } compositor_surface_config_t;
 
 /* ============================================================================
@@ -105,14 +121,18 @@ typedef struct {
  * Compositor surface - opaque handle to a wallpaper surface
  * 
  * This wraps compositor-specific surface types and provides a unified interface.
- * Backend implementations store their protocol-specific data in opaque_data.
+ * Backend implementations store their protocol-specific data in backend_data.
+ * 
+ * NOTE: The native_surface and native_output fields are opaque handles.
+ * For Wayland backends: native_surface = wl_surface*, native_output = wl_output*
+ * For X11 backends: native_surface = Window (XID), native_output = NULL
  */
 struct compositor_surface {
-    struct wl_surface *wl_surface;      /* Base Wayland surface */
-    struct wl_egl_window *egl_window;   /* EGL window for rendering */
+    void *native_surface;               /* Native surface handle (wl_surface* or X11 Window) */
+    void *egl_window;                   /* EGL window handle (wl_egl_window* or native window) */
     EGLSurface egl_surface;             /* EGL surface */
     
-    struct wl_output *output;           /* Associated output */
+    void *native_output;                /* Associated output handle (wl_output* or NULL for X11) */
     int32_t width;                      /* Current surface width */
     int32_t height;                     /* Current surface height */
     int32_t scale;                      /* Output scale factor */
@@ -124,7 +144,7 @@ struct compositor_surface {
     void *backend_data;                 /* Backend-specific data (opaque) */
     struct compositor_backend *backend; /* Back-pointer to backend */
     
-    struct wp_tearing_control_v1 *tearing_control; /* Tearing control for immediate presentation */
+    void *tearing_control;              /* Tearing control handle (protocol-specific) */
     
     /* Callbacks */
     void (*on_configure)(struct compositor_surface *surface, 
@@ -205,6 +225,25 @@ typedef struct compositor_backend_ops {
                              int32_t width, int32_t height);
     
     /**
+     * Resize EGL window
+     * 
+     * @param surface Surface whose EGL window to resize
+     * @param width New width
+     * @param height New height
+     * @return true on success, false on failure
+     */
+    bool (*resize_egl_window)(struct compositor_surface *surface,
+                             int32_t width, int32_t height);
+    
+    /**
+     * Get native window handle for EGL surface creation
+     * 
+     * @param surface Surface to get native window for
+     * @return EGLNativeWindowType for eglCreateWindowSurface
+     */
+    EGLNativeWindowType (*get_native_window)(struct compositor_surface *surface);
+    
+    /**
      * Destroy EGL window for surface
      * 
      * @param surface Surface whose EGL window to destroy
@@ -223,17 +262,37 @@ typedef struct compositor_backend_ops {
      * Handle output added event (optional)
      * 
      * @param backend_data Data returned from init()
-     * @param output New output
+     * @param output New output handle (platform-specific: wl_output* for Wayland, etc.)
      */
-    void (*on_output_added)(void *backend_data, struct wl_output *output);
+    void (*on_output_added)(void *backend_data, void *output);
     
     /**
      * Handle output removed event (optional)
      * 
      * @param backend_data Data returned from init()
-     * @param output Removed output
+     * @param output Removed output handle (platform-specific)
      */
-    void (*on_output_removed)(void *backend_data, struct wl_output *output);
+    void (*on_output_removed)(void *backend_data, void *output);
+    
+    /**
+     * Mark surface region as damaged (needs redraw)
+     * 
+     * @param surface Surface to mark as damaged
+     * @param x X coordinate of damaged region (0 for full)
+     * @param y Y coordinate of damaged region (0 for full)
+     * @param width Width of damaged region (-1 for full width)
+     * @param height Height of damaged region (-1 for full height)
+     */
+    void (*damage_surface)(struct compositor_surface *surface,
+                          int32_t x, int32_t y, int32_t width, int32_t height);
+    
+    /**
+     * Set surface buffer scale factor
+     * 
+     * @param surface Surface to set scale for
+     * @param scale Scale factor (1 = normal, 2 = HiDPI, etc.)
+     */
+    void (*set_scale)(struct compositor_surface *surface, int32_t scale);
     
     /**
      * Initialize outputs for this backend (optional)
@@ -311,6 +370,16 @@ typedef struct compositor_backend_ops {
      * @return 0 if no error, error code otherwise
      */
     int (*get_error)(void *backend_data);
+    
+    /**
+     * Synchronize with display server
+     * Flushes all pending requests and waits for the server to process them.
+     * This is equivalent to wl_display_roundtrip() for Wayland or XSync() for X11.
+     * 
+     * @param backend_data Data returned from init()
+     * @return true on success, false on failure
+     */
+    bool (*sync)(void *backend_data);
     
     /* ===== DISPLAY/EGL OPERATIONS ===== */
     
@@ -390,10 +459,10 @@ typedef struct {
 /**
  * Detect which compositor is running
  * 
- * @param display Wayland display
+ * @param native_display Native display handle (wl_display* for Wayland, Display* for X11)
  * @return Compositor info
  */
-compositor_info_t compositor_detect(struct wl_display *display);
+compositor_info_t compositor_detect(void *native_display);
 
 /**
  * Initialize compositor backend
@@ -501,10 +570,10 @@ const char *compositor_type_to_string(compositor_type_t type);
 /**
  * Get default surface configuration
  * 
- * @param output Target output (or NULL for all outputs)
+ * @param native_output Target output handle, platform-specific (or NULL for all outputs)
  * @return Default configuration
  */
-compositor_surface_config_t compositor_surface_config_default(struct wl_output *output);
+compositor_surface_config_t compositor_surface_config_default(void *native_output);
 
 /**
  * Check if surface is ready for rendering

@@ -127,8 +127,8 @@ static bool output_configure_frame_timer(struct output_state *output) {
 
 
 struct output_state *output_create(struct neowall_state *state,
-                                   struct wl_output *output, uint32_t name) {
-    if (!state || !output) {
+                                   void *native_output, uint32_t name) {
+    if (!state) {
         log_error("Invalid parameters for output_create");
         return NULL;
     }
@@ -140,7 +140,7 @@ struct output_state *output_create(struct neowall_state *state,
     }
 
     /* Initialize output state */
-    out->output = output;
+    out->native_output = native_output;
     out->xdg_output = NULL;
     out->name = name;
     out->width = 0;
@@ -150,7 +150,7 @@ struct output_state *output_create(struct neowall_state *state,
     out->pixel_width = 0;
     out->pixel_height = 0;
     out->scale = 1;
-    out->transform = WL_OUTPUT_TRANSFORM_NORMAL;
+    out->transform = COMPOSITOR_TRANSFORM_NORMAL;
     out->configured = false;
     out->needs_redraw = true;
     out->state = state;
@@ -302,7 +302,7 @@ void output_destroy(struct output_state *output) {
         output->compositor_surface = NULL;
     }
 
-    /* Note: We don't destroy output->output as it's managed by Wayland */
+    /* Note: We don't destroy native_output as it's managed by the display server */
 
     free(output);
 }

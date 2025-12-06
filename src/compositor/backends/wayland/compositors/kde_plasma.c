@@ -7,6 +7,7 @@
 #include <wayland-egl.h>
 #include <EGL/egl.h>
 #include "compositor.h"
+#include "compositor/backends/wayland.h"
 #include "neowall.h"
 #include "plasma-shell-client-protocol.h"
 
@@ -93,7 +94,8 @@ static const struct wl_registry_listener registry_listener = {
  * ============================================================================ */
 
 static void *kde_backend_init(struct neowall_state *state) {
-    if (!state || !state->display) {
+    wayland_t *wl = wayland_get();
+    if (!state || !wl || !wl->display) {
         log_error("Invalid state for KDE Plasma backend");
         return NULL;
     }
@@ -111,7 +113,7 @@ static void *kde_backend_init(struct neowall_state *state) {
     backend_data->has_plasma_shell = false;
 
     /* Get Wayland registry and listen for globals */
-    backend_data->registry = wl_display_get_registry(state->display);
+    backend_data->registry = wl_display_get_registry(wl->display);
     if (!backend_data->registry) {
         log_error("Failed to get Wayland registry");
         free(backend_data);
@@ -121,7 +123,7 @@ static void *kde_backend_init(struct neowall_state *state) {
     wl_registry_add_listener(backend_data->registry, &registry_listener, backend_data);
 
     /* Roundtrip to get all globals */
-    wl_display_roundtrip(state->display);
+    wl_display_roundtrip(wl->display);
 
     /* Check if plasma shell is available */
     if (!backend_data->has_plasma_shell) {
@@ -192,23 +194,25 @@ static struct compositor_surface *kde_create_surface(void *data,
     }
 
     /* Create base Wayland surface */
-    surface->wl_surface = wl_compositor_create_surface(backend_data->state->compositor);
-    if (!surface->wl_surface) {
+    wayland_t *wl = wayland_get();
+    struct wl_surface *wl_surface = wl_compositor_create_surface(wl->compositor);
+    if (!wl_surface) {
         log_error("Failed to create Wayland surface");
         free(surface_data);
         free(surface);
         return NULL;
     }
+    surface->native_surface = wl_surface;
 
     /* Get plasma surface from plasma shell */
     surface_data->plasma_surface = org_kde_plasma_shell_get_surface(
         backend_data->plasma_shell,
-        surface->wl_surface
+        wl_surface
     );
 
     if (!surface_data->plasma_surface) {
         log_error("Failed to get plasma surface");
-        wl_surface_destroy(surface->wl_surface);
+        wl_surface_destroy(wl_surface);
         free(surface_data);
         free(surface);
         return NULL;
@@ -235,7 +239,7 @@ static struct compositor_surface *kde_create_surface(void *data,
     surface->config = *config;
     surface->configured = false;
     surface->committed = false;
-    surface->output = config->output;
+    surface->native_output = config->output;
 
     log_debug("KDE Plasma surface created successfully");
 
@@ -269,9 +273,9 @@ static void kde_destroy_surface(struct compositor_surface *surface) {
     }
 
     /* Cleanup Wayland surface */
-    if (surface->wl_surface) {
-        wl_surface_destroy(surface->wl_surface);
-        surface->wl_surface = NULL;
+    if (surface->native_surface) {
+        wl_surface_destroy((struct wl_surface *)surface->native_surface);
+        surface->native_surface = NULL;
     }
 
     free(surface);
@@ -326,18 +330,18 @@ static bool kde_configure_surface(struct compositor_surface *surface,
 }
 
 static void kde_commit_surface(struct compositor_surface *surface) {
-    if (!surface || !surface->wl_surface) {
+    if (!surface || !surface->native_surface) {
         log_error("Invalid surface for commit");
         return;
     }
 
-    wl_surface_commit(surface->wl_surface);
+    wl_surface_commit((struct wl_surface *)surface->native_surface);
     surface->committed = true;
 }
 
 static bool kde_create_egl_window(struct compositor_surface *surface,
                                  int32_t width, int32_t height) {
-    if (!surface || !surface->wl_surface) {
+    if (!surface || !surface->native_surface) {
         log_error("Invalid surface for EGL window creation");
         return false;
     }
@@ -350,7 +354,8 @@ static bool kde_create_egl_window(struct compositor_surface *surface,
     }
 
     /* Create new EGL window */
-    surface->egl_window = wl_egl_window_create(surface->wl_surface, width, height);
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    surface->egl_window = wl_egl_window_create(wl_surface, width, height);
     if (!surface->egl_window) {
         log_error("Failed to create EGL window");
         return false;
@@ -362,6 +367,23 @@ static bool kde_create_egl_window(struct compositor_surface *surface,
     log_debug("EGL window created successfully");
 
     return true;
+}
+
+static bool kde_resize_egl_window(struct compositor_surface *surface,
+                                 int32_t width, int32_t height) {
+    if (!surface || !surface->egl_window) {
+        return false;
+    }
+
+    wl_egl_window_resize(surface->egl_window, width, height, 0, 0);
+    return true;
+}
+
+static EGLNativeWindowType kde_get_native_window(struct compositor_surface *surface) {
+    if (!surface || !surface->egl_window) {
+        return (EGLNativeWindowType)0;
+    }
+    return (EGLNativeWindowType)surface->egl_window;
 }
 
 static void kde_destroy_egl_window(struct compositor_surface *surface) {
@@ -387,7 +409,7 @@ static compositor_capabilities_t kde_get_capabilities(void *data) {
     return COMPOSITOR_CAP_MULTI_OUTPUT;
 }
 
-static void kde_on_output_added(void *data, struct wl_output *output) {
+static void kde_on_output_added(void *data, void *output) {
     if (!data || !output) {
         return;
     }
@@ -397,7 +419,7 @@ static void kde_on_output_added(void *data, struct wl_output *output) {
               backend_data->state ? "initialized" : "uninitialized");
 }
 
-static void kde_on_output_removed(void *data, struct wl_output *output) {
+static void kde_on_output_removed(void *data, void *output) {
     if (!data || !output) {
         return;
     }
@@ -407,25 +429,46 @@ static void kde_on_output_removed(void *data, struct wl_output *output) {
               backend_data->state ? "initialized" : "uninitialized");
 }
 
+static void kde_damage_surface(struct compositor_surface *surface,
+                              int32_t x, int32_t y, int32_t width, int32_t height) {
+    if (!surface || !surface->native_surface) {
+        return;
+    }
+
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    wl_surface_damage(wl_surface, x, y, width, height);
+}
+
+static void kde_set_scale(struct compositor_surface *surface, int32_t scale) {
+    if (!surface || !surface->native_surface) {
+        return;
+    }
+
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    wl_surface_set_buffer_scale(wl_surface, scale);
+}
+
 /* ============================================================================
  * EVENT HANDLING OPERATIONS
  * ============================================================================ */
 
 static int kde_get_fd(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
-    return wl_display_get_fd(backend->state->display);
+    return wl_display_get_fd(wl->display);
 }
 
 static bool kde_prepare_events(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    struct wl_display *display = backend->state->display;
+    struct wl_display *display = wl->display;
     while (wl_display_prepare_read(display) != 0) {
         if (wl_display_dispatch_pending(display) < 0) {
             return false;
@@ -436,29 +479,32 @@ static bool kde_prepare_events(void *data) {
 
 static bool kde_read_events(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    return wl_display_read_events(backend->state->display) >= 0;
+    return wl_display_read_events(wl->display) >= 0;
 }
 
 static bool kde_dispatch_events(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    return wl_display_dispatch_pending(backend->state->display) >= 0;
+    return wl_display_dispatch_pending(wl->display) >= 0;
 }
 
 static bool kde_flush(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    int ret = wl_display_flush(backend->state->display);
+    int ret = wl_display_flush(wl->display);
     if (ret < 0 && errno != EAGAIN) {
         return false;
     }
@@ -467,28 +513,48 @@ static bool kde_flush(void *data) {
 
 static void kde_cancel_read(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return;
     }
 
-    wl_display_cancel_read(backend->state->display);
+    wl_display_cancel_read(wl->display);
 }
 
 static int kde_get_error(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
 
-    return wl_display_get_error(backend->state->display);
+    return wl_display_get_error(wl->display);
+}
+
+static bool kde_sync(void *data) {
+    kde_backend_data_t *backend = data;
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
+        return false;
+    }
+
+    /* Flush pending requests and wait for server to process */
+    if (wl_display_flush(wl->display) < 0) {
+        return false;
+    }
+    if (wl_display_roundtrip(wl->display) < 0) {
+        return false;
+    }
+    return true;
 }
 
 static void *kde_get_native_display(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl) {
         return NULL;
     }
-    return backend->state->display;
+    return wl->display;
 }
 
 static EGLenum kde_get_egl_platform(void *data) {
@@ -509,9 +575,13 @@ static const compositor_backend_ops_t kde_backend_ops = {
     .commit_surface = kde_commit_surface,
     .create_egl_window = kde_create_egl_window,
     .destroy_egl_window = kde_destroy_egl_window,
+    .resize_egl_window = kde_resize_egl_window,
+    .get_native_window = kde_get_native_window,
     .get_capabilities = kde_get_capabilities,
     .on_output_added = kde_on_output_added,
     .on_output_removed = kde_on_output_removed,
+    .damage_surface = kde_damage_surface,
+    .set_scale = kde_set_scale,
 
     /* Event handling operations */
     .get_fd = kde_get_fd,
@@ -521,6 +591,7 @@ static const compositor_backend_ops_t kde_backend_ops = {
     .flush = kde_flush,
     .cancel_read = kde_cancel_read,
     .get_error = kde_get_error,
+    .sync = kde_sync,
     .get_native_display = kde_get_native_display,
     .get_egl_platform = kde_get_egl_platform,
 };
@@ -556,12 +627,12 @@ struct compositor_backend *compositor_backend_kde_plasma_init(struct neowall_sta
  *
  * This backend provides full KDE Plasma Shell protocol support:
  *
- * ✅ Panel role with windows_can_cover behavior acts as wallpaper layer
- * ✅ Per-output surface management
- * ✅ Position control (always 0,0 for wallpapers)
- * ✅ Skip taskbar/switcher for clean desktop
- * ✅ EGL window support for GPU rendering
- * ✅ Multi-monitor support
+ * - Panel role with windows_can_cover behavior acts as wallpaper layer
+ * - Per-output surface management
+ * - Position control (always 0,0 for wallpapers)
+ * - Skip taskbar/switcher for clean desktop
+ * - EGL window support for GPU rendering
+ * - Multi-monitor support
  *
  * The backend creates surfaces with the ORG_KDE_PLASMA_SURFACE_ROLE_PANEL
  * role and PANEL_BEHAVIOR_WINDOWS_CAN_COVER behavior. This allows the surface

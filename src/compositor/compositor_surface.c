@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <wayland-client.h>
-#include <wayland-egl.h>
 #include <EGL/egl.h>
 #include "compositor.h"
 #include "neowall.h"
@@ -160,11 +158,18 @@ void compositor_surface_damage(struct compositor_surface *surface,
         return;
     }
 
-    /* Damage the Wayland surface if available (Wayland backends) */
-    if (surface->wl_surface) {
-        wl_surface_damage(surface->wl_surface, x, y, width, height);
+    struct compositor_backend *backend = surface->backend;
+
+    if (!backend) {
+        log_error("Cannot damage surface: backend is NULL");
+        return;
     }
-    /* For X11 backends, damage is handled differently (no explicit damage call needed) */
+
+    /* Use backend's damage_surface operation if available */
+    if (backend->ops && backend->ops->damage_surface) {
+        backend->ops->damage_surface(surface, x, y, width, height);
+    }
+    /* For backends without explicit damage support, damage is handled at commit time */
 }
 
 void compositor_surface_commit(struct compositor_surface *surface) {
@@ -233,22 +238,11 @@ EGLSurface compositor_surface_create_egl(struct compositor_surface *surface,
 
     /* X11 backend uses native window handle directly, Wayland uses egl_window */
     EGLNativeWindowType native_window;
-    if (surface->egl_window) {
-        /* Wayland: use wl_egl_window */
+    if (backend->ops->get_native_window) {
+        native_window = backend->ops->get_native_window(surface);
+    } else if (surface->egl_window) {
+        /* Fallback: assume egl_window is the native window handle */
         native_window = (EGLNativeWindowType)surface->egl_window;
-    } else if (surface->backend_data) {
-        /* X11: backend_data contains x11_surface_data_t with native_window */
-        /* Cast to get the native window handle from X11 backend data */
-        typedef struct {
-            void *x_window;
-            void *egl_surface;
-            EGLNativeWindowType native_window;
-            bool mapped;
-        } x11_surface_data_t;
-
-        x11_surface_data_t *x11_data = (x11_surface_data_t *)surface->backend_data;
-        native_window = x11_data->native_window;
-        log_debug("Using X11 native window handle: 0x%lx", (unsigned long)native_window);
     } else {
         log_error("Backend created EGL window but no valid window handle available");
         return EGL_NO_SURFACE;
@@ -310,7 +304,7 @@ void compositor_surface_destroy_egl(struct compositor_surface *surface,
  * ============================================================================ */
 
 /* Get default surface configuration */
-compositor_surface_config_t compositor_surface_config_default(struct wl_output *output) {
+compositor_surface_config_t compositor_surface_config_default(void *native_output) {
     compositor_surface_config_t config = {
         .layer = COMPOSITOR_LAYER_BACKGROUND,
         .anchor = COMPOSITOR_ANCHOR_FILL,
@@ -318,7 +312,7 @@ compositor_surface_config_t compositor_surface_config_default(struct wl_output *
         .keyboard_interactivity = false,
         .width = 0,  /* Auto */
         .height = 0, /* Auto */
-        .output = output,
+        .output = native_output,
     };
 
     return config;
@@ -356,10 +350,21 @@ bool compositor_surface_resize_egl(struct compositor_surface *surface,
         return false;
     }
 
+    struct compositor_backend *backend = surface->backend;
+    if (!backend) {
+        log_error("Cannot resize: no backend");
+        return false;
+    }
+
     log_debug("Resizing EGL window: %dx%d -> %dx%d",
               surface->width, surface->height, width, height);
 
-    wl_egl_window_resize(surface->egl_window, width, height, 0, 0);
+    /* Use backend's resize operation if available */
+    if (backend->ops && backend->ops->resize_egl_window) {
+        if (!backend->ops->resize_egl_window(surface, width, height)) {
+            return false;
+        }
+    }
 
     surface->width = width;
     surface->height = height;
@@ -369,7 +374,7 @@ bool compositor_surface_resize_egl(struct compositor_surface *surface,
 
 /* Set surface scale factor */
 void compositor_surface_set_scale(struct compositor_surface *surface, int32_t scale) {
-    if (!surface || !surface->wl_surface) {
+    if (!surface) {
         return;
     }
 
@@ -379,7 +384,13 @@ void compositor_surface_set_scale(struct compositor_surface *surface, int32_t sc
 
     log_debug("Setting surface scale: %d", scale);
 
-    wl_surface_set_buffer_scale(surface->wl_surface, scale);
+    struct compositor_backend *backend = surface->backend;
+
+    /* Use backend's set_scale operation if available */
+    if (backend && backend->ops && backend->ops->set_scale) {
+        backend->ops->set_scale(surface, scale);
+    }
+
     surface->scale = scale;
 }
 

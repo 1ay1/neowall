@@ -8,9 +8,6 @@
 #include <stdatomic.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
-#include <wayland-client.h>
-#include "xdg-output-unstable-v1-client-protocol.h"
-#include "tearing-control-v1-client-protocol.h"
 #include "version.h"
 #include "egl/capability.h"
 #include "../src/output/output.h"
@@ -35,17 +32,6 @@ struct neowall_state {
     /* ===== COMPOSITOR ABSTRACTION - ONLY INTERFACE ===== */
     struct compositor_backend *compositor_backend;
     
-    /* ===== WAYLAND GLOBALS (managed by compositor backend) ===== */
-    /* NOTE: These fields are managed by the Wayland backend implementations.
-     * They are set during backend init() and cleared during backend cleanup().
-     * Do not access directly - use compositor backend operations instead. */
-    struct wl_display *display;
-    struct wl_registry *registry;
-    struct wl_compositor *compositor;
-    struct wl_shm *shm;
-    struct zxdg_output_manager_v1 *xdg_output_manager;
-    struct wp_tearing_control_manager_v1 *tearing_control_manager;
-
     /* ===== EGL CONTEXT (PLATFORM-AGNOSTIC) ===== */
     EGLDisplay egl_display;
     EGLContext egl_context;

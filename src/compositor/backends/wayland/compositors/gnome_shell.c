@@ -7,6 +7,7 @@
 #include <wayland-egl.h>
 #include <EGL/egl.h>
 #include "compositor.h"
+#include "compositor/backends/wayland.h"
 #include "neowall.h"
 
 /*
@@ -70,7 +71,8 @@ typedef struct {
  * ============================================================================ */
 
 static void *gnome_backend_init(struct neowall_state *state) {
-    if (!state || !state->display) {
+    wayland_t *wl = wayland_get();
+    if (!state || !wl || !wl->display) {
         log_error("Invalid state for GNOME Shell backend");
         return NULL;
     }
@@ -197,8 +199,8 @@ static void gnome_destroy_surface(struct compositor_surface *surface) {
         wl_egl_window_destroy(surface->egl_window);
     }
 
-    if (surface->wl_surface) {
-        wl_surface_destroy(surface->wl_surface);
+    if (surface->native_surface) {
+        wl_surface_destroy((struct wl_surface *)surface->native_surface);
     }
 
     free(surface);
@@ -228,24 +230,25 @@ static bool gnome_configure_surface(struct compositor_surface *surface,
 }
 
 static void gnome_commit_surface(struct compositor_surface *surface) {
-    if (!surface || !surface->wl_surface) {
+    if (!surface || !surface->native_surface) {
         log_error("Invalid surface for commit");
         return;
     }
 
-    wl_surface_commit(surface->wl_surface);
+    wl_surface_commit((struct wl_surface *)surface->native_surface);
 }
 
 static bool gnome_create_egl_window(struct compositor_surface *surface,
                                    int32_t width, int32_t height) {
-    if (!surface || !surface->wl_surface) {
+    if (!surface || !surface->native_surface) {
         log_error("Invalid surface for EGL window creation");
         return false;
     }
 
     log_debug("Creating EGL window for GNOME surface: %dx%d", width, height);
 
-    surface->egl_window = wl_egl_window_create(surface->wl_surface, width, height);
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    surface->egl_window = wl_egl_window_create(wl_surface, width, height);
     if (!surface->egl_window) {
         log_error("Failed to create EGL window");
         return false;
@@ -255,6 +258,23 @@ static bool gnome_create_egl_window(struct compositor_surface *surface,
     surface->height = height;
 
     return true;
+}
+
+static bool gnome_resize_egl_window(struct compositor_surface *surface,
+                                   int32_t width, int32_t height) {
+    if (!surface || !surface->egl_window) {
+        return false;
+    }
+
+    wl_egl_window_resize(surface->egl_window, width, height, 0, 0);
+    return true;
+}
+
+static EGLNativeWindowType gnome_get_native_window(struct compositor_surface *surface) {
+    if (!surface || !surface->egl_window) {
+        return (EGLNativeWindowType)0;
+    }
+    return (EGLNativeWindowType)surface->egl_window;
 }
 
 static void gnome_destroy_egl_window(struct compositor_surface *surface) {
@@ -275,18 +295,37 @@ static compositor_capabilities_t gnome_get_capabilities(void *data) {
     return COMPOSITOR_CAP_SUBSURFACES;
 }
 
-static void gnome_on_output_added(void *data, struct wl_output *output) {
+static void gnome_on_output_added(void *data, void *output) {
     (void)data;
     (void)output;
 
     log_debug("Output added to GNOME backend");
 }
 
-static void gnome_on_output_removed(void *data, struct wl_output *output) {
+static void gnome_on_output_removed(void *data, void *output) {
     (void)data;
     (void)output;
 
     log_debug("Output removed from GNOME backend");
+}
+
+static void gnome_damage_surface(struct compositor_surface *surface,
+                                int32_t x, int32_t y, int32_t width, int32_t height) {
+    if (!surface || !surface->native_surface) {
+        return;
+    }
+
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    wl_surface_damage(wl_surface, x, y, width, height);
+}
+
+static void gnome_set_scale(struct compositor_surface *surface, int32_t scale) {
+    if (!surface || !surface->native_surface) {
+        return;
+    }
+
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    wl_surface_set_buffer_scale(wl_surface, scale);
 }
 
 /* ============================================================================
@@ -295,19 +334,21 @@ static void gnome_on_output_removed(void *data, struct wl_output *output) {
 
 static int gnome_get_fd(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
-    return wl_display_get_fd(backend->state->display);
+    return wl_display_get_fd(wl->display);
 }
 
 static bool gnome_prepare_events(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    struct wl_display *display = backend->state->display;
+    struct wl_display *display = wl->display;
     while (wl_display_prepare_read(display) != 0) {
         if (wl_display_dispatch_pending(display) < 0) {
             return false;
@@ -318,29 +359,32 @@ static bool gnome_prepare_events(void *data) {
 
 static bool gnome_read_events(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    return wl_display_read_events(backend->state->display) >= 0;
+    return wl_display_read_events(wl->display) >= 0;
 }
 
 static bool gnome_dispatch_events(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    return wl_display_dispatch_pending(backend->state->display) >= 0;
+    return wl_display_dispatch_pending(wl->display) >= 0;
 }
 
 static bool gnome_flush(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    int ret = wl_display_flush(backend->state->display);
+    int ret = wl_display_flush(wl->display);
     if (ret < 0 && errno != EAGAIN) {
         return false;
     }
@@ -349,28 +393,48 @@ static bool gnome_flush(void *data) {
 
 static void gnome_cancel_read(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return;
     }
 
-    wl_display_cancel_read(backend->state->display);
+    wl_display_cancel_read(wl->display);
 }
 
 static int gnome_get_error(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
 
-    return wl_display_get_error(backend->state->display);
+    return wl_display_get_error(wl->display);
+}
+
+static bool gnome_sync(void *data) {
+    gnome_backend_data_t *backend = data;
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
+        return false;
+    }
+
+    /* Flush pending requests and wait for server to process */
+    if (wl_display_flush(wl->display) < 0) {
+        return false;
+    }
+    if (wl_display_roundtrip(wl->display) < 0) {
+        return false;
+    }
+    return true;
 }
 
 static void *gnome_get_native_display(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl) {
         return NULL;
     }
-    return backend->state->display;
+    return wl->display;
 }
 
 static EGLenum gnome_get_egl_platform(void *data) {
@@ -391,9 +455,13 @@ static const compositor_backend_ops_t gnome_backend_ops = {
     .commit_surface = gnome_commit_surface,
     .create_egl_window = gnome_create_egl_window,
     .destroy_egl_window = gnome_destroy_egl_window,
+    .resize_egl_window = gnome_resize_egl_window,
+    .get_native_window = gnome_get_native_window,
     .get_capabilities = gnome_get_capabilities,
     .on_output_added = gnome_on_output_added,
     .on_output_removed = gnome_on_output_removed,
+    .damage_surface = gnome_damage_surface,
+    .set_scale = gnome_set_scale,
 
     /* Event handling operations */
     .get_fd = gnome_get_fd,
@@ -403,6 +471,7 @@ static const compositor_backend_ops_t gnome_backend_ops = {
     .flush = gnome_flush,
     .cancel_read = gnome_cancel_read,
     .get_error = gnome_get_error,
+    .sync = gnome_sync,
     .get_native_display = gnome_get_native_display,
     .get_egl_platform = gnome_get_egl_platform,
 };

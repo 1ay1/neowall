@@ -5,7 +5,6 @@
 #include <stdbool.h>
 #include <pthread.h>
 #include <stdatomic.h>
-#include <wayland-client.h>
 #include <GLES2/gl2.h>
 #include "../image/image.h"   /* For struct image_data and enum image_format */
 
@@ -15,7 +14,6 @@
 /* Forward declarations for external types */
 struct neowall_state;
 struct compositor_surface;
-struct zxdg_output_v1;
 
 /* Thread-safe atomic types */
 typedef atomic_bool atomic_bool_t;
@@ -71,11 +69,11 @@ struct wallpaper_config {
 
 /* Output (monitor) state */
 struct output_state {
-    struct wl_output *output;
-    struct zxdg_output_v1 *xdg_output;  /* For getting connector name */
+    void *native_output;                /* Platform-specific output handle (wl_output* for Wayland, NULL for X11) */
+    void *xdg_output;                   /* Extended output info (zxdg_output_v1* for Wayland) */
     struct compositor_surface *compositor_surface;  /* Compositor abstraction surface */
 
-    uint32_t name;              /* Wayland output name/ID */
+    uint32_t name;              /* Output name/ID */
     /* width/height represent the current physical buffer in pixels */
     int32_t width;
     int32_t height;
@@ -188,7 +186,7 @@ struct output_state {
 
 /* Output management */
 struct output_state *output_create(struct neowall_state *state,
-                                   struct wl_output *output, uint32_t name);
+                                   void *native_output, uint32_t name);
 void output_destroy(struct output_state *output);
 bool output_configure_compositor_surface(struct output_state *output);
 bool output_create_egl_surface(struct output_state *output);
