@@ -181,20 +181,15 @@ else
     $(info Wayland backend not available (wayland-client or wayland-egl not found))
 endif
 
-# X11 backend support
-ifeq ($(HAS_X11),yes)
-    CFLAGS += -DHAVE_X11_BACKEND
-    LDFLAGS += -lX11
+# X11 backend support (requires both libX11 and libXrandr)
+ifeq ($(HAS_X11)$(HAS_XRANDR),yesyes)
+    CFLAGS += -DHAVE_X11_BACKEND -DHAVE_XRANDR
+    LDFLAGS += -lX11 -lXrandr
     X11_BACKEND := yes
-    $(info X11 backend available)
-
-    ifeq ($(HAS_XRANDR),yes)
-        CFLAGS += -DHAVE_XRANDR
-        LDFLAGS += -lXrandr
-        $(info XRandR multi-monitor support enabled)
-    endif
+    $(info X11 backend available (with XRandR multi-monitor support))
 else
     X11_BACKEND := no
+    $(info X11 backend not available (requires libx11 and libxrandr))
 endif
 
 # Ensure at least one backend is available
@@ -243,8 +238,8 @@ endif
 # EGL core (always compiled)
 EGL_CORE_SOURCES = $(EGL_DIR)/capability.c $(EGL_DIR)/egl_core.c
 
-# X11 backend sources (conditional)
-ifeq ($(HAS_X11),yes)
+# X11 backend sources (conditional - requires X11_BACKEND=yes)
+ifeq ($(X11_BACKEND),yes)
     X11_BACKEND_DIR = $(SRC_DIR)/compositor/backends/x11
     X11_BACKEND_SOURCES = $(X11_BACKEND_DIR)/x11_core.c
 else
