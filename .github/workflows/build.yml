@@ -55,11 +55,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build (Wayland only)
-        run: make
+        run: make X11_BACKEND=no
 
       - name: Verify X11 backend not compiled
         run: |
-          ! grep -q "X11 backend available" <(make 2>&1) || echo "X11 correctly not available"
+          make X11_BACKEND=no 2>&1 | grep -q "X11 backend disabled" && echo "X11 correctly disabled"
 
       - name: Check binary
         run: |
@@ -83,11 +83,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build (X11 only)
-        run: make
+        run: make WAYLAND_BACKEND=no
 
       - name: Verify Wayland backend not compiled
         run: |
-          ! grep -q "Wayland backend available" <(make 2>&1) || echo "Wayland correctly not available"
+          make WAYLAND_BACKEND=no 2>&1 | grep -q "Wayland backend disabled" && echo "Wayland correctly disabled"
 
       - name: Check binary
         run: |
@@ -113,15 +113,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build (X11 only)
-        run: make
+        run: make WAYLAND_BACKEND=no
 
       - name: Verify Wayland backend not compiled
         run: |
-          make 2>&1 | grep -q "Wayland backend not available" && echo "Wayland correctly disabled"
+          make WAYLAND_BACKEND=no 2>&1 | grep -q "Wayland backend disabled" && echo "Wayland correctly disabled"
 
       - name: Verify X11 backend compiled
         run: |
-          make 2>&1 | grep -q "X11 backend available" && echo "X11 backend enabled"
+          make WAYLAND_BACKEND=no 2>&1 | grep -q "X11 backend available" && echo "X11 backend enabled"
 
       - name: Check binary
         run: |

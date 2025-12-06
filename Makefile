@@ -171,6 +171,8 @@ ifeq ($(HAS_EGL_KHR_FENCE),yes)
 endif
 
 # Wayland backend support (requires wayland-client, wayland-egl, AND wayland-protocols)
+# Can be explicitly disabled with: make WAYLAND_BACKEND=no
+ifneq ($(WAYLAND_BACKEND),no)
 ifeq ($(HAS_WAYLAND)$(HAS_WAYLAND_PROTOCOLS),yesyes)
     CFLAGS += -DHAVE_WAYLAND_BACKEND
     LDFLAGS += -lwayland-client -lwayland-egl
@@ -180,8 +182,14 @@ else
     WAYLAND_BACKEND := no
     $(info Wayland backend not available (requires wayland-client, wayland-egl, and wayland-protocols))
 endif
+else
+    WAYLAND_BACKEND := no
+    $(info Wayland backend disabled by user)
+endif
 
 # X11 backend support (requires both libX11 and libXrandr)
+# Can be explicitly disabled with: make X11_BACKEND=no
+ifneq ($(X11_BACKEND),no)
 ifeq ($(HAS_X11)$(HAS_XRANDR),yesyes)
     CFLAGS += -DHAVE_X11_BACKEND -DHAVE_XRANDR
     LDFLAGS += -lX11 -lXrandr
@@ -190,6 +198,10 @@ ifeq ($(HAS_X11)$(HAS_XRANDR),yesyes)
 else
     X11_BACKEND := no
     $(info X11 backend not available (requires libx11 and libxrandr))
+endif
+else
+    X11_BACKEND := no
+    $(info X11 backend disabled by user)
 endif
 
 # Ensure at least one backend is available
@@ -416,63 +428,58 @@ $(INC_DIR)/version.h: $(INC_DIR)/version.h.in
 	@sed 's/@VERSION@/$(VERSION)/g' $< > $@
 	@echo "Generated: $(INC_DIR)/version.h (v$(VERSION))"
 
-# Generate Wayland protocol files
-protocols: $(PROTO_HEADERS) $(PROTO_SRCS)
-
-$(PROTO_DIR)/%-client-protocol.h: | directories
-	@if [ -f "$(WLR_LAYER_SHELL_XML)" ]; then \
-		echo "Generating wlr-layer-shell header...$(COLOR_RESET)"; \
-		wayland-scanner client-header $(WLR_LAYER_SHELL_XML) $@ 2>/dev/null || echo "Warning: Could not generate wlr-layer-shell header$(COLOR_RESET)"; \
-	fi
-	@if [ -f "$(XDG_SHELL_XML)" ]; then \
-		echo "Generating xdg-shell header...$(COLOR_RESET)"; \
-		wayland-scanner client-header $(XDG_SHELL_XML) $(PROTO_DIR)/xdg-shell-client-protocol.h 2>/dev/null || echo "Warning: Could not generate xdg-shell header$(COLOR_RESET)"; \
-	fi
-	@if [ -f "$(VIEWPORTER_XML)" ]; then \
-		echo "Generating viewporter header...$(COLOR_RESET)"; \
-		wayland-scanner client-header $(VIEWPORTER_XML) $(PROTO_DIR)/viewporter-client-protocol.h 2>/dev/null || echo "Warning: Could not generate viewporter header$(COLOR_RESET)"; \
-	fi
-	@if [ -f "$(XDG_OUTPUT_XML)" ]; then \
-		echo "Generating xdg-output header...$(COLOR_RESET)"; \
-		wayland-scanner client-header $(XDG_OUTPUT_XML) $(PROTO_DIR)/xdg-output-unstable-v1-client-protocol.h 2>/dev/null || echo "Warning: Could not generate xdg-output header$(COLOR_RESET)"; \
-	fi
-	@if [ -f "$(PLASMA_SHELL_XML)" ]; then \
-		echo "Generating plasma-shell header...$(COLOR_RESET)"; \
-		wayland-scanner client-header $(PLASMA_SHELL_XML) $(PROTO_DIR)/plasma-shell-client-protocol.h 2>/dev/null || echo "Warning: Could not generate plasma-shell header$(COLOR_RESET)"; \
-	fi
-	@if [ -f "$(TEARING_CONTROL_XML)" ]; then \
-		echo "Generating tearing-control header...$(COLOR_RESET)"; \
-		wayland-scanner client-header $(TEARING_CONTROL_XML) $(PROTO_DIR)/tearing-control-v1-client-protocol.h 2>/dev/null || echo "Warning: Could not generate tearing-control header$(COLOR_RESET)"; \
+# Wayland protocol files - use pre-generated files from protocols/ directory
+# These are checked into git and should not need regeneration
+# To regenerate, run: make regenerate-protocols (requires wayland-scanner and XML files)
+protocols:
+	@if [ "$(WAYLAND_BACKEND)" = "yes" ]; then \
+		for f in $(PROTO_HEADERS); do \
+			if [ ! -f "$$f" ]; then \
+				echo "Error: Missing protocol header: $$f"; \
+				echo "Protocol files should be pre-generated in the repository."; \
+				exit 1; \
+			fi; \
+		done; \
+		echo "Protocol headers verified"; \
 	fi
 
-$(PROTO_DIR)/%-client-protocol.c: | directories
+# Optional target to regenerate protocol files (for development only)
+regenerate-protocols: | directories
+	@echo "Regenerating Wayland protocol files..."
 	@if [ -f "$(WLR_LAYER_SHELL_XML)" ]; then \
-		echo "Generating wlr-layer-shell code...$(COLOR_RESET)"; \
-		wayland-scanner private-code $(WLR_LAYER_SHELL_XML) $(PROTO_DIR)/wlr-layer-shell-unstable-v1-client-protocol.c 2>/dev/null || echo "Warning: Could not generate wlr-layer-shell code$(COLOR_RESET)"; \
+		echo "Generating wlr-layer-shell..."; \
+		wayland-scanner client-header $(WLR_LAYER_SHELL_XML) $(PROTO_DIR)/wlr-layer-shell-unstable-v1-client-protocol.h; \
+		wayland-scanner private-code $(WLR_LAYER_SHELL_XML) $(PROTO_DIR)/wlr-layer-shell-unstable-v1-client-protocol.c; \
 	fi
 	@if [ -f "$(XDG_SHELL_XML)" ]; then \
-		echo "Generating xdg-shell code...$(COLOR_RESET)"; \
-		wayland-scanner private-code $(XDG_SHELL_XML) $(PROTO_DIR)/xdg-shell-client-protocol.c 2>/dev/null || echo "Warning: Could not generate xdg-shell code$(COLOR_RESET)"; \
+		echo "Generating xdg-shell..."; \
+		wayland-scanner client-header $(XDG_SHELL_XML) $(PROTO_DIR)/xdg-shell-client-protocol.h; \
+		wayland-scanner private-code $(XDG_SHELL_XML) $(PROTO_DIR)/xdg-shell-client-protocol.c; \
 	fi
 	@if [ -f "$(VIEWPORTER_XML)" ]; then \
-		echo "Generating viewporter code...$(COLOR_RESET)"; \
-		wayland-scanner private-code $(VIEWPORTER_XML) $(PROTO_DIR)/viewporter-client-protocol.c 2>/dev/null || echo "Warning: Could not generate viewporter code$(COLOR_RESET)"; \
+		echo "Generating viewporter..."; \
+		wayland-scanner client-header $(VIEWPORTER_XML) $(PROTO_DIR)/viewporter-client-protocol.h; \
+		wayland-scanner private-code $(VIEWPORTER_XML) $(PROTO_DIR)/viewporter-client-protocol.c; \
 	fi
 	@if [ -f "$(XDG_OUTPUT_XML)" ]; then \
-		echo "Generating xdg-output code...$(COLOR_RESET)"; \
-		wayland-scanner private-code $(XDG_OUTPUT_XML) $(PROTO_DIR)/xdg-output-unstable-v1-client-protocol.c 2>/dev/null || echo "Warning: Could not generate xdg-output code$(COLOR_RESET)"; \
+		echo "Generating xdg-output..."; \
+		wayland-scanner client-header $(XDG_OUTPUT_XML) $(PROTO_DIR)/xdg-output-unstable-v1-client-protocol.h; \
+		wayland-scanner private-code $(XDG_OUTPUT_XML) $(PROTO_DIR)/xdg-output-unstable-v1-client-protocol.c; \
 	fi
 	@if [ -f "$(PLASMA_SHELL_XML)" ]; then \
-		echo "Generating plasma-shell code...$(COLOR_RESET)"; \
-		wayland-scanner private-code $(PLASMA_SHELL_XML) $(PROTO_DIR)/plasma-shell-client-protocol.c 2>/dev/null || echo "Warning: Could not generate plasma-shell code$(COLOR_RESET)"; \
+		echo "Generating plasma-shell..."; \
+		wayland-scanner client-header $(PLASMA_SHELL_XML) $(PROTO_DIR)/plasma-shell-client-protocol.h; \
+		wayland-scanner private-code $(PLASMA_SHELL_XML) $(PROTO_DIR)/plasma-shell-client-protocol.c; \
 	fi
 	@if [ -f "$(TEARING_CONTROL_XML)" ]; then \
-		echo "Generating tearing-control code...$(COLOR_RESET)"; \
-		wayland-scanner private-code $(TEARING_CONTROL_XML) $(PROTO_DIR)/tearing-control-v1-client-protocol.c 2>/dev/null || echo "Warning: Could not generate tearing-control code$(COLOR_RESET)"; \
+		echo "Generating tearing-control..."; \
+		wayland-scanner client-header $(TEARING_CONTROL_XML) $(PROTO_DIR)/tearing-control-v1-client-protocol.h; \
+		wayland-scanner private-code $(TEARING_CONTROL_XML) $(PROTO_DIR)/tearing-control-v1-client-protocol.c; \
 	fi
+	@echo "Protocol regeneration complete"
 
 # Compile protocol objects
-$(OBJ_DIR)/proto_%.o: $(PROTO_DIR)/%.c $(PROTO_HEADERS) | directories
+$(OBJ_DIR)/proto_%.o: $(PROTO_DIR)/%.c | directories
 	@echo "Compiling protocol: $<"
 	@$(CC) $(CFLAGS) -Wno-unused-parameter -c $< -o $@
 
