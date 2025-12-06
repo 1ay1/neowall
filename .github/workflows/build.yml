@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  build-arch:
-    name: Build on Arch Linux
+  build-arch-full:
+    name: Arch Linux (Wayland + X11)
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
@@ -32,34 +32,64 @@ jobs:
           ./build/bin/neowall --version
           ./build/bin/neowall --help
 
-  build-ubuntu:
-    name: Build on Ubuntu
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neowall-arch-full
+          path: build/bin/neowall
+
+  build-arch-wayland-only:
+    name: Arch Linux (Wayland only)
     runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
 
     steps:
-      - name: Install dependencies
+      - name: Update system and install dependencies (no X11)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config \
-            libwayland-dev libwayland-egl-backend-dev \
-            libegl1-mesa-dev libgles2-mesa-dev \
-            libpng-dev libjpeg-dev wayland-protocols \
-            libx11-dev libxrandr-dev
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git wayland wayland-protocols \
+            egl-wayland mesa libpng libjpeg-turbo
 
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build
+      - name: Build (Wayland only)
         run: make
+
+      - name: Verify X11 backend not compiled
+        run: |
+          ! grep -q "X11 backend available" <(make 2>&1) || echo "X11 correctly not available"
 
       - name: Check binary
         run: |
           test -f build/bin/neowall
           ./build/bin/neowall --version
-          ./build/bin/neowall --help
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: neowall-ubuntu
-          path: build/bin/neowall
+  build-arch-x11-only:
+    name: Arch Linux (X11 only)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Update system and install dependencies (no Wayland)
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git mesa libpng libjpeg-turbo \
+            libx11 libxrandr
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build (X11 only)
+        run: make
+
+      - name: Verify Wayland backend not compiled
+        run: |
+          ! grep -q "Wayland backend available" <(make 2>&1) || echo "Wayland correctly not available"
+
+      - name: Check binary
+        run: |
+          test -f build/bin/neowall
+          ./build/bin/neowall --version
