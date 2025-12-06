@@ -244,6 +244,93 @@ typedef struct compositor_backend_ops {
      * @return true on success, false on failure
      */
     bool (*init_outputs)(void *backend_data, struct neowall_state *state);
+    
+    /* ===== EVENT HANDLING OPERATIONS ===== */
+    
+    /**
+     * Get file descriptor for polling
+     * Returns the file descriptor that can be polled for compositor events.
+     * 
+     * @param backend_data Data returned from init()
+     * @return FD for poll(), or -1 if not pollable
+     */
+    int (*get_fd)(void *backend_data);
+    
+    /**
+     * Prepare for event reading
+     * Prepares the backend for reading events (Wayland-specific, no-op for X11).
+     * Must be called before poll() for Wayland backends.
+     * 
+     * @param backend_data Data returned from init()
+     * @return true on success, false on failure
+     */
+    bool (*prepare_events)(void *backend_data);
+    
+    /**
+     * Read events from compositor
+     * Reads events from the compositor (may block if prepared).
+     * For Wayland, reads events that were prepared. For X11, this is a no-op.
+     * 
+     * @param backend_data Data returned from init()
+     * @return true on success, false on failure
+     */
+    bool (*read_events)(void *backend_data);
+    
+    /**
+     * Dispatch pending events
+     * Processes all pending events from the compositor.
+     * 
+     * @param backend_data Data returned from init()
+     * @return true on success, false on failure
+     */
+    bool (*dispatch_events)(void *backend_data);
+    
+    /**
+     * Flush outgoing requests to compositor
+     * Sends all buffered requests to the compositor.
+     * 
+     * @param backend_data Data returned from init()
+     * @return true on success, false on failure (EAGAIN/EPIPE are failures)
+     */
+    bool (*flush)(void *backend_data);
+    
+    /**
+     * Cancel prepared event read
+     * Cancels a prepared read operation (Wayland-specific, no-op for X11).
+     * Must be called if prepare_events() was called but read_events() won't be.
+     * 
+     * @param backend_data Data returned from init()
+     */
+    void (*cancel_read)(void *backend_data);
+    
+    /**
+     * Get error code from display/connection
+     * Returns the error code from the compositor connection.
+     * 
+     * @param backend_data Data returned from init()
+     * @return 0 if no error, error code otherwise
+     */
+    int (*get_error)(void *backend_data);
+    
+    /* ===== DISPLAY/EGL OPERATIONS ===== */
+    
+    /**
+     * Get native display handle for EGL
+     * Returns the native display pointer for EGL initialization.
+     * 
+     * @param backend_data Data returned from init()
+     * @return Native display pointer (wl_display* or Display*)
+     */
+    void *(*get_native_display)(void *backend_data);
+    
+    /**
+     * Get EGL platform type
+     * Returns the EGL platform type for this backend.
+     * 
+     * @param backend_data Data returned from init()
+     * @return EGL_PLATFORM_WAYLAND_KHR, EGL_PLATFORM_X11_KHR, etc.
+     */
+    EGLenum (*get_egl_platform)(void *backend_data);
 } compositor_backend_ops_t;
 
 /* ============================================================================
@@ -350,6 +437,20 @@ void compositor_surface_destroy(struct compositor_surface *surface);
  */
 bool compositor_surface_configure(struct compositor_surface *surface,
                                   const compositor_surface_config_t *config);
+
+/**
+ * Damage surface region
+ * Marks a region of the surface as damaged and needing repaint.
+ * 
+ * @param surface Surface to damage
+ * @param x X coordinate of damaged region
+ * @param y Y coordinate of damaged region
+ * @param width Width of damaged region
+ * @param height Height of damaged region
+ */
+void compositor_surface_damage(struct compositor_surface *surface,
+                               int32_t x, int32_t y,
+                               int32_t width, int32_t height);
 
 /**
  * Commit surface changes

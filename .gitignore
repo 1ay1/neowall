@@ -5,6 +5,7 @@ build/
 *.so
 *.so.*
 staticwall
+REFACTORING_PLAN.md
 
 # Generated files
 include/version.h
