@@ -263,10 +263,10 @@ static bool send_daemon_signal(int signal, const char *action, bool check_cycle)
         printf("Cannot cycle wallpaper: Only one wallpaper/shader configured.\n");
         printf("\n");
         printf("To enable cycling:\n");
-        printf("  • Use a directory path ending with '/' in your config\n");
+        printf("  - Use a directory path ending with '/' in your config\n");
         printf("    Example: path ~/Pictures/Wallpapers/\n");
-        printf("  • Or configure a 'duration' to cycle through wallpapers\n");
-        printf("  • Multiple files will be loaded and cycled alphabetically\n");
+        printf("  - Or configure a 'duration' to cycle through wallpapers\n");
+        printf("  - Multiple files will be loaded and cycled alphabetically\n");
         printf("\n");
         printf("Check current status with: neowall current\n");
         return false;

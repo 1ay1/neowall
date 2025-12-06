@@ -1415,7 +1415,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
             if (cleaned_source) {
                 source_body = cleaned_source;
                 needs_cleanup = true;
-                log_debug("✓ Successfully removed conflicting uniforms");
+                log_debug("Successfully removed conflicting uniforms");
             } else {
                 log_error("✗ Failed to clean conflicting uniforms");
                 return NULL;
@@ -1433,7 +1433,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
                 source_body = cleaned_vars;
                 cleaned_source = cleaned_vars;
                 needs_cleanup = true;
-                log_debug("✓ Successfully removed conflicting global variables");
+                log_debug("Successfully removed conflicting global variables");
 
                 /* After removing global variables, check for orphaned assignments */
                 /* Example: "float time = 0;" was removed, but "time = iTime;" remains */
@@ -1463,7 +1463,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
                 source_body = fixed_source;
                 cleaned_source = fixed_source;
                 needs_cleanup = true;
-                log_debug("✓ Successfully fixed uniform assignments");
+                log_debug("Successfully fixed uniform assignments");
             } else {
                 log_error("✗ Could not fix uniform assignments automatically");
             }

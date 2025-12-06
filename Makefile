@@ -1,8 +1,8 @@
 # NeoWall - A reliable Wayland wallpaper daemon with Multi-Version EGL/OpenGL ES Support
-# Copyright (C) 2024
+# Copyright (C) 2025
 
 PROJECT = neowall
-VERSION = 0.4.1
+VERSION = 0.4.2
 
 # Directories
 SRC_DIR = src

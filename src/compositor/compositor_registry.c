@@ -513,10 +513,10 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         log_info("========================================");
         log_info("NeoWall will render as a native wallpaper using wlr-layer-shell");
         log_info("Features enabled:");
-        log_info("  • Full GPU-accelerated GLSL shaders");
-        log_info("  • Works on all virtual desktops");
-        log_info("  • 60 FPS @ ~2%% CPU usage");
-        log_info("  • BACKGROUND layer (behind all windows)");
+        log_info("  - Full GPU-accelerated GLSL shaders");
+        log_info("  - Works on all virtual desktops");
+        log_info("  - 60 FPS @ ~2%% CPU usage");
+        log_info("  - BACKGROUND layer (behind all windows)");
         log_info("========================================");
     }
 
@@ -543,7 +543,7 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
 
         /* Additional KDE-specific success message */
         if (info.type == COMPOSITOR_TYPE_KDE_PLASMA) {
-            log_info("✓ KDE integration ready - neowall is now your wallpaper!");
+            log_info("KDE integration ready - neowall is now your wallpaper!");
         }
 
         /* Set backend in state so surface configuration can use it */

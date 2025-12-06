@@ -15,7 +15,7 @@
 /* Project metadata */
 #define NEOWALL_PROJECT_NAME    "NeoWall"
 #define NEOWALL_PROJECT_DESC    "A reliable Wayland wallpaper daemon with Multi-Version EGL/OpenGL ES Support"
-#define NEOWALL_COPYRIGHT       "Copyright (C) 2024"
+#define NEOWALL_COPYRIGHT       "Copyright (C) 2025"
 #define NEOWALL_LICENSE         "GPL-3.0"
 
 /* Build information */

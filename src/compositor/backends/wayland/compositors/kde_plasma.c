@@ -627,12 +627,12 @@ struct compositor_backend *compositor_backend_kde_plasma_init(struct neowall_sta
  *
  * This backend provides full KDE Plasma Shell protocol support:
  *
- * ✅ Panel role with windows_can_cover behavior acts as wallpaper layer
- * ✅ Per-output surface management
- * ✅ Position control (always 0,0 for wallpapers)
- * ✅ Skip taskbar/switcher for clean desktop
- * ✅ EGL window support for GPU rendering
- * ✅ Multi-monitor support
+ * - Panel role with windows_can_cover behavior acts as wallpaper layer
+ * - Per-output surface management
+ * - Position control (always 0,0 for wallpapers)
+ * - Skip taskbar/switcher for clean desktop
+ * - EGL window support for GPU rendering
+ * - Multi-monitor support
  *
  * The backend creates surfaces with the ORG_KDE_PLASMA_SURFACE_ROLE_PANEL
  * role and PANEL_BEHAVIOR_WINDOWS_CAN_COVER behavior. This allows the surface
