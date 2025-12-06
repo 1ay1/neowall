@@ -4,54 +4,56 @@
   <h3>GPU-Accelerated Live Wallpapers for Wayland & X11</h3>
   
   <p>
-    <strong>Transform your desktop into a living canvas.</strong><br/>
-    Watch fractals breathe, waves ripple, and neon cities pulse at silky 60 FPS.
+    Run shaders and animated wallpapers on your desktop.<br/>
+    Smooth 60 FPS, multi-monitor support, works anywhere.
   </p>
 
   <p>
-    <a href="#-quick-start"><strong>Quick Start</strong></a> •
-    <a href="#-included-shaders"><strong>Gallery</strong></a> •
-    <a href="#%EF%B8%8F-configuration"><strong>Config</strong></a> •
-    <a href="#-create-your-own"><strong>Create Shaders</strong></a>
+    <a href="#quick-start"><strong>Quick Start</strong></a> •
+    <a href="#included-shaders"><strong>Gallery</strong></a> •
+    <a href="#configuration"><strong>Config</strong></a> •
+    <a href="#create-your-own"><strong>Create Shaders</strong></a>
   </p>
 
   https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560
+  
+  <p><em>Interactive mouse tracking - shaders respond to cursor movement</em></p>
+  
+  https://github.com/user-attachments/assets/c1e38d88-5c1e-4db4-9948-da2ad86c6a69
 </div>
 
 ---
 
-## ✨ Features
+## Features
 
 <table>
 <tr>
 <td width="50%">
 
 **Performance**
-- 🔥 **60 FPS** shader animations
-- ⚡ **GPU-accelerated** rendering
-- 🎯 **Precise FPS control** (1-240 FPS)
-- 🔄 **VSync support** for tear-free display
+- 60 FPS shader animations
+- GPU-accelerated rendering
+- Precise FPS control (1-240)
+- Optional VSync
 
 </td>
 <td width="50%">
 
 **Compatibility**
-- 🖥️ **Multi-monitor** with independent configs
-- 🌊 **Wayland-native** (Hyprland, Sway, River, KDE)
-- 🪟 **Full X11 support** (i3, bspwm, dwm, awesome, xmonad, qtile)
-- 🎨 **Shadertoy-compatible** shaders
-- 🖱️ **Mouse event support** (Wayland & X11)
-- 📦 **30+ included shaders** ready to use
+- Multi-monitor with independent configs
+- Wayland: Hyprland, Sway, River, KDE, GNOME
+- X11: i3, bspwm, dwm, awesome, xmonad, qtile
+- Shadertoy-compatible shaders
+- Mouse event support for interactive shaders
+- 30+ included shaders
 
 </td>
 </tr>
 </table>
 
-**Perfect for:** r/unixporn enthusiasts, shader artists, developers who want their desktop to match their vibe.
-
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Arch Linux
@@ -65,32 +67,30 @@ cd neowall && make -j$(nproc) && sudo make install
 neowall
 ```
 
-Your first run creates `~/.config/neowall/config.vibe` with a gorgeous retro synthwave shader.
+Your first run creates `~/.config/neowall/config.vibe` with a default shader.
 
-> **Wayland & X11:** Automatically detects your environment. Works on Wayland compositors (Hyprland, Sway, River, KDE) and X11 tiling window managers (i3, bspwm, dwm, awesome, xmonad, qtile). See [X11 Backend Documentation](src/compositor/backends/x11/README.md) for X11-specific details.
-
----
-
-## 🎨 Included Shaders
-
-| Preview | Shader | Vibe | Best For |
-|---------|--------|------|----------|
-| 🌆 | `retro_wave.glsl` | Synthwave nostalgia | Late-night coding |
-| 🟢 | `matrix_rain.glsl` | Digital rainfall | Terminal hackers |
-| 🌈 | `plasma.glsl` | Flowing energy | Creative work |
-| 🌌 | `aurora.glsl` | Northern lights | Focus sessions |
-| 🌊 | `ocean_waves.glsl` | Endless ocean | Meditation |
-| 🔮 | `fractal_land.glsl` | Infinite geometry | Mind expansion |
-| ⚡ | `electric_storm.glsl` | Lightning chaos | High-energy work |
-| 🌀 | `vortex.glsl` | Hypnotic spiral | Deep focus |
-
-**30+ more** waiting in `~/.config/neowall/shaders/` after first run.
-
-Browse [Shadertoy.com](https://shadertoy.com) for thousands more - many can be adapted with minimal changes.
+> Works on Wayland compositors (Hyprland, Sway, River, KDE, GNOME) and X11 tiling window managers (i3, bspwm, dwm, awesome, xmonad, qtile). Auto-detects your environment.
 
 ---
 
-## ⚙️ Configuration
+## Included Shaders
+
+| Preview | Shader | Style | 
+|---------|--------|-------|
+| | `retro_wave.glsl` | Synthwave |
+| | `matrix_rain.glsl` | Digital rain |
+| | `plasma.glsl` | Flowing energy |
+| | `aurora.glsl` | Northern lights |
+| | `ocean_waves.glsl` | Ocean waves |
+| | `fractal_land.glsl` | Fractal geometry |
+| | `electric_storm.glsl` | Lightning |
+| | `vortex.glsl` | Hypnotic spiral |
+
+30+ more included. Browse [Shadertoy.com](https://shadertoy.com) for thousands more - most work with minimal changes.
+
+---
+
+## Configuration
 
 Config lives at `~/.config/neowall/config.vibe` - a simple, human-readable format:
 
@@ -140,9 +140,9 @@ neowall kill && neowall
 
 ---
 
-## 🎮 Runtime Controls
+## Runtime Controls
 
-Control your wallpapers without editing config:
+Control wallpapers at runtime:
 
 ```bash
 neowall next         # Switch to next wallpaper/shader
@@ -167,7 +167,7 @@ neowall kill         # Stop daemon
 
 ---
 
-## 🛠️ Create Your Own
+## Create Your Own
 
 Drop any GLSL shader into `~/.config/neowall/shaders/`:
 
@@ -185,18 +185,16 @@ void main() {
 }
 ```
 
-**Shadertoy Uniforms Supported:**
+**Supported Shadertoy Uniforms:**
 - `iTime` - Shader playback time
 - `iResolution` - Viewport resolution
 - `iChannel0-4` - Input textures
-- `iMouse` - Mouse position (tracked in real-time on Wayland & X11)
+- `iMouse` - Mouse position
 - `iDate` - Current date/time
-
-Most Shadertoy shaders work with minimal adaptation!
 
 ---
 
-## 📦 Installation
+## Installation
 
 ### Dependencies
 
@@ -257,68 +255,45 @@ See [X11 Backend Documentation](src/compositor/backends/x11/README.md) for X11-s
 
 ---
 
-## 💡 Pro Tips
+## Tips
 
-- **Battery Life:** Lower `shader_fps` on battery power
-- **Multi-Monitor:** Each display can have completely different content
-- **Transitions:** `glitch` and `pixelate` add serious style points
-- **VSync:** Enable for tear-free display, disable for precise FPS control
-- **FPS Monitoring:** Use `show_fps true` to verify performance
-- **State Persistence:** Wallpaper cycle position is remembered across restarts
-- **Config Philosophy:** Treat config as immutable - restart to apply changes
+- **Battery:** Lower `shader_fps` when on battery
+- **Multi-Monitor:** Each display can have different content
+- **VSync:** Enable for tear-free, disable for precise FPS control
+- **FPS Monitor:** Use `show_fps true` to check performance
 
-### X11-Specific Notes
+### X11 Notes
 
-- **Root Pixmap Integration:** Renders to root window pixmap for apps like Conky to use pseudo-transparency
-- **Tiling WM Focus:** Designed for tiling WMs (i3, bspwm, dwm) - may not work correctly with floating WMs
-- **Multi-Monitor:** XRandR auto-detection - properly detects ultrawide and multi-monitor setups
-- **Performance:** Uses override_redirect window - bypasses WM for optimal performance
-- **Conky Transparency:** Conky's pseudo-transparency will show the wallpaper (though with refresh lag)
+- Renders to root window pixmap (works with Conky pseudo-transparency)
+- Designed for tiling WMs (i3, bspwm, dwm)
+- XRandR auto-detection for multi-monitor setups
+- See [X11 Backend Documentation](src/compositor/backends/x11/README.md) for details
 
-### Recommended Settings
+### Example Configs
 
-**For Gaming PC:**
+**High refresh rate:**
 ```vibe
 shader_fps 144
 vsync false
 ```
 
-**For Laptop:**
+**Power saving:**
 ```vibe
 shader_fps 30
 vsync true
 ```
 
-**For Multi-Monitor:**
-```vibe
-output {
-  main { shader_fps 60 }
-  secondary { shader_fps 30 }
-}
-```
-
 ---
 
-## 🖱️ Mouse Events & Interactive Shaders
+## Mouse Events
 
-NeoWall now supports **real-time mouse tracking** on both Wayland and X11! Mouse coordinates are captured and can be used in your shaders for interactive effects.
-
-### How It Works
-
-- **Wayland:** Automatic via `wl_seat` and `wl_pointer` protocol
-- **X11:** Event-driven via `XEvent` handling (ButtonPress, MotionNotify, etc.)
-- **Thread-safe:** Mouse position safely updated across all outputs
-- **Performance:** Event-driven architecture with zero polling overhead
-
-### Mouse Position Access
-
-Mouse coordinates are available in your shaders through the `iMouse` uniform:
+Real-time mouse tracking on both Wayland and X11. Mouse position is available via the `iMouse` uniform:
 
 ```glsl
 uniform vec4 iMouse;  // .xy = current position, .zw = click position
 ```
 
-### Interactive Shader Example
+### Example Interactive Shader
 
 Create `~/.config/neowall/shaders/interactive.glsl`:
 
@@ -347,83 +322,48 @@ void main() {
 
 ### Technical Details
 
-- **Real-time tracking:** Mouse position updated on every motion event
-- **Multi-monitor:** Coordinates in root window space (works across all displays)
-- **Debug logging:** Enable with `-v` flag to see mouse events
-- **Surface focus:** On Wayland, pointer events only when cursor is over wallpaper surface (typically empty desktop space)
-- **Zero overhead:** Events processed only when mouse moves (no polling)
-
-### Limitations
-
-- **Wayland:** Mouse events only trigger when pointer is over the wallpaper layer (background). Windows above the wallpaper block pointer input.
-- **X11:** Similar behavior - mouse events captured when over the root window wallpaper.
-- **Expected behavior:** This is standard for wallpaper applications - they sit below all other windows.
-
-### Documentation
-
-For technical details on the mouse event implementation:
-- **Wayland:** See `docs/features/` for Wayland pointer event handling
-- **X11:** See `docs/X11_MOUSE_EVENTS.md` for X11 implementation details
-- **Testing:** Use `-f -v` flags to run in foreground with debug logging
+Mouse events are captured when the cursor is over the wallpaper (empty desktop areas). This is standard for wallpaper applications since they sit below all windows.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
-NeoWall is built with performance and reliability in mind:
+NeoWall is built with performance in mind:
 
-- **Event-driven architecture** - Uses `timerfd`/`signalfd` for minimal overhead
-- **Compositor abstraction layer** - Native backends for different Wayland compositors
-- **GPU-accelerated rendering** - All shader computation happens on GPU
-- **Runtime capability detection** - Adapts between OpenGL ES 2.0/3.0/3.1/3.2
-- **State persistence** - Remembers your place in wallpaper cycles across restarts
-- **Zero-copy rendering** - Direct GPU upload, minimal memory copies
-- **Mouse event handling** - Real-time mouse tracking on both Wayland and X11 for interactive shaders
+- Event-driven architecture using `timerfd`/`signalfd`
+- Compositor abstraction layer with native backends
+- GPU-accelerated rendering
+- Runtime OpenGL ES capability detection (2.0/3.0/3.1/3.2)
+- State persistence across restarts
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-Contributions welcome! Here's how you can help:
+Contributions welcome:
 
-- **🎨 Shader Artists:** Submit your creations via PR to grow the included collection
-- **🔧 Developers:** Test on your compositor and report compatibility issues
-- **📝 Documentation:** Improve guides, add examples, fix typos
-- **🐛 Bug Reports:** [Open an issue](https://github.com/1ay1/neowall/issues) with details
+- **Shaders:** Submit via PR
+- **Testing:** Report compatibility issues on your compositor
+- **Bugs:** [Open an issue](https://github.com/1ay1/neowall/issues)
 
 ### Development
 
 ```bash
 git clone https://github.com/1ay1/neowall
 cd neowall
-make debug        # Debug build with symbols
-./build/bin/neowall -f -v  # Run in foreground with verbose logging
+make debug
+./build/bin/neowall -f -v
 ```
 
 ---
 
-## 🏆 Credits
+## License
 
-Built with ❤️ for the Wayland and r/unixporn communities.
-
-**Shader examples** adapted from the incredible [Shadertoy](https://shadertoy.com) community.
-
-**Inspiration:** The beautiful chaos of `mpvpaper`, `swww`, and `hyprpaper` - but faster.
-
----
-
-## 📜 License
-
-**MIT License** - Use it, modify it, share it.
-
-See [LICENSE](LICENSE) for full text.
+MIT License. See [LICENSE](LICENSE).
 
 ---
 
 <div align="center">
-  <h3>Make your desktop legendary.</h3>
-  <p>⭐ Star if NeoWall transformed your setup!</p>
-  
   <p>
     <a href="https://github.com/1ay1/neowall/issues">Report Bug</a> •
     <a href="https://github.com/1ay1/neowall/issues">Request Feature</a> •
