@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <errno.h>
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include "compositor.h"
@@ -710,6 +711,108 @@ static void wlr_on_output_removed(void *data, struct wl_output *output) {
 }
 
 /* ============================================================================
+ * EVENT HANDLING OPERATIONS
+ * ============================================================================ */
+
+static int wlr_get_fd(void *data) {
+    wlr_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return -1;
+    }
+    return wl_display_get_fd(backend->state->display);
+}
+
+static bool wlr_prepare_events(void *data) {
+    wlr_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    struct wl_display *display = backend->state->display;
+
+    /* Wayland requires prepare_read before poll() */
+    while (wl_display_prepare_read(display) != 0) {
+        /* If prepare failed, dispatch pending events and retry */
+        if (wl_display_dispatch_pending(display) < 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool wlr_read_events(void *data) {
+    wlr_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    /* Read events that were prepared */
+    return wl_display_read_events(backend->state->display) >= 0;
+}
+
+static bool wlr_dispatch_events(void *data) {
+    wlr_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    /* Dispatch all pending events */
+    return wl_display_dispatch_pending(backend->state->display) >= 0;
+}
+
+static bool wlr_flush(void *data) {
+    wlr_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    struct wl_display *display = backend->state->display;
+
+    if (wl_display_flush(display) < 0) {
+        /* EAGAIN is not a failure - just means buffer is full */
+        if (errno == EAGAIN) {
+            return true;
+        }
+        /* EPIPE means compositor disconnected */
+        return false;
+    }
+
+    return true;
+}
+
+static void wlr_cancel_read(void *data) {
+    wlr_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return;
+    }
+
+    wl_display_cancel_read(backend->state->display);
+}
+
+static int wlr_get_error(void *data) {
+    wlr_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return -1;
+    }
+
+    return wl_display_get_error(backend->state->display);
+}
+
+static void *wlr_get_native_display(void *data) {
+    wlr_backend_data_t *backend = data;
+    if (!backend || !backend->state) {
+        return NULL;
+    }
+    return backend->state->display;
+}
+
+static EGLenum wlr_get_egl_platform(void *data) {
+    (void)data;
+    return EGL_PLATFORM_WAYLAND_KHR;
+}
+
+/* ============================================================================
  * BACKEND REGISTRATION
  * ============================================================================ */
 
@@ -725,6 +828,17 @@ static const compositor_backend_ops_t wlr_backend_ops = {
     .get_capabilities = wlr_get_capabilities,
     .on_output_added = wlr_on_output_added,
     .on_output_removed = wlr_on_output_removed,
+    /* Event handling operations */
+    .get_fd = wlr_get_fd,
+    .prepare_events = wlr_prepare_events,
+    .read_events = wlr_read_events,
+    .dispatch_events = wlr_dispatch_events,
+    .flush = wlr_flush,
+    .cancel_read = wlr_cancel_read,
+    .get_error = wlr_get_error,
+    /* Display/EGL operations */
+    .get_native_display = wlr_get_native_display,
+    .get_egl_platform = wlr_get_egl_platform,
 };
 
 struct compositor_backend *compositor_backend_wlr_layer_shell_init(struct neowall_state *state) {

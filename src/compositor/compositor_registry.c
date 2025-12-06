@@ -56,11 +56,11 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
                                    uint32_t name, const char *interface,
                                    uint32_t version) {
     protocol_state_t *state = data;
-    
+
     (void)registry;
     (void)name;
     (void)version;
-    
+
     if (strcmp(interface, "zwlr_layer_shell_v1") == 0) {
         state->has_layer_shell = true;
         log_debug("Detected protocol: zwlr_layer_shell_v1");
@@ -92,17 +92,17 @@ static const struct wl_registry_listener registry_listener = {
 /* Detect available Wayland protocols */
 static protocol_state_t detect_protocols(struct wl_display *display) {
     protocol_state_t state = {0};
-    
+
     struct wl_registry *registry = wl_display_get_registry(display);
     if (!registry) {
         log_error("Failed to get Wayland registry");
         return state;
     }
-    
+
     wl_registry_add_listener(registry, &registry_listener, &state);
     wl_display_roundtrip(display);
     wl_registry_destroy(registry);
-    
+
     return state;
 }
 
@@ -115,7 +115,7 @@ static compositor_type_t detect_compositor_type(const protocol_state_t *proto) {
     const char *desktop = getenv("XDG_CURRENT_DESKTOP");
     const char *session = getenv("XDG_SESSION_DESKTOP");
     const char *wayland_display = getenv("WAYLAND_DISPLAY");
-    
+
     /* Hyprland detection */
     if ((desktop && strstr(desktop, "Hyprland")) ||
         (session && strstr(session, "Hyprland")) ||
@@ -123,7 +123,7 @@ static compositor_type_t detect_compositor_type(const protocol_state_t *proto) {
         log_info("Detected compositor: Hyprland");
         return COMPOSITOR_TYPE_HYPRLAND;
     }
-    
+
     /* Sway detection */
     if ((desktop && strstr(desktop, "sway")) ||
         (session && strstr(session, "sway")) ||
@@ -131,21 +131,21 @@ static compositor_type_t detect_compositor_type(const protocol_state_t *proto) {
         log_info("Detected compositor: Sway");
         return COMPOSITOR_TYPE_SWAY;
     }
-    
+
     /* River detection */
     if ((desktop && strstr(desktop, "river")) ||
         (session && strstr(session, "river"))) {
         log_info("Detected compositor: River");
         return COMPOSITOR_TYPE_RIVER;
     }
-    
+
     /* Wayfire detection */
     if ((desktop && strstr(desktop, "wayfire")) ||
         (session && strstr(session, "wayfire"))) {
         log_info("Detected compositor: Wayfire");
         return COMPOSITOR_TYPE_WAYFIRE;
     }
-    
+
     /* KDE Plasma detection */
     if ((desktop && strstr(desktop, "KDE")) ||
         (session && strstr(session, "plasma")) ||
@@ -153,7 +153,7 @@ static compositor_type_t detect_compositor_type(const protocol_state_t *proto) {
         log_info("Detected compositor: KDE Plasma");
         return COMPOSITOR_TYPE_KDE_PLASMA;
     }
-    
+
     /* GNOME Shell detection */
     if ((desktop && strstr(desktop, "GNOME")) ||
         (session && strstr(session, "gnome")) ||
@@ -161,26 +161,26 @@ static compositor_type_t detect_compositor_type(const protocol_state_t *proto) {
         log_info("Detected compositor: GNOME Shell");
         return COMPOSITOR_TYPE_GNOME_SHELL;
     }
-    
+
     /* Mutter detection (GNOME's compositor) */
     if (session && strstr(session, "mutter")) {
         log_info("Detected compositor: Mutter");
         return COMPOSITOR_TYPE_MUTTER;
     }
-    
+
     /* Weston detection */
     if ((desktop && strstr(desktop, "weston")) ||
         (session && strstr(session, "weston"))) {
         log_info("Detected compositor: Weston");
         return COMPOSITOR_TYPE_WESTON;
     }
-    
+
     /* Generic wlroots-based if layer shell is available */
     if (proto->has_layer_shell) {
         log_info("Detected compositor: Generic wlroots-based");
         return COMPOSITOR_TYPE_GENERIC;
     }
-    
+
     /* Unknown compositor */
     log_info("Detected compositor: Unknown");
     return COMPOSITOR_TYPE_UNKNOWN;
@@ -206,21 +206,21 @@ const char *compositor_type_to_string(compositor_type_t type) {
 /* Public API: Detect compositor */
 compositor_info_t compositor_detect(struct wl_display *display) {
     compositor_info_t info = {0};
-    
+
     /* Detect protocols */
     protocol_state_t proto = detect_protocols(display);
-    
+
     /* Detect compositor type */
     info.type = detect_compositor_type(&proto);
     info.name = compositor_type_to_string(info.type);
     info.has_layer_shell = proto.has_layer_shell;
     info.has_kde_shell = proto.has_kde_shell;
     info.has_gtk_shell = proto.has_gtk_shell;
-    
+
     /* Try to get version from environment */
     const char *version = getenv("COMPOSITOR_VERSION");
     info.version = version ? version : "unknown";
-    
+
     return info;
 }
 
@@ -236,12 +236,12 @@ bool compositor_backend_register(const char *name,
         log_error("Backend registry full, cannot register '%s'", name);
         return false;
     }
-    
+
     if (!name || !ops) {
         log_error("Invalid backend registration parameters");
         return false;
     }
-    
+
     /* Check if backend already registered */
     for (size_t i = 0; i < backend_count; i++) {
         if (strcmp(backend_registry[i].name, name) == 0) {
@@ -249,17 +249,17 @@ bool compositor_backend_register(const char *name,
             return false;
         }
     }
-    
+
     /* Register backend */
     backend_registry[backend_count].name = name;
     backend_registry[backend_count].description = description;
     backend_registry[backend_count].priority = priority;
     backend_registry[backend_count].ops = ops;
     backend_count++;
-    
-    log_debug("Registered backend: %s (priority: %d) - %s", 
+
+    log_debug("Registered backend: %s (priority: %d) - %s",
               name, priority, description);
-    
+
     return true;
 }
 
@@ -271,9 +271,9 @@ bool compositor_backend_register(const char *name,
 static struct compositor_backend *select_backend(struct neowall_state *state,
                                                  const compositor_info_t *info) {
     const char *preferred_backend = NULL;
-    
+
     log_info("Selecting backend for %s compositor...", info->name);
-    
+
     /* Determine preferred backend based on compositor type */
     switch (info->type) {
         case COMPOSITOR_TYPE_KDE_PLASMA:
@@ -284,7 +284,7 @@ static struct compositor_backend *select_backend(struct neowall_state *state,
             log_info("KDE Plasma detected - using wlr-layer-shell backend");
             log_info("Backend optimized for KDE: BACKGROUND layer, full GPU acceleration, 60 FPS");
             break;
-            
+
         case COMPOSITOR_TYPE_HYPRLAND:
         case COMPOSITOR_TYPE_SWAY:
         case COMPOSITOR_TYPE_RIVER:
@@ -292,13 +292,13 @@ static struct compositor_backend *select_backend(struct neowall_state *state,
             preferred_backend = "wlr-layer-shell";
             log_info("Using wlr-layer-shell backend for wlroots compositor");
             break;
-            
+
         case COMPOSITOR_TYPE_GNOME_SHELL:
         case COMPOSITOR_TYPE_MUTTER:
             preferred_backend = "gnome-shell";
             log_info("Using GNOME Shell backend");
             break;
-            
+
         default:
             /* For unknown compositors, try wlr-layer-shell if available, else fallback */
             if (info->has_layer_shell) {
@@ -310,18 +310,18 @@ static struct compositor_backend *select_backend(struct neowall_state *state,
             }
             break;
     }
-    
+
     /* Try to initialize the preferred backend */
     for (size_t i = 0; i < backend_count; i++) {
         if (strcmp(backend_registry[i].name, preferred_backend) == 0) {
             log_debug("Initializing preferred backend: %s", preferred_backend);
-            
+
             void *backend_data = backend_registry[i].ops->init(state);
             if (!backend_data) {
                 log_error("Failed to initialize preferred backend: %s", preferred_backend);
                 break;
             }
-            
+
             /* Create backend structure */
             struct compositor_backend *backend = calloc(1, sizeof(struct compositor_backend));
             if (!backend) {
@@ -329,23 +329,23 @@ static struct compositor_backend *select_backend(struct neowall_state *state,
                 backend_registry[i].ops->cleanup(backend_data);
                 return NULL;
             }
-            
+
             backend->name = backend_registry[i].name;
             backend->description = backend_registry[i].description;
             backend->priority = backend_registry[i].priority;
             backend->ops = backend_registry[i].ops;
             backend->data = backend_data;
             backend->capabilities = backend_registry[i].ops->get_capabilities(backend_data);
-            
+
             log_info("Selected backend: %s", backend->name);
             return backend;
         }
     }
-    
+
     /* Preferred backend failed, try fallback */
     if (strcmp(preferred_backend, "fallback") != 0) {
         log_info("Preferred backend unavailable, trying fallback...");
-        
+
         for (size_t i = 0; i < backend_count; i++) {
             if (strcmp(backend_registry[i].name, "fallback") == 0) {
                 void *backend_data = backend_registry[i].ops->init(state);
@@ -353,27 +353,27 @@ static struct compositor_backend *select_backend(struct neowall_state *state,
                     log_error("Failed to initialize fallback backend");
                     break;
                 }
-                
+
                 struct compositor_backend *backend = calloc(1, sizeof(struct compositor_backend));
                 if (!backend) {
                     log_error("Failed to allocate backend structure");
                     backend_registry[i].ops->cleanup(backend_data);
                     return NULL;
                 }
-                
+
                 backend->name = backend_registry[i].name;
                 backend->description = backend_registry[i].description;
                 backend->priority = backend_registry[i].priority;
                 backend->ops = backend_registry[i].ops;
                 backend->data = backend_data;
                 backend->capabilities = backend_registry[i].ops->get_capabilities(backend_data);
-                
+
                 log_info("Selected backend: %s", backend->name);
                 return backend;
             }
         }
     }
-    
+
     log_error("No suitable backend found for compositor: %s", info->name);
     return NULL;
 }
@@ -388,27 +388,32 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         log_error("Invalid state for compositor backend initialization");
         return NULL;
     }
-    
+
     compositor_info_t info;
-    
-    /* Detect compositor (only if Wayland display available) */
-    if (state->display) {
+
+    /* Try to initialize Wayland (connects display, discovers outputs) */
+    log_debug("Attempting to initialize Wayland...");
+
+    /* Forward declaration */
+    extern bool wayland_init_registry(struct neowall_state *state);
+
+    if (wayland_init_registry(state)) {
+        /* Wayland initialized successfully, detect compositor */
+        log_info("Wayland initialization successful");
         info = compositor_detect(state->display);
-    } else {
-        /* No Wayland - will attempt X11 backend */
-        log_info("No Wayland display detected");
-        memset(&info, 0, sizeof(info));
-        info.name = "X11";
-        info.type = COMPOSITOR_TYPE_UNKNOWN;
-    }
-    
-    if (state->display) {
+
         log_info("Compositor: %s", info.name);
         log_info("Layer shell support: %s", info.has_layer_shell ? "yes" : "no");
         log_info("KDE shell support: %s", info.has_kde_shell ? "yes" : "no");
         log_info("GTK shell support: %s", info.has_gtk_shell ? "yes" : "no");
+    } else {
+        /* No Wayland - will attempt X11 backend */
+        log_info("Failed to initialize Wayland, will try X11");
+        memset(&info, 0, sizeof(info));
+        info.name = "X11";
+        info.type = COMPOSITOR_TYPE_UNKNOWN;
     }
-    
+
     /* KDE-specific information */
     if (info.type == COMPOSITOR_TYPE_KDE_PLASMA) {
         log_info("========================================");
@@ -422,10 +427,10 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         log_info("  • BACKGROUND layer (behind all windows)");
         log_info("========================================");
     }
-    
+
     /* Register all available backends */
     log_debug("Registering available backends...");
-    
+
     /* Try X11 backend first (if Wayland not available) */
     if (!state->display) {
         log_info("No Wayland display - attempting X11 backend");
@@ -438,29 +443,65 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
             return NULL;
         }
     }
-    
+
     /* Wayland backends */
     compositor_backend_wlr_layer_shell_init(state);
     compositor_backend_kde_plasma_init(state);
     compositor_backend_gnome_shell_init(state);
     compositor_backend_fallback_init(state);
-    
+
     /* Select best backend */
     struct compositor_backend *backend = select_backend(state, &info);
-    
+
+    /* If backend selection failed, cleanup the Wayland display */
+    if (!backend && state->display) {
+        log_error("Backend selection failed, cleaning up Wayland display");
+        wl_display_disconnect(state->display);
+        state->display = NULL;
+    }
+
     if (backend) {
         log_info("Backend initialized: %s", backend->name);
         log_info("Description: %s", backend->description);
         log_info("Capabilities: 0x%08x", backend->capabilities);
-        
+
         /* Additional KDE-specific success message */
         if (info.type == COMPOSITOR_TYPE_KDE_PLASMA) {
             log_info("✓ KDE integration ready - neowall is now your wallpaper!");
         }
+
+        /* Set backend in state so surface configuration can use it */
+        state->compositor_backend = backend;
+
+        /* Configure compositor surfaces for all configured outputs */
+        extern bool output_configure_compositor_surface(struct output_state *output);
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        struct output_state *output = state->outputs;
+        while (output) {
+            /* Only configure surfaces for fully configured outputs */
+            if (output->configured && output->output) {
+                if (!output_configure_compositor_surface(output)) {
+                    log_error("Failed to configure compositor surface for output %s", output->model);
+                }
+            } else {
+                log_debug("Skipping surface configuration for output %s (configured=%d, wl_output=%p)",
+                          output->model[0] ? output->model : "unknown",
+                          output->configured, (void*)output->output);
+            }
+            output = output->next;
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
+
+        /* Flush all pending requests */
+        if (state->display) {
+            log_debug("Flushing Wayland display to ensure compositor processes layer surfaces");
+            wl_display_flush(state->display);
+            wl_display_roundtrip(state->display);
+        }
     } else {
         log_error("Failed to initialize any compositor backend");
     }
-    
+
     return backend;
 }
 
@@ -469,13 +510,13 @@ void compositor_backend_cleanup(struct compositor_backend *backend) {
     if (!backend) {
         return;
     }
-    
+
     log_debug("Cleaning up compositor backend: %s", backend->name);
-    
+
     if (backend->ops && backend->ops->cleanup && backend->data) {
         backend->ops->cleanup(backend->data);
     }
-    
+
     free(backend);
 }
 
@@ -484,6 +525,6 @@ compositor_capabilities_t compositor_backend_get_capabilities(struct compositor_
     if (!backend) {
         return COMPOSITOR_CAP_NONE;
     }
-    
+
     return backend->capabilities;
 }

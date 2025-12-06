@@ -6,10 +6,11 @@
 #include <time.h>
 #include <pthread.h>
 #include <stdatomic.h>
-#include <wayland-client.h>
-#include <wayland-egl.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+#include <wayland-client.h>
+#include "xdg-output-unstable-v1-client-protocol.h"
+#include "tearing-control-v1-client-protocol.h"
 #include "version.h"
 #include "egl/capability.h"
 #include "../src/output/output.h"
@@ -31,33 +32,35 @@ struct compositor_backend;
 
 /* Global application state */
 struct neowall_state {
-    /* Wayland globals */
+    /* ===== COMPOSITOR ABSTRACTION - ONLY INTERFACE ===== */
+    struct compositor_backend *compositor_backend;
+    
+    /* ===== WAYLAND GLOBALS (managed by compositor backend) ===== */
+    /* NOTE: These fields are managed by the Wayland backend implementations.
+     * They are set during backend init() and cleared during backend cleanup().
+     * Do not access directly - use compositor backend operations instead. */
     struct wl_display *display;
     struct wl_registry *registry;
     struct wl_compositor *compositor;
     struct wl_shm *shm;
-    struct zxdg_output_manager_v1 *xdg_output_manager;  /* For getting connector names */
-    struct wp_tearing_control_manager_v1 *tearing_control_manager;  /* For immediate presentation */
+    struct zxdg_output_manager_v1 *xdg_output_manager;
+    struct wp_tearing_control_manager_v1 *tearing_control_manager;
 
-    /* Compositor abstraction backend */
-    struct compositor_backend *compositor_backend;
-
-    /* EGL context */
+    /* ===== EGL CONTEXT (PLATFORM-AGNOSTIC) ===== */
     EGLDisplay egl_display;
     EGLContext egl_context;
     EGLConfig egl_config;
-    
-    /* OpenGL ES capabilities */
     egl_capabilities_t gl_caps;
 
-    /* Outputs */
+    /* ===== OUTPUTS ===== */
     struct output_state *outputs;
     uint32_t output_count;
 
-    /* Configuration */
+    /* ===== CONFIGURATION ===== */
     char config_path[MAX_PATH_LENGTH];
 
-    /* Runtime state - ALL flags must be atomic for thread safety */
+    /* ===== RUNTIME STATE ===== */
+    /* ALL flags must be atomic for thread safety */
     atomic_bool_t running;           /* Main loop running flag - accessed from signal handlers */
     atomic_bool_t paused;            /* Pause wallpaper cycling - set by signal handlers */
     atomic_bool_t outputs_need_init; /* Flag when new outputs need initialization */
@@ -91,19 +94,20 @@ struct neowall_state {
      * deadlock scenarios.
      *========================================================*/
     
-    /* Event-driven timer for wallpaper cycling */
+    /* ===== EVENT-DRIVEN TIMERS ===== */
     int timer_fd;               /* timerfd for next wallpaper cycle */
     int wakeup_fd;              /* eventfd for waking poll on internal events */
     int signal_fd;              /* signalfd for race-free signal handling */
 
-    /* Statistics */
+    /* ===== STATISTICS ===== */
     uint64_t frames_rendered;
     uint64_t errors_count;
 };
 
-/* Wayland/EGL initialization */
-bool wayland_init(struct neowall_state *state);
-void wayland_cleanup(struct neowall_state *state);
+/* Note: Compositor initialization is now handled via compositor_backend_init()
+ * in compositor.h. Wayland/X11 specific code has been moved to their respective backends. */
+
+/* EGL initialization */
 bool egl_init(struct neowall_state *state);
 void egl_cleanup(struct neowall_state *state);
 void detect_gl_capabilities(struct neowall_state *state);

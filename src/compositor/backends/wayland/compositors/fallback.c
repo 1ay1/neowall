@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <errno.h>
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include "compositor.h"
@@ -13,7 +14,7 @@
  * ============================================================================
  *
  * Universal fallback backend that works on ANY Wayland compositor.
- * 
+ *
  * This backend uses only core Wayland protocols that are guaranteed to be
  * available on every Wayland compositor. It creates simple surfaces without
  * any special positioning or layer management.
@@ -69,7 +70,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
                                   uint32_t name, const char *interface,
                                   uint32_t version) {
     fallback_backend_data_t *backend_data = data;
-    
+
     if (strcmp(interface, wl_subcompositor_interface.name) == 0) {
         backend_data->subcompositor = wl_registry_bind(registry, name,
                                                        &wl_subcompositor_interface,
@@ -100,21 +101,21 @@ static void *fallback_backend_init(struct neowall_state *state) {
         log_error("Invalid state for fallback backend");
         return NULL;
     }
-    
+
     log_debug("Initializing fallback backend");
     log_info("Using fallback backend - limited features available");
     log_info("Consider using a compositor with wlr-layer-shell support for better integration");
-    
+
     /* Allocate backend data */
     fallback_backend_data_t *backend_data = calloc(1, sizeof(fallback_backend_data_t));
     if (!backend_data) {
         log_error("Failed to allocate fallback backend data");
         return NULL;
     }
-    
+
     backend_data->state = state;
     backend_data->has_subsurface = false;
-    
+
     /* Try to get optional subsurface support */
     struct wl_registry *registry = wl_display_get_registry(state->display);
     if (registry) {
@@ -122,16 +123,16 @@ static void *fallback_backend_init(struct neowall_state *state) {
         wl_display_roundtrip(state->display);
         wl_registry_destroy(registry);
     }
-    
+
     if (backend_data->has_subsurface) {
         log_info("Subsurface support available - will use for positioning");
     } else {
         log_info("No subsurface support - surfaces may not position correctly");
     }
-    
+
     backend_data->initialized = true;
     log_info("Fallback backend initialized successfully");
-    
+
     return backend_data;
 }
 
@@ -139,17 +140,17 @@ static void fallback_backend_cleanup(void *data) {
     if (!data) {
         return;
     }
-    
+
     log_debug("Cleaning up fallback backend");
-    
+
     fallback_backend_data_t *backend_data = data;
-    
+
     if (backend_data->subcompositor) {
         wl_subcompositor_destroy(backend_data->subcompositor);
     }
-    
+
     free(backend_data);
-    
+
     log_debug("Fallback backend cleanup complete");
 }
 
@@ -159,23 +160,23 @@ static struct compositor_surface *fallback_create_surface(void *data,
         log_error("Invalid parameters for fallback surface creation");
         return NULL;
     }
-    
+
     fallback_backend_data_t *backend_data = data;
-    
+
     if (!backend_data->initialized) {
         log_error("Backend not properly initialized");
         return NULL;
     }
-    
+
     log_debug("Creating fallback surface");
-    
+
     /* Allocate surface structure */
     struct compositor_surface *surface = calloc(1, sizeof(struct compositor_surface));
     if (!surface) {
         log_error("Failed to allocate compositor surface");
         return NULL;
     }
-    
+
     /* Allocate backend-specific data */
     fallback_surface_data_t *surface_data = calloc(1, sizeof(fallback_surface_data_t));
     if (!surface_data) {
@@ -183,7 +184,7 @@ static struct compositor_surface *fallback_create_surface(void *data,
         free(surface);
         return NULL;
     }
-    
+
     /* Create base Wayland surface */
     surface->wl_surface = wl_compositor_create_surface(backend_data->state->compositor);
     if (!surface->wl_surface) {
@@ -192,7 +193,7 @@ static struct compositor_surface *fallback_create_surface(void *data,
         free(surface);
         return NULL;
     }
-    
+
     /* Set opaque region to cover entire surface (prevents transparency) */
     struct wl_region *opaque_region = wl_compositor_create_region(backend_data->state->compositor);
     if (opaque_region) {
@@ -201,7 +202,7 @@ static struct compositor_surface *fallback_create_surface(void *data,
         wl_region_destroy(opaque_region);
         log_debug("Set opaque region for fallback surface");
     }
-    
+
     /* Try to create subsurface if available */
     if (backend_data->has_subsurface && backend_data->subcompositor) {
         /* For subsurface, we need a parent surface
@@ -209,7 +210,7 @@ static struct compositor_surface *fallback_create_surface(void *data,
          * For now, we'll create a simple surface
          */
         log_debug("Creating subsurface for positioning");
-        
+
         surface_data->parent_surface = wl_compositor_create_surface(backend_data->state->compositor);
         if (surface_data->parent_surface) {
             surface_data->subsurface = wl_subcompositor_get_subsurface(
@@ -217,7 +218,7 @@ static struct compositor_surface *fallback_create_surface(void *data,
                 surface->wl_surface,
                 surface_data->parent_surface
             );
-            
+
             if (surface_data->subsurface) {
                 /* Place subsurface below parent */
                 wl_subsurface_place_below(surface_data->subsurface, surface_data->parent_surface);
@@ -231,7 +232,7 @@ static struct compositor_surface *fallback_create_surface(void *data,
             }
         }
     }
-    
+
     /* Initialize surface structure */
     surface->backend_data = surface_data;
     surface->output = config->output;
@@ -240,10 +241,10 @@ static struct compositor_surface *fallback_create_surface(void *data,
     surface->egl_window = NULL;
     surface->scale = 1;
     surface_data->configured = true;  /* No configuration needed for basic surfaces */
-    
+
     log_debug("Fallback surface created successfully");
     log_info("Note: Fallback backend cannot guarantee wallpaper placement");
-    
+
     return surface;
 }
 
@@ -251,37 +252,37 @@ static void fallback_destroy_surface(struct compositor_surface *surface) {
     if (!surface) {
         return;
     }
-    
+
     log_debug("Destroying fallback surface");
-    
+
     /* Destroy EGL window if it exists */
     if (surface->egl_window) {
         wl_egl_window_destroy(surface->egl_window);
         surface->egl_window = NULL;
     }
-    
+
     /* Destroy backend-specific data */
     if (surface->backend_data) {
         fallback_surface_data_t *surface_data = surface->backend_data;
-        
+
         if (surface_data->subsurface) {
             wl_subsurface_destroy(surface_data->subsurface);
         }
-        
+
         if (surface_data->parent_surface) {
             wl_surface_destroy(surface_data->parent_surface);
         }
-        
+
         free(surface_data);
     }
-    
+
     /* Destroy base Wayland surface */
     if (surface->wl_surface) {
         wl_surface_destroy(surface->wl_surface);
     }
-    
+
     free(surface);
-    
+
     log_debug("Fallback surface destroyed");
 }
 
@@ -291,25 +292,25 @@ static bool fallback_configure_surface(struct compositor_surface *surface,
         log_error("Invalid parameters for fallback surface configuration");
         return false;
     }
-    
+
     log_debug("Configuring fallback surface");
     log_info("Note: Fallback backend ignores layer, anchor, and exclusive zone settings");
-    
+
     /* Update config cache */
     surface->config = *config;
-    
+
     /* For subsurfaces, try to position based on anchor flags */
     fallback_surface_data_t *surface_data = surface->backend_data;
     if (surface_data && surface_data->is_subsurface && surface_data->subsurface) {
         /* Position subsurface at origin (limited positioning available) */
         wl_subsurface_set_position(surface_data->subsurface, 0, 0);
     }
-    
+
     /* Set input region to empty (click pass-through) */
     if (surface->wl_surface) {
-        struct wl_compositor *compositor = 
+        struct wl_compositor *compositor =
             ((fallback_backend_data_t*)surface->backend->data)->state->compositor;
-        
+
         if (compositor) {
             struct wl_region *region = wl_compositor_create_region(compositor);
             if (region) {
@@ -320,7 +321,7 @@ static bool fallback_configure_surface(struct compositor_surface *surface,
             }
         }
     }
-    
+
     return true;
 }
 
@@ -329,7 +330,7 @@ static void fallback_commit_surface(struct compositor_surface *surface) {
         log_error("Invalid surface for commit");
         return;
     }
-    
+
     /* Ensure opaque region is always set (prevents transparency) */
     fallback_backend_data_t *backend_data = surface->backend->data;
     if (backend_data && backend_data->state && backend_data->state->compositor) {
@@ -340,9 +341,9 @@ static void fallback_commit_surface(struct compositor_surface *surface) {
             wl_region_destroy(opaque_region);
         }
     }
-    
+
     wl_surface_commit(surface->wl_surface);
-    
+
     /* If subsurface, also commit parent */
     fallback_surface_data_t *surface_data = surface->backend_data;
     if (surface_data && surface_data->parent_surface) {
@@ -356,21 +357,21 @@ static bool fallback_create_egl_window(struct compositor_surface *surface,
         log_error("Invalid surface for EGL window creation");
         return false;
     }
-    
+
     log_debug("Creating EGL window for fallback surface: %dx%d", width, height);
-    
+
     /* Create EGL window */
     surface->egl_window = wl_egl_window_create(surface->wl_surface, width, height);
     if (!surface->egl_window) {
         log_error("Failed to create EGL window");
         return false;
     }
-    
+
     surface->width = width;
     surface->height = height;
-    
+
     log_debug("EGL window created successfully");
-    
+
     return true;
 }
 
@@ -378,7 +379,7 @@ static void fallback_destroy_egl_window(struct compositor_surface *surface) {
     if (!surface) {
         return;
     }
-    
+
     if (surface->egl_window) {
         log_debug("Destroying EGL window");
         wl_egl_window_destroy(surface->egl_window);
@@ -388,34 +389,130 @@ static void fallback_destroy_egl_window(struct compositor_surface *surface) {
 
 static compositor_capabilities_t fallback_get_capabilities(void *data) {
     fallback_backend_data_t *backend_data = data;
-    
+
     /* Basic capabilities */
     compositor_capabilities_t caps = COMPOSITOR_CAP_NONE;
-    
+
     if (backend_data && backend_data->has_subsurface) {
         caps |= COMPOSITOR_CAP_SUBSURFACES;
     }
-    
+
     return caps;
 }
 
 static void fallback_on_output_added(void *data, struct wl_output *output) {
     (void)data;
     (void)output;
-    
+
     log_debug("Output added to fallback backend");
 }
 
 static void fallback_on_output_removed(void *data, struct wl_output *output) {
     (void)data;
     (void)output;
-    
+
     log_debug("Output removed from fallback backend");
 }
 
 /* ============================================================================
  * BACKEND REGISTRATION
  * ============================================================================ */
+
+/* ============================================================================
+ * EVENT HANDLING OPERATIONS
+ * ============================================================================ */
+
+static int fallback_get_fd(void *data) {
+    fallback_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return -1;
+    }
+    return wl_display_get_fd(backend->state->display);
+}
+
+static bool fallback_prepare_events(void *data) {
+    fallback_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    struct wl_display *display = backend->state->display;
+
+    while (wl_display_prepare_read(display) != 0) {
+        if (wl_display_dispatch_pending(display) < 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool fallback_read_events(void *data) {
+    fallback_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    return wl_display_read_events(backend->state->display) >= 0;
+}
+
+static bool fallback_dispatch_events(void *data) {
+    fallback_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    return wl_display_dispatch_pending(backend->state->display) >= 0;
+}
+
+static bool fallback_flush(void *data) {
+    fallback_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    struct wl_display *display = backend->state->display;
+
+    if (wl_display_flush(display) < 0) {
+        if (errno == EAGAIN) {
+            return true;
+        }
+        return false;
+    }
+
+    return true;
+}
+
+static void fallback_cancel_read(void *data) {
+    fallback_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return;
+    }
+
+    wl_display_cancel_read(backend->state->display);
+}
+
+static int fallback_get_error(void *data) {
+    fallback_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return -1;
+    }
+
+    return wl_display_get_error(backend->state->display);
+}
+
+static void *fallback_get_native_display(void *data) {
+    fallback_backend_data_t *backend = data;
+    if (!backend || !backend->state) {
+        return NULL;
+    }
+    return backend->state->display;
+}
+
+static EGLenum fallback_get_egl_platform(void *data) {
+    (void)data;
+    return EGL_PLATFORM_WAYLAND_KHR;
+}
 
 static const compositor_backend_ops_t fallback_backend_ops = {
     .init = fallback_backend_init,
@@ -429,17 +526,28 @@ static const compositor_backend_ops_t fallback_backend_ops = {
     .get_capabilities = fallback_get_capabilities,
     .on_output_added = fallback_on_output_added,
     .on_output_removed = fallback_on_output_removed,
+    /* Event handling operations */
+    .get_fd = fallback_get_fd,
+    .prepare_events = fallback_prepare_events,
+    .read_events = fallback_read_events,
+    .dispatch_events = fallback_dispatch_events,
+    .flush = fallback_flush,
+    .cancel_read = fallback_cancel_read,
+    .get_error = fallback_get_error,
+    /* Display/EGL operations */
+    .get_native_display = fallback_get_native_display,
+    .get_egl_platform = fallback_get_egl_platform,
 };
 
 struct compositor_backend *compositor_backend_fallback_init(struct neowall_state *state) {
     (void)state;
-    
+
     /* Register backend in registry */
     compositor_backend_register(BACKEND_NAME,
                                 BACKEND_DESCRIPTION,
                                 BACKEND_PRIORITY,
                                 &fallback_backend_ops);
-    
+
     return NULL; /* Actual initialization happens in select_backend() */
 }
 
