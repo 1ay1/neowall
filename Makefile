@@ -170,15 +170,15 @@ ifeq ($(HAS_EGL_KHR_FENCE),yes)
     $(info EGL_KHR_fence_sync extension available)
 endif
 
-# Wayland backend support
-ifeq ($(HAS_WAYLAND),yes)
+# Wayland backend support (requires wayland-client, wayland-egl, AND wayland-protocols)
+ifeq ($(HAS_WAYLAND)$(HAS_WAYLAND_PROTOCOLS),yesyes)
     CFLAGS += -DHAVE_WAYLAND_BACKEND
     LDFLAGS += -lwayland-client -lwayland-egl
     WAYLAND_BACKEND := yes
     $(info Wayland backend available)
 else
     WAYLAND_BACKEND := no
-    $(info Wayland backend not available (wayland-client or wayland-egl not found))
+    $(info Wayland backend not available (requires wayland-client, wayland-egl, and wayland-protocols))
 endif
 
 # X11 backend support (requires both libX11 and libXrandr)

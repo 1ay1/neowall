@@ -93,3 +93,37 @@ jobs:
         run: |
           test -f build/bin/neowall
           ./build/bin/neowall --version
+
+  build-debian-x11-only:
+    name: Debian (X11 only - i3 style)
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bookworm
+
+    steps:
+      - name: Install dependencies (pure X11, no Wayland)
+        run: |
+          apt-get update
+          apt-get install -y build-essential git pkg-config \
+            libx11-dev libxrandr-dev \
+            libegl1-mesa-dev libgles2-mesa-dev \
+            libpng-dev libjpeg-dev
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build (X11 only)
+        run: make
+
+      - name: Verify Wayland backend not compiled
+        run: |
+          make 2>&1 | grep -q "Wayland backend not available" && echo "Wayland correctly disabled"
+
+      - name: Verify X11 backend compiled
+        run: |
+          make 2>&1 | grep -q "X11 backend available" && echo "X11 backend enabled"
+
+      - name: Check binary
+        run: |
+          test -f build/bin/neowall
+          ./build/bin/neowall --version
