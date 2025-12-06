@@ -38,9 +38,9 @@ const char *egl_error_string(EGLint error) {
 bool egl_check_error(const char *context) {
     EGLint error = eglGetError();
     if (error != EGL_SUCCESS) {
-        log_error("EGL error in %s: %s (0x%x)", 
-                  context ? context : "unknown", 
-                  egl_error_string(error), 
+        log_error("EGL error in %s: %s (0x%x)",
+                  context ? context : "unknown",
+                  egl_error_string(error),
                   error);
         return true;
     }
@@ -53,43 +53,72 @@ bool egl_core_init(struct neowall_state *state) {
         log_error("Invalid state");
         return false;
     }
-    
+
     log_info("Initializing EGL with multi-version support...");
-    
-    /* Get EGL display - handle both Wayland and X11 */
-    if (state->display) {
-        /* Wayland display */
-        state->egl_display = eglGetDisplay((EGLNativeDisplayType)state->display);
+
+    /* Get native display and platform from compositor backend */
+    if (!state->compositor_backend || !state->compositor_backend->ops) {
+        log_error("No compositor backend available for EGL initialization");
+        return false;
+    }
+
+    const compositor_backend_ops_t *ops = state->compositor_backend->ops;
+    void *backend_data = state->compositor_backend->data;
+
+    void *native_display = NULL;
+    if (ops->get_native_display) {
+        native_display = ops->get_native_display(backend_data);
+    }
+
+    EGLenum platform = EGL_PLATFORM_WAYLAND_KHR;  /* Default */
+    if (ops->get_egl_platform) {
+        platform = ops->get_egl_platform(backend_data);
+    }
+
+    /* Get EGL display using platform-specific method */
+    if (native_display) {
+        /* Use eglGetPlatformDisplay for proper platform handling */
+        PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT =
+            (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
+
+        if (eglGetPlatformDisplayEXT) {
+            state->egl_display = eglGetPlatformDisplayEXT(platform, native_display, NULL);
+            log_info("Using eglGetPlatformDisplayEXT with platform 0x%x", platform);
+        } else {
+            /* Fallback to eglGetDisplay */
+            state->egl_display = eglGetDisplay((EGLNativeDisplayType)native_display);
+            log_info("Using eglGetDisplay (fallback)");
+        }
     } else {
-        /* X11 display - use default display */
-        log_info("Using X11 EGL display (default)");
+        /* No native display - use default */
+        log_info("Using EGL default display");
         state->egl_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     }
-    
+
     if (state->egl_display == EGL_NO_DISPLAY) {
         log_error("Failed to get EGL display");
         return false;
     }
-    
+
     /* Initialize EGL */
     EGLint major, minor;
     if (!eglInitialize(state->egl_display, &major, &minor)) {
         log_error("Failed to initialize EGL");
         return false;
     }
-    
+
     log_info("EGL version: %d.%d", major, minor);
-    
+
     /* Bind OpenGL ES API */
     if (!eglBindAPI(EGL_OPENGL_ES_API)) {
         log_error("Failed to bind OpenGL ES API");
         eglTerminate(state->egl_display);
         return false;
     }
-    
+
     /* Detect capabilities */
     egl_detect_capabilities(state->egl_display, &state->gl_caps);
-    
+
     /* Try ES 3.0 first, then ES 2.0 */
     const EGLint config_attribs_es3[] = {
         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
@@ -100,7 +129,7 @@ bool egl_core_init(struct neowall_state *state) {
         EGL_ALPHA_SIZE, 8,
         EGL_NONE
     };
-    
+
     const EGLint config_attribs_es2[] = {
         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
@@ -110,10 +139,10 @@ bool egl_core_init(struct neowall_state *state) {
         EGL_ALPHA_SIZE, 8,
         EGL_NONE
     };
-    
+
     EGLint num_configs;
     bool using_es3 = false;
-    
+
     /* Try ES 3.0 */
     if (eglChooseConfig(state->egl_display, config_attribs_es3,
                         &state->egl_config, 1, &num_configs) && num_configs > 0) {
@@ -122,7 +151,7 @@ bool egl_core_init(struct neowall_state *state) {
             EGL_CONTEXT_MINOR_VERSION, 0,
             EGL_NONE
         };
-        
+
         state->egl_context = eglCreateContext(state->egl_display,
                                              state->egl_config,
                                              EGL_NO_CONTEXT,
@@ -133,23 +162,23 @@ bool egl_core_init(struct neowall_state *state) {
             log_info("Created OpenGL ES 3.0 context (enhanced Shadertoy support)");
         }
     }
-    
+
     /* Fallback to ES 2.0 */
     if (!using_es3) {
         log_info("OpenGL ES 3.0 not available, falling back to ES 2.0");
-        
+
         if (!eglChooseConfig(state->egl_display, config_attribs_es2,
                             &state->egl_config, 1, &num_configs) || num_configs == 0) {
             log_error("No suitable EGL configs found");
             eglTerminate(state->egl_display);
             return false;
         }
-        
+
         const EGLint context_attribs_es2[] = {
             EGL_CONTEXT_CLIENT_VERSION, 2,
             EGL_NONE
         };
-        
+
         state->egl_context = eglCreateContext(state->egl_display,
                                              state->egl_config,
                                              EGL_NO_CONTEXT,
@@ -159,15 +188,15 @@ bool egl_core_init(struct neowall_state *state) {
             eglTerminate(state->egl_display);
             return false;
         }
-        
+
         state->gl_caps.gles_version = GLES_VERSION_2_0;
         log_info("Created OpenGL ES 2.0 context");
     }
-    
+
     /* BUG FIX #2: Protect output list traversal with read lock */
     /* Create surfaces and detect GL capabilities - FIRST TRAVERSAL */
     pthread_rwlock_rdlock(&state->output_list_lock);
-    
+
     struct output_state *output = state->outputs;
     while (output) {
         if (output->width > 0 && output->height > 0) {
@@ -182,13 +211,13 @@ bool egl_core_init(struct neowall_state *state) {
         }
         output = output->next;
     }
-    
+
     pthread_rwlock_unlock(&state->output_list_lock);
-    
+
     /* BUG FIX #2: Second traversal also needs lock protection */
     /* Make context current to detect GL capabilities - SECOND TRAVERSAL */
     pthread_rwlock_rdlock(&state->output_list_lock);
-    
+
     output = state->outputs;
     if (output && output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
         /* Enable vsync to reduce GPU usage and prevent tearing */
@@ -199,27 +228,27 @@ bool egl_core_init(struct neowall_state *state) {
         } else {
             log_info("Enabled vsync (swap interval = 1) for power efficiency");
         }
-        
-        if (output->compositor_surface && 
+
+        if (output->compositor_surface &&
             eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
                           output->compositor_surface->egl_surface, state->egl_context)) {
-            gles_detect_capabilities_for_context(state->egl_display, 
+            gles_detect_capabilities_for_context(state->egl_display,
                                                  state->egl_context,
                                                  &state->gl_caps);
-            
+
             log_info("Using OpenGL ES %s (%s Shadertoy compatibility)",
                      gles_version_string(state->gl_caps.gles_version),
                      state->gl_caps.gles_version >= GLES_VERSION_3_0 ? "enhanced" : "basic");
         }
     }
-    
+
     pthread_rwlock_unlock(&state->output_list_lock);
-    
+
     /* BUG FIX #10: Third traversal also needs lock protection */
     /* Initialize rendering resources for each output - THIRD TRAVERSAL */
     log_debug("Initializing rendering resources for outputs...");
     pthread_rwlock_rdlock(&state->output_list_lock);
-    
+
     output = state->outputs;
     while (output) {
         if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
@@ -232,7 +261,7 @@ bool egl_core_init(struct neowall_state *state) {
                 output = output->next;
                 continue;
             }
-            
+
             if (!output_init_render(output)) {
                 log_error("Failed to initialize rendering for output %s",
                           output->model[0] ? output->model : "unknown");
@@ -243,28 +272,28 @@ bool egl_core_init(struct neowall_state *state) {
         }
         output = output->next;
     }
-    
+
     pthread_rwlock_unlock(&state->output_list_lock);
-    
+
     /* BUG FIX #10: Fourth traversal also needs lock protection */
     /* Apply any deferred configuration now that surfaces are ready - FOURTH TRAVERSAL */
     log_debug("Applying deferred configuration to outputs...");
     pthread_rwlock_rdlock(&state->output_list_lock);
-    
+
     output = state->outputs;
     while (output) {
         output_apply_deferred_config(output);
         output = output->next;
     }
-    
+
     pthread_rwlock_unlock(&state->output_list_lock);
-    
+
     return true;
 }
 
 void egl_core_cleanup(struct neowall_state *state) {
     if (!state) return;
-    
+
     struct output_state *output = state->outputs;
     while (output) {
         if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
@@ -272,17 +301,17 @@ void egl_core_cleanup(struct neowall_state *state) {
         }
         output = output->next;
     }
-    
+
     if (state->egl_display != EGL_NO_DISPLAY) {
         eglMakeCurrent(state->egl_display, EGL_NO_SURFACE,
                       EGL_NO_SURFACE, EGL_NO_CONTEXT);
     }
-    
+
     if (state->egl_context != EGL_NO_CONTEXT) {
         eglDestroyContext(state->egl_display, state->egl_context);
         state->egl_context = EGL_NO_CONTEXT;
     }
-    
+
     if (state->egl_display != EGL_NO_DISPLAY) {
         eglTerminate(state->egl_display);
         state->egl_display = EGL_NO_DISPLAY;
@@ -291,14 +320,14 @@ void egl_core_cleanup(struct neowall_state *state) {
 
 bool egl_core_make_current(struct neowall_state *state, struct output_state *output) {
     if (!state || state->egl_display == EGL_NO_DISPLAY) return false;
-    
+
     if (!output) {
         return eglMakeCurrent(state->egl_display, EGL_NO_SURFACE,
                              EGL_NO_SURFACE, EGL_NO_CONTEXT);
     }
-    
+
     if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) return false;
-    
+
     return eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
                          output->compositor_surface->egl_surface, state->egl_context);
 }

@@ -746,35 +746,23 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* Initialize Wayland connection (optional - will try alternative backend if this fails) */
-    bool wayland_available = wayland_init(&state);
-    if (!wayland_available) {
-        log_info("Wayland not available - attempting alternative backend");
-        /* state.display remains NULL, which triggers alternative backend selection */
-        state.compositor_backend = compositor_backend_init(&state);
-        if (!state.compositor_backend) {
-            log_error("Failed to initialize backend");
-            close(state.signal_fd);
-            return EXIT_FAILURE;
-        }
-        log_info("Backend initialized successfully");
-
-        /* Initialize outputs via backend (for X11, creates synthetic output) */
-        if (state.compositor_backend->ops && state.compositor_backend->ops->init_outputs) {
-            if (!state.compositor_backend->ops->init_outputs(state.compositor_backend->data, &state)) {
-                log_error("Failed to initialize outputs");
-                close(state.signal_fd);
-                return EXIT_FAILURE;
-            }
-        }
+    /* Initialize compositor backend (auto-detects Wayland/X11) */
+    log_info("Initializing compositor backend...");
+    state.compositor_backend = compositor_backend_init(&state);
+    if (!state.compositor_backend) {
+        log_error("Failed to initialize compositor backend");
+        log_error("Ensure you're running under a Wayland compositor or X11 window manager");
+        close(state.signal_fd);
+        return EXIT_FAILURE;
     }
+
+    log_info("Compositor backend initialized: %s", state.compositor_backend->name);
+    log_info("Description: %s", state.compositor_backend->description);
 
     /* Initialize EGL/OpenGL */
     if (!egl_core_init(&state)) {
         log_error("Failed to initialize EGL");
-        if (wayland_available) {
-            wayland_cleanup(&state);
-        }
+        compositor_backend_cleanup(state.compositor_backend);
         close(state.signal_fd);
         return EXIT_FAILURE;
     }
@@ -783,9 +771,7 @@ int main(int argc, char *argv[]) {
     if (!config_load(&state, config_path)) {
         log_error("Failed to load configuration");
         egl_core_cleanup(&state);
-        if (wayland_available) {
-            wayland_cleanup(&state);
-        }
+        compositor_backend_cleanup(state.compositor_backend);
         close(state.signal_fd);
         return EXIT_FAILURE;
     }
@@ -803,7 +789,12 @@ int main(int argc, char *argv[]) {
 
     /* Quick cleanup - don't spend too much time on this during shutdown */
     egl_core_cleanup(&state);
-    wayland_cleanup(&state);
+
+    /* Cleanup compositor backend */
+    if (state.compositor_backend) {
+        compositor_backend_cleanup(state.compositor_backend);
+        state.compositor_backend = NULL;
+    }
 
     /* Close signal fd */
     if (state.signal_fd >= 0) {
