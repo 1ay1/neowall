@@ -315,26 +315,38 @@ XDG_SHELL_XML = /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml
 VIEWPORTER_XML = /usr/share/wayland-protocols/stable/viewporter/viewporter.xml
 XDG_OUTPUT_XML = /usr/share/wayland-protocols/unstable/xdg-output/xdg-output-unstable-v1.xml
 PLASMA_SHELL_XML = $(PROTO_DIR)/plasma-shell.xml
+TEARING_CONTROL_XML = $(PROTO_DIR)/tearing-control-v1.xml
 
+# Protocol headers/sources only needed for Wayland backend
+ifeq ($(WAYLAND_BACKEND),yes)
 PROTO_HEADERS = $(PROTO_DIR)/wlr-layer-shell-unstable-v1-client-protocol.h \
                 $(PROTO_DIR)/xdg-shell-client-protocol.h \
                 $(PROTO_DIR)/viewporter-client-protocol.h \
                 $(PROTO_DIR)/xdg-output-unstable-v1-client-protocol.h \
-                $(PROTO_DIR)/plasma-shell-client-protocol.h
+                $(PROTO_DIR)/plasma-shell-client-protocol.h \
+                $(PROTO_DIR)/tearing-control-v1-client-protocol.h
 
 PROTO_SRCS = $(PROTO_DIR)/wlr-layer-shell-unstable-v1-client-protocol.c \
              $(PROTO_DIR)/xdg-shell-client-protocol.c \
              $(PROTO_DIR)/viewporter-client-protocol.c \
              $(PROTO_DIR)/xdg-output-unstable-v1-client-protocol.c \
-             $(PROTO_DIR)/plasma-shell-client-protocol.c
+             $(PROTO_DIR)/plasma-shell-client-protocol.c \
+             $(PROTO_DIR)/tearing-control-v1-client-protocol.c
+else
+PROTO_HEADERS =
+PROTO_SRCS =
+endif
 
 # ============================================================================
 # pkg-config Dependencies
 # ============================================================================
 
+# Wayland deps only when Wayland backend is enabled
+ifeq ($(WAYLAND_BACKEND),yes)
 DEPS = wayland-client wayland-egl
 CFLAGS += $(shell pkg-config --cflags $(DEPS))
 LDFLAGS += $(shell pkg-config --libs $(DEPS))
+endif
 
 # Optional dependencies (image loading)
 OPTIONAL_DEPS = libpng libjpeg
@@ -348,8 +360,12 @@ LDFLAGS += $(shell pkg-config --libs $(OPTIONAL_DEPS) 2>/dev/null || echo "-lpng
 # Target binary
 TARGET = $(BIN_DIR)/$(PROJECT)
 
-# Default target
+# Default target - protocols only when Wayland backend is enabled
+ifeq ($(WAYLAND_BACKEND),yes)
 all: banner directories version_header protocols $(TARGET) success
+else
+all: banner directories version_header $(TARGET) success
+endif
 
 # Banner
 banner:
@@ -424,6 +440,10 @@ $(PROTO_DIR)/%-client-protocol.h: | directories
 		echo "Generating plasma-shell header...$(COLOR_RESET)"; \
 		wayland-scanner client-header $(PLASMA_SHELL_XML) $(PROTO_DIR)/plasma-shell-client-protocol.h 2>/dev/null || echo "Warning: Could not generate plasma-shell header$(COLOR_RESET)"; \
 	fi
+	@if [ -f "$(TEARING_CONTROL_XML)" ]; then \
+		echo "Generating tearing-control header...$(COLOR_RESET)"; \
+		wayland-scanner client-header $(TEARING_CONTROL_XML) $(PROTO_DIR)/tearing-control-v1-client-protocol.h 2>/dev/null || echo "Warning: Could not generate tearing-control header$(COLOR_RESET)"; \
+	fi
 
 $(PROTO_DIR)/%-client-protocol.c: | directories
 	@if [ -f "$(WLR_LAYER_SHELL_XML)" ]; then \
@@ -445,6 +465,10 @@ $(PROTO_DIR)/%-client-protocol.c: | directories
 	@if [ -f "$(PLASMA_SHELL_XML)" ]; then \
 		echo "Generating plasma-shell code...$(COLOR_RESET)"; \
 		wayland-scanner private-code $(PLASMA_SHELL_XML) $(PROTO_DIR)/plasma-shell-client-protocol.c 2>/dev/null || echo "Warning: Could not generate plasma-shell code$(COLOR_RESET)"; \
+	fi
+	@if [ -f "$(TEARING_CONTROL_XML)" ]; then \
+		echo "Generating tearing-control code...$(COLOR_RESET)"; \
+		wayland-scanner private-code $(TEARING_CONTROL_XML) $(PROTO_DIR)/tearing-control-v1-client-protocol.c 2>/dev/null || echo "Warning: Could not generate tearing-control code$(COLOR_RESET)"; \
 	fi
 
 # Compile protocol objects
