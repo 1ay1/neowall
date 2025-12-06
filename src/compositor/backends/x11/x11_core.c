@@ -380,10 +380,10 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
     surf_data->native_window = (EGLNativeWindowType)surf_data->x_window;
 
     /* Initialize surface structure */
-    surface->wl_surface = NULL;  /* Not Wayland */
-    surface->egl_window = NULL;  /* Not Wayland EGL */
+    surface->native_surface = (void *)(uintptr_t)surf_data->x_window;  /* X11 Window as opaque handle */
+    surface->egl_window = NULL;  /* X11 uses window directly, not wl_egl_window */
     surface->egl_surface = EGL_NO_SURFACE;
-    surface->output = NULL;
+    surface->native_output = NULL;
     surface->width = width;
     surface->height = height;
     surface->scale = 1;
@@ -778,6 +778,41 @@ static void x11_destroy_egl_window(struct compositor_surface *surface) {
 }
 
 /* ============================================================================
+ * EGL WINDOW RESIZE
+ * ============================================================================ */
+
+static bool x11_resize_egl_window(struct compositor_surface *surface,
+                                 int32_t width, int32_t height) {
+    if (!surface) return false;
+
+    x11_surface_data_t *surf_data = surface->backend_data;
+    if (!surf_data) return false;
+
+    x11_backend_data_t *backend = surface->backend ? (x11_backend_data_t *)surface->backend->data : NULL;
+    if (!backend || !backend->x_display) return false;
+
+    /* Resize the X11 window */
+    XResizeWindow(backend->x_display, surf_data->x_window,
+                 (unsigned int)width, (unsigned int)height);
+    XFlush(backend->x_display);
+
+    return true;
+}
+
+/* ============================================================================
+ * GET NATIVE WINDOW
+ * ============================================================================ */
+
+static EGLNativeWindowType x11_get_native_window(struct compositor_surface *surface) {
+    if (!surface) return (EGLNativeWindowType)0;
+
+    x11_surface_data_t *surf_data = surface->backend_data;
+    if (!surf_data) return (EGLNativeWindowType)0;
+
+    return surf_data->native_window;
+}
+
+/* ============================================================================
  * CAPABILITIES
  * ============================================================================ */
 
@@ -792,7 +827,7 @@ static compositor_capabilities_t x11_get_capabilities(void *backend_data) {
  * OUTPUT MANAGEMENT
  * ============================================================================ */
 
-static void x11_on_output_added(void *backend_data, struct wl_output *output) {
+static void x11_on_output_added(void *backend_data, void *output) {
     (void)backend_data;
     (void)output;
 
@@ -800,12 +835,31 @@ static void x11_on_output_added(void *backend_data, struct wl_output *output) {
     log_debug("X11 output added (handled via XRandR)");
 }
 
-static void x11_on_output_removed(void *backend_data, struct wl_output *output) {
+static void x11_on_output_removed(void *backend_data, void *output) {
     (void)backend_data;
     (void)output;
 
     /* X11 output management handled via XRandR events */
     log_debug("X11 output removed (handled via XRandR)");
+}
+
+static void x11_damage_surface(struct compositor_surface *surface,
+                              int32_t x, int32_t y, int32_t width, int32_t height) {
+    /* X11 doesn't require explicit damage marking - handled by X server */
+    (void)surface;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+}
+
+static void x11_set_scale(struct compositor_surface *surface, int32_t scale) {
+    /* X11 scaling is handled differently - store for reference but no direct API */
+    if (!surface) {
+        return;
+    }
+    /* Scale is stored in surface->scale by the caller */
+    (void)scale;
 }
 
 /* ============================================================================
@@ -828,7 +882,7 @@ static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
     }
 
     x11_output->state = state;
-    x11_output->output = NULL;  /* No Wayland output */
+    x11_output->native_output = NULL;  /* X11 doesn't use Wayland outputs */
     x11_output->name = 0;
     snprintf(x11_output->model, sizeof(x11_output->model), "X11 Screen");
     snprintf(x11_output->connector_name, sizeof(x11_output->connector_name), "X11-0");
@@ -1034,9 +1088,13 @@ static const compositor_backend_ops_t x11_backend_ops = {
     .commit_surface = x11_commit_surface,
     .create_egl_window = x11_create_egl_window,
     .destroy_egl_window = x11_destroy_egl_window,
+    .resize_egl_window = x11_resize_egl_window,
+    .get_native_window = x11_get_native_window,
     .get_capabilities = x11_get_capabilities,
     .on_output_added = x11_on_output_added,
     .on_output_removed = x11_on_output_removed,
+    .damage_surface = x11_damage_surface,
+    .set_scale = x11_set_scale,
     .init_outputs = x11_init_outputs,
     /* Event handling operations */
     .get_fd = x11_get_fd,

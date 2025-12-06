@@ -205,8 +205,11 @@ const char *compositor_type_to_string(compositor_type_t type) {
 }
 
 /* Public API: Detect compositor */
-compositor_info_t compositor_detect(struct wl_display *display) {
+compositor_info_t compositor_detect(void *native_display) {
     compositor_info_t info = {0};
+
+    /* Cast to Wayland display - this function is primarily for Wayland */
+    struct wl_display *display = (struct wl_display *)native_display;
 
     /* Detect protocols */
     protocol_state_t proto = detect_protocols(display);
@@ -529,14 +532,14 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         struct output_state *output = state->outputs;
         while (output) {
             /* Only configure surfaces for fully configured outputs */
-            if (output->configured && output->output) {
+            if (output->configured && output->native_output) {
                 if (!output_configure_compositor_surface(output)) {
                     log_error("Failed to configure compositor surface for output %s", output->model);
                 }
             } else {
-                log_debug("Skipping surface configuration for output %s (configured=%d, wl_output=%p)",
+                log_debug("Skipping surface configuration for output %s (configured=%d, native_output=%p)",
                           output->model[0] ? output->model : "unknown",
-                          output->configured, (void*)output->output);
+                          output->configured, (void*)output->native_output);
             }
             output = output->next;
         }

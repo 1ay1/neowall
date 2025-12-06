@@ -653,15 +653,15 @@ bool output_configure_compositor_surface(struct output_state *output) {
         return false;
     }
 
-    if (!output->output) {
-        log_error("Output %s has no wl_output yet, cannot configure surface",
+    if (!output->native_output) {
+        log_error("Output %s has no native output yet, cannot configure surface",
                   output->model[0] ? output->model : "unknown");
         return false;
     }
 
-    log_debug("Configuring compositor surface for output %s (wl_output=%p, configured=%d)",
+    log_debug("Configuring compositor surface for output %s (native_output=%p, configured=%d)",
               output->model[0] ? output->model : "unknown",
-              (void*)output->output, output->configured);
+              (void*)output->native_output, output->configured);
 
     /* Create compositor surface using abstraction layer */
     compositor_surface_config_t config = {
@@ -671,7 +671,7 @@ bool output_configure_compositor_surface(struct output_state *output) {
         .keyboard_interactivity = false,
         .width = 0,   /* Auto-size from compositor */
         .height = 0,  /* Auto-size from compositor */
-        .output = output->output,
+        .output = output->native_output,
     };
 
     output->compositor_surface = compositor_surface_create(state->compositor_backend, &config);

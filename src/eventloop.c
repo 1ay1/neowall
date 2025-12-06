@@ -338,16 +338,12 @@ static void render_outputs(struct neowall_state *state) {
                          output->model, eglGetError());
                 state->errors_count++;
             } else {
-                /* Damage the entire surface to tell compositor it needs repainting (Wayland only) */
-                if (output->compositor_surface->wl_surface) {
-                    wl_surface_damage(output->compositor_surface->wl_surface, 0, 0, INT32_MAX, INT32_MAX);
+                /* Damage the entire surface to tell compositor it needs repainting */
+                compositor_surface_damage(output->compositor_surface, 0, 0, INT32_MAX, INT32_MAX);
 
-                    /* Commit Wayland surface */
-                    wl_surface_commit(output->compositor_surface->wl_surface);
-                } else {
-                    /* Commit surface for non-Wayland backends */
-                    compositor_surface_commit(output->compositor_surface);
-                }
+                /* Commit surface changes */
+                compositor_surface_commit(output->compositor_surface);
+
                 output->last_frame_time = current_time;
                 state->frames_rendered++;
 

@@ -195,23 +195,24 @@ static struct compositor_surface *kde_create_surface(void *data,
 
     /* Create base Wayland surface */
     wayland_t *wl = wayland_get();
-    surface->wl_surface = wl_compositor_create_surface(wl->compositor);
-    if (!surface->wl_surface) {
+    struct wl_surface *wl_surface = wl_compositor_create_surface(wl->compositor);
+    if (!wl_surface) {
         log_error("Failed to create Wayland surface");
         free(surface_data);
         free(surface);
         return NULL;
     }
+    surface->native_surface = wl_surface;
 
     /* Get plasma surface from plasma shell */
     surface_data->plasma_surface = org_kde_plasma_shell_get_surface(
         backend_data->plasma_shell,
-        surface->wl_surface
+        wl_surface
     );
 
     if (!surface_data->plasma_surface) {
         log_error("Failed to get plasma surface");
-        wl_surface_destroy(surface->wl_surface);
+        wl_surface_destroy(wl_surface);
         free(surface_data);
         free(surface);
         return NULL;
@@ -238,7 +239,7 @@ static struct compositor_surface *kde_create_surface(void *data,
     surface->config = *config;
     surface->configured = false;
     surface->committed = false;
-    surface->output = config->output;
+    surface->native_output = config->output;
 
     log_debug("KDE Plasma surface created successfully");
 
@@ -272,9 +273,9 @@ static void kde_destroy_surface(struct compositor_surface *surface) {
     }
 
     /* Cleanup Wayland surface */
-    if (surface->wl_surface) {
-        wl_surface_destroy(surface->wl_surface);
-        surface->wl_surface = NULL;
+    if (surface->native_surface) {
+        wl_surface_destroy((struct wl_surface *)surface->native_surface);
+        surface->native_surface = NULL;
     }
 
     free(surface);
@@ -329,18 +330,18 @@ static bool kde_configure_surface(struct compositor_surface *surface,
 }
 
 static void kde_commit_surface(struct compositor_surface *surface) {
-    if (!surface || !surface->wl_surface) {
+    if (!surface || !surface->native_surface) {
         log_error("Invalid surface for commit");
         return;
     }
 
-    wl_surface_commit(surface->wl_surface);
+    wl_surface_commit((struct wl_surface *)surface->native_surface);
     surface->committed = true;
 }
 
 static bool kde_create_egl_window(struct compositor_surface *surface,
                                  int32_t width, int32_t height) {
-    if (!surface || !surface->wl_surface) {
+    if (!surface || !surface->native_surface) {
         log_error("Invalid surface for EGL window creation");
         return false;
     }
@@ -353,7 +354,8 @@ static bool kde_create_egl_window(struct compositor_surface *surface,
     }
 
     /* Create new EGL window */
-    surface->egl_window = wl_egl_window_create(surface->wl_surface, width, height);
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    surface->egl_window = wl_egl_window_create(wl_surface, width, height);
     if (!surface->egl_window) {
         log_error("Failed to create EGL window");
         return false;
@@ -365,6 +367,23 @@ static bool kde_create_egl_window(struct compositor_surface *surface,
     log_debug("EGL window created successfully");
 
     return true;
+}
+
+static bool kde_resize_egl_window(struct compositor_surface *surface,
+                                 int32_t width, int32_t height) {
+    if (!surface || !surface->egl_window) {
+        return false;
+    }
+
+    wl_egl_window_resize(surface->egl_window, width, height, 0, 0);
+    return true;
+}
+
+static EGLNativeWindowType kde_get_native_window(struct compositor_surface *surface) {
+    if (!surface || !surface->egl_window) {
+        return (EGLNativeWindowType)0;
+    }
+    return (EGLNativeWindowType)surface->egl_window;
 }
 
 static void kde_destroy_egl_window(struct compositor_surface *surface) {
@@ -390,7 +409,7 @@ static compositor_capabilities_t kde_get_capabilities(void *data) {
     return COMPOSITOR_CAP_MULTI_OUTPUT;
 }
 
-static void kde_on_output_added(void *data, struct wl_output *output) {
+static void kde_on_output_added(void *data, void *output) {
     if (!data || !output) {
         return;
     }
@@ -400,7 +419,7 @@ static void kde_on_output_added(void *data, struct wl_output *output) {
               backend_data->state ? "initialized" : "uninitialized");
 }
 
-static void kde_on_output_removed(void *data, struct wl_output *output) {
+static void kde_on_output_removed(void *data, void *output) {
     if (!data || !output) {
         return;
     }
@@ -408,6 +427,25 @@ static void kde_on_output_removed(void *data, struct wl_output *output) {
     kde_backend_data_t *backend_data = data;
     log_debug("Output removed from KDE backend (compositor: %s)",
               backend_data->state ? "initialized" : "uninitialized");
+}
+
+static void kde_damage_surface(struct compositor_surface *surface,
+                              int32_t x, int32_t y, int32_t width, int32_t height) {
+    if (!surface || !surface->native_surface) {
+        return;
+    }
+
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    wl_surface_damage(wl_surface, x, y, width, height);
+}
+
+static void kde_set_scale(struct compositor_surface *surface, int32_t scale) {
+    if (!surface || !surface->native_surface) {
+        return;
+    }
+
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    wl_surface_set_buffer_scale(wl_surface, scale);
 }
 
 /* ============================================================================
@@ -537,9 +575,13 @@ static const compositor_backend_ops_t kde_backend_ops = {
     .commit_surface = kde_commit_surface,
     .create_egl_window = kde_create_egl_window,
     .destroy_egl_window = kde_destroy_egl_window,
+    .resize_egl_window = kde_resize_egl_window,
+    .get_native_window = kde_get_native_window,
     .get_capabilities = kde_get_capabilities,
     .on_output_added = kde_on_output_added,
     .on_output_removed = kde_on_output_removed,
+    .damage_surface = kde_damage_surface,
+    .set_scale = kde_set_scale,
 
     /* Event handling operations */
     .get_fd = kde_get_fd,

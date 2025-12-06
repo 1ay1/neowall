@@ -420,19 +420,20 @@ static struct compositor_surface *wlr_create_surface(void *data,
 
     /* Create base Wayland surface */
     wayland_t *wl = wayland_get();
-    surface->wl_surface = wl_compositor_create_surface(wl->compositor);
-    if (!surface->wl_surface) {
+    struct wl_surface *wl_surface = wl_compositor_create_surface(wl->compositor);
+    if (!wl_surface) {
         log_error("Failed to create Wayland surface");
         free(surface_data);
         free(surface);
         return NULL;
     }
+    surface->native_surface = wl_surface;
 
     /* Set opaque region to cover entire surface (prevents transparency) */
     struct wl_region *opaque_region = wl_compositor_create_region(wl->compositor);
     if (opaque_region) {
         wl_region_add(opaque_region, 0, 0, INT32_MAX, INT32_MAX);
-        wl_surface_set_opaque_region(surface->wl_surface, opaque_region);
+        wl_surface_set_opaque_region(wl_surface, opaque_region);
         wl_region_destroy(opaque_region);
     }
 
@@ -458,15 +459,15 @@ static struct compositor_surface *wlr_create_surface(void *data,
     /* Create layer surface */
     surface_data->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
         backend_data->layer_shell,
-        surface->wl_surface,
-        config->output,
+        wl_surface,
+        (struct wl_output *)config->output,
         layer,
         "neowall"
     );
 
     if (!surface_data->layer_surface) {
         log_error("Failed to create layer surface");
-        wl_surface_destroy(surface->wl_surface);
+        wl_surface_destroy(wl_surface);
         free(surface_data);
         free(surface);
         return NULL;
@@ -479,7 +480,7 @@ static struct compositor_surface *wlr_create_surface(void *data,
 
     /* Initialize surface structure */
     surface->backend_data = surface_data;
-    surface->output = config->output;
+    surface->native_output = config->output;
     surface->config = *config;
     surface->egl_surface = EGL_NO_SURFACE;
     surface->egl_window = NULL;
@@ -517,15 +518,16 @@ static struct compositor_surface *wlr_create_surface(void *data,
 
     /* Enable tearing control for immediate presentation (bypasses compositor vsync) */
     if (wl && wl->tearing_control_manager) {
-        surface->tearing_control = wp_tearing_control_manager_v1_get_tearing_control(
+        struct wp_tearing_control_v1 *tearing = wp_tearing_control_manager_v1_get_tearing_control(
             wl->tearing_control_manager,
-            surface->wl_surface
+            wl_surface
         );
+        surface->tearing_control = tearing;
 
-        if (surface->tearing_control) {
+        if (tearing) {
             /* Set presentation hint to async (immediate/tearing allowed) */
             wp_tearing_control_v1_set_presentation_hint(
-                surface->tearing_control,
+                tearing,
                 WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC
             );
             log_info("Enabled tearing control for immediate presentation (bypasses compositor FPS limits)");
@@ -572,8 +574,8 @@ static void wlr_destroy_surface(struct compositor_surface *surface) {
     }
 
     /* Destroy base Wayland surface */
-    if (surface->wl_surface) {
-        wl_surface_destroy(surface->wl_surface);
+    if (surface->native_surface) {
+        wl_surface_destroy((struct wl_surface *)surface->native_surface);
     }
 
     free(surface);
@@ -634,10 +636,12 @@ static bool wlr_configure_surface(struct compositor_surface *surface,
 }
 
 static void wlr_commit_surface(struct compositor_surface *surface) {
-    if (!surface || !surface->wl_surface) {
+    if (!surface || !surface->native_surface) {
         log_error("Invalid surface for commit");
         return;
     }
+
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
 
     /* Ensure opaque region is always set (prevents transparency) */
     wayland_t *wl = wayland_get();
@@ -645,17 +649,17 @@ static void wlr_commit_surface(struct compositor_surface *surface) {
         struct wl_region *opaque_region = wl_compositor_create_region(wl->compositor);
         if (opaque_region) {
             wl_region_add(opaque_region, 0, 0, INT32_MAX, INT32_MAX);
-            wl_surface_set_opaque_region(surface->wl_surface, opaque_region);
+            wl_surface_set_opaque_region(wl_surface, opaque_region);
             wl_region_destroy(opaque_region);
         }
     }
 
-    wl_surface_commit(surface->wl_surface);
+    wl_surface_commit(wl_surface);
 }
 
 static bool wlr_create_egl_window(struct compositor_surface *surface,
                                  int32_t width, int32_t height) {
-    if (!surface || !surface->wl_surface) {
+    if (!surface || !surface->native_surface) {
         log_error("Invalid surface for EGL window creation");
         return false;
     }
@@ -663,7 +667,8 @@ static bool wlr_create_egl_window(struct compositor_surface *surface,
     log_debug("Creating EGL window: %dx%d", width, height);
 
     /* Create EGL window */
-    surface->egl_window = wl_egl_window_create(surface->wl_surface, width, height);
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    surface->egl_window = wl_egl_window_create(wl_surface, width, height);
     if (!surface->egl_window) {
         log_error("Failed to create EGL window");
         return false;
@@ -675,6 +680,23 @@ static bool wlr_create_egl_window(struct compositor_surface *surface,
     log_debug("EGL window created successfully");
 
     return true;
+}
+
+static bool wlr_resize_egl_window(struct compositor_surface *surface,
+                                 int32_t width, int32_t height) {
+    if (!surface || !surface->egl_window) {
+        return false;
+    }
+
+    wl_egl_window_resize(surface->egl_window, width, height, 0, 0);
+    return true;
+}
+
+static EGLNativeWindowType wlr_get_native_window(struct compositor_surface *surface) {
+    if (!surface || !surface->egl_window) {
+        return (EGLNativeWindowType)0;
+    }
+    return (EGLNativeWindowType)surface->egl_window;
 }
 
 static void wlr_destroy_egl_window(struct compositor_surface *surface) {
@@ -699,18 +721,37 @@ static compositor_capabilities_t wlr_get_capabilities(void *data) {
            COMPOSITOR_CAP_MULTI_OUTPUT;
 }
 
-static void wlr_on_output_added(void *data, struct wl_output *output) {
+static void wlr_on_output_added(void *data, void *output) {
     (void)data;
     (void)output;
 
     log_debug("Output added to wlr backend");
 }
 
-static void wlr_on_output_removed(void *data, struct wl_output *output) {
+static void wlr_on_output_removed(void *data, void *output) {
     (void)data;
     (void)output;
 
     log_debug("Output removed from wlr backend");
+}
+
+static void wlr_damage_surface(struct compositor_surface *surface,
+                              int32_t x, int32_t y, int32_t width, int32_t height) {
+    if (!surface || !surface->native_surface) {
+        return;
+    }
+
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    wl_surface_damage(wl_surface, x, y, width, height);
+}
+
+static void wlr_set_scale(struct compositor_surface *surface, int32_t scale) {
+    if (!surface || !surface->native_surface) {
+        return;
+    }
+
+    struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
+    wl_surface_set_buffer_scale(wl_surface, scale);
 }
 
 /* ============================================================================
@@ -853,9 +894,13 @@ static const compositor_backend_ops_t wlr_backend_ops = {
     .commit_surface = wlr_commit_surface,
     .create_egl_window = wlr_create_egl_window,
     .destroy_egl_window = wlr_destroy_egl_window,
+    .resize_egl_window = wlr_resize_egl_window,
+    .get_native_window = wlr_get_native_window,
     .get_capabilities = wlr_get_capabilities,
     .on_output_added = wlr_on_output_added,
     .on_output_removed = wlr_on_output_removed,
+    .damage_surface = wlr_damage_surface,
+    .set_scale = wlr_set_scale,
     /* Event handling operations */
     .get_fd = wlr_get_fd,
     .prepare_events = wlr_prepare_events,
