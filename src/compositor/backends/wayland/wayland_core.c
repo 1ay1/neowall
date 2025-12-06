@@ -6,6 +6,7 @@
 #include <time.h>
 #include "neowall.h"
 #include "compositor.h"
+#include "compositor/backends/wayland.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
 
@@ -13,8 +14,29 @@
 #define COMPOSITOR_READY_MAX_RETRIES 5
 #define COMPOSITOR_READY_RETRY_DELAY_MS 200
 
+/* ============================================================================
+ * WAYLAND GLOBAL STATE
+ * ============================================================================
+ * This is the single instance of Wayland-specific state. It encapsulates all
+ * Wayland types that were previously in neowall_state, achieving true
+ * compositor abstraction where the core state is platform-agnostic.
+ */
+static wayland_t g_wayland = {0};
+
+/* Accessor function for Wayland backends */
+wayland_t *wayland_get(void) {
+    if (!g_wayland.initialized) {
+        return NULL;
+    }
+    return &g_wayland;
+}
+
+/* Check if Wayland is available */
+bool wayland_available(void) {
+    return g_wayland.initialized && g_wayland.display != NULL;
+}
+
 /* Forward declarations */
-void wayland_cleanup(struct neowall_state *state);
 static bool wait_for_outputs_configured(struct neowall_state *state);
 
 /* XDG Output listener callbacks */
@@ -243,6 +265,8 @@ static bool output_apply_render_size(struct output_state *output,
 /* Wait for compositor outputs to be available with minimal retries
  * This is compositor-agnostic and works with any Wayland compositor */
 static bool wait_for_outputs_configured(struct neowall_state *state) {
+    wayland_t *wl = &g_wayland;
+    
     /* Simple retry with short delay - don't be too aggressive during compositor startup */
     int retry_count = 0;
     while (retry_count < COMPOSITOR_READY_MAX_RETRIES && state->output_count == 0) {
@@ -259,7 +283,7 @@ static bool wait_for_outputs_configured(struct neowall_state *state) {
         }
 
         /* Do a quick roundtrip to check for outputs */
-        int ret = wl_display_roundtrip(state->display);
+        int ret = wl_display_roundtrip(wl->display);
         if (ret < 0) {
             log_error("Wayland roundtrip failed (compositor may be shutting down)");
             return false;
@@ -359,23 +383,24 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
                                    uint32_t name, const char *interface,
                                    uint32_t version) {
     struct neowall_state *state = data;
+    wayland_t *wl = &g_wayland;
     (void)version;
 
     log_debug("Registry: interface=%s, name=%u, version=%u", interface, name, version);
 
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
-        state->compositor = wl_registry_bind(registry, name,
+        wl->compositor = wl_registry_bind(registry, name,
                                             &wl_compositor_interface, 4);
         log_info("Bound to compositor");
     } else if (strcmp(interface, wl_shm_interface.name) == 0) {
-        state->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
+        wl->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
         log_info("Bound to shared memory");
     } else if (strcmp(interface, "wp_tearing_control_manager_v1") == 0) {
-        state->tearing_control_manager = wl_registry_bind(registry, name,
+        wl->tearing_control_manager = wl_registry_bind(registry, name,
                                                            &wp_tearing_control_manager_v1_interface, 1);
         log_info("Bound to tearing control manager (immediate presentation support)");
     } else if (strcmp(interface, zxdg_output_manager_v1_interface.name) == 0) {
-        state->xdg_output_manager = wl_registry_bind(registry, name,
+        wl->xdg_output_manager = wl_registry_bind(registry, name,
                                                       &zxdg_output_manager_v1_interface, 2);
         log_debug("Bound to xdg_output_manager");
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
@@ -391,9 +416,9 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
             wl_output_add_listener(output_obj, &output_listener, output);
 
             /* Get xdg_output for connector name if manager is available */
-            if (state->xdg_output_manager) {
+            if (wl->xdg_output_manager) {
                 output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
-                    state->xdg_output_manager, output_obj);
+                    wl->xdg_output_manager, output_obj);
                 if (output->xdg_output) {
                     zxdg_output_v1_add_listener(output->xdg_output, &xdg_output_listener, output);
                     log_debug("Created xdg_output for output %u", name);
@@ -456,9 +481,15 @@ bool wayland_init_registry(struct neowall_state *state) {
         return false;
     }
 
+    wayland_t *wl = &g_wayland;
+
+    /* Initialize the wayland structure */
+    memset(wl, 0, sizeof(wayland_t));
+    wl->state = state;
+
     /* Connect to Wayland display */
-    state->display = wl_display_connect(NULL);
-    if (!state->display) {
+    wl->display = wl_display_connect(NULL);
+    if (!wl->display) {
         log_debug("Failed to connect to Wayland display");
         return false;
     }
@@ -466,19 +497,19 @@ bool wayland_init_registry(struct neowall_state *state) {
     log_info("Connected to Wayland display");
 
     /* Get registry */
-    state->registry = wl_display_get_registry(state->display);
-    if (!state->registry) {
+    wl->registry = wl_display_get_registry(wl->display);
+    if (!wl->registry) {
         log_error("Failed to get Wayland registry");
-        wl_display_disconnect(state->display);
-        state->display = NULL;
+        wl_display_disconnect(wl->display);
+        wl->display = NULL;
         return false;
     }
 
     /* Add registry listener */
-    wl_registry_add_listener(state->registry, &registry_listener, state);
+    wl_registry_add_listener(wl->registry, &registry_listener, state);
 
     /* Roundtrip to get all globals */
-    wl_display_roundtrip(state->display);
+    wl_display_roundtrip(wl->display);
 
     /* Wait for outputs to be fully configured before proceeding
      * This ensures compositor is ready to display our layer surfaces */
@@ -488,24 +519,29 @@ bool wayland_init_registry(struct neowall_state *state) {
     }
 
     /* Verify we have required interfaces */
-    if (!state->compositor) {
+    if (!wl->compositor) {
         log_error("Compositor not available");
         return false;
     }
 
+    /* Mark as initialized */
+    wl->initialized = true;
+
     return true;
 }
 
-bool wayland_init(struct neowall_state *state) {
+bool wayland_init_full(struct neowall_state *state) {
     if (!state) {
         log_error("Invalid state pointer");
         return false;
     }
 
+    wayland_t *wl = &g_wayland;
+
     /* Initialize registry and discover outputs */
     if (!wayland_init_registry(state)) {
         log_error("Failed to initialize Wayland registry");
-        wayland_cleanup(state);
+        wayland_cleanup();
         return false;
     }
 
@@ -515,7 +551,7 @@ bool wayland_init(struct neowall_state *state) {
     if (!state->compositor_backend) {
         log_error("Failed to initialize compositor backend");
         log_error("No suitable backend found for your compositor");
-        wayland_cleanup(state);
+        wayland_cleanup();
         return false;
     }
 
@@ -535,60 +571,70 @@ bool wayland_init(struct neowall_state *state) {
     /* Flush all pending requests to ensure compositor processes them immediately
      * This is critical for autostart scenarios where compositor may be under load */
     log_debug("Flushing Wayland display to ensure compositor processes layer surfaces");
-    wl_display_flush(state->display);
+    wl_display_flush(wl->display);
 
     /* Final roundtrip to wait for configure events */
-    wl_display_roundtrip(state->display);
+    wl_display_roundtrip(wl->display);
 
     log_info("Wayland initialization complete, all surfaces configured");
 
     return true;
 }
 
-void wayland_cleanup(struct neowall_state *state) {
-    if (!state) {
+void wayland_cleanup(void) {
+    wayland_t *wl = &g_wayland;
+    
+    if (!wl->initialized && !wl->display) {
         return;
     }
 
     log_debug("Cleaning up Wayland resources");
 
-    /* Destroy all outputs - acquire write lock since we're modifying the list */
-    pthread_rwlock_wrlock(&state->output_list_lock);
-    while (state->outputs) {
-        struct output_state *next = state->outputs->next;
-        output_destroy(state->outputs);
-        state->outputs = next;
-    }
-    state->output_count = 0;
-    pthread_rwlock_unlock(&state->output_list_lock);
+    /* Get the neowall state for output cleanup */
+    struct neowall_state *state = wl->state;
 
-    /* Cleanup compositor backend */
-    if (state->compositor_backend) {
-        log_debug("Cleaning up compositor backend: %s", state->compositor_backend->name);
-        compositor_backend_cleanup(state->compositor_backend);
-        state->compositor_backend = NULL;
+    if (state) {
+        /* Destroy all outputs - acquire write lock since we're modifying the list */
+        pthread_rwlock_wrlock(&state->output_list_lock);
+        while (state->outputs) {
+            struct output_state *next = state->outputs->next;
+            output_destroy(state->outputs);
+            state->outputs = next;
+        }
+        state->output_count = 0;
+        pthread_rwlock_unlock(&state->output_list_lock);
+
+        /* Cleanup compositor backend */
+        if (state->compositor_backend) {
+            log_debug("Cleaning up compositor backend: %s", state->compositor_backend->name);
+            compositor_backend_cleanup(state->compositor_backend);
+            state->compositor_backend = NULL;
+        }
     }
 
     /* Destroy Wayland objects */
-    if (state->shm) {
-        wl_shm_destroy(state->shm);
-        state->shm = NULL;
+    if (wl->shm) {
+        wl_shm_destroy(wl->shm);
+        wl->shm = NULL;
     }
 
-    if (state->compositor) {
-        wl_compositor_destroy(state->compositor);
-        state->compositor = NULL;
+    if (wl->compositor) {
+        wl_compositor_destroy(wl->compositor);
+        wl->compositor = NULL;
     }
 
-    if (state->registry) {
-        wl_registry_destroy(state->registry);
-        state->registry = NULL;
+    if (wl->registry) {
+        wl_registry_destroy(wl->registry);
+        wl->registry = NULL;
     }
 
-    if (state->display) {
-        wl_display_disconnect(state->display);
-        state->display = NULL;
+    if (wl->display) {
+        wl_display_disconnect(wl->display);
+        wl->display = NULL;
     }
+
+    wl->initialized = false;
+    wl->state = NULL;
 
     log_debug("Wayland cleanup complete");
 }
@@ -652,7 +698,10 @@ bool output_configure_compositor_surface(struct output_state *output) {
     compositor_surface_commit(output->compositor_surface);
 
     /* Force immediate flush to compositor - critical for autostart timing */
-    wl_display_flush(state->display);
+    wayland_t *wl = wayland_get();
+    if (wl && wl->display) {
+        wl_display_flush(wl->display);
+    }
 
     log_info("Compositor surface configured and committed for output %s",
              output->model[0] ? output->model : "unknown");

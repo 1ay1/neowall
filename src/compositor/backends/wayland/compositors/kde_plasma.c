@@ -7,6 +7,7 @@
 #include <wayland-egl.h>
 #include <EGL/egl.h>
 #include "compositor.h"
+#include "compositor/backends/wayland.h"
 #include "neowall.h"
 #include "plasma-shell-client-protocol.h"
 
@@ -93,7 +94,8 @@ static const struct wl_registry_listener registry_listener = {
  * ============================================================================ */
 
 static void *kde_backend_init(struct neowall_state *state) {
-    if (!state || !state->display) {
+    wayland_t *wl = wayland_get();
+    if (!state || !wl || !wl->display) {
         log_error("Invalid state for KDE Plasma backend");
         return NULL;
     }
@@ -111,7 +113,7 @@ static void *kde_backend_init(struct neowall_state *state) {
     backend_data->has_plasma_shell = false;
 
     /* Get Wayland registry and listen for globals */
-    backend_data->registry = wl_display_get_registry(state->display);
+    backend_data->registry = wl_display_get_registry(wl->display);
     if (!backend_data->registry) {
         log_error("Failed to get Wayland registry");
         free(backend_data);
@@ -121,7 +123,7 @@ static void *kde_backend_init(struct neowall_state *state) {
     wl_registry_add_listener(backend_data->registry, &registry_listener, backend_data);
 
     /* Roundtrip to get all globals */
-    wl_display_roundtrip(state->display);
+    wl_display_roundtrip(wl->display);
 
     /* Check if plasma shell is available */
     if (!backend_data->has_plasma_shell) {
@@ -192,7 +194,8 @@ static struct compositor_surface *kde_create_surface(void *data,
     }
 
     /* Create base Wayland surface */
-    surface->wl_surface = wl_compositor_create_surface(backend_data->state->compositor);
+    wayland_t *wl = wayland_get();
+    surface->wl_surface = wl_compositor_create_surface(wl->compositor);
     if (!surface->wl_surface) {
         log_error("Failed to create Wayland surface");
         free(surface_data);
@@ -413,19 +416,21 @@ static void kde_on_output_removed(void *data, struct wl_output *output) {
 
 static int kde_get_fd(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
-    return wl_display_get_fd(backend->state->display);
+    return wl_display_get_fd(wl->display);
 }
 
 static bool kde_prepare_events(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    struct wl_display *display = backend->state->display;
+    struct wl_display *display = wl->display;
     while (wl_display_prepare_read(display) != 0) {
         if (wl_display_dispatch_pending(display) < 0) {
             return false;
@@ -436,29 +441,32 @@ static bool kde_prepare_events(void *data) {
 
 static bool kde_read_events(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    return wl_display_read_events(backend->state->display) >= 0;
+    return wl_display_read_events(wl->display) >= 0;
 }
 
 static bool kde_dispatch_events(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    return wl_display_dispatch_pending(backend->state->display) >= 0;
+    return wl_display_dispatch_pending(wl->display) >= 0;
 }
 
 static bool kde_flush(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    int ret = wl_display_flush(backend->state->display);
+    int ret = wl_display_flush(wl->display);
     if (ret < 0 && errno != EAGAIN) {
         return false;
     }
@@ -467,28 +475,31 @@ static bool kde_flush(void *data) {
 
 static void kde_cancel_read(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return;
     }
 
-    wl_display_cancel_read(backend->state->display);
+    wl_display_cancel_read(wl->display);
 }
 
 static int kde_get_error(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
 
-    return wl_display_get_error(backend->state->display);
+    return wl_display_get_error(wl->display);
 }
 
 static void *kde_get_native_display(void *data) {
     kde_backend_data_t *backend = data;
-    if (!backend || !backend->state) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl) {
         return NULL;
     }
-    return backend->state->display;
+    return wl->display;
 }
 
 static EGLenum kde_get_egl_platform(void *data) {

@@ -7,6 +7,7 @@
 #include <wayland-egl.h>
 #include <EGL/egl.h>
 #include "compositor.h"
+#include "compositor/backends/wayland.h"
 #include "neowall.h"
 
 /*
@@ -70,7 +71,8 @@ typedef struct {
  * ============================================================================ */
 
 static void *gnome_backend_init(struct neowall_state *state) {
-    if (!state || !state->display) {
+    wayland_t *wl = wayland_get();
+    if (!state || !wl || !wl->display) {
         log_error("Invalid state for GNOME Shell backend");
         return NULL;
     }
@@ -295,19 +297,21 @@ static void gnome_on_output_removed(void *data, struct wl_output *output) {
 
 static int gnome_get_fd(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
-    return wl_display_get_fd(backend->state->display);
+    return wl_display_get_fd(wl->display);
 }
 
 static bool gnome_prepare_events(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    struct wl_display *display = backend->state->display;
+    struct wl_display *display = wl->display;
     while (wl_display_prepare_read(display) != 0) {
         if (wl_display_dispatch_pending(display) < 0) {
             return false;
@@ -318,29 +322,32 @@ static bool gnome_prepare_events(void *data) {
 
 static bool gnome_read_events(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    return wl_display_read_events(backend->state->display) >= 0;
+    return wl_display_read_events(wl->display) >= 0;
 }
 
 static bool gnome_dispatch_events(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    return wl_display_dispatch_pending(backend->state->display) >= 0;
+    return wl_display_dispatch_pending(wl->display) >= 0;
 }
 
 static bool gnome_flush(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    int ret = wl_display_flush(backend->state->display);
+    int ret = wl_display_flush(wl->display);
     if (ret < 0 && errno != EAGAIN) {
         return false;
     }
@@ -349,28 +356,31 @@ static bool gnome_flush(void *data) {
 
 static void gnome_cancel_read(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return;
     }
 
-    wl_display_cancel_read(backend->state->display);
+    wl_display_cancel_read(wl->display);
 }
 
 static int gnome_get_error(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
 
-    return wl_display_get_error(backend->state->display);
+    return wl_display_get_error(wl->display);
 }
 
 static void *gnome_get_native_display(void *data) {
     gnome_backend_data_t *backend = data;
-    if (!backend || !backend->state) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl) {
         return NULL;
     }
-    return backend->state->display;
+    return wl->display;
 }
 
 static EGLenum gnome_get_egl_platform(void *data) {

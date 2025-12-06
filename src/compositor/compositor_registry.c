@@ -5,6 +5,7 @@
 #include <wayland-client.h>
 #include "compositor.h"
 #include "compositor/backends/x11.h"
+#include "compositor/backends/wayland.h"
 #include "neowall.h"
 
 /*
@@ -400,7 +401,8 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     if (wayland_init_registry(state)) {
         /* Wayland initialized successfully, detect compositor */
         log_info("Wayland initialization successful");
-        info = compositor_detect(state->display);
+        wayland_t *wl = wayland_get();
+        info = compositor_detect(wl->display);
 
         log_info("Compositor: %s", info.name);
         log_info("Layer shell support: %s", info.has_layer_shell ? "yes" : "no");
@@ -432,7 +434,7 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     log_debug("Registering available backends...");
 
     /* Try X11 backend first (if Wayland not available) */
-    if (!state->display) {
+    if (!wayland_available()) {
         log_info("No Wayland display - attempting X11 backend");
         struct compositor_backend *x11_backend = compositor_backend_x11_init(state);
         if (x11_backend) {
@@ -453,11 +455,10 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     /* Select best backend */
     struct compositor_backend *backend = select_backend(state, &info);
 
-    /* If backend selection failed, cleanup the Wayland display */
-    if (!backend && state->display) {
-        log_error("Backend selection failed, cleaning up Wayland display");
-        wl_display_disconnect(state->display);
-        state->display = NULL;
+    /* If backend selection failed, cleanup Wayland */
+    if (!backend && wayland_available()) {
+        log_error("Backend selection failed, cleaning up Wayland");
+        wayland_cleanup();
     }
 
     if (backend) {
@@ -493,10 +494,11 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         pthread_rwlock_unlock(&state->output_list_lock);
 
         /* Flush all pending requests */
-        if (state->display) {
+        wayland_t *wl_flush = wayland_get();
+        if (wl_flush && wl_flush->display) {
             log_debug("Flushing Wayland display to ensure compositor processes layer surfaces");
-            wl_display_flush(state->display);
-            wl_display_roundtrip(state->display);
+            wl_display_flush(wl_flush->display);
+            wl_display_roundtrip(wl_flush->display);
         }
     } else {
         log_error("Failed to initialize any compositor backend");

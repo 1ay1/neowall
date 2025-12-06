@@ -6,6 +6,7 @@
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include "compositor.h"
+#include "compositor/backends/wayland.h"
 #include "neowall.h"
 
 /*
@@ -97,7 +98,8 @@ static const struct wl_registry_listener registry_listener = {
  * ============================================================================ */
 
 static void *fallback_backend_init(struct neowall_state *state) {
-    if (!state || !state->display) {
+    wayland_t *wl = wayland_get();
+    if (!state || !wl || !wl->display) {
         log_error("Invalid state for fallback backend");
         return NULL;
     }
@@ -117,10 +119,10 @@ static void *fallback_backend_init(struct neowall_state *state) {
     backend_data->has_subsurface = false;
 
     /* Try to get optional subsurface support */
-    struct wl_registry *registry = wl_display_get_registry(state->display);
+    struct wl_registry *registry = wl_display_get_registry(wl->display);
     if (registry) {
         wl_registry_add_listener(registry, &registry_listener, backend_data);
-        wl_display_roundtrip(state->display);
+        wl_display_roundtrip(wl->display);
         wl_registry_destroy(registry);
     }
 
@@ -186,7 +188,8 @@ static struct compositor_surface *fallback_create_surface(void *data,
     }
 
     /* Create base Wayland surface */
-    surface->wl_surface = wl_compositor_create_surface(backend_data->state->compositor);
+    wayland_t *wl = wayland_get();
+    surface->wl_surface = wl_compositor_create_surface(wl->compositor);
     if (!surface->wl_surface) {
         log_error("Failed to create Wayland surface");
         free(surface_data);
@@ -195,7 +198,7 @@ static struct compositor_surface *fallback_create_surface(void *data,
     }
 
     /* Set opaque region to cover entire surface (prevents transparency) */
-    struct wl_region *opaque_region = wl_compositor_create_region(backend_data->state->compositor);
+    struct wl_region *opaque_region = wl_compositor_create_region(wl->compositor);
     if (opaque_region) {
         wl_region_add(opaque_region, 0, 0, INT32_MAX, INT32_MAX);
         wl_surface_set_opaque_region(surface->wl_surface, opaque_region);
@@ -211,7 +214,7 @@ static struct compositor_surface *fallback_create_surface(void *data,
          */
         log_debug("Creating subsurface for positioning");
 
-        surface_data->parent_surface = wl_compositor_create_surface(backend_data->state->compositor);
+        surface_data->parent_surface = wl_compositor_create_surface(wl->compositor);
         if (surface_data->parent_surface) {
             surface_data->subsurface = wl_subcompositor_get_subsurface(
                 backend_data->subcompositor,
@@ -308,11 +311,10 @@ static bool fallback_configure_surface(struct compositor_surface *surface,
 
     /* Set input region to empty (click pass-through) */
     if (surface->wl_surface) {
-        struct wl_compositor *compositor =
-            ((fallback_backend_data_t*)surface->backend->data)->state->compositor;
+        wayland_t *wl = wayland_get();
 
-        if (compositor) {
-            struct wl_region *region = wl_compositor_create_region(compositor);
+        if (wl && wl->compositor) {
+            struct wl_region *region = wl_compositor_create_region(wl->compositor);
             if (region) {
                 /* Empty region = no input */
                 wl_surface_set_input_region(surface->wl_surface, region);
@@ -332,9 +334,9 @@ static void fallback_commit_surface(struct compositor_surface *surface) {
     }
 
     /* Ensure opaque region is always set (prevents transparency) */
-    fallback_backend_data_t *backend_data = surface->backend->data;
-    if (backend_data && backend_data->state && backend_data->state->compositor) {
-        struct wl_region *opaque_region = wl_compositor_create_region(backend_data->state->compositor);
+    wayland_t *wl = wayland_get();
+    if (wl && wl->compositor) {
+        struct wl_region *opaque_region = wl_compositor_create_region(wl->compositor);
         if (opaque_region) {
             wl_region_add(opaque_region, 0, 0, INT32_MAX, INT32_MAX);
             wl_surface_set_opaque_region(surface->wl_surface, opaque_region);
@@ -424,19 +426,21 @@ static void fallback_on_output_removed(void *data, struct wl_output *output) {
 
 static int fallback_get_fd(void *data) {
     fallback_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
-    return wl_display_get_fd(backend->state->display);
+    return wl_display_get_fd(wl->display);
 }
 
 static bool fallback_prepare_events(void *data) {
     fallback_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    struct wl_display *display = backend->state->display;
+    struct wl_display *display = wl->display;
 
     while (wl_display_prepare_read(display) != 0) {
         if (wl_display_dispatch_pending(display) < 0) {
@@ -449,29 +453,32 @@ static bool fallback_prepare_events(void *data) {
 
 static bool fallback_read_events(void *data) {
     fallback_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    return wl_display_read_events(backend->state->display) >= 0;
+    return wl_display_read_events(wl->display) >= 0;
 }
 
 static bool fallback_dispatch_events(void *data) {
     fallback_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    return wl_display_dispatch_pending(backend->state->display) >= 0;
+    return wl_display_dispatch_pending(wl->display) >= 0;
 }
 
 static bool fallback_flush(void *data) {
     fallback_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    struct wl_display *display = backend->state->display;
+    struct wl_display *display = wl->display;
 
     if (wl_display_flush(display) < 0) {
         if (errno == EAGAIN) {
@@ -485,28 +492,31 @@ static bool fallback_flush(void *data) {
 
 static void fallback_cancel_read(void *data) {
     fallback_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return;
     }
 
-    wl_display_cancel_read(backend->state->display);
+    wl_display_cancel_read(wl->display);
 }
 
 static int fallback_get_error(void *data) {
     fallback_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
 
-    return wl_display_get_error(backend->state->display);
+    return wl_display_get_error(wl->display);
 }
 
 static void *fallback_get_native_display(void *data) {
     fallback_backend_data_t *backend = data;
-    if (!backend || !backend->state) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl) {
         return NULL;
     }
-    return backend->state->display;
+    return wl->display;
 }
 
 static EGLenum fallback_get_egl_platform(void *data) {

@@ -6,6 +6,7 @@
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include "compositor.h"
+#include "compositor/backends/wayland.h"
 #include "neowall.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
@@ -316,7 +317,8 @@ static const struct wl_registry_listener registry_listener = {
  * ============================================================================ */
 
 static void *wlr_backend_init(struct neowall_state *state) {
-    if (!state || !state->display) {
+    wayland_t *wl = wayland_get();
+    if (!state || !wl || !wl->display) {
         log_error("Invalid state for wlr-layer-shell backend");
         return NULL;
     }
@@ -333,7 +335,7 @@ static void *wlr_backend_init(struct neowall_state *state) {
     backend_data->state = state;
 
     /* Get layer shell global */
-    struct wl_registry *registry = wl_display_get_registry(state->display);
+    struct wl_registry *registry = wl_display_get_registry(wl->display);
     if (!registry) {
         log_error("Failed to get Wayland registry");
         free(backend_data);
@@ -341,7 +343,7 @@ static void *wlr_backend_init(struct neowall_state *state) {
     }
 
     wl_registry_add_listener(registry, &registry_listener, backend_data);
-    wl_display_roundtrip(state->display);
+    wl_display_roundtrip(wl->display);
     wl_registry_destroy(registry);
 
     /* Check if layer shell is available */
@@ -417,7 +419,8 @@ static struct compositor_surface *wlr_create_surface(void *data,
     }
 
     /* Create base Wayland surface */
-    surface->wl_surface = wl_compositor_create_surface(backend_data->state->compositor);
+    wayland_t *wl = wayland_get();
+    surface->wl_surface = wl_compositor_create_surface(wl->compositor);
     if (!surface->wl_surface) {
         log_error("Failed to create Wayland surface");
         free(surface_data);
@@ -426,7 +429,7 @@ static struct compositor_surface *wlr_create_surface(void *data,
     }
 
     /* Set opaque region to cover entire surface (prevents transparency) */
-    struct wl_region *opaque_region = wl_compositor_create_region(backend_data->state->compositor);
+    struct wl_region *opaque_region = wl_compositor_create_region(wl->compositor);
     if (opaque_region) {
         wl_region_add(opaque_region, 0, 0, INT32_MAX, INT32_MAX);
         wl_surface_set_opaque_region(surface->wl_surface, opaque_region);
@@ -513,9 +516,9 @@ static struct compositor_surface *wlr_create_surface(void *data,
     zwlr_layer_surface_v1_set_keyboard_interactivity(surface_data->layer_surface, kb_mode);
 
     /* Enable tearing control for immediate presentation (bypasses compositor vsync) */
-    if (backend_data->state->tearing_control_manager) {
+    if (wl && wl->tearing_control_manager) {
         surface->tearing_control = wp_tearing_control_manager_v1_get_tearing_control(
-            backend_data->state->tearing_control_manager,
+            wl->tearing_control_manager,
             surface->wl_surface
         );
 
@@ -637,9 +640,9 @@ static void wlr_commit_surface(struct compositor_surface *surface) {
     }
 
     /* Ensure opaque region is always set (prevents transparency) */
-    wlr_backend_data_t *backend_data = surface->backend->data;
-    if (backend_data && backend_data->state && backend_data->state->compositor) {
-        struct wl_region *opaque_region = wl_compositor_create_region(backend_data->state->compositor);
+    wayland_t *wl = wayland_get();
+    if (wl && wl->compositor) {
+        struct wl_region *opaque_region = wl_compositor_create_region(wl->compositor);
         if (opaque_region) {
             wl_region_add(opaque_region, 0, 0, INT32_MAX, INT32_MAX);
             wl_surface_set_opaque_region(surface->wl_surface, opaque_region);
@@ -716,19 +719,21 @@ static void wlr_on_output_removed(void *data, struct wl_output *output) {
 
 static int wlr_get_fd(void *data) {
     wlr_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
-    return wl_display_get_fd(backend->state->display);
+    return wl_display_get_fd(wl->display);
 }
 
 static bool wlr_prepare_events(void *data) {
     wlr_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    struct wl_display *display = backend->state->display;
+    struct wl_display *display = wl->display;
 
     /* Wayland requires prepare_read before poll() */
     while (wl_display_prepare_read(display) != 0) {
@@ -743,31 +748,34 @@ static bool wlr_prepare_events(void *data) {
 
 static bool wlr_read_events(void *data) {
     wlr_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
     /* Read events that were prepared */
-    return wl_display_read_events(backend->state->display) >= 0;
+    return wl_display_read_events(wl->display) >= 0;
 }
 
 static bool wlr_dispatch_events(void *data) {
     wlr_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
     /* Dispatch all pending events */
-    return wl_display_dispatch_pending(backend->state->display) >= 0;
+    return wl_display_dispatch_pending(wl->display) >= 0;
 }
 
 static bool wlr_flush(void *data) {
     wlr_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return false;
     }
 
-    struct wl_display *display = backend->state->display;
+    struct wl_display *display = wl->display;
 
     if (wl_display_flush(display) < 0) {
         /* EAGAIN is not a failure - just means buffer is full */
@@ -783,28 +791,31 @@ static bool wlr_flush(void *data) {
 
 static void wlr_cancel_read(void *data) {
     wlr_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return;
     }
 
-    wl_display_cancel_read(backend->state->display);
+    wl_display_cancel_read(wl->display);
 }
 
 static int wlr_get_error(void *data) {
     wlr_backend_data_t *backend = data;
-    if (!backend || !backend->state || !backend->state->display) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
         return -1;
     }
 
-    return wl_display_get_error(backend->state->display);
+    return wl_display_get_error(wl->display);
 }
 
 static void *wlr_get_native_display(void *data) {
     wlr_backend_data_t *backend = data;
-    if (!backend || !backend->state) {
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl) {
         return NULL;
     }
-    return backend->state->display;
+    return wl->display;
 }
 
 static EGLenum wlr_get_egl_platform(void *data) {
