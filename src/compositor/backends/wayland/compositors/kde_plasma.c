@@ -493,6 +493,23 @@ static int kde_get_error(void *data) {
     return wl_display_get_error(wl->display);
 }
 
+static bool kde_sync(void *data) {
+    kde_backend_data_t *backend = data;
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
+        return false;
+    }
+
+    /* Flush pending requests and wait for server to process */
+    if (wl_display_flush(wl->display) < 0) {
+        return false;
+    }
+    if (wl_display_roundtrip(wl->display) < 0) {
+        return false;
+    }
+    return true;
+}
+
 static void *kde_get_native_display(void *data) {
     kde_backend_data_t *backend = data;
     wayland_t *wl = wayland_get();
@@ -532,6 +549,7 @@ static const compositor_backend_ops_t kde_backend_ops = {
     .flush = kde_flush,
     .cancel_read = kde_cancel_read,
     .get_error = kde_get_error,
+    .sync = kde_sync,
     .get_native_display = kde_get_native_display,
     .get_egl_platform = kde_get_egl_platform,
 };

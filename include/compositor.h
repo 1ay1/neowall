@@ -6,6 +6,7 @@
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 
 /*
  * ============================================================================
@@ -311,6 +312,16 @@ typedef struct compositor_backend_ops {
      * @return 0 if no error, error code otherwise
      */
     int (*get_error)(void *backend_data);
+    
+    /**
+     * Synchronize with display server
+     * Flushes all pending requests and waits for the server to process them.
+     * This is equivalent to wl_display_roundtrip() for Wayland or XSync() for X11.
+     * 
+     * @param backend_data Data returned from init()
+     * @return true on success, false on failure
+     */
+    bool (*sync)(void *backend_data);
     
     /* ===== DISPLAY/EGL OPERATIONS ===== */
     

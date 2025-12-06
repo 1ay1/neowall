@@ -374,6 +374,23 @@ static int gnome_get_error(void *data) {
     return wl_display_get_error(wl->display);
 }
 
+static bool gnome_sync(void *data) {
+    gnome_backend_data_t *backend = data;
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
+        return false;
+    }
+
+    /* Flush pending requests and wait for server to process */
+    if (wl_display_flush(wl->display) < 0) {
+        return false;
+    }
+    if (wl_display_roundtrip(wl->display) < 0) {
+        return false;
+    }
+    return true;
+}
+
 static void *gnome_get_native_display(void *data) {
     gnome_backend_data_t *backend = data;
     wayland_t *wl = wayland_get();
@@ -413,6 +430,7 @@ static const compositor_backend_ops_t gnome_backend_ops = {
     .flush = gnome_flush,
     .cancel_read = gnome_cancel_read,
     .get_error = gnome_get_error,
+    .sync = gnome_sync,
     .get_native_display = gnome_get_native_display,
     .get_egl_platform = gnome_get_egl_platform,
 };

@@ -941,6 +941,90 @@ static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
     return true;
 }
 
+/* ============================================================================
+ * EVENT HANDLING OPERATIONS
+ * ============================================================================ */
+
+static int x11_get_fd(void *backend_data) {
+    x11_backend_data_t *backend = backend_data;
+    if (!backend || !backend->x_display) {
+        return -1;
+    }
+    return ConnectionNumber(backend->x_display);
+}
+
+static bool x11_prepare_events(void *backend_data) {
+    /* X11 doesn't require prepare step like Wayland */
+    (void)backend_data;
+    return true;
+}
+
+static bool x11_read_events(void *backend_data) {
+    /* X11 events are processed in dispatch */
+    (void)backend_data;
+    return true;
+}
+
+static bool x11_dispatch_events(void *backend_data) {
+    x11_backend_data_t *backend = backend_data;
+    if (!backend || !backend->x_display) {
+        return false;
+    }
+
+    /* Process all pending X11 events */
+    while (XPending(backend->x_display) > 0) {
+        XEvent event;
+        XNextEvent(backend->x_display, &event);
+        /* Events are handled by the surface's event processing */
+    }
+    return true;
+}
+
+static bool x11_flush(void *backend_data) {
+    x11_backend_data_t *backend = backend_data;
+    if (!backend || !backend->x_display) {
+        return false;
+    }
+
+    XFlush(backend->x_display);
+    return true;
+}
+
+static void x11_cancel_read(void *backend_data) {
+    /* X11 doesn't need cancel_read */
+    (void)backend_data;
+}
+
+static int x11_get_error(void *backend_data) {
+    /* X11 errors are handled via error handlers, not return values */
+    (void)backend_data;
+    return 0;
+}
+
+static bool x11_sync(void *backend_data) {
+    x11_backend_data_t *backend = backend_data;
+    if (!backend || !backend->x_display) {
+        return false;
+    }
+
+    /* Sync with X server - equivalent to Wayland roundtrip */
+    XSync(backend->x_display, False);
+    return true;
+}
+
+static void *x11_get_native_display(void *backend_data) {
+    x11_backend_data_t *backend = backend_data;
+    if (!backend) {
+        return NULL;
+    }
+    return backend->x_display;
+}
+
+static EGLenum x11_get_egl_platform(void *backend_data) {
+    (void)backend_data;
+    return EGL_PLATFORM_X11_KHR;
+}
+
 static const compositor_backend_ops_t x11_backend_ops = {
     .init = x11_backend_init,
     .cleanup = x11_backend_cleanup,
@@ -954,6 +1038,18 @@ static const compositor_backend_ops_t x11_backend_ops = {
     .on_output_added = x11_on_output_added,
     .on_output_removed = x11_on_output_removed,
     .init_outputs = x11_init_outputs,
+    /* Event handling operations */
+    .get_fd = x11_get_fd,
+    .prepare_events = x11_prepare_events,
+    .read_events = x11_read_events,
+    .dispatch_events = x11_dispatch_events,
+    .flush = x11_flush,
+    .cancel_read = x11_cancel_read,
+    .get_error = x11_get_error,
+    .sync = x11_sync,
+    /* Display/EGL operations */
+    .get_native_display = x11_get_native_display,
+    .get_egl_platform = x11_get_egl_platform,
 };
 
 /* ============================================================================

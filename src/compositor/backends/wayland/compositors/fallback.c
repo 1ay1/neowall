@@ -510,6 +510,23 @@ static int fallback_get_error(void *data) {
     return wl_display_get_error(wl->display);
 }
 
+static bool fallback_sync(void *data) {
+    fallback_backend_data_t *backend = data;
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
+        return false;
+    }
+
+    /* Flush pending requests and wait for server to process */
+    if (wl_display_flush(wl->display) < 0) {
+        return false;
+    }
+    if (wl_display_roundtrip(wl->display) < 0) {
+        return false;
+    }
+    return true;
+}
+
 static void *fallback_get_native_display(void *data) {
     fallback_backend_data_t *backend = data;
     wayland_t *wl = wayland_get();
@@ -544,6 +561,7 @@ static const compositor_backend_ops_t fallback_backend_ops = {
     .flush = fallback_flush,
     .cancel_read = fallback_cancel_read,
     .get_error = fallback_get_error,
+    .sync = fallback_sync,
     /* Display/EGL operations */
     .get_native_display = fallback_get_native_display,
     .get_egl_platform = fallback_get_egl_platform,

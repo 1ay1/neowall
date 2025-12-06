@@ -809,6 +809,23 @@ static int wlr_get_error(void *data) {
     return wl_display_get_error(wl->display);
 }
 
+static bool wlr_sync(void *data) {
+    wlr_backend_data_t *backend = data;
+    wayland_t *wl = wayland_get();
+    if (!backend || !wl || !wl->display) {
+        return false;
+    }
+
+    /* Flush pending requests and wait for server to process */
+    if (wl_display_flush(wl->display) < 0) {
+        return false;
+    }
+    if (wl_display_roundtrip(wl->display) < 0) {
+        return false;
+    }
+    return true;
+}
+
 static void *wlr_get_native_display(void *data) {
     wlr_backend_data_t *backend = data;
     wayland_t *wl = wayland_get();
@@ -847,6 +864,7 @@ static const compositor_backend_ops_t wlr_backend_ops = {
     .flush = wlr_flush,
     .cancel_read = wlr_cancel_read,
     .get_error = wlr_get_error,
+    .sync = wlr_sync,
     /* Display/EGL operations */
     .get_native_display = wlr_get_native_display,
     .get_egl_platform = wlr_get_egl_platform,

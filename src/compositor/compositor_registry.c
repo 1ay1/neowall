@@ -380,6 +380,39 @@ static struct compositor_backend *select_backend(struct neowall_state *state,
 }
 
 /* ============================================================================
+ * DISPLAY SERVER DETECTION
+ * ============================================================================ */
+
+typedef enum {
+    DISPLAY_SERVER_UNKNOWN = 0,
+    DISPLAY_SERVER_WAYLAND,
+    DISPLAY_SERVER_X11,
+} display_server_t;
+
+/**
+ * Detect which display server is available
+ * Returns the display server type based on environment
+ */
+static display_server_t detect_display_server(void) {
+    /* Check for Wayland first */
+    const char *wayland_display = getenv("WAYLAND_DISPLAY");
+    if (wayland_display && wayland_display[0] != '\0') {
+        log_debug("WAYLAND_DISPLAY set: %s", wayland_display);
+        return DISPLAY_SERVER_WAYLAND;
+    }
+
+    /* Check for X11 */
+    const char *x_display = getenv("DISPLAY");
+    if (x_display && x_display[0] != '\0') {
+        log_debug("DISPLAY set: %s", x_display);
+        return DISPLAY_SERVER_X11;
+    }
+
+    log_error("No display server detected (neither WAYLAND_DISPLAY nor DISPLAY set)");
+    return DISPLAY_SERVER_UNKNOWN;
+}
+
+/* ============================================================================
  * PUBLIC API IMPLEMENTATION
  * ============================================================================ */
 
@@ -390,31 +423,62 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         return NULL;
     }
 
+    /* Detect display server type */
+    display_server_t display_server = detect_display_server();
+    
+    if (display_server == DISPLAY_SERVER_UNKNOWN) {
+        log_error("Cannot initialize compositor - no display server available");
+        return NULL;
+    }
+
     compositor_info_t info;
+    memset(&info, 0, sizeof(info));
 
-    /* Try to initialize Wayland (connects display, discovers outputs) */
-    log_debug("Attempting to initialize Wayland...");
+    /* Initialize based on detected display server */
+    if (display_server == DISPLAY_SERVER_WAYLAND) {
+        log_info("Detected Wayland display server");
+        
+        /* Forward declaration */
+        extern bool wayland_init_registry(struct neowall_state *state);
 
-    /* Forward declaration */
-    extern bool wayland_init_registry(struct neowall_state *state);
+        if (wayland_init_registry(state)) {
+            /* Wayland initialized successfully, detect compositor */
+            log_info("Wayland initialization successful");
+            wayland_t *wl = wayland_get();
+            info = compositor_detect(wl->display);
 
-    if (wayland_init_registry(state)) {
-        /* Wayland initialized successfully, detect compositor */
-        log_info("Wayland initialization successful");
-        wayland_t *wl = wayland_get();
-        info = compositor_detect(wl->display);
+            log_info("Compositor: %s", info.name);
+            log_info("Layer shell support: %s", info.has_layer_shell ? "yes" : "no");
+            log_info("KDE shell support: %s", info.has_kde_shell ? "yes" : "no");
+            log_info("GTK shell support: %s", info.has_gtk_shell ? "yes" : "no");
+        } else {
+            log_error("Failed to connect to Wayland display");
+            /* Fall through to try X11 if available */
+            if (getenv("DISPLAY")) {
+                log_info("Falling back to X11 (DISPLAY is set)");
+                display_server = DISPLAY_SERVER_X11;
+            } else {
+                return NULL;
+            }
+        }
+    }
 
-        log_info("Compositor: %s", info.name);
-        log_info("Layer shell support: %s", info.has_layer_shell ? "yes" : "no");
-        log_info("KDE shell support: %s", info.has_kde_shell ? "yes" : "no");
-        log_info("GTK shell support: %s", info.has_gtk_shell ? "yes" : "no");
-    } else {
-        /* No Wayland - will attempt X11 backend */
-        log_info("Failed to initialize Wayland, will try X11");
-        memset(&info, 0, sizeof(info));
+    if (display_server == DISPLAY_SERVER_X11) {
+        log_info("Detected X11 display server");
         info.name = "X11";
         info.type = COMPOSITOR_TYPE_UNKNOWN;
+        
+        struct compositor_backend *x11_backend = compositor_backend_x11_init(state);
+        if (x11_backend) {
+            log_info("X11 backend initialized successfully");
+            return x11_backend;
+        } else {
+            log_error("Failed to initialize X11 backend");
+            return NULL;
+        }
     }
+
+    /* Wayland path continues here */
 
     /* KDE-specific information */
     if (info.type == COMPOSITOR_TYPE_KDE_PLASMA) {
@@ -430,23 +494,8 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         log_info("========================================");
     }
 
-    /* Register all available backends */
-    log_debug("Registering available backends...");
-
-    /* Try X11 backend first (if Wayland not available) */
-    if (!wayland_available()) {
-        log_info("No Wayland display - attempting X11 backend");
-        struct compositor_backend *x11_backend = compositor_backend_x11_init(state);
-        if (x11_backend) {
-            log_info("X11 backend registered successfully");
-            return x11_backend;
-        } else {
-            log_error("Failed to initialize X11 backend");
-            return NULL;
-        }
-    }
-
-    /* Wayland backends */
+    /* Register all Wayland backends */
+    log_debug("Registering available Wayland backends...");
     compositor_backend_wlr_layer_shell_init(state);
     compositor_backend_kde_plasma_init(state);
     compositor_backend_gnome_shell_init(state);
@@ -493,12 +542,10 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         }
         pthread_rwlock_unlock(&state->output_list_lock);
 
-        /* Flush all pending requests */
-        wayland_t *wl_flush = wayland_get();
-        if (wl_flush && wl_flush->display) {
-            log_debug("Flushing Wayland display to ensure compositor processes layer surfaces");
-            wl_display_flush(wl_flush->display);
-            wl_display_roundtrip(wl_flush->display);
+        /* Flush all pending requests via backend abstraction */
+        if (backend->ops && backend->ops->sync) {
+            log_debug("Syncing with display server to ensure surfaces are processed");
+            backend->ops->sync(backend->data);
         }
     } else {
         log_error("Failed to initialize any compositor backend");
