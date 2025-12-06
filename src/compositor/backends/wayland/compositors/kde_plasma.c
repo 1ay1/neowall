@@ -2,8 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <errno.h>
 #include <wayland-client.h>
 #include <wayland-egl.h>
+#include <EGL/egl.h>
 #include "compositor.h"
 #include "neowall.h"
 #include "plasma-shell-client-protocol.h"
@@ -61,7 +63,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
                                   uint32_t name, const char *interface,
                                   uint32_t version) {
     kde_backend_data_t *backend_data = data;
-    
+
     if (strcmp(interface, org_kde_plasma_shell_interface.name) == 0) {
         /* Bind to plasma shell interface */
         uint32_t bind_version = version < 8 ? version : 8;
@@ -95,19 +97,19 @@ static void *kde_backend_init(struct neowall_state *state) {
         log_error("Invalid state for KDE Plasma backend");
         return NULL;
     }
-    
+
     log_debug("Initializing KDE Plasma backend");
-    
+
     /* Allocate backend data */
     kde_backend_data_t *backend_data = calloc(1, sizeof(kde_backend_data_t));
     if (!backend_data) {
         log_error("Failed to allocate KDE backend data");
         return NULL;
     }
-    
+
     backend_data->state = state;
     backend_data->has_plasma_shell = false;
-    
+
     /* Get Wayland registry and listen for globals */
     backend_data->registry = wl_display_get_registry(state->display);
     if (!backend_data->registry) {
@@ -115,12 +117,12 @@ static void *kde_backend_init(struct neowall_state *state) {
         free(backend_data);
         return NULL;
     }
-    
+
     wl_registry_add_listener(backend_data->registry, &registry_listener, backend_data);
-    
+
     /* Roundtrip to get all globals */
     wl_display_roundtrip(state->display);
-    
+
     /* Check if plasma shell is available */
     if (!backend_data->has_plasma_shell) {
         log_info("org_kde_plasma_shell not available on this compositor");
@@ -128,10 +130,10 @@ static void *kde_backend_init(struct neowall_state *state) {
         free(backend_data);
         return NULL;
     }
-    
+
     backend_data->initialized = true;
     log_info("KDE Plasma backend initialized successfully");
-    
+
     return backend_data;
 }
 
@@ -139,21 +141,21 @@ static void kde_backend_cleanup(void *data) {
     if (!data) {
         return;
     }
-    
+
     log_debug("Cleaning up KDE Plasma backend");
-    
+
     kde_backend_data_t *backend_data = data;
-    
+
     if (backend_data->plasma_shell) {
         org_kde_plasma_shell_destroy(backend_data->plasma_shell);
         backend_data->plasma_shell = NULL;
     }
-    
+
     if (backend_data->registry) {
         wl_registry_destroy(backend_data->registry);
         backend_data->registry = NULL;
     }
-    
+
     free(backend_data);
     log_debug("KDE Plasma backend cleaned up");
 }
@@ -164,23 +166,23 @@ static struct compositor_surface *kde_create_surface(void *data,
         log_error("Invalid parameters for KDE surface creation");
         return NULL;
     }
-    
+
     kde_backend_data_t *backend_data = data;
-    
+
     if (!backend_data->plasma_shell) {
         log_error("Plasma shell not available");
         return NULL;
     }
-    
+
     log_debug("Creating KDE Plasma surface");
-    
+
     /* Allocate compositor surface */
     struct compositor_surface *surface = calloc(1, sizeof(struct compositor_surface));
     if (!surface) {
         log_error("Failed to allocate compositor surface");
         return NULL;
     }
-    
+
     /* Allocate KDE surface data */
     kde_surface_data_t *surface_data = calloc(1, sizeof(kde_surface_data_t));
     if (!surface_data) {
@@ -188,7 +190,7 @@ static struct compositor_surface *kde_create_surface(void *data,
         free(surface);
         return NULL;
     }
-    
+
     /* Create base Wayland surface */
     surface->wl_surface = wl_compositor_create_surface(backend_data->state->compositor);
     if (!surface->wl_surface) {
@@ -197,13 +199,13 @@ static struct compositor_surface *kde_create_surface(void *data,
         free(surface);
         return NULL;
     }
-    
+
     /* Get plasma surface from plasma shell */
     surface_data->plasma_surface = org_kde_plasma_shell_get_surface(
         backend_data->plasma_shell,
         surface->wl_surface
     );
-    
+
     if (!surface_data->plasma_surface) {
         log_error("Failed to get plasma surface");
         wl_surface_destroy(surface->wl_surface);
@@ -211,32 +213,32 @@ static struct compositor_surface *kde_create_surface(void *data,
         free(surface);
         return NULL;
     }
-    
+
     /* Set role to panel (renders above wallpaper, below windows) */
     org_kde_plasma_surface_set_role(surface_data->plasma_surface,
                                     ORG_KDE_PLASMA_SURFACE_ROLE_PANEL);
     surface_data->role_set = true;
-    
+
     /* Set panel behavior: windows_can_cover allows windows to render on top */
     org_kde_plasma_surface_set_panel_behavior(surface_data->plasma_surface,
                                               ORG_KDE_PLASMA_SURFACE_PANEL_BEHAVIOR_WINDOWS_CAN_COVER);
-    
+
     /* Set position to (0, 0) for wallpaper */
     org_kde_plasma_surface_set_position(surface_data->plasma_surface, 0, 0);
-    
+
     /* Skip taskbar and pager */
     org_kde_plasma_surface_set_skip_taskbar(surface_data->plasma_surface, 1);
     org_kde_plasma_surface_set_skip_switcher(surface_data->plasma_surface, 1);
-    
+
     /* Initialize surface structure */
     surface->backend_data = surface_data;
     surface->config = *config;
     surface->configured = false;
     surface->committed = false;
     surface->output = config->output;
-    
+
     log_debug("KDE Plasma surface created successfully");
-    
+
     return surface;
 }
 
@@ -244,34 +246,34 @@ static void kde_destroy_surface(struct compositor_surface *surface) {
     if (!surface) {
         return;
     }
-    
+
     log_debug("Destroying KDE Plasma surface");
-    
+
     /* Cleanup KDE-specific surface resources */
     if (surface->backend_data) {
         kde_surface_data_t *surface_data = surface->backend_data;
-        
+
         if (surface_data->plasma_surface) {
             org_kde_plasma_surface_destroy(surface_data->plasma_surface);
             surface_data->plasma_surface = NULL;
         }
-        
+
         free(surface_data);
         surface->backend_data = NULL;
     }
-    
+
     /* Cleanup EGL window if exists */
     if (surface->egl_window) {
         wl_egl_window_destroy(surface->egl_window);
         surface->egl_window = NULL;
     }
-    
+
     /* Cleanup Wayland surface */
     if (surface->wl_surface) {
         wl_surface_destroy(surface->wl_surface);
         surface->wl_surface = NULL;
     }
-    
+
     free(surface);
     log_debug("KDE Plasma surface destroyed");
 }
@@ -282,44 +284,44 @@ static bool kde_configure_surface(struct compositor_surface *surface,
         log_error("Invalid parameters for KDE surface configuration");
         return false;
     }
-    
+
     log_debug("Configuring KDE Plasma surface");
-    
+
     kde_surface_data_t *surface_data = surface->backend_data;
     if (!surface_data || !surface_data->plasma_surface) {
         log_error("Invalid KDE surface data");
         return false;
     }
-    
+
     /* Update surface configuration */
     surface->config = *config;
-    
+
     /* Ensure role is set (should already be set during creation) */
     if (!surface_data->role_set) {
         org_kde_plasma_surface_set_role(surface_data->plasma_surface,
                                         ORG_KDE_PLASMA_SURFACE_ROLE_PANEL);
         surface_data->role_set = true;
     }
-    
+
     /* Set position (wallpapers are always at 0,0) */
     org_kde_plasma_surface_set_position(surface_data->plasma_surface, 0, 0);
-    
+
     /* Update dimensions if specified */
     if (config->width > 0 && config->height > 0) {
         surface->width = config->width;
         surface->height = config->height;
-        
+
         /* Resize EGL window if it exists */
         if (surface->egl_window) {
             wl_egl_window_resize(surface->egl_window, config->width, config->height, 0, 0);
         }
     }
-    
+
     surface_data->configured = true;
     surface->configured = true;
-    
+
     log_debug("KDE Plasma surface configured: %dx%d", surface->width, surface->height);
-    
+
     return true;
 }
 
@@ -328,7 +330,7 @@ static void kde_commit_surface(struct compositor_surface *surface) {
         log_error("Invalid surface for commit");
         return;
     }
-    
+
     wl_surface_commit(surface->wl_surface);
     surface->committed = true;
 }
@@ -339,26 +341,26 @@ static bool kde_create_egl_window(struct compositor_surface *surface,
         log_error("Invalid surface for EGL window creation");
         return false;
     }
-    
+
     log_debug("Creating EGL window for KDE surface: %dx%d", width, height);
-    
+
     /* Destroy existing EGL window if present */
     if (surface->egl_window) {
         wl_egl_window_destroy(surface->egl_window);
     }
-    
+
     /* Create new EGL window */
     surface->egl_window = wl_egl_window_create(surface->wl_surface, width, height);
     if (!surface->egl_window) {
         log_error("Failed to create EGL window");
         return false;
     }
-    
+
     surface->width = width;
     surface->height = height;
-    
+
     log_debug("EGL window created successfully");
-    
+
     return true;
 }
 
@@ -366,7 +368,7 @@ static void kde_destroy_egl_window(struct compositor_surface *surface) {
     if (!surface) {
         return;
     }
-    
+
     if (surface->egl_window) {
         log_debug("Destroying EGL window");
         wl_egl_window_destroy(surface->egl_window);
@@ -376,7 +378,7 @@ static void kde_destroy_egl_window(struct compositor_surface *surface) {
 
 static compositor_capabilities_t kde_get_capabilities(void *data) {
     (void)data;
-    
+
     /* KDE Plasma capabilities:
      * - Multi-output support (each monitor can have different wallpaper)
      * - No exclusive zones (wallpapers don't affect panel placement)
@@ -389,9 +391,9 @@ static void kde_on_output_added(void *data, struct wl_output *output) {
     if (!data || !output) {
         return;
     }
-    
+
     kde_backend_data_t *backend_data = data;
-    log_debug("Output added to KDE backend (compositor: %s)", 
+    log_debug("Output added to KDE backend (compositor: %s)",
               backend_data->state ? "initialized" : "uninitialized");
 }
 
@@ -399,10 +401,99 @@ static void kde_on_output_removed(void *data, struct wl_output *output) {
     if (!data || !output) {
         return;
     }
-    
+
     kde_backend_data_t *backend_data = data;
-    log_debug("Output removed from KDE backend (compositor: %s)", 
+    log_debug("Output removed from KDE backend (compositor: %s)",
               backend_data->state ? "initialized" : "uninitialized");
+}
+
+/* ============================================================================
+ * EVENT HANDLING OPERATIONS
+ * ============================================================================ */
+
+static int kde_get_fd(void *data) {
+    kde_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return -1;
+    }
+    return wl_display_get_fd(backend->state->display);
+}
+
+static bool kde_prepare_events(void *data) {
+    kde_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    struct wl_display *display = backend->state->display;
+    while (wl_display_prepare_read(display) != 0) {
+        if (wl_display_dispatch_pending(display) < 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool kde_read_events(void *data) {
+    kde_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    return wl_display_read_events(backend->state->display) >= 0;
+}
+
+static bool kde_dispatch_events(void *data) {
+    kde_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    return wl_display_dispatch_pending(backend->state->display) >= 0;
+}
+
+static bool kde_flush(void *data) {
+    kde_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return false;
+    }
+
+    int ret = wl_display_flush(backend->state->display);
+    if (ret < 0 && errno != EAGAIN) {
+        return false;
+    }
+    return true;
+}
+
+static void kde_cancel_read(void *data) {
+    kde_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return;
+    }
+
+    wl_display_cancel_read(backend->state->display);
+}
+
+static int kde_get_error(void *data) {
+    kde_backend_data_t *backend = data;
+    if (!backend || !backend->state || !backend->state->display) {
+        return -1;
+    }
+
+    return wl_display_get_error(backend->state->display);
+}
+
+static void *kde_get_native_display(void *data) {
+    kde_backend_data_t *backend = data;
+    if (!backend || !backend->state) {
+        return NULL;
+    }
+    return backend->state->display;
+}
+
+static EGLenum kde_get_egl_platform(void *data) {
+    (void)data;
+    return EGL_PLATFORM_WAYLAND_KHR;
 }
 
 /* ============================================================================
@@ -421,6 +512,17 @@ static const compositor_backend_ops_t kde_backend_ops = {
     .get_capabilities = kde_get_capabilities,
     .on_output_added = kde_on_output_added,
     .on_output_removed = kde_on_output_removed,
+
+    /* Event handling operations */
+    .get_fd = kde_get_fd,
+    .prepare_events = kde_prepare_events,
+    .read_events = kde_read_events,
+    .dispatch_events = kde_dispatch_events,
+    .flush = kde_flush,
+    .cancel_read = kde_cancel_read,
+    .get_error = kde_get_error,
+    .get_native_display = kde_get_native_display,
+    .get_egl_platform = kde_get_egl_platform,
 };
 
 struct compositor_backend *compositor_backend_kde_plasma_init(struct neowall_state *state) {
@@ -428,9 +530,9 @@ struct compositor_backend *compositor_backend_kde_plasma_init(struct neowall_sta
         log_error("Invalid state for KDE backend registration");
         return NULL;
     }
-    
+
     log_debug("Registering KDE Plasma backend");
-    
+
     /* Register backend in registry */
     if (!compositor_backend_register(BACKEND_NAME,
                                      BACKEND_DESCRIPTION,
@@ -439,10 +541,10 @@ struct compositor_backend *compositor_backend_kde_plasma_init(struct neowall_sta
         log_error("Failed to register KDE Plasma backend");
         return NULL;
     }
-    
+
     log_debug("KDE Plasma backend registered successfully");
-    
-    /* Actual initialization happens in compositor_backend_init() 
+
+    /* Actual initialization happens in compositor_backend_init()
      * which calls select_backend() -> kde_backend_init() */
     return NULL;
 }

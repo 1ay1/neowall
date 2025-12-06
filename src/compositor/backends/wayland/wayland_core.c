@@ -13,6 +13,10 @@
 #define COMPOSITOR_READY_MAX_RETRIES 5
 #define COMPOSITOR_READY_RETRY_DELAY_MS 200
 
+/* Forward declarations */
+void wayland_cleanup(struct neowall_state *state);
+static bool wait_for_outputs_configured(struct neowall_state *state);
+
 /* XDG Output listener callbacks */
 static void xdg_output_handle_logical_position(void *data,
                                                  struct zxdg_output_v1 *xdg_output,
@@ -41,11 +45,11 @@ static void xdg_output_handle_name(void *data, struct zxdg_output_v1 *xdg_output
                                     const char *name) {
     struct output_state *output = data;
     (void)xdg_output;
-    
+
     if (name) {
         strncpy(output->connector_name, name, sizeof(output->connector_name) - 1);
         output->connector_name[sizeof(output->connector_name) - 1] = '\0';
-        log_info("Output connector name: %s (model: %s)", 
+        log_info("Output connector name: %s (model: %s)",
                  output->connector_name, output->model);
     }
 }
@@ -245,7 +249,7 @@ static bool wait_for_outputs_configured(struct neowall_state *state) {
         if (retry_count > 0) {
             log_debug("Waiting for outputs... (retry %d/%d)",
                      retry_count, COMPOSITOR_READY_MAX_RETRIES);
-            
+
             /* Sleep briefly */
             struct timespec ts = {
                 .tv_sec = 0,
@@ -253,22 +257,22 @@ static bool wait_for_outputs_configured(struct neowall_state *state) {
             };
             nanosleep(&ts, NULL);
         }
-        
+
         /* Do a quick roundtrip to check for outputs */
         int ret = wl_display_roundtrip(state->display);
         if (ret < 0) {
             log_error("Wayland roundtrip failed (compositor may be shutting down)");
             return false;
         }
-        
+
         retry_count++;
     }
-    
+
     if (state->output_count > 0) {
         log_info("Found %u output(s)", state->output_count);
         return true;
     }
-    
+
     log_error("No outputs detected after %d retries", COMPOSITOR_READY_MAX_RETRIES);
     return false;
 }
@@ -291,8 +295,8 @@ static void output_on_configure_callback(struct compositor_surface *surface,
     output_apply_render_size(output, "layer configure", &dimensions_changed);
 
     /* Apply deferred configuration if surface just became ready */
-    if (dimensions_changed && output->compositor_surface && 
-        output->compositor_surface->egl_surface != EGL_NO_SURFACE && 
+    if (dimensions_changed && output->compositor_surface &&
+        output->compositor_surface->egl_surface != EGL_NO_SURFACE &&
         output->compositor_surface->egl_window) {
         log_debug("Surface ready after configuration, applying deferred config for output %s",
                   output->model[0] ? output->model : "unknown");
@@ -305,12 +309,12 @@ static void output_on_closed_callback(struct compositor_surface *surface) {
     struct output_state *output = surface->user_data;
 
     log_info("Compositor surface closed for output %s", output->model);
-    
+
     /* CRITICAL: Must acquire write lock before destroying output and modifying list */
     struct neowall_state *state = output->state;
     if (state) {
         pthread_rwlock_wrlock(&state->output_list_lock);
-        
+
         /* BUG FIX #4: Verify output is still in the list before destroying
          * It might have been removed by another thread */
         bool found = false;
@@ -322,14 +326,14 @@ static void output_on_closed_callback(struct compositor_surface *surface) {
             }
             check = check->next;
         }
-        
+
         if (!found) {
             log_error("Output %s already removed from list, skipping destroy",
                     output->model);
             pthread_rwlock_unlock(&state->output_list_lock);
             return;
         }
-        
+
         /* Remove from linked list before destroying */
         struct output_state **output_ptr = &state->outputs;
         while (*output_ptr) {
@@ -340,7 +344,7 @@ static void output_on_closed_callback(struct compositor_surface *surface) {
             }
             output_ptr = &(*output_ptr)->next;
         }
-        
+
         output_destroy(output);
         pthread_rwlock_unlock(&state->output_list_lock);
     } else {
@@ -377,7 +381,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
         struct wl_output *output_obj = wl_registry_bind(registry, name,
                                                          &wl_output_interface, 3);
-        
+
         /* CRITICAL: Acquire write lock before creating output and modifying list */
         pthread_rwlock_wrlock(&state->output_list_lock);
         struct output_state *output = output_create(state, output_obj, name);
@@ -385,7 +389,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 
         if (output) {
             wl_output_add_listener(output_obj, &output_listener, output);
-            
+
             /* Get xdg_output for connector name if manager is available */
             if (state->xdg_output_manager) {
                 output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
@@ -395,8 +399,8 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
                     log_debug("Created xdg_output for output %u", name);
                 }
             }
-            
-            log_info("New output detected (name=%u, model=%s) - will initialize on configuration", 
+
+            log_info("New output detected (name=%u, model=%s) - will initialize on configuration",
                      name, output->model[0] ? output->model : "pending");
             /* Set flag to trigger initialization in event loop - use atomic */
             atomic_store_explicit(&state->outputs_need_init, true, memory_order_release);
@@ -418,7 +422,7 @@ static void registry_handle_global_remove(void *data, struct wl_registry *regist
 
     /* CRITICAL: Acquire write lock before modifying output list */
     pthread_rwlock_wrlock(&state->output_list_lock);
-    
+
     /* Find and remove the output with this name */
     struct output_state **output_ptr = &state->outputs;
     while (*output_ptr) {
@@ -427,7 +431,7 @@ static void registry_handle_global_remove(void *data, struct wl_registry *regist
             log_info("Removing output %s (name=%u)", output->model, name);
             *output_ptr = output->next;
             state->output_count--;
-            
+
             /* Unlock before destroying (destroy might take time) */
             pthread_rwlock_unlock(&state->output_list_lock);
             output_destroy(output);
@@ -435,7 +439,7 @@ static void registry_handle_global_remove(void *data, struct wl_registry *regist
         }
         output_ptr = &output->next;
     }
-    
+
     pthread_rwlock_unlock(&state->output_list_lock);
 }
 
@@ -445,7 +449,8 @@ static const struct wl_registry_listener registry_listener = {
 };
 
 /* Public Wayland functions */
-bool wayland_init(struct neowall_state *state) {
+/* Initialize Wayland registry and discover outputs (without backend init) */
+bool wayland_init_registry(struct neowall_state *state) {
     if (!state) {
         log_error("Invalid state pointer");
         return false;
@@ -454,8 +459,7 @@ bool wayland_init(struct neowall_state *state) {
     /* Connect to Wayland display */
     state->display = wl_display_connect(NULL);
     if (!state->display) {
-        log_error("Failed to connect to Wayland display. Is WAYLAND_DISPLAY set?");
-        log_error("Make sure you're running under a Wayland compositor.");
+        log_debug("Failed to connect to Wayland display");
         return false;
     }
 
@@ -472,21 +476,35 @@ bool wayland_init(struct neowall_state *state) {
 
     /* Add registry listener */
     wl_registry_add_listener(state->registry, &registry_listener, state);
-    
+
     /* Roundtrip to get all globals */
     wl_display_roundtrip(state->display);
-    
+
     /* Wait for outputs to be fully configured before proceeding
      * This ensures compositor is ready to display our layer surfaces */
     if (!wait_for_outputs_configured(state)) {
         log_error("Failed to detect configured outputs");
-        wayland_cleanup(state);
         return false;
     }
 
     /* Verify we have required interfaces */
     if (!state->compositor) {
         log_error("Compositor not available");
+        return false;
+    }
+
+    return true;
+}
+
+bool wayland_init(struct neowall_state *state) {
+    if (!state) {
+        log_error("Invalid state pointer");
+        return false;
+    }
+
+    /* Initialize registry and discover outputs */
+    if (!wayland_init_registry(state)) {
+        log_error("Failed to initialize Wayland registry");
         wayland_cleanup(state);
         return false;
     }
@@ -583,11 +601,21 @@ bool output_configure_compositor_surface(struct output_state *output) {
     }
 
     struct neowall_state *state = output->state;
-    
+
     if (!state->compositor_backend) {
         log_error("No compositor backend available");
         return false;
     }
+
+    if (!output->output) {
+        log_error("Output %s has no wl_output yet, cannot configure surface",
+                  output->model[0] ? output->model : "unknown");
+        return false;
+    }
+
+    log_debug("Configuring compositor surface for output %s (wl_output=%p, configured=%d)",
+              output->model[0] ? output->model : "unknown",
+              (void*)output->output, output->configured);
 
     /* Create compositor surface using abstraction layer */
     compositor_surface_config_t config = {
@@ -601,9 +629,9 @@ bool output_configure_compositor_surface(struct output_state *output) {
     };
 
     output->compositor_surface = compositor_surface_create(state->compositor_backend, &config);
-    
+
     if (!output->compositor_surface) {
-        log_error("Failed to create compositor surface for output %s", 
+        log_error("Failed to create compositor surface for output %s",
                   output->model[0] ? output->model : "unknown");
         return false;
     }
@@ -622,11 +650,11 @@ bool output_configure_compositor_surface(struct output_state *output) {
 
     /* Commit surface to trigger configure event */
     compositor_surface_commit(output->compositor_surface);
-    
+
     /* Force immediate flush to compositor - critical for autostart timing */
     wl_display_flush(state->display);
 
-    log_info("Compositor surface configured and committed for output %s", 
+    log_info("Compositor surface configured and committed for output %s",
              output->model[0] ? output->model : "unknown");
 
     return true;
