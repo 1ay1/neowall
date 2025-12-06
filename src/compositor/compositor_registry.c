@@ -2,11 +2,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <wayland-client.h>
 #include "compositor.h"
-#include "compositor/backends/x11.h"
-#include "compositor/backends/wayland.h"
 #include "neowall.h"
+
+#ifdef HAVE_WAYLAND_BACKEND
+#include <wayland-client.h>
+#include "compositor/backends/wayland.h"
+#endif
+
+#ifdef HAVE_X11_BACKEND
+#include "compositor/backends/x11.h"
+#endif
 
 /*
  * ============================================================================
@@ -49,8 +55,9 @@ typedef struct {
     char compositor_name[256];  /* XDG_CURRENT_DESKTOP or detected name */
 } protocol_state_t;
 
+#ifdef HAVE_WAYLAND_BACKEND
 /* ============================================================================
- * PROTOCOL DETECTION
+ * PROTOCOL DETECTION (Wayland-specific)
  * ============================================================================ */
 
 static void registry_handle_global(void *data, struct wl_registry *registry,
@@ -187,23 +194,6 @@ static compositor_type_t detect_compositor_type(const protocol_state_t *proto) {
     return COMPOSITOR_TYPE_UNKNOWN;
 }
 
-/* Get compositor name string */
-const char *compositor_type_to_string(compositor_type_t type) {
-    switch (type) {
-        case COMPOSITOR_TYPE_HYPRLAND:    return "Hyprland";
-        case COMPOSITOR_TYPE_SWAY:        return "Sway";
-        case COMPOSITOR_TYPE_RIVER:       return "River";
-        case COMPOSITOR_TYPE_WAYFIRE:     return "Wayfire";
-        case COMPOSITOR_TYPE_KDE_PLASMA:  return "KDE Plasma";
-        case COMPOSITOR_TYPE_GNOME_SHELL: return "GNOME Shell";
-        case COMPOSITOR_TYPE_MUTTER:      return "Mutter";
-        case COMPOSITOR_TYPE_WESTON:      return "Weston";
-        case COMPOSITOR_TYPE_GENERIC:     return "Generic wlroots";
-        case COMPOSITOR_TYPE_UNKNOWN:
-        default:                          return "Unknown";
-    }
-}
-
 /* Public API: Detect compositor */
 compositor_info_t compositor_detect(void *native_display) {
     compositor_info_t info = {0};
@@ -226,6 +216,24 @@ compositor_info_t compositor_detect(void *native_display) {
     info.version = version ? version : "unknown";
 
     return info;
+}
+#endif /* HAVE_WAYLAND_BACKEND */
+
+/* Get compositor name string */
+const char *compositor_type_to_string(compositor_type_t type) {
+    switch (type) {
+        case COMPOSITOR_TYPE_HYPRLAND:    return "Hyprland";
+        case COMPOSITOR_TYPE_SWAY:        return "Sway";
+        case COMPOSITOR_TYPE_RIVER:       return "River";
+        case COMPOSITOR_TYPE_WAYFIRE:     return "Wayfire";
+        case COMPOSITOR_TYPE_KDE_PLASMA:  return "KDE Plasma";
+        case COMPOSITOR_TYPE_GNOME_SHELL: return "GNOME Shell";
+        case COMPOSITOR_TYPE_MUTTER:      return "Mutter";
+        case COMPOSITOR_TYPE_WESTON:      return "Weston";
+        case COMPOSITOR_TYPE_GENERIC:     return "Generic wlroots";
+        case COMPOSITOR_TYPE_UNKNOWN:
+        default:                          return "Unknown";
+    }
 }
 
 /* ============================================================================
@@ -271,9 +279,10 @@ bool compositor_backend_register(const char *name,
  * BACKEND SELECTION
  * ============================================================================ */
 
-/* Select native backend based on compositor type */
-static struct compositor_backend *select_backend(struct neowall_state *state,
-                                                 const compositor_info_t *info) {
+#ifdef HAVE_WAYLAND_BACKEND
+/* Select native backend based on compositor type (Wayland-specific) */
+static struct compositor_backend *select_wayland_backend(struct neowall_state *state,
+                                                        const compositor_info_t *info) {
     const char *preferred_backend = NULL;
 
     log_info("Selecting backend for %s compositor...", info->name);
@@ -381,6 +390,7 @@ static struct compositor_backend *select_backend(struct neowall_state *state,
     log_error("No suitable backend found for compositor: %s", info->name);
     return NULL;
 }
+#endif /* HAVE_WAYLAND_BACKEND */
 
 /* ============================================================================
  * DISPLAY SERVER DETECTION
@@ -397,19 +407,23 @@ typedef enum {
  * Returns the display server type based on environment
  */
 static display_server_t detect_display_server(void) {
+#ifdef HAVE_WAYLAND_BACKEND
     /* Check for Wayland first */
     const char *wayland_display = getenv("WAYLAND_DISPLAY");
     if (wayland_display && wayland_display[0] != '\0') {
         log_debug("WAYLAND_DISPLAY set: %s", wayland_display);
         return DISPLAY_SERVER_WAYLAND;
     }
+#endif
 
+#ifdef HAVE_X11_BACKEND
     /* Check for X11 */
     const char *x_display = getenv("DISPLAY");
     if (x_display && x_display[0] != '\0') {
         log_debug("DISPLAY set: %s", x_display);
         return DISPLAY_SERVER_X11;
     }
+#endif
 
     log_error("No display server detected (neither WAYLAND_DISPLAY nor DISPLAY set)");
     return DISPLAY_SERVER_UNKNOWN;
@@ -437,6 +451,7 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     compositor_info_t info;
     memset(&info, 0, sizeof(info));
 
+#ifdef HAVE_WAYLAND_BACKEND
     /* Initialize based on detected display server */
     if (display_server == DISPLAY_SERVER_WAYLAND) {
         log_info("Detected Wayland display server");
@@ -456,6 +471,7 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
             log_info("GTK shell support: %s", info.has_gtk_shell ? "yes" : "no");
         } else {
             log_error("Failed to connect to Wayland display");
+#ifdef HAVE_X11_BACKEND
             /* Fall through to try X11 if available */
             if (getenv("DISPLAY")) {
                 log_info("Falling back to X11 (DISPLAY is set)");
@@ -463,9 +479,14 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
             } else {
                 return NULL;
             }
+#else
+            return NULL;
+#endif
         }
     }
+#endif /* HAVE_WAYLAND_BACKEND */
 
+#ifdef HAVE_X11_BACKEND
     if (display_server == DISPLAY_SERVER_X11) {
         log_info("Detected X11 display server");
         info.name = "X11";
@@ -480,7 +501,9 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
             return NULL;
         }
     }
+#endif /* HAVE_X11_BACKEND */
 
+#ifdef HAVE_WAYLAND_BACKEND
     /* Wayland path continues here */
 
     /* KDE-specific information */
@@ -505,7 +528,7 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     compositor_backend_fallback_init(state);
 
     /* Select best backend */
-    struct compositor_backend *backend = select_backend(state, &info);
+    struct compositor_backend *backend = select_wayland_backend(state, &info);
 
     /* If backend selection failed, cleanup Wayland */
     if (!backend && wayland_available()) {
@@ -555,6 +578,11 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     }
 
     return backend;
+#else
+    /* No Wayland backend, but we already returned if X11 succeeded */
+    log_error("No display server backend available");
+    return NULL;
+#endif /* HAVE_WAYLAND_BACKEND */
 }
 
 /* Cleanup compositor backend */
