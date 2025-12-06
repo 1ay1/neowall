@@ -495,6 +495,22 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         struct compositor_backend *x11_backend = compositor_backend_x11_init(state);
         if (x11_backend) {
             log_info("X11 backend initialized successfully");
+            
+            /* Set backend in state BEFORE init_outputs so surface creation can use it */
+            state->compositor_backend = x11_backend;
+            
+            /* Initialize X11 outputs - unlike Wayland, X11 doesn't have output announcement events,
+             * so we need to explicitly create the output(s) for the X11 screen(s) */
+            if (x11_backend->ops && x11_backend->ops->init_outputs) {
+                if (!x11_backend->ops->init_outputs(x11_backend->data, state)) {
+                    log_error("Failed to initialize X11 outputs");
+                    state->compositor_backend = NULL;  /* Clear before cleanup */
+                    compositor_backend_cleanup(x11_backend);
+                    return NULL;
+                }
+                log_info("X11 outputs initialized");
+            }
+            
             return x11_backend;
         } else {
             log_error("Failed to initialize X11 backend");
