@@ -564,6 +564,10 @@ void event_loop_run(struct neowall_state *state) {
         int shader_count = 0;
         num_fds = BASE_FD_COUNT;  /* Reset to base fds */
 
+        /* Map frame timer fd indices to outputs for targeted redraw */
+        struct output_state *frame_timer_outputs[MAX_POLL_FDS];
+        memset(frame_timer_outputs, 0, sizeof(frame_timer_outputs));
+
         while (output) {
             /* Check for active frame timer (vsync disabled shaders) */
             int frame_fd = output_get_frame_timer_fd(output);
@@ -572,6 +576,7 @@ void event_loop_run(struct neowall_state *state) {
                 if (num_fds < MAX_POLL_FDS) {
                     fds[num_fds].fd = frame_fd;
                     fds[num_fds].events = POLLIN;
+                    frame_timer_outputs[num_fds] = output;  /* Map index to output */
                     num_fds++;
                 }
                 /* With frame timers, use long timeout - timers will wake us */
@@ -713,10 +718,15 @@ void event_loop_run(struct neowall_state *state) {
                 if (fds[i].revents & POLLIN) {
                     uint64_t expirations;
                     ssize_t s = read(fds[i].fd, &expirations, sizeof(expirations));
-                    if (s == sizeof(expirations) && expirations > 1) {
-                        log_debug("Frame timer expired %lu times (frame overrun)", expirations);
+                    if (s == sizeof(expirations)) {
+                        if (expirations > 1) {
+                            log_debug("Frame timer expired %lu times (frame overrun)", expirations);
+                        }
+                        /* Mark the specific output for redraw */
+                        if (frame_timer_outputs[i]) {
+                            frame_timer_outputs[i]->needs_redraw = true;
+                        }
                     }
-                    /* render_outputs() will be called below */
                 }
             }
         }
@@ -767,12 +777,16 @@ void event_loop_run(struct neowall_state *state) {
                 output->config->transition != TRANSITION_NONE) {
                 output->needs_redraw = true;
             }
-            /* Keep redrawing for shader wallpapers (continuous animation)
-             * but only if shader loaded successfully and hasn't failed */
+            /* For shader wallpapers with vsync enabled, always redraw (vsync paces us)
+             * For shaders with vsync disabled, only redraw when frame timer fires (handled above) */
             if (output->config->type == WALLPAPER_SHADER &&
                 !output->shader_load_failed &&
                 output->live_shader_program != 0) {
-                output->needs_redraw = true;
+                /* Only auto-redraw if vsync is enabled (paced by eglSwapBuffers)
+                 * or if there's no frame timer configured */
+                if (output->config->vsync || output_get_frame_timer_fd(output) < 0) {
+                    output->needs_redraw = true;
+                }
             }
             output = output->next;
         }

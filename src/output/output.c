@@ -105,11 +105,32 @@ static bool output_configure_frame_timer(struct output_state *output) {
 
     /* Configure timer for target FPS */
     int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : 60;
-    long interval_ns = 1000000000L / target_fps;
+    
+    /* Calculate interval in seconds and nanoseconds
+     * tv_nsec must be < 1000000000 (less than 1 second) */
+    time_t interval_sec = 0;
+    long interval_ns = 0;
+    
+    if (target_fps >= 1) {
+        /* For FPS >= 1, interval is less than or equal to 1 second */
+        long total_ns = 1000000000L / target_fps;
+        interval_sec = total_ns / 1000000000L;
+        interval_ns = total_ns % 1000000000L;
+        
+        /* Handle the edge case where FPS=1 results in exactly 1 second */
+        if (interval_ns == 0 && target_fps == 1) {
+            interval_sec = 1;
+            interval_ns = 0;
+        }
+    } else {
+        /* FPS < 1 means interval > 1 second (e.g., 0.5 FPS = 2 seconds) */
+        interval_sec = 1;
+        interval_ns = 0;
+    }
 
     struct itimerspec timer_spec = {
-        .it_interval = { .tv_sec = 0, .tv_nsec = interval_ns },  /* Recurring */
-        .it_value = { .tv_sec = 0, .tv_nsec = interval_ns }      /* Initial expiration */
+        .it_interval = { .tv_sec = interval_sec, .tv_nsec = interval_ns },  /* Recurring */
+        .it_value = { .tv_sec = interval_sec, .tv_nsec = interval_ns }      /* Initial expiration */
     };
 
     if (timerfd_settime(output->frame_timer_fd, 0, &timer_spec, NULL) < 0) {
@@ -118,8 +139,8 @@ static bool output_configure_frame_timer(struct output_state *output) {
         return false;
     }
 
-    log_debug("Configured frame timer for %d FPS (interval: %ld ns) on output %s",
-             target_fps, interval_ns, output_get_identifier(output));
+    log_debug("Configured frame timer for %d FPS (interval: %ld.%09ld s) on output %s",
+             target_fps, (long)interval_sec, interval_ns, output_get_identifier(output));
 
     return true;
 }
