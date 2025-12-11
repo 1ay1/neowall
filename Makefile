@@ -2,7 +2,7 @@
 # Copyright (C) 2025
 
 PROJECT = neowall
-VERSION = 0.4.2
+VERSION = 0.4.3
 
 # Directories
 SRC_DIR = src
