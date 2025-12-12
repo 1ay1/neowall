@@ -1,134 +1,107 @@
-<img src="packaging/neowall.svg" alt="NeoWall Logo" width="150" align="left"/>
+<div align="center">
+  <img src="packaging/neowall.svg" alt="NeoWall Logo" width="120"/>
+  
+  # NeoWall
+  
+  **GPU-Accelerated Live Wallpapers for Wayland & X11**
+  
+  [![Build Status](https://github.com/1ay1/neowall/actions/workflows/build.yml/badge.svg)](https://github.com/1ay1/neowall/actions/workflows/build.yml)
+  [![License](https://img.shields.io/github/license/1ay1/neowall)](https://github.com/1ay1/neowall/blob/main/LICENSE)
+  [![Stars](https://img.shields.io/github/stars/1ay1/neowall?style=social)](https://github.com/1ay1/neowall/stargazers)
+</div>
 
-# NeoWall
+## Overview
 
-**GPU-Accelerated Live Wallpapers for Wayland & X11**
-<br/>
+NeoWall is a high-performance wallpaper daemon for Linux desktop environments, designed to render animated shaders and seamless image slideshows with minimal resource consumption. Built from the ground up in C with GPU acceleration, NeoWall delivers smooth 60 FPS animations while maintaining exceptional compatibility across Wayland compositors and X11 window managers.
 
-<p align="left">
-  <a href="https://github.com/1ay1/neowall/actions/workflows/build.yml">
-    <img src="https://github.com/1ay1/neowall/actions/workflows/build.yml/badge.svg" alt="Build Status"/>
-  </a>
-  <a href="https://github.com/1ay1/neowall/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/1ay1/neowall" alt="License"/>
-  </a>
-  <a href="https://github.com/1ay1/neowall/stargazers">
-    <img src="https://img.shields.io/github/stars/1ay1/neowall?style=social" alt="GitHub Stars"/>
-  </a>
-</p>
+### Key Capabilities
 
-<p align="left">
-  <a href="#-why-neowall">Why NeoWall?</a> •
-  <a href="#-features">Features</a> •
-  <a href="#-quick-start">Quick Start</a> •
-  <a href="#-configuration">Configuration</a> •
-  <a href="#-installation">Installation</a>
-</p>
+- **High Performance Rendering**: GPU-accelerated shader execution via EGL/OpenGL ES with configurable frame rates (1-240 FPS)
+- **Broad Platform Support**: Native integration with Wayland (Hyprland, Sway, River, KDE Plasma, GNOME) and X11 (i3, bspwm, dwm, awesome, xmonad, qtile)
+- **Multi-Monitor Configuration**: Independent wallpaper settings per display with granular control
+- **Extensive Shader Library**: Out-of-the-box compatibility with thousands of Shadertoy shaders
+- **Efficient Architecture**: Event-driven design using timerfd and signalfd for minimal CPU overhead
 
-<br/>
+## Features
 
----
+**Rendering Engine**
+- GPU-accelerated shader execution
+- Configurable frame rate control (1-240 FPS)
+- Optional VSync synchronization
+- Interactive mouse event support for shader inputs
 
-<table>
-  <tr>
-    <td align="center">
-      https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560
-      <br/>
-      <em>Interactive mouse tracking.</em>
-    </td>
-    <td align="center">
-      https://github.com/user-attachments/assets/c1e38d88-5c1e-4db4-9948-da2ad86c6a69
-      <br/>
-      <em>Smooth transitions & live wallpapers.</em>
-    </td>
-  </tr>
-</table>
+**Display Management**
+- Multi-monitor support with per-display configuration
+- Automatic display detection and reconfiguration
+- Independent shader/image settings per output
 
----
+**Content Options**
+- Animated GLSL shader wallpapers
+- Image slideshow capabilities with directory monitoring
+- Multiple transition effects (fade, slide, glitch, pixelate)
+- Adjustable animation speed and timing
 
-## 🤔 Why NeoWall?
+**System Integration**
+- Runtime control via daemon commands
+- Human-readable configuration format (`.vibe`)
+- Minimal dependencies and lightweight footprint
+- Systemd service support
 
-NeoWall is a high-performance wallpaper daemon for Linux that brings your desktop to life with animated shaders and seamless image slideshows. It is designed from the ground up for efficiency, compatibility, and extensive customization.
+## Installation
 
-- **High Performance:** Renders animations at a smooth 60 FPS with minimal CPU usage by leveraging GPU acceleration.
-- **Broad Compatibility:** Works flawlessly across a wide range of Wayland compositors (Hyprland, Sway, KDE, GNOME) and X11 window managers (i3, bspwm, dwm).
-- **Highly Customizable:** Supports thousands of Shadertoy shaders out-of-the-box, offers powerful per-monitor configuration, and provides a rich set of transition effects.
-- **Lightweight & Efficient:** Written in C with an event-driven architecture, ensuring it remains light on system resources.
+### Package Manager
 
-## ✨ Features
-
-<table>
-<tr>
-<td width="50%">
-
-**Performance**
-- Smooth 60 FPS shader animations
-- GPU-accelerated rendering via EGL/OpenGL ES
-- Precise FPS control (1-240 FPS)
-- Optional VSync for tear-free rendering
-
-</td>
-<td width="50%">
-
-**Compatibility**
-- Multi-monitor support with independent configurations
-- Wayland: Hyprland, Sway, River, KDE Plasma, GNOME
-- X11: i3, bspwm, dwm, awesome, xmonad, qtile
-- Excellent Shadertoy compatibility
-- Mouse event support for interactive shaders
-
-</td>
-</tr>
-</table>
-
-- **Wallpaper Slideshows:** Automatically cycle through images in a directory.
-- **Smooth Transitions:** A selection of eye-catching transitions like `fade`, `slide`, `glitch`, and `pixelate`.
-- **Simple Configuration:** A clean, human-readable config format (`.vibe`).
-- **Runtime Control:** Switch wallpapers, pause/resume, and check status on the fly.
-- **Robust Architecture:** Event-driven design using `timerfd` and `signalfd` for reliability.
-
----
-
-## 🚀 Quick Start
-
+**Arch Linux**
 ```bash
-# Arch Linux
 yay -S neowall-git
+```
 
-# From source (2 minutes)
+### Build from Source
+
+**Dependencies**
+
+Debian/Ubuntu:
+```bash
+sudo apt install build-essential libwayland-dev libgles2-mesa-dev \
+    libpng-dev libjpeg-dev wayland-protocols libx11-dev libxrandr-dev
+```
+
+Arch Linux:
+```bash
+sudo pacman -S base-devel wayland mesa libpng libjpeg-turbo \
+    wayland-protocols libx11 libxrandr
+```
+
+Fedora:
+```bash
+sudo dnf install gcc make wayland-devel mesa-libGLES-devel \
+    libpng-devel libjpeg-turbo-devel wayland-protocols-devel \
+    libX11-devel libXrandr-devel
+```
+
+**Build Steps**
+```bash
 git clone https://github.com/1ay1/neowall
-cd neowall && make -j$(nproc) && sudo make install
+cd neowall
+make -j$(nproc)
+sudo make install
+```
 
-# Launch the daemon
+## Quick Start
+
+Launch the daemon:
+```bash
 neowall
 ```
 
-Your first run creates a default configuration at `~/.config/neowall/config.vibe`.
+The initial run generates a default configuration file at `~/.config/neowall/config.vibe`.
 
----
+## Configuration
 
-## 🎨 Included Shaders
+Configuration files are located at `~/.config/neowall/config.vibe`. The `.vibe` format provides a structured, human-readable syntax for wallpaper settings.
 
-NeoWall comes with over 30 pre-packaged shaders. Here is a small sample:
+### Shader Wallpaper
 
-| Preview | Shader | Style |
-|---------|--------|-------|
-| _(preview)_ | `retro_wave.glsl` | Synthwave |
-| _(preview)_ | `matrix_rain.glsl` | Digital rain |
-| _(preview)_ | `plasma.glsl` | Flowing energy |
-| _(preview)_ | `aurora.glsl` | Northern lights |
-| _(preview)_ | `ocean_waves.glsl` | Ocean waves |
-| _(preview)_ | `fractal_land.glsl` | Fractal geometry |
-
-Browse [Shadertoy.com](https://shadertoy.com) for thousands more — most work with minimal changes.
-
----
-
-## ⚙️ Configuration
-
-Configuration is located at `~/.config/neowall/config.vibe`.
-
-### Live Shader Wallpaper
 ```vibe
 default {
   shader retro_wave.glsl
@@ -137,90 +110,86 @@ default {
 }
 ```
 
-### Image Slideshow with Transitions
+### Image Slideshow
+
 ```vibe
 default {
-  path ~/Pictures/Wallpapers/ # Must end with a slash!
-  duration 300                # Seconds between wallpapers
+  path ~/Pictures/Wallpapers/ # Directory path (must end with /)
+  duration 300                # Seconds between transitions
   transition glitch           # fade | slide-left | slide-right | glitch | pixelate
 }
 ```
 
-### Multi-Monitor Setup
+### Multi-Monitor Configuration
+
 ```vibe
 output {
   eDP-1 {
     shader plasma.glsl
-    shader_fps 120      # Smooth 120 FPS on main display
+    shader_fps 120      # 120 FPS on primary display
   }
   HDMI-A-1 {
     path ~/Pictures/Wallpapers/
     duration 1800       # Cycle every 30 minutes
-    shader_fps 30       # Power-saving 30 FPS on secondary
+    shader_fps 30       # 30 FPS on secondary display
   }
 }
 ```
 
-**Apply changes by restarting the daemon:** `neowall kill && neowall`
+**Applying Configuration Changes**: Restart the daemon with `neowall kill && neowall`
 
----
+## Included Shaders
 
-## 🛠️ Installation
+NeoWall ships with over 30 pre-configured shaders optimized for desktop backgrounds:
 
-### Dependencies
+| Shader | Description |
+|--------|-------------|
+| `retro_wave.glsl` | Synthwave aesthetic with animated waves |
+| `matrix_rain.glsl` | Digital rain effect inspired by The Matrix |
+| `plasma.glsl` | Flowing plasma energy patterns |
+| `aurora.glsl` | Aurora borealis simulation |
+| `ocean_waves.glsl` | Realistic ocean wave dynamics |
+| `fractal_land.glsl` | Animated fractal geometry |
 
-**Debian/Ubuntu:**
+Additional shaders are available at [Shadertoy.com](https://shadertoy.com), with most requiring minimal adaptation for NeoWall compatibility.
+
+## Runtime Control
+
 ```bash
-sudo apt install build-essential libwayland-dev libgles2-mesa-dev \
-    libpng-dev libjpeg-dev wayland-protocols libx11-dev libxrandr-dev
+neowall                # Start daemon
+neowall kill           # Stop daemon
+neowall status         # Check daemon status
+neowall reload         # Reload configuration
 ```
 
-**Arch Linux:**
-```bash
-sudo pacman -S base-devel wayland mesa libpng libjpeg-turbo \
-    wayland-protocols libx11 libxrandr
-```
+## Development
 
-**Fedora:**
-```bash
-sudo dnf install gcc make wayland-devel mesa-libGLES-devel \
-    libpng-devel libjpeg-turbo-devel wayland-protocols-devel \
-    libX11-devel libXrandr-devel
-```
+### Building in Debug Mode
 
-### Build from Source
 ```bash
 git clone https://github.com/1ay1/neowall
 cd neowall
-make -j$(nproc)
-sudo make install
-```
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a pull request, open an issue, or suggest features.
-
-- **Shaders:** Submit new shaders via PR.
-- **Testing:** Report compatibility issues on your compositor.
-- **Bugs:** [Open an issue](https://github.com/1ay1/neowall/issues).
-
-### Development
-```bash
-# Clone the repository
-git clone https://github.com/1ay1/neowall
-cd neowall
-
-# Build in debug mode
 make debug
+```
 
-# Run in foreground with verbose logging
+### Running with Verbose Logging
+
+```bash
 ./build/bin/neowall -f -v
 ```
 
----
+## Contributing
 
-## 📜 License
+Contributions are welcome. Please submit pull requests for:
+- New shader implementations
+- Platform compatibility improvements
+- Bug fixes and performance optimizations
+- Documentation enhancements
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+**Bug Reports**: Submit issues at [github.com/1ay1/neowall/issues](https://github.com/1ay1/neowall/issues)
+
+**Testing**: Compatibility reports for various compositors and window managers are appreciated.
+
+## License
+
+Licensed under the MIT License. See [LICENSE](LICENSE) for full terms.
