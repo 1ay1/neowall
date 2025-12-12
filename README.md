@@ -1,8 +1,11 @@
+<img src="packaging/neowall.svg" alt="NeoWall Logo" width="150" align="left"/>
+
 # NeoWall
 
 **GPU-Accelerated Live Wallpapers for Wayland & X11**
+<br/>
 
-<p align="center">
+<p align="left">
   <a href="https://github.com/1ay1/neowall/actions/workflows/build.yml">
     <img src="https://github.com/1ay1/neowall/actions/workflows/build.yml/badge.svg" alt="Build Status"/>
   </a>
@@ -14,7 +17,7 @@
   </a>
 </p>
 
-<p align="center">
+<p align="left">
   <a href="#-why-neowall">Why NeoWall?</a> •
   <a href="#-features">Features</a> •
   <a href="#-quick-start">Quick Start</a> •
@@ -22,18 +25,24 @@
   <a href="#-installation">Installation</a>
 </p>
 
+<br/>
+
 ---
 
-<p align="center">
-  https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560
-  <br/>
-  <em>Interactive mouse tracking for responsive shader animations.</em>
-</p>
-<p align="center">
-  https://github.com/user-attachments/assets/c1e38d88-5c1e-4db4-9948-da2ad86c6a69
-  <br/>
-  <em>Smooth, high-performance transitions and live wallpapers.</em>
-</p>
+<table>
+  <tr>
+    <td align="center">
+      https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560
+      <br/>
+      <em>Interactive mouse tracking.</em>
+    </td>
+    <td align="center">
+      https://github.com/user-attachments/assets/c1e38d88-5c1e-4db4-9948-da2ad86c6a69
+      <br/>
+      <em>Smooth transitions & live wallpapers.</em>
+    </td>
+  </tr>
+</table>
 
 ---
 
