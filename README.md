@@ -18,7 +18,7 @@
   </a>
 </p>
 
-https://github.com/user-attachments/assets/c1e38d88-5c1e-4db4-9948-da2ad86c6a69
+https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560
 
 ## Overview
 
@@ -40,8 +40,6 @@ NeoWall is a high-performance wallpaper daemon for Linux desktop environments, d
 - Optional VSync synchronization
 - Interactive mouse event support for shader inputs
 
-<img src="https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560" width="400"/>
-
 **Display Management**
 - Multi-monitor support with per-display configuration
 - Automatic display detection and reconfiguration
@@ -52,6 +50,8 @@ NeoWall is a high-performance wallpaper daemon for Linux desktop environments, d
 - Image slideshow capabilities with directory monitoring
 - Multiple transition effects (fade, slide, glitch, pixelate)
 - Adjustable animation speed and timing
+
+<img src="https://github.com/user-attachments/assets/c1e38d88-5c1e-4db4-9948-da2ad86c6a69" width="400"/>
 
 **System Integration**
 - Runtime control via daemon commands
