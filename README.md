@@ -1,14 +1,27 @@
-<div align="center">
-  <img src="packaging/neowall.svg" alt="NeoWall Logo" width="120"/>
-  
-  # NeoWall
-  
-  **GPU-Accelerated Live Wallpapers for Wayland & X11**
-  
-  [![Build Status](https://github.com/1ay1/neowall/actions/workflows/build.yml/badge.svg)](https://github.com/1ay1/neowall/actions/workflows/build.yml)
-  [![License](https://img.shields.io/github/license/1ay1/neowall)](https://github.com/1ay1/neowall/blob/main/LICENSE)
-  [![Stars](https://img.shields.io/github/stars/1ay1/neowall?style=social)](https://github.com/1ay1/neowall/stargazers)
-</div>
+<p align="center">
+  <img src="packaging/neowall.svg" alt="NeoWall" width="200"/>
+</p>
+
+<p align="center">
+  <strong>GPU-Accelerated Live Wallpapers for Wayland & X11</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/1ay1/neowall/actions/workflows/build.yml">
+    <img src="https://github.com/1ay1/neowall/actions/workflows/build.yml/badge.svg" alt="Build Status"/>
+  </a>
+  <a href="https://github.com/1ay1/neowall/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/1ay1/neowall" alt="License"/>
+  </a>
+  <a href="https://github.com/1ay1/neowall/stargazers">
+    <img src="https://img.shields.io/github/stars/1ay1/neowall?style=social" alt="Stars"/>
+  </a>
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560" width="45%"/>
+  <img src="https://github.com/user-attachments/assets/c1e38d88-5c1e-4db4-9948-da2ad86c6a69" width="45%"/>
+</p>
 
 ## Overview
 
