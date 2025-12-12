@@ -18,20 +18,9 @@
   </a>
 </p>
 
-<table>
-  <tr>
-    <td align="center" width="50%">
-      
 https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560
 
-  </td>
-    <td align="center" width="50%">
-      
 https://github.com/user-attachments/assets/c1e38d88-5c1e-4db4-9948-da2ad86c6a69
-
-  </td>
-  </tr>
-</table>
 
 ## Overview
 
