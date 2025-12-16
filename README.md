@@ -42,18 +42,17 @@
 
 | Feature | NeoWall | swww | mpvpaper | hyprpaper |
 |---------|---------|------|----------|-----------|
-| **Live Shaders** | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| **Shadertoy Compatible** | ✅ 1000s of shaders | ❌ No | ❌ No | ❌ No |
+| **Live GLSL Shaders** | ✅ Yes | ❌ No | ❌ No | ❌ No |
+| **Shadertoy Compatible** | ✅ Yes | ❌ No | ❌ No | ❌ No |
 | **Video Wallpapers** | ❌ No | ✅ GIFs | ✅ Yes | ❌ No |
-| **CPU Usage** | ~2% | ~1% | 10-20% | ~0% |
-| **GPU Accelerated** | ✅ OpenGL ES | ✅ Vulkan | ❌ CPU decode | ✅ Yes |
-| **Interactive (Mouse)** | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| **X11 Support** | ✅ Yes | ❌ Wayland only | ❌ Wayland only | ❌ Wayland only |
+| **Image Slideshows** | ✅ Yes | ✅ Yes | ❌ No | ❌ No |
+| **Interactive (iMouse)** | ✅ Yes | ❌ No | ❌ No | ❌ No |
+| **X11 Support** | ✅ Yes | ❌ No | ❌ No | ❌ No |
 | **Wayland Support** | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
-| **Multi-Monitor** | ✅ Independent | ✅ Independent | ✅ Yes | ✅ Yes |
-| **Transitions** | ✅ 5 effects | ✅ Multiple | ❌ No | ❌ No |
+| **Multi-Monitor** | ✅ Per-output config | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Transitions** | ✅ 5 effects | ✅ Yes | ❌ No | ❌ No |
 
-**TL;DR**: NeoWall is the only tool that runs **live GPU shaders** as wallpapers. If you want procedurally generated, infinitely unique animated backgrounds with Shadertoy compatibility — NeoWall is your only option on Linux.
+**TL;DR**: NeoWall is the only Linux tool that renders **live GPU shaders** as wallpapers with Shadertoy compatibility.
 
 ---
 
@@ -72,11 +71,11 @@
 </td>
 <td width="50%">
 
-### ⚡ Blazing Performance
-- **Pure C** — no Electron, no bloat
+### ⚡ Lightweight
+- **Pure C** — minimal dependencies
 - **GPU-accelerated** — OpenGL ES 2.0/3.0
-- **Event-driven** — sleeps when idle
-- **~2% CPU** — lighter than video wallpapers
+- **Event-driven** — uses timerfd/signalfd
+- **Single binary** — no runtime overhead
 
 </td>
 </tr>
@@ -309,17 +308,6 @@ ninja -C build
 ```
 
 ---
-
-## 📊 Benchmarks
-
-Tested on AMD Ryzen 5 5600X + RX 6700 XT @ 2560x1440:
-
-| Mode | CPU Usage | GPU Usage | Memory |
-|------|-----------|-----------|--------|
-| Shader @ 60 FPS | 1.8% | 3% | 48 MB |
-| Shader @ 144 FPS | 2.4% | 5% | 48 MB |
-| Image slideshow | 0.1% | 0% | 32 MB |
-| Idle (paused) | 0% | 0% | 28 MB |
 
 ---
 
