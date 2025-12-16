@@ -262,6 +262,50 @@ Most Shadertoy shaders work with minimal or no modification:
 
 ---
 
+## 🎨 GLEditor — Shader Development Companion
+
+<p align="center">
+  <a href="https://github.com/1ay1/gleditor">
+    <img src="https://img.shields.io/badge/GLEditor-Shader%20IDE-blueviolet?style=for-the-badge&logo=opengl" alt="GLEditor"/>
+  </a>
+</p>
+
+**[GLEditor](https://github.com/1ay1/gleditor)** is a Shadertoy-compatible shader editor designed to work seamlessly with NeoWall. Use it to:
+
+- ✏️ **Write & preview shaders** in real-time with instant feedback
+- 🔍 **Test Shadertoy shaders** before using them as wallpapers
+- 📦 **Install shaders directly** to NeoWall with one click
+- 🎯 **Debug shader errors** with helpful error messages and line numbers
+
+### Quick Workflow
+
+```bash
+# Install GLEditor
+yay -S gleditor-git   # AUR
+# or build from source: https://github.com/1ay1/gleditor
+
+# Launch the editor
+gleditor
+
+# 1. Paste any Shadertoy shader code
+# 2. See live preview instantly
+# 3. Click "Install to NeoWall" to use as wallpaper
+```
+
+### Why GLEditor + NeoWall?
+
+| Feature | Description |
+|---------|-------------|
+| **Live Preview** | See your shader running in real-time as you type |
+| **Shadertoy Compatible** | Supports `iTime`, `iResolution`, `iMouse`, `iFrame`, and more |
+| **One-Click Install** | Export shaders directly to `~/.config/neowall/shaders/` |
+| **Error Highlighting** | GLSL compilation errors shown with line numbers |
+| **Auto-Reload** | NeoWall hot-reloads when you save a shader |
+
+GLEditor and NeoWall share the same shader compatibility layer, so if it works in the editor, it works as your wallpaper.
+
+---
+
 ## 🏗️ Architecture
 
 ```
