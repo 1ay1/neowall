@@ -217,6 +217,25 @@ float ease_in_out_cubic(float t) {
 }
 
 /* Get state file path - use persistent location that survives reboots */
+/* Get path to the cycle list file (shows all wallpapers with indices) */
+const char *get_cycle_list_file_path(void) {
+    static char path[MAX_PATH_LENGTH];
+    const char *state_dir = getenv("XDG_STATE_HOME");
+    
+    if (state_dir) {
+        snprintf(path, sizeof(path), "%s/neowall/cycle_list", state_dir);
+    } else {
+        const char *home = getenv("HOME");
+        if (home) {
+            snprintf(path, sizeof(path), "%s/.local/state/neowall/cycle_list", home);
+        } else {
+            snprintf(path, sizeof(path), "/tmp/neowall-cycle-list-%d", getuid());
+        }
+    }
+    
+    return path;
+}
+
 const char *get_state_file_path(void) {
     static char state_path[MAX_PATH_LENGTH];
     const char *state_home = getenv("XDG_STATE_HOME");
@@ -571,6 +590,112 @@ bool read_wallpaper_state(void) {
         printf("\n  No outputs configured.\n");
     } else {
         printf("\nTotal outputs: %d\n", output_count);
+    }
+    
+    return true;
+}
+
+/* Write cycle list to file (called by daemon when config is loaded) */
+bool write_cycle_list(const char *output_name, char **paths, size_t count, size_t current_index) {
+    if (!output_name || !paths || count == 0) {
+        return false;
+    }
+    
+    const char *list_path = get_cycle_list_file_path();
+    
+    /* Ensure parent directory exists */
+    char dir_path[MAX_PATH_LENGTH];
+    strncpy(dir_path, list_path, sizeof(dir_path) - 1);
+    dir_path[sizeof(dir_path) - 1] = '\0';
+    char *last_slash = strrchr(dir_path, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        mkdir(dir_path, 0755);
+    }
+    
+    /* For now, we overwrite - could be extended to support multiple outputs */
+    FILE *fp = fopen(list_path, "w");
+    if (!fp) {
+        log_error("Failed to write cycle list: %s", strerror(errno));
+        return false;
+    }
+    
+    fprintf(fp, "[cycle]\n");
+    fprintf(fp, "output=%s\n", output_name);
+    fprintf(fp, "count=%zu\n", count);
+    fprintf(fp, "current=%zu\n", current_index);
+    fprintf(fp, "\n");
+    
+    for (size_t i = 0; i < count; i++) {
+        fprintf(fp, "[%zu]\n", i);
+        fprintf(fp, "path=%s\n", paths[i]);
+        if (i == current_index) {
+            fprintf(fp, "current=true\n");
+        }
+        fprintf(fp, "\n");
+    }
+    
+    fclose(fp);
+    return true;
+}
+
+/* Read and display cycle list (called by client for 'list' command) */
+bool read_cycle_list(void) {
+    const char *list_path = get_cycle_list_file_path();
+    FILE *fp = fopen(list_path, "r");
+    
+    if (!fp) {
+        printf("No cycle list found.\n");
+        printf("The daemon may not be running or no wallpaper cycling is configured.\n");
+        printf("\nTo enable cycling, use a directory path in your config:\n");
+        printf("  default {\n");
+        printf("    path ~/Pictures/Wallpapers/\n");
+        printf("  }\n");
+        return false;
+    }
+    
+    char line[MAX_PATH_LENGTH];
+    char output_name[256] = {0};
+    size_t count = 0;
+    size_t current = 0;
+    int current_index = -1;
+    
+    printf("Wallpaper cycle list:\n\n");
+    
+    while (fgets(line, sizeof(line), fp)) {
+        line[strcspn(line, "\n")] = 0;
+        
+        if (strncmp(line, "output=", 7) == 0) {
+            size_t len = strlen(line + 7);
+            if (len >= sizeof(output_name)) len = sizeof(output_name) - 1;
+            memcpy(output_name, line + 7, len);
+            output_name[len] = '\0';
+        } else if (strncmp(line, "count=", 6) == 0) {
+            count = (size_t)atoi(line + 6);
+        } else if (strncmp(line, "current=", 8) == 0 && line[8] != 't') {
+            current = (size_t)atoi(line + 8);
+        } else if (line[0] == '[' && line[1] >= '0' && line[1] <= '9') {
+            current_index = atoi(line + 1);
+        } else if (strncmp(line, "path=", 5) == 0 && current_index >= 0) {
+            const char *path = line + 5;
+            /* Extract just the filename for cleaner display */
+            const char *filename = strrchr(path, '/');
+            filename = filename ? filename + 1 : path;
+            
+            if ((size_t)current_index == current) {
+                printf("  [%d] %s  <-- current\n", current_index, filename);
+            } else {
+                printf("  [%d] %s\n", current_index, filename);
+            }
+        }
+    }
+    
+    fclose(fp);
+    
+    if (count > 0) {
+        printf("\nOutput: %s\n", output_name);
+        printf("Total:  %zu wallpapers\n", count);
+        printf("\nUse 'neowall set <index>' to jump to a specific wallpaper.\n");
     }
     
     return true;

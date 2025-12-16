@@ -1091,6 +1091,14 @@ void output_cycle_wallpaper(struct output_state *output) {
         output->needs_redraw = true;
     }
 
+    /* Update cycle list file for 'neowall list' command */
+    if (output->config->cycle_paths && output->config->cycle_count > 0) {
+        write_cycle_list(output_get_identifier(output),
+                        output->config->cycle_paths,
+                        output->config->cycle_count,
+                        output->config->current_cycle_index);
+    }
+
     log_info("Wallpaper cycle completed successfully");
 }
 
@@ -1151,6 +1159,14 @@ void output_set_cycle_index(struct output_state *output, size_t index) {
 
     /* Mark for redraw */
     output->needs_redraw = true;
+
+    /* Update cycle list file for 'neowall list' command */
+    if (output->config->cycle_paths && output->config->cycle_count > 0) {
+        write_cycle_list(output_get_identifier(output),
+                        output->config->cycle_paths,
+                        output->config->cycle_count,
+                        output->config->current_cycle_index);
+    }
 
     log_info("Wallpaper index set successfully");
 }
@@ -1307,6 +1323,12 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
                 output->config->path[sizeof(output->config->path) - 1] = '\0';
             }
         }
+
+        /* Write cycle list file for 'neowall list' command */
+        write_cycle_list(output_get_identifier(output),
+                        output->config->cycle_paths,
+                        output->config->cycle_count,
+                        output->config->current_cycle_index);
     }
 
     log_debug("Config applied - type=%d, cycle=%d, cycle_count=%zu, cycle_index=%zu",

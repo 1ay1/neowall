@@ -93,6 +93,7 @@ static DaemonCommand daemon_commands[] = {
     {"pause",             SIGUSR2,      "Pause wallpaper cycling",                 "Pausing wallpaper cycling...",       NULL,  false, false},
     {"resume",            SIGCONT,      "Resume wallpaper cycling",                "Resuming wallpaper cycling...",      NULL,  false, false},
     {"set",               0,            "Set wallpaper by index (set <index>)",    NULL,                                 NULL,  false, false},   /* Handled specially */
+    {"list",              0,            "List all wallpapers with indices",        NULL,                                 NULL,  false, false},   /* Handled specially */
     {"current",           0,            "Show current wallpaper",                  NULL,                                 NULL,  true,  false},
     {"status",            0,            "Show current wallpaper",                  NULL,                                 NULL,  true,  false},
     {NULL, 0, NULL, NULL, NULL, false, false}  /* Sentinel */
@@ -671,6 +672,11 @@ int main(int argc, char *argv[]) {
         /* Special case: kill command */
         if (strcmp(cmd, "kill") == 0) {
             return kill_daemon() ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
+
+        /* Special case: list command shows all wallpapers with indices */
+        if (strcmp(cmd, "list") == 0) {
+            return read_cycle_list() ? EXIT_SUCCESS : EXIT_FAILURE;
         }
 
         /* Special case: set command requires an index argument */

@@ -123,11 +123,14 @@ float ease_in_out_cubic(float t);
 
 /* State file functions */
 const char *get_state_file_path(void);
+const char *get_cycle_list_file_path(void);
 bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
                            const char *mode, int cycle_index, int cycle_total,
                            const char *status);
 bool read_wallpaper_state(void);
 int restore_cycle_index_from_state(const char *output_name);
+bool write_cycle_list(const char *output_name, char **paths, size_t count, size_t current_index);
+bool read_cycle_list(void);
 
 /* Signal handling */
 void signal_handler_init(struct neowall_state *state);
