@@ -290,12 +290,12 @@ static struct compositor_backend *select_wayland_backend(struct neowall_state *s
     /* Determine preferred backend based on compositor type */
     switch (info->type) {
         case COMPOSITOR_TYPE_KDE_PLASMA:
-            /* KDE Plasma (KWin) supports wlr-layer-shell natively
-             * This is the recommended backend for KDE - provides full GPU acceleration,
-             * works on all virtual desktops, and integrates seamlessly with KWin's compositor */
-            preferred_backend = "wlr-layer-shell";
-            log_info("KDE Plasma detected - using wlr-layer-shell backend");
-            log_info("Backend optimized for KDE: BACKGROUND layer, full GPU acceleration, 60 FPS");
+            /* KDE Plasma (KWin) works best with the kde-plasma backend which uses
+             * wlr-layer-shell but with an empty input region for click pass-through.
+             * This ensures the start menu closes when clicking on the desktop. */
+            preferred_backend = "kde-plasma";
+            log_info("KDE Plasma detected - using kde-plasma backend");
+            log_info("Backend features: click pass-through, GPU acceleration, desktop integration");
             break;
 
         case COMPOSITOR_TYPE_HYPRLAND:
@@ -527,12 +527,13 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         log_info("========================================");
         log_info("KDE Plasma Detected");
         log_info("========================================");
-        log_info("NeoWall will render as a native wallpaper using wlr-layer-shell");
+        log_info("NeoWall will render using kde-plasma backend");
         log_info("Features enabled:");
         log_info("  - Full GPU-accelerated GLSL shaders");
+        log_info("  - Click pass-through (start menu works correctly)");
         log_info("  - Works on all virtual desktops");
-        log_info("  - 60 FPS @ ~2%% CPU usage");
         log_info("  - BACKGROUND layer (behind all windows)");
+        log_info("Note: iMouse disabled for proper KDE integration");
         log_info("========================================");
     }
 

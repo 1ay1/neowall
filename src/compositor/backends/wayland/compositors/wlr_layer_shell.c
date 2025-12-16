@@ -20,7 +20,6 @@
  * zwlr_layer_shell_v1 protocol.
  *
  * SUPPORTED COMPOSITORS:
- * - KDE Plasma (KWin) - Full support, recommended backend
  * - Hyprland
  * - Sway
  * - River
@@ -33,12 +32,16 @@
  * - Exclusive zones
  * - Keyboard interactivity control
  * - Surface anchoring
+ * - iMouse support for shader interaction
  *
- * PRIORITY: 100 (highest - preferred for wlroots compositors)
+ * PRIORITY: 100 (preferred for wlroots compositors)
+ *
+ * NOTE: For KDE Plasma, use the kde-plasma backend instead which provides
+ * proper click pass-through for desktop integration.
  */
 
 #define BACKEND_NAME "wlr-layer-shell"
-#define BACKEND_DESCRIPTION "wlroots layer shell protocol (KDE, Hyprland, Sway, River, etc.)"
+#define BACKEND_DESCRIPTION "wlroots layer shell protocol (Hyprland, Sway, River, etc.)"
 #define BACKEND_PRIORITY 100
 
 /* Backend-specific data */
