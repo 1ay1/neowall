@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "platform_compat.h"
-#include <GLES2/gl2.h>
+/* OpenGL headers included via platform_compat.h */
 #include <ctype.h>
 #include <stdarg.h>
 #include "shader_log.h"
@@ -59,6 +59,82 @@ const char *shader_get_last_error_log(void) {
  * and creation functions in their respective files.
  */
 
+/* Desktop OpenGL vertex shader (for Windows/macOS with epoxy) */
+#ifdef USE_EPOXY
+static const char *live_vertex_shader_desktop =
+    "#version 330 core\n"
+    "in vec2 position;\n"
+    "void main() {\n"
+    "    gl_Position = vec4(position, 0.0, 1.0);\n"
+    "}\n";
+
+/* Desktop OpenGL fragment shader prefix (for Windows/macOS with epoxy) */
+static const char *shadertoy_wrapper_prefix_desktop =
+    "#version 330 core\n"
+    "\n"
+    "// Shadertoy compatibility defines\n"
+    "#ifndef HW_PERFORMANCE\n"
+    "#define HW_PERFORMANCE 1\n"
+    "#endif\n"
+    "\n"
+    "// Shadertoy compatibility uniforms (prefixed to avoid conflicts)\n"
+    "uniform float _neowall_time;          // Maps to iTime\n"
+    "uniform vec2 _neowall_resolution;     // Maps to iResolution.xy\n"
+    "uniform vec4 _neowall_mouse;          // Maps to iMouse\n"
+    "uniform int _neowall_frame;           // Maps to iFrame\n"
+    "uniform vec4 _neowall_date;           // Maps to iDate\n"
+    "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
+    "\n"
+    "// Shadertoy uniform arrays - use vec2 for channel resolution (common expectation)\n"
+    "uniform vec4 iChannelTime[4];\n"
+    "uniform vec2 iChannelResolution[4];\n"
+    "\n"
+    "// Shadertoy-compatible global variables (initialized at declaration)\n"
+    "float iTime = 0.0;\n"
+    "float time = 0.0;\n"
+    "vec2 resolution = vec2(0.0);\n"
+    "float iTimeDelta = 0.016667;\n"
+    "int iFrame = 0;\n"
+    "vec4 iMouse = vec4(0.0);\n"
+    "vec4 iDate = vec4(2024.0, 1.0, 1.0, 0.0);\n"
+    "float iSampleRate = 44100.0;\n"
+    "\n"
+    "// GLSL 330 output\n"
+    "out vec4 fragColor;\n"
+    "\n"
+    "// Helper function: Convert vec3 direction to spherical/equirectangular UV coordinates\n"
+    "vec2 directionToUV(vec3 dir) {\n"
+    "    vec3 n = normalize(dir);\n"
+    "    float u = 0.5 + atan(n.z, n.x) / (2.0 * 3.14159265359);\n"
+    "    float v = 0.5 - asin(n.y) / 3.14159265359;\n"
+    "    return vec2(u, v);\n"
+    "}\n"
+    "\n"
+    "// Helper for vec3 texture coordinates (extracts xy, common Shadertoy pattern)\n"
+    "vec4 tex2D(sampler2D s, vec3 c) { return texture(s, c.xy); }\n"
+    "vec4 tex2D(sampler2D s, vec2 c) { return texture(s, c); }\n"
+    "#define texture(s, c) tex2D(s, c)\n"
+    "\n";
+
+/* Desktop OpenGL fragment shader suffix */
+static const char *shadertoy_wrapper_suffix_desktop =
+    "\n"
+    "void main() {\n"
+    "    // Update dynamic uniforms from current frame state\n"
+    "    iTime = _neowall_time;\n"
+    "    time = _neowall_time;\n"
+    "    resolution = _neowall_resolution;\n"
+    "    iMouse = _neowall_mouse;\n"
+    "    iFrame = _neowall_frame;\n"
+    "    iDate = _neowall_date;\n"
+    "    \n"
+    "    vec4 color;\n"
+    "    mainImage(color, gl_FragCoord.xy);\n"
+    "    fragColor = color;\n"
+    "}\n";
+#endif
+
+#ifndef USE_EPOXY
 /* Standard vertex shader for live wallpapers - ES 2.0 */
 static const char *live_vertex_shader_es2 =
     "#version 100\n"
@@ -74,7 +150,9 @@ static const char *live_vertex_shader_es3 =
     "void main() {\n"
     "    gl_Position = vec4(position, 0.0, 1.0);\n"
     "}\n";
+#endif
 
+#ifndef USE_EPOXY
 /* Shadertoy compatibility wrapper prefix - ES 2.0 version */
 static const char *shadertoy_wrapper_prefix_es2 =
     "#version 100\n"
@@ -91,11 +169,12 @@ static const char *shadertoy_wrapper_prefix_es2 =
     "uniform vec2 _neowall_resolution;     // Maps to iResolution.xy\n"
     "uniform vec4 _neowall_mouse;          // Maps to iMouse\n"
     "uniform int _neowall_frame;           // Maps to iFrame\n"
+    "uniform vec4 _neowall_date;           // Maps to iDate\n"
     "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
     "\n"
     "// Shadertoy uniform arrays (must come after precision specifier)\n"
     "uniform vec4 iChannelTime[4];\n"
-    "uniform vec3 iChannelResolution[4];\n"
+    "uniform vec2 iChannelResolution[4];\n"
     "\n"
     "// Shadertoy-compatible global variables (initialized at declaration)\n"
     "float iTime = 0.0;\n"
@@ -142,11 +221,12 @@ static const char *shadertoy_wrapper_prefix_es3 =
     "uniform vec2 _neowall_resolution;     // Maps to iResolution.xy\n"
     "uniform vec4 _neowall_mouse;          // Maps to iMouse\n"
     "uniform int _neowall_frame;           // Maps to iFrame\n"
+    "uniform vec4 _neowall_date;           // Maps to iDate\n"
     "uniform vec3 iResolution;    // Shadertoy iResolution (set in render)\n"
     "\n"
     "// Shadertoy uniform arrays (must come after precision specifier)\n"
     "uniform vec4 iChannelTime[4];\n"
-    "uniform vec3 iChannelResolution[4];\n"
+    "uniform vec2 iChannelResolution[4];\n"
     "\n"
     "// Shadertoy-compatible global variables (initialized at declaration)\n"
     "float iTime = 0.0;\n"
@@ -170,6 +250,7 @@ static const char *shadertoy_wrapper_prefix_es3 =
     "    return vec2(u, v);\n"
     "}\n"
     "\n";
+#endif /* !USE_EPOXY */
 
 /* Build dynamic iChannel declarations based on channel count */
 static char *build_ichannel_declarations(size_t channel_count) {
@@ -196,6 +277,7 @@ static char *build_ichannel_declarations(size_t channel_count) {
     return declarations;
 }
 
+#ifndef USE_EPOXY
 /* Shadertoy compatibility wrapper suffix - ES 2.0 version */
 /* Shadertoy wrapper suffix - ES 2.0 version */
 static const char *shadertoy_wrapper_suffix_es2 =
@@ -207,6 +289,7 @@ static const char *shadertoy_wrapper_suffix_es2 =
     "    resolution = _neowall_resolution;\n"
     "    iMouse = _neowall_mouse;\n"
     "    iFrame = _neowall_frame;\n"
+    "    iDate = _neowall_date;\n"
     "    \n"
     "    mainImage(gl_FragColor, gl_FragCoord.xy);\n"
     "}\n";
@@ -222,11 +305,13 @@ static const char *shadertoy_wrapper_suffix_es3 =
     "    resolution = _neowall_resolution;\n"
     "    iMouse = _neowall_mouse;\n"
     "    iFrame = _neowall_frame;\n"
+    "    iDate = _neowall_date;\n"
     "    \n"
     "    vec4 color;\n"
     "    mainImage(color, gl_FragCoord.xy);\n"
     "    fragColor = color;\n"
     "}\n";
+#endif /* !USE_EPOXY */
 
 /**
  * Print shader source with line numbers for debugging
@@ -285,7 +370,7 @@ static GLuint compile_shader(GLenum type, const char *source) {
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
     if (!compiled) {
         append_to_error_log("\n=== %s SHADER COMPILATION FAILED ===\n\n",
-                           strcmp(type_str, "vertex") == 0 ? "VERTEX" : "FRAGMENT");
+                           (type == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT");
 
         GLint info_len = 0;
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &info_len);
@@ -443,6 +528,23 @@ static bool shader_resolve_path(const char *shader_name, char *resolved_path, si
     }
 
     /* If it's an absolute path or starts with ~, use it directly */
+#ifdef PLATFORM_WINDOWS
+    /* Windows: Check for drive letter (e.g., C:\) or UNC path (\\server) */
+    bool is_absolute = (shader_name[0] != '\0' && shader_name[1] == ':') ||
+                       (shader_name[0] == '\\' && shader_name[1] == '\\');
+    if (is_absolute || shader_name[0] == '~') {
+        strncpy(resolved_path, shader_name, resolved_size - 1);
+        resolved_path[resolved_size - 1] = '\0';
+        return true;
+    }
+
+    /* If it contains a path separator, treat it as a relative path */
+    if (strchr(shader_name, '/') != NULL || strchr(shader_name, '\\') != NULL) {
+        strncpy(resolved_path, shader_name, resolved_size - 1);
+        resolved_path[resolved_size - 1] = '\0';
+        return true;
+    }
+#else
     if (shader_name[0] == '/' || shader_name[0] == '~') {
         strncpy(resolved_path, shader_name, resolved_size - 1);
         resolved_path[resolved_size - 1] = '\0';
@@ -455,6 +557,7 @@ static bool shader_resolve_path(const char *shader_name, char *resolved_path, si
         resolved_path[resolved_size - 1] = '\0';
         return true;
     }
+#endif
 
     /* Search in multiple locations for just the shader name */
     const char *home = getenv("HOME");
@@ -531,8 +634,8 @@ char *shader_load_file(const char *path) {
     }
     expanded_path[sizeof(expanded_path) - 1] = '\0';
 
-    /* Open file */
-    FILE *fp = fopen(expanded_path, "r");
+    /* Open file in binary mode to get accurate byte count */
+    FILE *fp = fopen(expanded_path, "rb");
     if (!fp) {
         log_error("Failed to open shader file: %s", expanded_path);
         return NULL;
@@ -558,25 +661,19 @@ char *shader_load_file(const char *path) {
     }
 
     /* Read file */
-    size_t read = fread(source, 1, size, fp);
+    size_t bytes_read = fread(source, 1, size, fp);
     fclose(fp);
 
-    if (read != (size_t)size) {
+    if (bytes_read == 0) {
         log_error("Failed to read shader file: %s", expanded_path);
         free(source);
         return NULL;
     }
 
-    source[size] = '\0';
-    log_debug("Loaded shader from %s (%ld bytes)", expanded_path, size);
+    source[bytes_read] = '\0';
+    log_debug("Loaded shader from %s (%zu bytes)", expanded_path, bytes_read);
     return source;
 }
-
-/* Forward declaration */
-/* Forward declarations */
-static const char *skip_whitespace_and_comments(const char *p);
-static inline bool is_identifier_char(char c);
-static const char *skip_whitespace_and_comments(const char *p);
 
 /**
  * Check if shader source uses Shadertoy format (mainImage function)
@@ -613,43 +710,18 @@ static bool is_shadertoy_format(const char *source) {
 
         /* Check if 'void' appears before 'mainImage' in the search window */
         if (voidKeyword && voidKeyword < mainImage) {
-            /* Check for duplicate mainImage definitions (properly skip comments) */
-            const char *search_ptr = mainImage + strlen("mainImage");
-            int count = 1;  /* Already found first mainImage */
-
-            while (*search_ptr) {
-                /* Skip comments and whitespace */
-                search_ptr = skip_whitespace_and_comments(search_ptr);
-                if (!*search_ptr) break;
-
-                /* Look for "void" keyword */
-                if (strncmp(search_ptr, "void", 4) == 0 && !is_identifier_char(*(search_ptr+4))) {
-                    const char *after_void = skip_whitespace_and_comments(search_ptr + 4);
-
-                    /* Check if followed by "mainImage" */
-                    if (strncmp(after_void, "mainImage", 9) == 0 && !is_identifier_char(*(after_void+9))) {
-                        const char *after_name = skip_whitespace_and_comments(after_void + 9);
-
-                        /* Confirm it's a function (has opening parenthesis) */
-                        if (*after_name == '(') {
-                            count++;
-                            log_error("╔══════════════════════════════════════════════════════════════╗");
-                            log_error("║ ERROR: Duplicate mainImage Function Detected                ║");
-                            log_error("╠══════════════════════════════════════════════════════════════╣");
-                            log_error("║ Your shader has multiple 'void mainImage(...)' functions.   ║");
-                            log_error("║ Shadertoy shaders should have only ONE mainImage function.  ║");
-                            log_error("║                                                               ║");
-                            log_error("║ Note: Functions in comments are properly ignored.            ║");
-                            log_error("╚══════════════════════════════════════════════════════════════╝");
-                            return false;
-                        }
-                        search_ptr = after_name + 1;
-                    } else {
-                        search_ptr = after_void + 1;
-                    }
-                } else {
-                    search_ptr++;
-                }
+            /* Check for duplicate mainImage definitions */
+            const char *second_mainImage = strstr(mainImage + 1, "void mainImage");
+            if (second_mainImage) {
+                log_error("╔══════════════════════════════════════════════════════════════╗");
+                log_error("║ ERROR: Duplicate mainImage Function Detected                ║");
+                log_error("╠══════════════════════════════════════════════════════════════╣");
+                log_error("║ Your shader has multiple 'void mainImage(...)' functions.   ║");
+                log_error("║ Shadertoy shaders should have only ONE mainImage function.  ║");
+                log_error("║                                                               ║");
+                log_error("║ Please remove duplicate function definitions.                ║");
+                log_error("╚══════════════════════════════════════════════════════════════╝");
+                return false;
             }
             log_debug("Detected Shadertoy format shader (mainImage function found)");
             return true;
@@ -1415,7 +1487,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
             if (cleaned_source) {
                 source_body = cleaned_source;
                 needs_cleanup = true;
-                log_debug("Successfully removed conflicting uniforms");
+                log_debug("✓ Successfully removed conflicting uniforms");
             } else {
                 log_error("✗ Failed to clean conflicting uniforms");
                 return NULL;
@@ -1433,7 +1505,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
                 source_body = cleaned_vars;
                 cleaned_source = cleaned_vars;
                 needs_cleanup = true;
-                log_debug("Successfully removed conflicting global variables");
+                log_debug("✓ Successfully removed conflicting global variables");
 
                 /* After removing global variables, check for orphaned assignments */
                 /* Example: "float time = 0;" was removed, but "time = iTime;" remains */
@@ -1463,7 +1535,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
                 source_body = fixed_source;
                 cleaned_source = fixed_source;
                 needs_cleanup = true;
-                log_debug("Successfully fixed uniform assignments");
+                log_debug("✓ Successfully fixed uniform assignments");
             } else {
                 log_error("✗ Could not fix uniform assignments automatically");
             }
@@ -1493,6 +1565,11 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
 
     if (version_string) {
         log_info("GL version string: %s", version_string);
+#ifdef USE_EPOXY
+        /* Desktop OpenGL via epoxy - always use desktop shaders */
+        use_es3 = true;  /* Reuse flag to mean "modern OpenGL" */
+        log_info("Using desktop OpenGL wrapper (epoxy)");
+#else
         /* Check for ES 3.x or regular OpenGL 3.x+ */
         if (strstr((const char*)version_string, "ES 3.") != NULL) {
             use_es3 = true;
@@ -1505,13 +1582,19 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
         } else {
             log_info("Using ES 2.0 Shadertoy wrapper");
         }
+#endif
     } else {
         log_error("Could not detect GL version (glGetString returned NULL), defaulting to ES 2.0 wrapper");
     }
 
     /* Select appropriate wrapper strings */
+#ifdef USE_EPOXY
+    const char *prefix = shadertoy_wrapper_prefix_desktop;
+    const char *suffix = shadertoy_wrapper_suffix_desktop;
+#else
     const char *prefix = use_es3 ? shadertoy_wrapper_prefix_es3 : shadertoy_wrapper_prefix_es2;
     const char *suffix = use_es3 ? shadertoy_wrapper_suffix_es3 : shadertoy_wrapper_suffix_es2;
+#endif
 
     /* Calculate total size needed */
     size_t prefix_len = strlen(prefix);
@@ -1594,63 +1677,66 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
 
                                     log_debug("Found texture(iChannel%d, '%s')", channel_num, coord_expr);
 
-                                    /* IMPROVED VEC3 DETECTION:
-                                     * Instead of trying to detect vec3, detect known vec2 patterns.
-                                     * If it's NOT a known vec2, assume it's vec3 and wrap it.
-                                     * This is safer for environment mapping shaders.
-                                     */
-                                    bool is_vec2 = false;
-                                    
-                                    /* Known vec2 patterns - these should NOT be wrapped */
-                                    if (strstr(coord_expr, ".xy") || strstr(coord_expr, ".uv") ||
-                                        strstr(coord_expr, ".st") || strstr(coord_expr, ".rg")) {
-                                        /* Explicitly accessing .xy swizzle - definitely vec2 */
-                                        log_debug("  -> Detected vec2 (has .xy/.uv/.st/.rg swizzle)");
-                                        is_vec2 = true;
-                                    } else if (strcmp(coord_expr, "uv") == 0 || strcmp(coord_expr, "UV") == 0 ||
-                                               strcmp(coord_expr, "st") == 0 || strcmp(coord_expr, "tc") == 0 ||
-                                               strcmp(coord_expr, "texcoord") == 0 || strcmp(coord_expr, "texCoord") == 0 ||
-                                               strcmp(coord_expr, "coord") == 0 || strcmp(coord_expr, "Coord") == 0) {
-                                        /* Common vec2 variable names */
-                                        log_debug("  -> Detected vec2 (common vec2 variable name)");
-                                        is_vec2 = true;
-                                    } else if (strstr(coord_expr, "vec2")) {
-                                        /* Explicitly constructing vec2 */
-                                        log_debug("  -> Detected vec2 (contains vec2 constructor)");
-                                        is_vec2 = true;
-                                    } else if (strstr(coord_expr, "fragCoord") || strstr(coord_expr, "gl_FragCoord")) {
-                                        /* Fragment coordinate is vec4, but typically used as .xy for textures */
-                                        /* If they're using it without .xy, it's likely intentional and handled elsewhere */
-                                        log_debug("  -> Detected vec2-ish (fragCoord)");
-                                        is_vec2 = true;
-                                    } else if (strstr(coord_expr, "iResolution.xy") || 
-                                               (strstr(coord_expr, "/") && strstr(coord_expr, "iResolution"))) {
-                                        /* Normalized coordinates like fragCoord/iResolution */
-                                        log_debug("  -> Detected vec2 (normalized coordinates)");
-                                        is_vec2 = true;
-                                    }
-                                    
-                                    /* If not detected as vec2, assume it's vec3 and needs conversion */
-                                    bool is_vec3 = !is_vec2;
-                                    
-                                    if (is_vec3) {
-                                        log_debug("  -> Assuming vec3 (not a known vec2 pattern)");
+                                    /* Check if it looks like a vec3 (contains getNormal, or is just 'n' variable, or other common vec3 patterns) */
+                                    bool is_vec3 = false;
+                                    if (strstr(coord_expr, "getNormal")) {
+                                        log_debug("  -> Detected vec3 (contains getNormal)");
+                                        is_vec3 = true;
+                                    } else if (strcmp(coord_expr, "n") == 0 || strcmp(coord_expr, "s") == 0) {
+                                        /* Single letter 'n' or 's' is commonly a vec3 (normal or sample coord) */
+                                        log_debug("  -> Detected vec3 (single-letter variable '%s')", coord_expr);
+                                        is_vec3 = true;
+                                    } else if (strstr(coord_expr, "normal") || strstr(coord_expr, "Normal")) {
+                                        /* Contains 'normal' or 'Normal' */
+                                        log_debug("  -> Detected vec3 (contains 'normal')");
+                                        is_vec3 = true;
+                                    } else {
+                                        /* Check if it ends with .p, .xyz, or other vec3-like patterns */
+                                        size_t len = strlen(coord_expr);
+                                        if (len >= 2) {
+                                            if (strstr(coord_expr, ".p)") || strstr(coord_expr, ".xyz") ||
+                                                strstr(coord_expr, "vec3") || strstr(coord_expr, "reflect") ||
+                                                strstr(coord_expr, "refract") || strstr(coord_expr, "cross")) {
+                                                log_debug("  -> Detected vec3 (contains vec3-like pattern)");
+                                                is_vec3 = true;
+                                            }
+                                            /* Check for common vec3 arithmetic patterns */
+                                            if (!is_vec3 && (strchr(coord_expr, '+') || strchr(coord_expr, '-') || strchr(coord_expr, '*'))) {
+                                                /* Contains arithmetic - likely vec3 if it has common vec3 variable names */
+                                                /* Check if expression starts with single-letter vec3 variable */
+                                                bool starts_with_vec3_var = (coord_expr[0] == 'u' || coord_expr[0] == 'o' || 
+                                                                             coord_expr[0] == 'p' || coord_expr[0] == 's' ||
+                                                                             coord_expr[0] == 'n') && 
+                                                                            (coord_expr[1] == ' ' || coord_expr[1] == '*' || 
+                                                                             coord_expr[1] == '+' || coord_expr[1] == '-' ||
+                                                                             coord_expr[1] == '.' || coord_expr[1] == '/');
+                                                if (starts_with_vec3_var ||
+                                                    strstr(coord_expr, " u") || strstr(coord_expr, "u*") || strstr(coord_expr, "u+") || strstr(coord_expr, "u-") ||
+                                                    strstr(coord_expr, " o") || strstr(coord_expr, "o*") || strstr(coord_expr, "o+") || strstr(coord_expr, "o-") ||
+                                                    strstr(coord_expr, " p") || strstr(coord_expr, "p*") || strstr(coord_expr, "p+") || strstr(coord_expr, "p-") ||
+                                                    strstr(coord_expr, " s") || strstr(coord_expr, "s*") || strstr(coord_expr, "s+") || strstr(coord_expr, "s-") ||
+                                                    strstr(coord_expr, "ray") || strstr(coord_expr, "dir") || strstr(coord_expr, "pos")) {
+                                                    log_debug("  -> Detected vec3 (arithmetic with vec3-like variables)");
+                                                    is_vec3 = true;
+                                                }
+                                            }
+                                        }
                                     }
 
                                     if (is_vec3) {
-                                        log_info("Converting texture(iChannel%d, %s) to use directionToUV()", channel_num, coord_expr);
+                                        log_info("Converting texture(iChannel%d, %s) to use .xy extraction", channel_num, coord_expr);
 
                                         /* Copy texture(iChannelN, */
                                         size_t prefix_len = coord_start - src;
                                         strncpy(dst, src, prefix_len);
                                         dst += prefix_len;
 
-                                        /* Wrap coordinate with directionToUV() */
-                                        strcpy(dst, "directionToUV(");
-                                        dst += 14;
+                                        /* Wrap coordinate with parentheses and extract .xy */
+                                        *dst++ = '(';
                                         strcpy(dst, coord_expr);
                                         dst += strlen(coord_expr);
-                                        *dst++ = ')';
+                                        strcpy(dst, ").xy");
+                                        dst += 4;
 
                                         src = coord_end;
                                         made_changes = true;
@@ -1671,7 +1757,7 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
             *dst = '\0';
 
             if (made_changes) {
-                log_info("Applied %d vec3->vec2 texture coordinate conversion(s) for environment mapping", conversion_count);
+                log_info("Applied %d vec3->vec2 texture coordinate conversion(s)", conversion_count);
                 free(wrapped);
                 wrapped = fixed;
             } else {
@@ -1738,21 +1824,10 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
         /* Analyze shader complexity and features */
         shadertoy_analyze_shader(fragment_src);
 
-        /* DISABLED: Preprocessing interferes with real iChannel textures
-         * The preprocessor was replacing texture() calls with noise fallbacks
-         * Now that we have real texture support, we don't need fallbacks */
-        /*
-        char *preprocessed = shadertoy_preprocess(fragment_src);
-        if (preprocessed) {
-            log_info("Shader preprocessed: %zu bytes -> %zu bytes",
-                     strlen(fragment_src), strlen(preprocessed));
-            free(fragment_src);
-            fragment_src = preprocessed;
-        } else {
-            log_info("Shader preprocessing skipped or failed, using original");
-        }
-        */
-        log_info("Using original shader source (preprocessing disabled to support real iChannel textures)");
+        /* Don't preprocess - use actual bound textures instead
+         * Default gray textures are bound to iChannel0-4 which provide
+         * non-black values when shaders sample from them */
+        log_info("Using original shader source (default textures will be bound to iChannels)");
 
         /* Wrap with Shadertoy compatibility layer */
         final_fragment_src = wrap_shadertoy_shader(fragment_src, channel_count);
@@ -1800,6 +1875,12 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
 
     /* Detect GL version to select appropriate vertex shader */
     const GLubyte *version_string = glGetString(GL_VERSION);
+#ifdef USE_EPOXY
+    /* Desktop OpenGL via epoxy - use desktop vertex shader */
+    const char *vertex_shader = live_vertex_shader_desktop;
+    log_debug("Using desktop OpenGL vertex shader (epoxy)");
+    (void)version_string; /* Suppress unused warning */
+#else
     const char *vertex_shader = live_vertex_shader_es2; // Default to ES 2.0
 
     if (version_string && strstr((const char*)version_string, "ES 3.") != NULL) {
@@ -1808,13 +1889,27 @@ bool shader_create_live_program(const char *shader_path, GLuint *program, size_t
     } else {
         log_debug("Using ES 2.0 vertex shader");
     }
+#endif
 
     /* Save wrapped shader for debugging on failure */
+#ifdef PLATFORM_WINDOWS
+    char debug_path[MAX_PATH];
+    char *temp_dir = getenv("TEMP");
+    if (!temp_dir) temp_dir = getenv("TMP");
+    if (!temp_dir) temp_dir = ".";
+    snprintf(debug_path, sizeof(debug_path), "%s\\neowall_shader_debug.glsl", temp_dir);
+    FILE *debug_fp = fopen(debug_path, "w");
+#else
     FILE *debug_fp = fopen("/tmp/neowall_shader_debug.glsl", "w");
+#endif
     if (debug_fp) {
         fprintf(debug_fp, "%s", final_fragment_src);
         fclose(debug_fp);
+#ifdef PLATFORM_WINDOWS
+        log_debug("Saved wrapped shader to %s for debugging", debug_path);
+#else
         log_debug("Saved wrapped shader to /tmp/neowall_shader_debug.glsl for debugging");
+#endif
     }
 
     /* Create program with standard vertex shader and loaded fragment shader */

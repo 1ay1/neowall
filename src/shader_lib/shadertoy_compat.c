@@ -3,7 +3,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
-#include "shader_log.h"
+#include "platform_compat.h"
 
 /**
  * Intelligent Shadertoy Shader Preprocessor

@@ -388,6 +388,12 @@ static void render_outputs(struct neowall_state *state) {
                          output->model, eglGetError());
                 state->errors_count++;
             } else {
+                /* Log swap success every 60 frames to verify buffer swapping is working */
+                static uint64_t swap_counter = 0;
+                swap_counter++;
+                if (swap_counter % 60 == 0) {
+                    log_info("Buffer swap #%lu successful for output %s", swap_counter, output->model);
+                }
                 /* Damage the entire surface to tell compositor it needs repainting */
                 compositor_surface_damage(output->compositor_surface, 0, 0, INT32_MAX, INT32_MAX);
 

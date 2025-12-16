@@ -1,16 +1,27 @@
 /* Shader Library Logging Shim
- * Provides logging macros that work without the full daemon logging system
+ * Provides logging macros that work with neowall's logging system when available,
+ * or standalone logging when used in other projects like gleditor
  */
 
 #ifndef SHADER_LIB_LOG_H
 #define SHADER_LIB_LOG_H
 
+/* Check if we're being compiled within neowall (which defines its own logging) */
+#ifdef NEOWALL_VERSION
+
+/* Use neowall's logging system - just declare the functions as extern */
+/* The actual log_* functions are defined in neowall's utils.c */
+/* Do NOT redefine LOG_LEVEL_* or log_* macros here */
+
+#else
+
+/* Standalone mode - provide our own logging implementation */
 #include <stdio.h>
 #include <stdarg.h>
 #include <time.h>
 #include <sys/time.h>
 
-/* Log levels */
+/* Log levels for standalone mode */
 #define LOG_LEVEL_ERROR 0
 #define LOG_LEVEL_WARN  1
 #define LOG_LEVEL_INFO  2
@@ -49,10 +60,12 @@ static inline void shader_log(int level, const char *prefix, const char *fmt, ..
     fprintf(stderr, "\n");
 }
 
-/* Logging macros compatible with daemon's log_* functions */
+/* Logging macros for standalone mode */
 #define log_error(...) shader_log(LOG_LEVEL_ERROR, "ERROR", __VA_ARGS__)
 #define log_warn(...)  shader_log(LOG_LEVEL_WARN,  "WARN",  __VA_ARGS__)
 #define log_info(...)  shader_log(LOG_LEVEL_INFO,  "INFO",  __VA_ARGS__)
 #define log_debug(...) shader_log(LOG_LEVEL_DEBUG, "DEBUG", __VA_ARGS__)
+
+#endif /* NEOWALL_VERSION */
 
 #endif /* SHADER_LIB_LOG_H */

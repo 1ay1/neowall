@@ -1,7 +1,7 @@
 #ifndef SHADER_H
 #define SHADER_H
 
-#include <GLES2/gl2.h>
+#include "platform_compat.h"
 #include <stdbool.h>
 
 /**

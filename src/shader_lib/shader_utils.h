@@ -7,7 +7,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <GLES2/gl2.h>
+#include "platform_compat.h"
 
 /**
  * Shader error information

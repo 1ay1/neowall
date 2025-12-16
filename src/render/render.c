@@ -2,7 +2,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
+#include <sys/time.h>
 #include <GLES2/gl2.h>
+#include <EGL/egl.h>
+
+/* GPU timeout detection threshold in milliseconds.
+ * If a frame takes longer than this, the shader is likely causing GPU hangs. */
+#define GPU_TIMEOUT_THRESHOLD_MS 2000
+
+/* Number of consecutive slow frames before marking shader as problematic */
+#define GPU_TIMEOUT_FRAME_THRESHOLD 3
 #include "neowall.h"
 #include "../image/image.h"    /* Only for legacy wrapper functions */
 #include "config_access.h"
@@ -112,6 +122,11 @@ static void render_fps_watermark(struct output_state *output) {
     char fps_text[32];
     snprintf(fps_text, sizeof(fps_text), "%.1f FPS", output->fps_current);
 
+    /* Save current GL state */
+    GLboolean blend_enabled = glIsEnabled(GL_BLEND);
+    GLint current_program = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
+
     /* Enable blending for semi-transparent background */
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -206,13 +221,21 @@ static void render_fps_watermark(struct output_state *output) {
     glDisableVertexAttribArray(pos_attrib);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glDeleteBuffers(1, &text_vbo);
+
+    /* Restore GL state */
+    if (!blend_enabled) {
+        glDisable(GL_BLEND);
+    }
+    if (current_program != 0) {
+        glUseProgram(current_program);
+    }
 }
 
 /* Global cache for default iChannel textures (generated once, reused forever) */
 static GLuint cached_default_channel_textures[5] = {0, 0, 0, 0, 0};
 static bool default_channels_initialized = false;
 
-/* Fullscreen quad vertices (position + texcoord) */
+/* Fullscreen quad vertices (position + texcoord) for image rendering */
 static const float quad_vertices[] = {
     /* positions */  /* texcoords */
     -1.0f,  1.0f,    0.0f, 0.0f,  /* top-left */
@@ -220,6 +243,17 @@ static const float quad_vertices[] = {
     -1.0f, -1.0f,    0.0f, 1.0f,  /* bottom-left */
      1.0f, -1.0f,    1.0f, 1.0f   /* bottom-right */
 };
+
+/* Simple fullscreen quad vertices (position only) for shader rendering - matches gleditor */
+static const float shader_quad_vertices[] = {
+    -1.0f, -1.0f,  /* Bottom-left */
+     1.0f, -1.0f,  /* Bottom-right */
+    -1.0f,  1.0f,  /* Top-left */
+     1.0f,  1.0f,  /* Top-right */
+};
+
+/* Shader-specific VBO (created once, shared across outputs) */
+static GLuint shader_vbo = 0;
 
 /* Helper: Cache uniform locations for a program */
 static inline void cache_program_uniforms(struct output_state *output) {
@@ -336,6 +370,15 @@ bool render_init_output(struct output_state *output) {
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), quad_vertices, GL_STATIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    /* Create shared shader VBO (matching gleditor's format exactly) */
+    if (shader_vbo == 0) {
+        glGenBuffers(1, &shader_vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, shader_vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(shader_quad_vertices), shader_quad_vertices, GL_STATIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        log_debug("Created shader VBO with gleditor-compatible format");
+    }
 
     /* Check for errors */
     GLenum error = glGetError();
@@ -811,186 +854,173 @@ static void calculate_vertex_coords(struct output_state *output, float vertices[
 
 
 /* Render shader wallpaper frame
- * Optimized: Uses state tracking and eliminates redundant GL calls */
+ * Matches gleditor's on_gl_render exactly for consistent behavior */
+
 bool render_frame_shader(struct output_state *output) {
     if (!output || output->live_shader_program == 0) {
         log_error("Invalid output or shader program for render_frame_shader");
         return false;
     }
 
+    /* Check if shader was previously marked as causing GPU timeouts */
+    if (output->shader_load_failed) {
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        return true;
+    }
+
     /* Validate EGL context is still valid */
     if (!output->state || output->state->egl_display == EGL_NO_DISPLAY) {
-        log_error("EGL display not available for shader rendering (display may be disconnected)");
+        log_error("EGL display not available for shader rendering");
         return false;
     }
 
     if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
-        log_error("EGL surface not available for shader rendering (display may be disconnected)");
+        log_error("EGL surface not available for shader rendering");
         return false;
     }
 
-    /* CRITICAL: Ensure EGL context is current on this thread before any GL operations */
+    /* Ensure EGL context is current */
     if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
                        output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for shader rendering");
         return false;
     }
 
-    /* Set viewport */
-    glViewport(0, 0, output->width, output->height);
+    int width = output->width;
+    int height = output->height;
 
-    /* Clear screen */
+    glViewport(0, 0, width, height);
+
+    /* Clear to opaque black first */
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    /* CRITICAL: Always use glUseProgram for shader rendering (not cached)
-     * GL state is per-context, not per-output. When switching between outputs,
-     * the cached state can be stale, causing GL_INVALID_OPERATION errors.
-     * Shaders are performance-critical, so we can't afford stale state. */
-    glUseProgram(output->live_shader_program);
-
-    /* Validate program is actually linked and ready */
-    GLint link_status = 0;
-    glGetProgramiv(output->live_shader_program, GL_LINK_STATUS, &link_status);
-    if (link_status == GL_FALSE) {
-        log_error("Shader program %u not linked properly, skipping frame", output->live_shader_program);
-        return false;
-    }
-
-    /* Calculate elapsed time for animation (continuous time since shader loaded) */
-    uint64_t current_time = get_time_ms();
-    uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : output->last_frame_time;
-    float time = (current_time - start_time) / (float)MS_PER_SECOND;
-
+    /* Calculate shader time - matching gleditor exactly */
+    uint64_t current_time_ms = get_time_ms();
+    uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : current_time_ms;
+    double current_time = (current_time_ms - start_time) / 1000.0;
+    
     /* Apply shader speed multiplier */
     float shader_speed = output->config->shader_speed > 0.0f ? output->config->shader_speed : 1.0f;
-    time *= shader_speed;
+    current_time *= shader_speed;
 
-    /* Cache shader uniform locations on first use to eliminate per-frame lookups */
-    if (output->shader_uniforms.position == -2) {
-        /* -2 means uninitialized, -1 means not found, >= 0 is valid location */
-        output->shader_uniforms.position = glGetAttribLocation(output->live_shader_program, "position");
-        output->shader_uniforms.u_time = glGetUniformLocation(output->live_shader_program, "_neowall_time");
-        output->shader_uniforms.u_resolution = glGetUniformLocation(output->live_shader_program, "_neowall_resolution");
+    /* Track frame count */
+    static int frame_count = 0;
+    frame_count++;
 
-        /* Also get iResolution uniform location (Shadertoy vec3) */
-        GLint iResolution_loc = glGetUniformLocation(output->live_shader_program, "iResolution");
-        if (iResolution_loc >= 0) {
-            /* Set iResolution as vec3(width, height, aspect_ratio) */
-            float aspect = (float)output->width / (float)output->height;
-            glUniform3f(iResolution_loc, (float)output->width, (float)output->height, aspect);
-        }
+    /* Use shader program */
+    glUseProgram(output->live_shader_program);
 
-        /* Cache iChannel sampler locations */
-        if (output->shader_uniforms.iChannel && output->channel_count > 0) {
-            for (size_t i = 0; i < output->channel_count; i++) {
-                char sampler_name[32];
-                snprintf(sampler_name, sizeof(sampler_name), "iChannel%zu", i);
-                output->shader_uniforms.iChannel[i] = glGetUniformLocation(output->live_shader_program, sampler_name);
-            }
-            log_debug("Cached %zu iChannel uniform locations", output->channel_count);
-        }
+    /* Set NeoWall internal uniforms - matching gleditor's on_gl_render exactly */
+    GLint loc;
+
+    loc = glGetUniformLocation(output->live_shader_program, "_neowall_time");
+    if (loc >= 0) {
+        glUniform1f(loc, (float)current_time);
     }
 
-    /* BUGFIX: Re-cache iChannel uniforms if they were reset (e.g., after cycle)
-     * This can happen when channel textures are reloaded but position uniform is already cached */
-    if (output->shader_uniforms.iChannel && output->channel_count > 0 &&
-        output->shader_uniforms.iChannel[0] == -2) {
-        for (size_t i = 0; i < output->channel_count; i++) {
-            char sampler_name[32];
-            snprintf(sampler_name, sizeof(sampler_name), "iChannel%zu", i);
-            output->shader_uniforms.iChannel[i] = glGetUniformLocation(output->live_shader_program, sampler_name);
-        }
-        log_debug("Re-cached %zu iChannel uniform locations after reset", output->channel_count);
+    loc = glGetUniformLocation(output->live_shader_program, "_neowall_resolution");
+    if (loc >= 0) {
+        glUniform2f(loc, (float)width, (float)height);
     }
 
-    /* Set all standard shader uniforms using the unified API from gleditor */
-    neowall_shader_set_uniforms(output->live_shader_program,
-                                 output->width,
-                                 output->height,
-                                 time,
-                                 output->mouse_x, output->mouse_y);  /* Use tracked mouse position */
+    loc = glGetUniformLocation(output->live_shader_program, "_neowall_mouse");
+    if (loc >= 0) {
+        glUniform4f(loc, 0.0f, 0.0f, 0.0f, 0.0f);
+    }
 
-    /* Bind iChannel textures if they exist */
-    if (output->channel_textures && output->shader_uniforms.iChannel) {
-        /* Query max texture units to avoid GL_INVALID_OPERATION */
-        static GLint max_texture_units = -1;
-        if (max_texture_units == -1) {
-            glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_texture_units);
-            log_debug("GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS: %d", max_texture_units);
-        }
+    loc = glGetUniformLocation(output->live_shader_program, "_neowall_frame");
+    if (loc >= 0) {
+        glUniform1i(loc, frame_count);
+    }
 
-        /* Clear any pre-existing GL errors before texture binding */
-        while (glGetError() != GL_NO_ERROR) {
-            /* Drain error queue */
-        }
+    /* Set _neowall_date uniform (year, month, day, seconds since midnight) - matching gleditor */
+    loc = glGetUniformLocation(output->live_shader_program, "_neowall_date");
+    if (loc >= 0) {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        struct tm *tm_info = localtime(&tv.tv_sec);
+        float year = (float)(tm_info->tm_year + 1900);
+        float month = (float)(tm_info->tm_mon + 1);
+        float day = (float)tm_info->tm_mday;
+        float seconds = (float)(tm_info->tm_hour * 3600 + tm_info->tm_min * 60 + tm_info->tm_sec) + (float)tv.tv_usec / 1000000.0f;
+        glUniform4f(loc, year, month, day, seconds);
+    }
 
+    /* Set Shadertoy uniforms for compatibility - matching gleditor exactly */
+    loc = glGetUniformLocation(output->live_shader_program, "iResolution");
+    if (loc >= 0) {
+        float aspect = (width > 0 && height > 0) ? (float)width / (float)height : 1.0f;
+        glUniform3f(loc, (float)width, (float)height, aspect);
+    }
+
+    loc = glGetUniformLocation(output->live_shader_program, "iTime");
+    if (loc >= 0) {
+        glUniform1f(loc, (float)current_time);
+    }
+
+    loc = glGetUniformLocation(output->live_shader_program, "iTimeDelta");
+    if (loc >= 0) {
+        glUniform1f(loc, 1.0f / 60.0f);
+    }
+
+    loc = glGetUniformLocation(output->live_shader_program, "iFrame");
+    if (loc >= 0) {
+        glUniform1i(loc, frame_count);
+    }
+
+    loc = glGetUniformLocation(output->live_shader_program, "iMouse");
+    if (loc >= 0) {
+        glUniform4f(loc, 0.0f, 0.0f, 0.0f, 0.0f);
+    }
+
+    /* Bind iChannel textures */
+    if (output->channel_textures && output->channel_count > 0) {
         for (size_t i = 0; i < output->channel_count; i++) {
-            /* Skip if texture doesn't exist */
             if (output->channel_textures[i] == 0) {
                 continue;
             }
 
-            /* Skip if uniform location is invalid */
-            if (output->shader_uniforms.iChannel[i] < 0) {
+            /* Get uniform location for this channel */
+            char sampler_name[32];
+            snprintf(sampler_name, sizeof(sampler_name), "iChannel%zu", i);
+            GLint channel_loc = glGetUniformLocation(output->live_shader_program, sampler_name);
+            if (channel_loc < 0) {
                 continue;
-            }
-
-            /* Validate texture unit index */
-            if ((GLint)i >= max_texture_units) {
-                log_error("iChannel%zu exceeds max texture units (%d), skipping", i, max_texture_units);
-                break;
             }
 
             glActiveTexture(GL_TEXTURE0 + (GLenum)i);
             glBindTexture(GL_TEXTURE_2D, output->channel_textures[i]);
-            glUniform1i(output->shader_uniforms.iChannel[i], (GLint)i);
-        }
-
-        /* Check for errors after all texture bindings */
-        GLenum tex_error = glGetError();
-        if (tex_error != GL_NO_ERROR) {
-            static uint64_t last_error_log = 0;
-            uint64_t now = get_time_ms();
-            /* Throttle error logging to once per second */
-            if (now - last_error_log > 1000) {
-                log_error("GL error after binding iChannel textures: 0x%x", tex_error);
-                last_error_log = now;
-            }
+            glUniform1i(channel_loc, (GLint)i);
         }
 
         /* Reset to texture unit 0 */
         glActiveTexture(GL_TEXTURE0);
     }
 
-    /* Use cached position attribute location */
-    GLint pos_attrib = output->shader_uniforms.position;
-    if (pos_attrib < 0) {
-        log_error("Failed to get 'position' attribute location in shader");
-        return false;
-    }
+    /* Draw fullscreen quad - matching gleditor exactly */
+    glBindBuffer(GL_ARRAY_BUFFER, shader_vbo);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
 
-    /* Bind persistent VBO - no need to upload data every frame!
-     * The fullscreen quad data is already in the VBO from render_init_output.
-     * We just reinterpret it: first 2 floats of each vertex are positions. */
-    glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-
-    /* Set up vertex attributes - stride of 4 floats to skip texcoords */
-    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(pos_attrib);
-
-    /* Disable alpha channel writes - force opaque output (prevents transparent shaders from showing white) */
+    /* Force opaque output - disable alpha channel writes
+     * Many Shadertoy shaders output alpha=0 which makes them transparent
+     * On layer-shell surfaces, transparent = see-through to desktop */
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 
-    /* Draw fullscreen quad */
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-    /* Re-enable alpha channel writes */
+    /* Re-enable alpha writes for other rendering (FPS overlay, etc) */
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-    /* Clean up */
-    glDisableVertexAttribArray(pos_attrib);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glDisableVertexAttribArray(0);
+
+    /* Log every 60 frames to confirm rendering is happening */
+    if (frame_count % 60 == 0) {
+        log_info("Shader render frame %d (time=%.2f, program=%u)", 
+                 frame_count, (float)current_time, output->live_shader_program);
+    }
 
     /* Handle cross-fade transition when switching shaders */
     const uint64_t FADE_OUT_MS = SHADER_FADE_OUT_MS;  /* Fade to black duration */

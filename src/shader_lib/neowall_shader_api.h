@@ -8,12 +8,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-
-#ifdef __APPLE__
-#include <OpenGL/gl3.h>
-#else
-#include <GLES2/gl2.h>
-#endif
+#include "platform_compat.h"
 
 /**
  * Shader compilation result
@@ -92,16 +87,12 @@ void neowall_shader_free_result(neowall_shader_result_t *result);
  * @param width Viewport width in pixels
  * @param height Viewport height in pixels
  * @param time Current time in seconds
- * @param mouse_x Mouse X coordinate (optional, pass -1 to use default)
- * @param mouse_y Mouse Y coordinate (optional, pass -1 to use default)
  */
 void neowall_shader_set_uniforms(
     GLuint program,
     int width,
     int height,
-    float time,
-    float mouse_x,
-    float mouse_y
+    float time
 );
 
 /**
