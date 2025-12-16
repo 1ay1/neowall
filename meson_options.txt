@@ -1,0 +1,14 @@
+# NeoWall Build Options
+
+# Backend options - can be set to 'enabled', 'disabled', or 'auto'
+option('wayland_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Build Wayland backend (requires wayland-client, wayland-egl, wayland-protocols)'
+)
+
+option('x11_backend',
+  type: 'feature',
+  value: 'auto',
+  description: 'Build X11 backend (requires libx11, libxrandr)'
+)

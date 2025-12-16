@@ -75,19 +75,19 @@ yay -S neowall-git
 
 Debian/Ubuntu:
 ```bash
-sudo apt install build-essential libwayland-dev libgles2-mesa-dev \
+sudo apt install build-essential meson ninja-build libwayland-dev libgles2-mesa-dev \
     libpng-dev libjpeg-dev wayland-protocols libx11-dev libxrandr-dev
 ```
 
 Arch Linux:
 ```bash
-sudo pacman -S base-devel wayland mesa libpng libjpeg-turbo \
+sudo pacman -S base-devel meson ninja wayland mesa libpng libjpeg-turbo \
     wayland-protocols libx11 libxrandr
 ```
 
 Fedora:
 ```bash
-sudo dnf install gcc make wayland-devel mesa-libGLES-devel \
+sudo dnf install gcc meson ninja-build wayland-devel mesa-libGLES-devel \
     libpng-devel libjpeg-turbo-devel wayland-protocols-devel \
     libX11-devel libXrandr-devel
 ```
@@ -96,8 +96,9 @@ sudo dnf install gcc make wayland-devel mesa-libGLES-devel \
 ```bash
 git clone https://github.com/1ay1/neowall
 cd neowall
-make -j$(nproc)
-sudo make install
+meson setup build
+ninja -C build
+sudo ninja -C build install
 ```
 
 ## Quick Start
@@ -182,13 +183,14 @@ neowall reload         # Reload configuration
 ```bash
 git clone https://github.com/1ay1/neowall
 cd neowall
-make debug
+meson setup build --buildtype=debug
+ninja -C build
 ```
 
 ### Running with Verbose Logging
 
 ```bash
-./build/bin/neowall -f -v
+./build/neowall -f -v
 ```
 
 ## Contributing

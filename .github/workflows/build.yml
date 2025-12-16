@@ -17,26 +17,29 @@ jobs:
       - name: Update system and install dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git wayland wayland-protocols \
+          pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
             egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr
 
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup build
+        run: meson setup build
+
       - name: Build
-        run: make
+        run: ninja -C build
 
       - name: Check binary
         run: |
-          test -f build/bin/neowall
-          ./build/bin/neowall --version
-          ./build/bin/neowall --help
+          test -f build/neowall
+          ./build/neowall --version
+          ./build/neowall --help
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: neowall-arch-full
-          path: build/bin/neowall
+          path: build/neowall
 
   build-arch-wayland-only:
     name: Arch Linux (Wayland only)
@@ -48,23 +51,26 @@ jobs:
       - name: Update system and install dependencies (no X11)
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git wayland wayland-protocols \
+          pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
             egl-wayland mesa libpng libjpeg-turbo
 
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build (Wayland only)
-        run: make X11_BACKEND=no
+      - name: Setup build (Wayland only)
+        run: meson setup build -Dx11_backend=disabled
 
-      - name: Verify X11 backend not compiled
+      - name: Build
+        run: ninja -C build
+
+      - name: Verify build configuration
         run: |
-          make X11_BACKEND=no 2>&1 | grep -q "X11 backend disabled" && echo "X11 correctly disabled"
+          meson configure build | grep -E "wayland_backend|x11_backend"
 
       - name: Check binary
         run: |
-          test -f build/bin/neowall
-          ./build/bin/neowall --version
+          test -f build/neowall
+          ./build/neowall --version
 
   build-arch-x11-only:
     name: Arch Linux (X11 only)
@@ -76,23 +82,62 @@ jobs:
       - name: Update system and install dependencies (no Wayland)
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git mesa libpng libjpeg-turbo \
+          pacman -S --noconfirm base-devel git meson ninja mesa libpng libjpeg-turbo \
             libx11 libxrandr
 
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build (X11 only)
-        run: make WAYLAND_BACKEND=no
+      - name: Setup build (X11 only)
+        run: meson setup build -Dwayland_backend=disabled
 
-      - name: Verify Wayland backend not compiled
+      - name: Build
+        run: ninja -C build
+
+      - name: Verify build configuration
         run: |
-          make WAYLAND_BACKEND=no 2>&1 | grep -q "Wayland backend disabled" && echo "Wayland correctly disabled"
+          meson configure build | grep -E "wayland_backend|x11_backend"
 
       - name: Check binary
         run: |
-          test -f build/bin/neowall
-          ./build/bin/neowall --version
+          test -f build/neowall
+          ./build/neowall --version
+
+  build-debian-full:
+    name: Debian (Wayland + X11)
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bookworm
+
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential git pkg-config meson ninja-build \
+            libwayland-dev wayland-protocols libwayland-egl1-mesa \
+            libx11-dev libxrandr-dev \
+            libegl1-mesa-dev libgles2-mesa-dev \
+            libpng-dev libjpeg-dev
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup build
+        run: meson setup build
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Check binary
+        run: |
+          test -f build/neowall
+          ./build/neowall --version
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neowall-debian-full
+          path: build/neowall
 
   build-debian-x11-only:
     name: Debian (X11 only - i3 style)
@@ -104,7 +149,7 @@ jobs:
       - name: Install dependencies (pure X11, no Wayland)
         run: |
           apt-get update
-          apt-get install -y build-essential git pkg-config \
+          apt-get install -y build-essential git pkg-config meson ninja-build \
             libx11-dev libxrandr-dev \
             libegl1-mesa-dev libgles2-mesa-dev \
             libpng-dev libjpeg-dev
@@ -112,18 +157,94 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build (X11 only)
-        run: make WAYLAND_BACKEND=no
+      - name: Setup build (X11 only)
+        run: meson setup build -Dwayland_backend=disabled
 
-      - name: Verify Wayland backend not compiled
-        run: |
-          make WAYLAND_BACKEND=no 2>&1 | grep -q "Wayland backend disabled" && echo "Wayland correctly disabled"
+      - name: Build
+        run: ninja -C build
 
-      - name: Verify X11 backend compiled
+      - name: Verify build configuration
         run: |
-          make WAYLAND_BACKEND=no 2>&1 | grep -q "X11 backend available" && echo "X11 backend enabled"
+          meson configure build | grep -E "wayland_backend|x11_backend"
 
       - name: Check binary
         run: |
-          test -f build/bin/neowall
-          ./build/bin/neowall --version
+          test -f build/neowall
+          ./build/neowall --version
+
+  build-fedora:
+    name: Fedora (Wayland + X11)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y gcc make git meson ninja-build pkg-config \
+            wayland-devel wayland-protocols-devel egl-wayland-devel \
+            mesa-libEGL-devel mesa-libGLES-devel \
+            libX11-devel libXrandr-devel \
+            libpng-devel libjpeg-turbo-devel
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup build
+        run: meson setup build
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Check binary
+        run: |
+          test -f build/neowall
+          ./build/neowall --version
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neowall-fedora
+          path: build/neowall
+
+  build-ubuntu:
+    name: Ubuntu (Wayland + X11)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git pkg-config meson ninja-build \
+            libwayland-dev wayland-protocols libwayland-egl1-mesa \
+            libx11-dev libxrandr-dev \
+            libegl1-mesa-dev libgles2-mesa-dev \
+            libpng-dev libjpeg-dev
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup build
+        run: meson setup build
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Check binary
+        run: |
+          test -f build/neowall
+          ./build/neowall --version
+          ./build/neowall --help
+
+      - name: Test install
+        run: |
+          DESTDIR=/tmp/neowall-test ninja -C build install
+          test -f /tmp/neowall-test/usr/local/bin/neowall
+          test -d /tmp/neowall-test/usr/local/share/neowall/shaders
+          test -f /tmp/neowall-test/usr/local/share/neowall/config.vibe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neowall-ubuntu
+          path: build/neowall

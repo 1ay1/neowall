@@ -347,25 +347,28 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
 
 #### 4. Update Build System
 
-Add to `Makefile`:
+Add to `meson.build` in the wayland sources section:
 
-```makefile
-COMPOSITOR_BACKEND_SRCS = \
-    $(SRC_DIR)/compositor/backends/wlr_layer_shell.c \
-    $(SRC_DIR)/compositor/backends/kde_plasma.c \
-    $(SRC_DIR)/compositor/backends/gnome_shell.c \
-    $(SRC_DIR)/compositor/backends/my_compositor.c \
-    $(SRC_DIR)/compositor/backends/fallback.c
+```meson
+wayland_sources = files(
+  'src/compositor/backends/wayland/wayland_core.c',
+  'src/compositor/backends/wayland/compositors/wlr_layer_shell.c',
+  'src/compositor/backends/wayland/compositors/kde_plasma.c',
+  'src/compositor/backends/wayland/compositors/gnome_shell.c',
+  'src/compositor/backends/wayland/compositors/my_compositor.c',
+  'src/compositor/backends/wayland/compositors/fallback.c',
+)
 ```
 
 #### 5. Test
 
 ```bash
 # Build
-make clean && make
+meson setup build --wipe
+ninja -C build
 
 # Run with debug output
-neowall -fv
+./build/neowall -fv
 
 # Look for:
 # [INFO] Detected compositor: My Custom Compositor

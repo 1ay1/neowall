@@ -16,8 +16,9 @@ If you're packaging NeoWall for a distribution, see:
 
 **Build:**
 ```bash
-make
-make install PREFIX=/usr
+meson setup build --prefix=/usr
+ninja -C build
+DESTDIR="$pkgdir" ninja -C build install
 ```
 
 **Systemd service install location:**

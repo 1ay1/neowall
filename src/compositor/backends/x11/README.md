@@ -71,12 +71,12 @@ sudo dnf install libX11-devel libXrandr-devel
 
 ```bash
 cd neowall
-make clean
-make -j$(nproc)
-sudo make install
+meson setup build
+ninja -C build
+sudo ninja -C build install
 ```
 
-The Makefile will automatically:
+Meson will automatically:
 1. Detect X11 libraries via `pkg-config`
 2. Enable `HAVE_X11_BACKEND` flag
 3. Build X11 backend if available
