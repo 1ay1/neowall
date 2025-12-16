@@ -172,41 +172,6 @@ jobs:
           test -f build/neowall
           ./build/neowall --version
 
-  build-fedora:
-    name: Fedora (Wayland + X11)
-    runs-on: ubuntu-latest
-    container:
-      image: fedora:latest
-
-    steps:
-      - name: Install dependencies
-        run: |
-          dnf install -y gcc make git meson ninja-build pkg-config \
-            wayland-devel wayland-protocols-devel egl-wayland-devel \
-            mesa-libEGL-devel mesa-libGLES-devel \
-            libX11-devel libXrandr-devel \
-            libpng-devel libjpeg-turbo-devel
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup build
-        run: meson setup build
-
-      - name: Build
-        run: ninja -C build
-
-      - name: Check binary
-        run: |
-          test -f build/neowall
-          ./build/neowall --version
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: neowall-fedora
-          path: build/neowall
-
   build-ubuntu:
     name: Ubuntu (Wayland + X11)
     runs-on: ubuntu-latest
