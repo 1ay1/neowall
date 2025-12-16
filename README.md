@@ -54,6 +54,8 @@
 
 **TL;DR**: NeoWall is the only Linux tool that renders **live GPU shaders** as wallpapers with Shadertoy compatibility.
 
+> ⚠️ **KDE Plasma Note**: Desktop icons may be hidden when NeoWall is running. This is a limitation of the layer-shell protocol on KDE. Consider disabling desktop icons or using a dock/panel for quick access.
+
 ---
 
 ## 🚀 Features

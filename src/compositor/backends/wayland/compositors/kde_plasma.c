@@ -249,9 +249,8 @@ static struct compositor_surface *kde_create_surface(void *data,
         wl_region_destroy(opaque_region);
     }
 
-    /* Use BOTTOM layer for KDE - BACKGROUND layer with empty input region
-     * causes KDE to destroy the surface. BOTTOM layer is above BACKGROUND
-     * but still below windows, and may handle input differently. */
+    /* Use BOTTOM layer for KDE - BACKGROUND layer doesn't render properly.
+     * Note: This may cover desktop icons on KDE Plasma. */
     enum zwlr_layer_shell_v1_layer layer = ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM;
 
     /* Create layer surface */
