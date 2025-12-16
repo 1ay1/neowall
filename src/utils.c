@@ -218,16 +218,30 @@ float ease_in_out_cubic(float t) {
 
 /* Get state file path - use persistent location that survives reboots */
 /* Get path to the cycle list file (shows all wallpapers with indices) */
+/* Must use same fallback logic as get_state_file_path to stay in sync */
 const char *get_cycle_list_file_path(void) {
     static char path[MAX_PATH_LENGTH];
-    const char *state_dir = getenv("XDG_STATE_HOME");
+    const char *state_home = getenv("XDG_STATE_HOME");
+    const char *config_home = getenv("XDG_CONFIG_HOME");
+    const char *home = getenv("HOME");
     
-    if (state_dir) {
-        snprintf(path, sizeof(path), "%s/neowall/cycle_list", state_dir);
-    } else {
-        const char *home = getenv("HOME");
-        if (home) {
-            snprintf(path, sizeof(path), "%s/.local/state/neowall/cycle_list", home);
+    /* Prefer XDG_STATE_HOME for persistent state (usually ~/.local/state) */
+    if (state_home && state_home[0] != '\0') {
+        snprintf(path, sizeof(path), "%s/neowall/cycle_list", state_home);
+    }
+    /* Fall back to config directory - same as get_state_file_path */
+    else if (config_home && config_home[0] != '\0') {
+        snprintf(path, sizeof(path), "%s/neowall/cycle_list", config_home);
+    }
+    /* Fall back to ~/.config/neowall/cycle_list */
+    else if (home && home[0] != '\0') {
+        snprintf(path, sizeof(path), "%s/.config/neowall/cycle_list", home);
+    }
+    /* Last resort: tmpfs (will be lost on reboot) */
+    else {
+        const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+        if (runtime_dir) {
+            snprintf(path, sizeof(path), "%s/neowall-cycle-list", runtime_dir);
         } else {
             snprintf(path, sizeof(path), "/tmp/neowall-cycle-list-%d", getuid());
         }
