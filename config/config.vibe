@@ -1,4 +1,4 @@
 default {
-  shader retro_wave.glsl
-  shader_speed 0.5
+  shader train_journey.glsl
+  shader_speed 1.0
 }
