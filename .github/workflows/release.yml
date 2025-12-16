@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version number (e.g., 0.3.0)"
+        description: "Version number (e.g., 0.4.4)"
         required: true
         type: string
 
@@ -40,20 +40,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            meson \
+            ninja-build \
             wayland-protocols \
             libwayland-dev \
             libpng-dev \
             libjpeg-dev \
-            libgl1-mesa-dev \
+            libgles2-mesa-dev \
             libegl1-mesa-dev \
             libx11-dev \
             libxrandr-dev \
             pkg-config \
-            make \
             gcc
 
       - name: Build neowall
-        run: make
+        run: |
+          meson setup build
+          ninja -C build
 
       - name: Create tarball
         run: |
@@ -62,6 +65,7 @@ jobs:
             --exclude='.git' \
             --exclude='release' \
             --exclude='.github' \
+            --exclude='build' \
             --transform "s,^,neowall-${{ steps.version.outputs.VERSION }}/," \
             *
 
@@ -89,7 +93,7 @@ jobs:
           tag_name: ${{ steps.version.outputs.TAG }}
           name: Release ${{ steps.version.outputs.TAG }}
           body: |
-            ## Neowall ${{ steps.version.outputs.VERSION }}
+            ## NeoWall ${{ steps.version.outputs.VERSION }}
 
             ### Changes
             ${{ steps.changelog.outputs.CHANGELOG }}
@@ -105,8 +109,9 @@ jobs:
             ```bash
             tar -xzf neowall-${{ steps.version.outputs.VERSION }}.tar.gz
             cd neowall-${{ steps.version.outputs.VERSION }}
-            make
-            sudo make install
+            meson setup build
+            ninja -C build
+            sudo ninja -C build install
             ```
           files: |
             release/neowall-${{ steps.version.outputs.VERSION }}.tar.gz
