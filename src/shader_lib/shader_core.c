@@ -1594,41 +1594,47 @@ static char *wrap_shadertoy_shader(const char *shadertoy_source, size_t channel_
 
                                     log_debug("Found texture(iChannel%d, '%s')", channel_num, coord_expr);
 
-                                    /* Check if it looks like a vec3 (contains getNormal, or is just 'n' variable, or other common vec3 patterns) */
-                                    bool is_vec3 = false;
-                                    if (strstr(coord_expr, "getNormal")) {
-                                        log_debug("  -> Detected vec3 (contains getNormal)");
-                                        is_vec3 = true;
-                                    } else if (strcmp(coord_expr, "n") == 0) {
-                                        /* Single letter 'n' is commonly a normal vector */
-                                        log_debug("  -> Detected vec3 (variable 'n')");
-                                        is_vec3 = true;
-                                    } else if (strstr(coord_expr, "normal") || strstr(coord_expr, "Normal")) {
-                                        /* Contains 'normal' or 'Normal' */
-                                        log_debug("  -> Detected vec3 (contains 'normal')");
-                                        is_vec3 = true;
-                                    } else {
-                                        /* Check if it ends with .p, .xyz, or other vec3-like patterns */
-                                        size_t len = strlen(coord_expr);
-                                        if (len >= 2) {
-                                            if (strstr(coord_expr, ".p)") || strstr(coord_expr, ".xyz") ||
-                                                strstr(coord_expr, "vec3") || strstr(coord_expr, "reflect") ||
-                                                strstr(coord_expr, "refract") || strstr(coord_expr, "cross")) {
-                                                log_debug("  -> Detected vec3 (contains vec3-like pattern)");
-                                                is_vec3 = true;
-                                            }
-                                            /* Check for common vec3 arithmetic patterns */
-                                            if (!is_vec3 && (strchr(coord_expr, '+') || strchr(coord_expr, '-') || strchr(coord_expr, '*'))) {
-                                                /* Contains arithmetic - likely vec3 if it has common vec3 variable names */
-                                                if (strstr(coord_expr, " u") || strstr(coord_expr, "u*") || strstr(coord_expr, "u+") || strstr(coord_expr, "u-") ||
-                                                    strstr(coord_expr, " o") || strstr(coord_expr, "o*") || strstr(coord_expr, "o+") || strstr(coord_expr, "o-") ||
-                                                    strstr(coord_expr, " p") || strstr(coord_expr, "p*") || strstr(coord_expr, "p+") || strstr(coord_expr, "p-") ||
-                                                    strstr(coord_expr, "ray") || strstr(coord_expr, "dir") || strstr(coord_expr, "pos")) {
-                                                    log_debug("  -> Detected vec3 (arithmetic with vec3-like variables)");
-                                                    is_vec3 = true;
-                                                }
-                                            }
-                                        }
+                                    /* IMPROVED VEC3 DETECTION:
+                                     * Instead of trying to detect vec3, detect known vec2 patterns.
+                                     * If it's NOT a known vec2, assume it's vec3 and wrap it.
+                                     * This is safer for environment mapping shaders.
+                                     */
+                                    bool is_vec2 = false;
+                                    
+                                    /* Known vec2 patterns - these should NOT be wrapped */
+                                    if (strstr(coord_expr, ".xy") || strstr(coord_expr, ".uv") ||
+                                        strstr(coord_expr, ".st") || strstr(coord_expr, ".rg")) {
+                                        /* Explicitly accessing .xy swizzle - definitely vec2 */
+                                        log_debug("  -> Detected vec2 (has .xy/.uv/.st/.rg swizzle)");
+                                        is_vec2 = true;
+                                    } else if (strcmp(coord_expr, "uv") == 0 || strcmp(coord_expr, "UV") == 0 ||
+                                               strcmp(coord_expr, "st") == 0 || strcmp(coord_expr, "tc") == 0 ||
+                                               strcmp(coord_expr, "texcoord") == 0 || strcmp(coord_expr, "texCoord") == 0 ||
+                                               strcmp(coord_expr, "coord") == 0 || strcmp(coord_expr, "Coord") == 0) {
+                                        /* Common vec2 variable names */
+                                        log_debug("  -> Detected vec2 (common vec2 variable name)");
+                                        is_vec2 = true;
+                                    } else if (strstr(coord_expr, "vec2")) {
+                                        /* Explicitly constructing vec2 */
+                                        log_debug("  -> Detected vec2 (contains vec2 constructor)");
+                                        is_vec2 = true;
+                                    } else if (strstr(coord_expr, "fragCoord") || strstr(coord_expr, "gl_FragCoord")) {
+                                        /* Fragment coordinate is vec4, but typically used as .xy for textures */
+                                        /* If they're using it without .xy, it's likely intentional and handled elsewhere */
+                                        log_debug("  -> Detected vec2-ish (fragCoord)");
+                                        is_vec2 = true;
+                                    } else if (strstr(coord_expr, "iResolution.xy") || 
+                                               (strstr(coord_expr, "/") && strstr(coord_expr, "iResolution"))) {
+                                        /* Normalized coordinates like fragCoord/iResolution */
+                                        log_debug("  -> Detected vec2 (normalized coordinates)");
+                                        is_vec2 = true;
+                                    }
+                                    
+                                    /* If not detected as vec2, assume it's vec3 and needs conversion */
+                                    bool is_vec3 = !is_vec2;
+                                    
+                                    if (is_vec3) {
+                                        log_debug("  -> Assuming vec3 (not a known vec2 pattern)");
                                     }
 
                                     if (is_vec3) {
