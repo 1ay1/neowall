@@ -40,15 +40,20 @@
 
 ## ✨ Why NeoWall?
 
-| Feature | NeoWall | Video Wallpapers | Static Images |
-|---------|---------|------------------|---------------|
-| **CPU Usage** | ~2% | 15-30% | 0% |
-| **GPU Accelerated** | ✅ Yes | ❌ CPU decode | ❌ N/A |
-| **Infinite Variety** | ✅ Procedural shaders | ❌ Fixed files | ❌ Fixed files |
-| **Shadertoy Compatible** | ✅ 1000s of shaders | ❌ No | ❌ No |
-| **Multi-Monitor** | ✅ Independent per display | ⚠️ Limited | ✅ Yes |
-| **Memory Footprint** | ~50MB | 200MB+ | ~20MB |
-| **Interactive (Mouse)** | ✅ Yes | ❌ No | ❌ No |
+| Feature | NeoWall | swww | mpvpaper | hyprpaper |
+|---------|---------|------|----------|-----------|
+| **Live Shaders** | ✅ Yes | ❌ No | ❌ No | ❌ No |
+| **Shadertoy Compatible** | ✅ 1000s of shaders | ❌ No | ❌ No | ❌ No |
+| **Video Wallpapers** | ❌ No | ✅ GIFs | ✅ Yes | ❌ No |
+| **CPU Usage** | ~2% | ~1% | 10-20% | ~0% |
+| **GPU Accelerated** | ✅ OpenGL ES | ✅ Vulkan | ❌ CPU decode | ✅ Yes |
+| **Interactive (Mouse)** | ✅ Yes | ❌ No | ❌ No | ❌ No |
+| **X11 Support** | ✅ Yes | ❌ Wayland only | ❌ Wayland only | ❌ Wayland only |
+| **Wayland Support** | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Multi-Monitor** | ✅ Independent | ✅ Independent | ✅ Yes | ✅ Yes |
+| **Transitions** | ✅ 5 effects | ✅ Multiple | ❌ No | ❌ No |
+
+**TL;DR**: NeoWall is the only tool that runs **live GPU shaders** as wallpapers. If you want procedurally generated, infinitely unique animated backgrounds with Shadertoy compatibility — NeoWall is your only option on Linux.
 
 ---
 
