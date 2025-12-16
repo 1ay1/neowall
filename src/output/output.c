@@ -1095,6 +1095,66 @@ void output_cycle_wallpaper(struct output_state *output) {
 }
 
 /* Check if output needs to cycle wallpaper based on duration */
+/* Set wallpaper to a specific index in the cycle */
+void output_set_cycle_index(struct output_state *output, size_t index) {
+    if (!output) {
+        log_error("Cannot set cycle index: output is NULL");
+        return;
+    }
+
+    if (!output->config->cycle || output->config->cycle_count == 0) {
+        const char *output_name = output->model[0] ? output->model : "unknown";
+        log_error("Cannot set cycle index on output '%s': Cycling is not enabled or no wallpapers configured",
+                  output_name);
+        return;
+    }
+
+    /* Validate index is within bounds */
+    if (index >= output->config->cycle_count) {
+        log_error("Invalid cycle index %zu: must be between 0 and %zu",
+                  index, output->config->cycle_count - 1);
+        return;
+    }
+
+    /* Don't do anything if already at the requested index */
+    if (output->config->current_cycle_index == index) {
+        log_info("Already at wallpaper index %zu", index);
+        return;
+    }
+
+    /* Set the index */
+    pthread_mutex_lock(&output->state->state_mutex);
+    size_t old_index = output->config->current_cycle_index;
+    output->config->current_cycle_index = index;
+
+    /* Copy path before releasing lock */
+    char path_copy[MAX_PATH_LENGTH];
+    const char *path = output->config->cycle_paths[index];
+    strncpy(path_copy, path, sizeof(path_copy) - 1);
+    path_copy[sizeof(path_copy) - 1] = '\0';
+    pthread_mutex_unlock(&output->state->state_mutex);
+
+    const char *type_str = (output->config->type == WALLPAPER_SHADER) ? "shader" : "wallpaper";
+    log_info("Setting %s index for output %s: %zu -> %zu (%zu/%zu): %s",
+             type_str,
+             output->model[0] ? output->model : "unknown",
+             old_index, index,
+             index + 1, output->config->cycle_count,
+             path_copy);
+
+    /* Apply the wallpaper/shader at the new index */
+    if (output->config->type == WALLPAPER_SHADER) {
+        output_set_shader(output, path_copy);
+    } else {
+        output_set_wallpaper(output, path_copy);
+    }
+
+    /* Mark for redraw */
+    output->needs_redraw = true;
+
+    log_info("Wallpaper index set successfully");
+}
+
 bool output_should_cycle(struct output_state *output, uint64_t current_time) {
     if (!output) {
         return false;

@@ -195,6 +195,7 @@ void output_set_shader(struct output_state *output, const char *shader_path);
 bool output_apply_config(struct output_state *output, struct wallpaper_config *config);
 void output_apply_deferred_config(struct output_state *output);
 void output_cycle_wallpaper(struct output_state *output);
+void output_set_cycle_index(struct output_state *output, size_t index);
 bool output_should_cycle(struct output_state *output, uint64_t current_time);
 void output_preload_next_wallpaper(struct output_state *output);
 

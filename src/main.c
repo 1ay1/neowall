@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <sys/signalfd.h>
+#include <ctype.h>
 #include "neowall.h"
 #include "config_access.h"
 #include "constants.h"
@@ -17,10 +18,62 @@
 #include "egl/egl_core.h"
 #include "output/output.h"
 
+/* Get path to the set-index command file */
+static const char *get_set_index_file_path(void) {
+    static char path[MAX_PATH_LENGTH];
+    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+
+    if (runtime_dir) {
+        snprintf(path, sizeof(path), "%s/neowall-set-index", runtime_dir);
+    } else {
+        const char *home = getenv("HOME");
+        if (home) {
+            snprintf(path, sizeof(path), "%s/.neowall-set-index", home);
+        } else {
+            snprintf(path, sizeof(path), "/tmp/neowall-set-index-%d", getuid());
+        }
+    }
+
+    return path;
+}
+
+/* Write the requested index to a file for the daemon to read */
+static bool write_set_index_file(int index) {
+    const char *path = get_set_index_file_path();
+    FILE *fp = fopen(path, "w");
+    if (!fp) {
+        fprintf(stderr, "Failed to write index file: %s\n", strerror(errno));
+        return false;
+    }
+    fprintf(fp, "%d\n", index);
+    fclose(fp);
+    return true;
+}
+
+/* Read the requested index from the file (called by daemon) */
+int read_set_index_file(void) {
+    const char *path = get_set_index_file_path();
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        return -1;
+    }
+    int index = -1;
+    if (fscanf(fp, "%d", &index) != 1) {
+        index = -1;
+    }
+    fclose(fp);
+    /* Remove the file after reading */
+    unlink(path);
+    return index;
+}
+
 static struct neowall_state *global_state = NULL;
 
 /* Forward declarations */
 static void handle_crash(int signum);
+static const char *get_pid_file_path(void);
+static void remove_pid_file(void);
+static bool can_cycle_wallpaper(void);
 
 /* Command descriptor structure */
 typedef struct {
@@ -33,11 +86,13 @@ typedef struct {
     bool check_cycle;           /* Whether to check if cycling is possible before sending signal */
 } DaemonCommand;
 
-/* Centralized command registry - Single source of truth */
+/* Centralized command registry - Single source of truth
+ * Note: 'set' command is handled specially, not via this table */
 static DaemonCommand daemon_commands[] = {
     {"next",              SIGUSR1,      "Skip to next wallpaper",                  "Skipping to next wallpaper...",      NULL,  false, true},   /* check_cycle = true */
     {"pause",             SIGUSR2,      "Pause wallpaper cycling",                 "Pausing wallpaper cycling...",       NULL,  false, false},
     {"resume",            SIGCONT,      "Resume wallpaper cycling",                "Resuming wallpaper cycling...",      NULL,  false, false},
+    {"set",               0,            "Set wallpaper by index (set <index>)",    NULL,                                 NULL,  false, false},   /* Handled specially */
     {"current",           0,            "Show current wallpaper",                  NULL,                                 NULL,  true,  false},
     {"status",            0,            "Show current wallpaper",                  NULL,                                 NULL,  true,  false},
     {NULL, 0, NULL, NULL, NULL, false, false}  /* Sentinel */
@@ -284,7 +339,8 @@ static bool send_daemon_signal(int signal, const char *action, bool check_cycle)
 
 static void print_usage(const char *program_name) {
     printf("NeoWall v%s - GPU-accelerated wallpapers for Wayland. Take the red pill. 🔴\n\n", NEOWALL_VERSION_STRING);
-    printf("Usage: %s [OPTIONS]\n\n", program_name);
+    printf("Usage: %s [OPTIONS]\n", program_name);
+    printf("       %s set <index>   Set wallpaper by index (0-based)\n\n", program_name);
     printf("Options:\n");
     printf("  -c, --config PATH     Path to configuration file\n");
     printf("  -f, --foreground      Run in foreground (for debugging)\n");
@@ -393,7 +449,19 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
             break;
 
         default:
-            log_debug("Received signal: %d", signum);
+            /* Check for SIGRTMIN (real-time signal for set-index) */
+            if (signum == SIGRTMIN) {
+                /* Read the requested index from file */
+                int index = read_set_index_file();
+                if (index >= 0) {
+                    log_info("Received SIGRTMIN, setting wallpaper to index %d", index);
+                    atomic_store_explicit(&state->set_index_requested, index, memory_order_release);
+                } else {
+                    log_error("Received SIGRTMIN but no valid index file found");
+                }
+            } else {
+                log_debug("Received signal: %d", signum);
+            }
             break;
     }
 }
@@ -440,6 +508,7 @@ static int setup_signalfd(void) {
     sigaddset(&mask, SIGUSR1);
     sigaddset(&mask, SIGUSR2);
     sigaddset(&mask, SIGCONT);
+    sigaddset(&mask, SIGRTMIN);  /* For set-index command */
 
     /* Block these signals for all threads */
     if (pthread_sigmask(SIG_BLOCK, &mask, NULL) != 0) {
@@ -604,6 +673,70 @@ int main(int argc, char *argv[]) {
             return kill_daemon() ? EXIT_SUCCESS : EXIT_FAILURE;
         }
 
+        /* Special case: set command requires an index argument */
+        if (strcmp(cmd, "set") == 0) {
+            if (argc < 3) {
+                fprintf(stderr, "Usage: %s set <index>\n", argv[0]);
+                fprintf(stderr, "  <index>  Wallpaper index (0-based)\n");
+                fprintf(stderr, "\nUse '%s current' to see available wallpapers and their indices.\n", argv[0]);
+                return EXIT_FAILURE;
+            }
+            /* Validate index is a number */
+            const char *index_str = argv[2];
+            for (const char *p = index_str; *p; p++) {
+                if (!isdigit((unsigned char)*p)) {
+                    fprintf(stderr, "Error: Index must be a non-negative integer, got '%s'\n", index_str);
+                    return EXIT_FAILURE;
+                }
+            }
+            int index = atoi(index_str);
+            
+            /* Send set-index command to daemon */
+            const char *pid_path = get_pid_file_path();
+            FILE *fp = fopen(pid_path, "r");
+            if (!fp) {
+                printf("No running neowall daemon found.\n");
+                printf("Start the daemon first with: neowall\n");
+                return EXIT_FAILURE;
+            }
+
+            pid_t pid;
+            if (fscanf(fp, "%d", &pid) != 1) {
+                fclose(fp);
+                fprintf(stderr, "Failed to read PID\n");
+                return EXIT_FAILURE;
+            }
+            fclose(fp);
+
+            /* Check if process exists */
+            if (kill(pid, 0) == -1 && errno == ESRCH) {
+                printf("NeoWall daemon (PID %d) is not running.\n", pid);
+                remove_pid_file();
+                return EXIT_FAILURE;
+            }
+
+            /* Check if cycling is possible */
+            if (!can_cycle_wallpaper()) {
+                printf("Cannot set wallpaper index: Only one wallpaper/shader configured.\n");
+                return EXIT_FAILURE;
+            }
+
+            /* Write the index to a file for the daemon to read */
+            if (!write_set_index_file(index)) {
+                return EXIT_FAILURE;
+            }
+
+            /* Send SIGRTMIN to notify daemon */
+            if (kill(pid, SIGRTMIN) == -1) {
+                fprintf(stderr, "Failed to send signal to daemon: %s\n", strerror(errno));
+                unlink(get_set_index_file_path());
+                return EXIT_FAILURE;
+            }
+
+            printf("Setting wallpaper to index %d...\n", index);
+            return EXIT_SUCCESS;
+        }
+
         /* Lookup command in table and dispatch */
         for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
             if (strcmp(cmd, daemon_commands[i].name) == 0) {
@@ -731,6 +864,7 @@ int main(int argc, char *argv[]) {
     atomic_init(&state.paused, false);
     atomic_init(&state.outputs_need_init, false);
     atomic_init(&state.next_requested, 0);
+    atomic_init(&state.set_index_requested, -1);  /* -1 means no request */
     state.timer_fd = -1;
     state.wakeup_fd = -1;
     strncpy(state.config_path, config_path, sizeof(state.config_path) - 1);

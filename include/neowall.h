@@ -51,6 +51,7 @@ struct neowall_state {
     atomic_bool_t paused;            /* Pause wallpaper cycling - set by signal handlers */
     atomic_bool_t outputs_need_init; /* Flag when new outputs need initialization */
     atomic_int_t next_requested;     /* Counter for skip to next wallpaper requests */
+    atomic_int_t set_index_requested; /* Requested wallpaper index (-1 = no request) */
     pthread_mutex_t state_mutex;     /* Protects output list and config data */
     pthread_rwlock_t output_list_lock; /* Read-write lock for output linked list traversal */
     pthread_mutex_t state_file_lock; /* Mutex for state file I/O operations */

@@ -98,7 +98,9 @@ static void render_outputs(struct neowall_state *state) {
 
     /* Check if there are any pending next requests - cycle ALL outputs with matching configs */
     int next_count = atomic_load_explicit(&state->next_requested, memory_order_acquire);
+    int set_index = atomic_load_explicit(&state->set_index_requested, memory_order_acquire);
     bool processed_next = false;
+    bool processed_set_index = false;
     bool has_cycleable_output = false;
     int total_outputs = 0;
 
@@ -125,6 +127,54 @@ static void render_outputs(struct neowall_state *state) {
 
     struct output_state *output = state->outputs;
     while (output) {
+        /* Handle set-index request - set ALL outputs with same config to the specified index */
+        if (set_index >= 0 && !processed_set_index && output->config->cycle && output->config->cycle_count > 0) {
+            /* Set this output and all others with matching configuration to the specified index */
+            struct output_state *sync_output = output;
+            int set_count = 0;
+
+            while (sync_output) {
+                /* Check if this output has the same cycle configuration */
+                bool same_config = (sync_output->config->cycle &&
+                                   sync_output->config->cycle_count == output->config->cycle_count);
+
+                /* Also verify the paths match if both have cycle paths */
+                if (same_config && sync_output->config->cycle_paths && output->config->cycle_paths) {
+                    same_config = true;
+                    for (size_t i = 0; i < output->config->cycle_count && same_config; i++) {
+                        if (strcmp(sync_output->config->cycle_paths[i], output->config->cycle_paths[i]) != 0) {
+                            same_config = false;
+                        }
+                    }
+                }
+
+                if (same_config) {
+                    /* Validate index is within bounds for this output */
+                    if ((size_t)set_index < sync_output->config->cycle_count) {
+                        log_debug("Setting wallpaper index %d for output %s (synchronized)",
+                                 set_index, sync_output->model[0] ? sync_output->model : "unknown");
+                        output_set_cycle_index(sync_output, (size_t)set_index);
+                        set_count++;
+                    } else {
+                        log_error("Index %d out of bounds for output %s (max: %zu)",
+                                 set_index, sync_output->model[0] ? sync_output->model : "unknown",
+                                 sync_output->config->cycle_count - 1);
+                    }
+                }
+
+                sync_output = sync_output->next;
+            }
+
+            current_time = get_time_ms();
+            processed_set_index = true;
+
+            log_info("Set wallpaper index %d on %d output(s) with matching configuration",
+                     set_index, set_count);
+
+            /* Clear the request after processing */
+            atomic_store_explicit(&state->set_index_requested, -1, memory_order_release);
+        }
+
         /* Handle next wallpaper request - cycle ALL outputs with same config for synchronization */
         if (next_count > 0 && !processed_next && output->config->cycle && output->config->cycle_count > 0) {
             /* Cycle this output and all others with matching configuration */
