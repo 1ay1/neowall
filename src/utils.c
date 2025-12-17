@@ -697,9 +697,17 @@ bool read_cycle_list(void) {
             filename = filename ? filename + 1 : path;
             
             if ((size_t)current_index == current) {
-                printf("  [%d] %s  <-- current\n", current_index, filename);
+                if (use_colors && isatty(STDOUT_FILENO)) {
+                    printf("  %s➜ [%d] %s%s\n", COLOR_GREEN, current_index, filename, COLOR_RESET);
+                } else {
+                    printf("  > [%d] %s\n", current_index, filename);
+                }
             } else {
-                printf("  [%d] %s\n", current_index, filename);
+                 if (use_colors && isatty(STDOUT_FILENO)) {
+                    printf("    [%d] %s\n", current_index, filename);
+                } else {
+                    printf("    [%d] %s\n", current_index, filename);
+                }
             }
         }
     }
