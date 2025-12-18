@@ -14,9 +14,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "platform_compat.h"
-#include "adaptive_scale.h"
-#include "render_optimizer.h"
-#include "multipass_optimizer.h"
 
 /* Maximum number of passes supported (BufferA-D + Image) */
 #define MULTIPASS_MAX_BUFFERS 4
@@ -93,7 +90,6 @@ typedef struct {
 } multipass_pass_t;
 
 /* Complete multipass shader configuration */
-/* Complete multipass shader configuration */
 typedef struct {
     char *common_source;                     /* Common code shared by all passes */
     multipass_pass_t passes[MULTIPASS_MAX_PASSES];
@@ -110,25 +106,36 @@ typedef struct {
     GLuint keyboard_texture;                 /* Keyboard state texture */
     GLint default_framebuffer;               /* Default framebuffer ID (may not be 0 in GTK) */
     
-    /* Resolution scaling */
-    float resolution_scale;                  /* Current buffer resolution scale */
+    /* Performance settings */
+    float resolution_scale;                  /* Buffer resolution scale (1.0 = full, 0.5 = half) */
+    float target_resolution_scale;           /* Target scale (for smooth transitions) */
     float min_resolution_scale;              /* Minimum allowed scale */
     float max_resolution_scale;              /* Maximum allowed scale */
     int scaled_width;                        /* Cached scaled width */
     int scaled_height;                       /* Cached scaled height */
     
-    /* Industry-grade adaptive resolution scaling */
-    adaptive_state_t adaptive;
+    /* Adaptive resolution scaling */
+    bool adaptive_resolution;                /* Enable automatic resolution adjustment */
+    float target_fps;                        /* Target FPS (default 60) */
+    float current_fps;                       /* Current measured FPS */
+    float fps_history[16];                   /* Rolling FPS history for smoothing */
+    float frame_times[16];                   /* Frame time history for analysis */
+    int fps_history_index;                   /* Current index in history */
+    double last_fps_update_time;             /* Time of last FPS measurement */
+    int frames_since_fps_update;             /* Frame counter for FPS calculation */
+    double last_scale_adjust_time;           /* Time of last scale adjustment */
     
-    /* GPU state optimization */
-    render_optimizer_t optimizer;
+    /* Stability tracking */
+    int stable_frames;                       /* Consecutive frames near target FPS */
+    int last_adjustment_direction;           /* -1 = down, 0 = none, 1 = up */
+    int oscillation_count;                   /* Count of direction changes */
+    float locked_scale;                      /* Scale value when locked */
+    bool scale_locked;                       /* True when scale is locked (stable) */
     
-    /* Smart multipass optimization (per-buffer resolution, half-rate updates) */
-    multipass_optimizer_t multipass_opt;
-    
-    /* Per-buffer resolution analysis (legacy - use multipass_opt instead) */
-    buffer_analysis_t buffer_analysis[MULTIPASS_MAX_BUFFERS];
-    bool use_smart_buffer_sizing;            /* Auto-detect optimal buffer resolutions */
+    /* Initial calibration */
+    bool initial_calibration_done;           /* True after initial FPS measurement */
+    int calibration_frames;                  /* Frames counted during calibration */
+    double calibration_start_time;           /* Start time of calibration period */
     
     bool is_initialized;                     /* OpenGL resources initialized */
 } multipass_shader_t;
@@ -367,16 +374,6 @@ void multipass_set_adaptive_resolution(multipass_shader_t *shader,
                                         float target_fps,
                                         float min_scale,
                                         float max_scale);
-
-/* Configure adaptive resolution with full options */
-void multipass_configure_adaptive(multipass_shader_t *shader,
-                                  const adaptive_config_t *config);
-
-/* Set adaptive scaling mode preset */
-void multipass_set_adaptive_mode(multipass_shader_t *shader, adaptive_mode_t mode);
-
-/* Get performance statistics */
-adaptive_stats_t multipass_get_adaptive_stats(const multipass_shader_t *shader);
 
 /**
  * Check if adaptive resolution is enabled

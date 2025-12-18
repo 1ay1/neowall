@@ -6,9 +6,6 @@
  */
 
 #include "shader_multipass.h"
-#include "adaptive_scale.h"
-#include "render_optimizer.h"
-#include "multipass_optimizer.h"
 #include "shader_log.h"
 #include "platform_compat.h"
 #include <stdio.h>
@@ -705,20 +702,10 @@ static const char *multipass_wrapper_prefix =
     "out vec4 fragColor;\n"
     "\n";
 
-/* Wrapper suffix for buffer passes - no modifications to preserve HDR/data */
-static const char *multipass_wrapper_suffix_buffer =
+static const char *multipass_wrapper_suffix =
     "\n"
     "void main() {\n"
     "    mainImage(fragColor, gl_FragCoord.xy);\n"
-    "}\n";
-
-/* Wrapper suffix for Image pass - clamp and force alpha for display */
-static const char *multipass_wrapper_suffix_image =
-    "\n"
-    "void main() {\n"
-    "    mainImage(fragColor, gl_FragCoord.xy);\n"
-    "    fragColor.rgb = clamp(fragColor.rgb, 0.0, 1.0);\n"
-    "    fragColor.a = 1.0;\n"
     "}\n";
 
 /**
@@ -858,12 +845,11 @@ static char *fix_shadertoy_compatibility(const char *source) {
 }
 
 /* Wrap a pass source with Shadertoy compatibility layer */
-static char *wrap_pass_source(const char *common, const char *pass_source, bool is_image_pass) {
-    const char *suffix = is_image_pass ? multipass_wrapper_suffix_image : multipass_wrapper_suffix_buffer;
+static char *wrap_pass_source(const char *common, const char *pass_source) {
     size_t prefix_len = strlen(multipass_wrapper_prefix);
     size_t common_len = common ? strlen(common) : 0;
     size_t pass_len = pass_source ? strlen(pass_source) : 0;
-    size_t suffix_len = strlen(suffix);
+    size_t suffix_len = strlen(multipass_wrapper_suffix);
 
     /* Extra space for .xy additions (worst case: every iChannelResolution gets .xy) */
     size_t total = prefix_len + (common_len * 2) + (pass_len * 2) + suffix_len + 64;
@@ -895,7 +881,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source, bool 
             strcat(wrapped, pass_source);
         }
     }
-    strcat(wrapped, suffix);
+    strcat(wrapped, multipass_wrapper_suffix);
 
     return wrapped;
 }
@@ -934,20 +920,32 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
     shader->image_pass_index = -1;
     shader->has_buffers = false;
     shader->resolution_scale = 1.0f;   /* Start at full resolution */
+    shader->target_resolution_scale = 1.0f;
     shader->min_resolution_scale = 0.25f;
     shader->max_resolution_scale = 1.0f;
     shader->scaled_width = 0;
     shader->scaled_height = 0;
     
-    /* Initialize industry-grade adaptive resolution system */
-    adaptive_init(&shader->adaptive, NULL);  /* Use default config */
-    
-    /* Initialize render optimizer (will be fully initialized in multipass_init_gl) */
-    memset(&shader->optimizer, 0, sizeof(shader->optimizer));
-    shader->use_smart_buffer_sizing = true;
-    
-    /* Initialize multipass optimizer for smart per-buffer resolution and half-rate updates */
-    multipass_optimizer_init(&shader->multipass_opt);
+    /* Adaptive resolution defaults */
+    shader->adaptive_resolution = true;  /* Enable by default */
+    shader->target_fps = 60.0f;          /* Target 60 FPS exactly */
+    shader->current_fps = 60.0f;
+    shader->fps_history_index = 0;
+    shader->last_fps_update_time = 0.0;
+    shader->frames_since_fps_update = 0;
+    shader->last_scale_adjust_time = 0.0;
+    shader->initial_calibration_done = false;
+    shader->calibration_frames = 0;
+    shader->calibration_start_time = 0.0;
+    shader->stable_frames = 0;
+    shader->last_adjustment_direction = 0;
+    shader->oscillation_count = 0;
+    shader->locked_scale = 0.0f;
+    shader->scale_locked = false;
+    for (int i = 0; i < 16; i++) {
+        shader->fps_history[i] = 60.0f;
+        shader->frame_times[i] = 1.0f / 60.0f;
+    }
 
     for (int i = 0; i < parse_result->pass_count; i++) {
         multipass_pass_t *pass = &shader->passes[i];
@@ -1149,19 +1147,6 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
     log_info("Created multipass shader with %d passes (has_buffers=%d, image_index=%d)",
              shader->pass_count, shader->has_buffers, shader->image_pass_index);
 
-    /* Analyze passes for smart optimization */
-    const char *pass_sources[MULTIPASS_MAX_PASSES];
-    int pass_types[MULTIPASS_MAX_PASSES];
-    for (int i = 0; i < shader->pass_count; i++) {
-        pass_sources[i] = shader->passes[i].source;
-        pass_types[i] = (int)shader->passes[i].type;
-    }
-    multipass_optimizer_analyze_shader(&shader->multipass_opt,
-                                       pass_sources,
-                                       pass_types,
-                                       shader->pass_count,
-                                       shader->image_pass_index);
-
     return shader;
 }
 
@@ -1174,27 +1159,6 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
     }
 
     log_info("Initializing multipass GL resources (%dx%d)", width, height);
-    
-    /* Initialize the render optimizer for GPU state caching
-     * 
-     * IMPORTANT: The optimizer caches GL state to avoid redundant calls.
-     * For multipass rendering, most state changes every pass, so we only
-     * benefit from caching:
-     * - Render state (depth test, blend, etc.) - set once per frame
-     * - Clear color - rarely changes
-     * - Viewport - changes per pass but optimizer tracks it
-     * 
-     * We DON'T cache aggressively:
-     * - Programs - change every pass
-     * - Textures - change every pass  
-     * - FBOs - change every pass
-     * - Uniforms - many change every frame (iTime, iFrame, etc.)
-     */
-    render_optimizer_init(&shader->optimizer);
-    shader->optimizer.enabled = true;
-    shader->optimizer.aggressive_mode = false;  /* Conservative mode */
-    
-    shader->use_smart_buffer_sizing = true;  /* Enable by default */
 
     /* Get the default framebuffer ID (GTK may use non-zero FBO) */
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &shader->default_framebuffer);
@@ -1250,38 +1214,25 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-    /* Calculate base scaled resolution for buffer passes */
-    int base_scaled_w = (int)(width * shader->resolution_scale);
-    int base_scaled_h = (int)(height * shader->resolution_scale);
-    if (base_scaled_w < 1) base_scaled_w = 1;
-    if (base_scaled_h < 1) base_scaled_h = 1;
-    shader->scaled_width = base_scaled_w;
-    shader->scaled_height = base_scaled_h;
+    /* Calculate scaled resolution for buffer passes */
+    int scaled_w = (int)(width * shader->resolution_scale);
+    int scaled_h = (int)(height * shader->resolution_scale);
+    if (scaled_w < 1) scaled_w = 1;
+    if (scaled_h < 1) scaled_h = 1;
+    shader->scaled_width = scaled_w;
+    shader->scaled_height = scaled_h;
     
-    log_info("Base resolution scale: %.2f (base buffers: %dx%d, output: %dx%d)",
-             shader->resolution_scale, base_scaled_w, base_scaled_h, width, height);
+    log_info("Resolution scale: %.2f (buffers: %dx%d, output: %dx%d)",
+             shader->resolution_scale, scaled_w, scaled_h, width, height);
 
-    /* Initialize each pass with smart per-buffer resolution */
+    /* Initialize each pass */
     for (int i = 0; i < shader->pass_count; i++) {
         multipass_pass_t *pass = &shader->passes[i];
         
-        /* Buffer passes use smart per-buffer resolution, Image pass uses full resolution */
+        /* Buffer passes use scaled resolution, Image pass uses full resolution */
         if (pass->type >= PASS_TYPE_BUFFER_A && pass->type <= PASS_TYPE_BUFFER_D) {
-            /* Use multipass optimizer for per-buffer resolution */
-            if (shader->multipass_opt.enabled && shader->multipass_opt.smart_resolution_enabled) {
-                int opt_w, opt_h;
-                multipass_optimizer_get_pass_resolution(&shader->multipass_opt, i,
-                                                        base_scaled_w, base_scaled_h,
-                                                        &opt_w, &opt_h);
-                pass->width = opt_w;
-                pass->height = opt_h;
-                log_info("  Pass %d (%s): %dx%d (%.0f%% of base)",
-                         i, pass->name, opt_w, opt_h, 
-                         (float)(opt_w * opt_h) / (float)(base_scaled_w * base_scaled_h) * 100.0f);
-            } else {
-                pass->width = base_scaled_w;
-                pass->height = base_scaled_h;
-            }
+            pass->width = scaled_w;
+            pass->height = scaled_h;
         } else {
             pass->width = width;
             pass->height = height;
@@ -1318,9 +1269,6 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
 
     shader->is_initialized = true;
     shader->frame_count = 0;
-
-    /* Initialize GPU timer queries for accurate frame time measurement */
-    adaptive_init_gpu_timing(&shader->adaptive);
 
     return true;
 }
@@ -1406,8 +1354,7 @@ bool multipass_compile_pass(multipass_shader_t *shader, int pass_index) {
     }
 
     /* Wrap pass source with compatibility layer */
-    bool is_image_pass = (pass->type == PASS_TYPE_IMAGE);
-    char *wrapped = wrap_pass_source(shader->common_source, pass->source, is_image_pass);
+    char *wrapped = wrap_pass_source(shader->common_source, pass->source);
     if (!wrapped) {
         pass->compile_error = str_dup("Failed to allocate memory for shader wrapping");
         pass->is_compiled = false;
@@ -1507,44 +1454,33 @@ bool multipass_compile_all(multipass_shader_t *shader) {
 void multipass_resize(multipass_shader_t *shader, int width, int height) {
     if (!shader || !shader->is_initialized) return;
 
-    /* Calculate base scaled resolution (from adaptive resolution system) */
-    int base_scaled_w = (int)(width * shader->resolution_scale);
-    int base_scaled_h = (int)(height * shader->resolution_scale);
-    if (base_scaled_w < 1) base_scaled_w = 1;
-    if (base_scaled_h < 1) base_scaled_h = 1;
+    /* Calculate scaled resolution for buffer passes */
+    int scaled_w = (int)(width * shader->resolution_scale);
+    int scaled_h = (int)(height * shader->resolution_scale);
+    if (scaled_w < 1) scaled_w = 1;
+    if (scaled_h < 1) scaled_h = 1;
 
-    /* Quick check: if Image pass has correct size and base scale unchanged, skip resize */
+    /* Quick check: if Image pass has correct size and scale unchanged, skip */
     if (shader->image_pass_index >= 0) {
         multipass_pass_t *img = &shader->passes[shader->image_pass_index];
         if (img->width == width && img->height == height &&
-            shader->scaled_width == base_scaled_w && shader->scaled_height == base_scaled_h) {
+            shader->scaled_width == scaled_w && shader->scaled_height == scaled_h) {
             return;
         }
     }
 
-    shader->scaled_width = base_scaled_w;
-    shader->scaled_height = base_scaled_h;
+    shader->scaled_width = scaled_w;
+    shader->scaled_height = scaled_h;
 
     for (int i = 0; i < shader->pass_count; i++) {
         multipass_pass_t *pass = &shader->passes[i];
 
-        /* Determine target resolution for this pass:
-         * - Image pass: always full output resolution
-         * - Buffer passes: use smart per-buffer resolution from optimizer */
+        /* Buffer passes use scaled resolution, Image pass uses full resolution */
         int target_w, target_h;
         if (pass->type >= PASS_TYPE_BUFFER_A && pass->type <= PASS_TYPE_BUFFER_D) {
-            /* Use multipass optimizer to get smart per-buffer resolution */
-            if (shader->multipass_opt.enabled && shader->multipass_opt.smart_resolution_enabled) {
-                multipass_optimizer_get_pass_resolution(&shader->multipass_opt, i,
-                                                        base_scaled_w, base_scaled_h,
-                                                        &target_w, &target_h);
-            } else {
-                /* Fallback to uniform scaling */
-                target_w = base_scaled_w;
-                target_h = base_scaled_h;
-            }
+            target_w = scaled_w;
+            target_h = scaled_h;
         } else {
-            /* Image pass - always full resolution */
             target_w = width;
             target_h = height;
         }
@@ -1594,12 +1530,6 @@ void multipass_destroy(multipass_shader_t *shader) {
     if (shader->vao) glDeleteVertexArrays(1, &shader->vao);
     if (shader->noise_texture) glDeleteTextures(1, &shader->noise_texture);
     if (shader->keyboard_texture) glDeleteTextures(1, &shader->keyboard_texture);
-    
-    /* Cleanup adaptive resolution system */
-    adaptive_destroy(&shader->adaptive);
-    
-    /* Cleanup render optimizer */
-    render_optimizer_destroy(&shader->optimizer);
 
     free(shader->common_source);
     free(shader);
@@ -1619,19 +1549,18 @@ void multipass_set_uniforms(multipass_shader_t *shader,
     multipass_pass_t *pass = &shader->passes[pass_index];
     if (!pass->program) return;
 
-    /* Use direct GL call for program - changes every pass, no benefit from caching */
     glUseProgram(pass->program);
 
     /* Use cached uniform locations for performance */
     const uniform_locations_t *u = &pass->uniforms;
 
-    /* Time uniforms - these change every frame, use direct GL calls */
+    /* Time uniforms */
     if (u->iTime >= 0) glUniform1f(u->iTime, shader_time);
     if (u->iTimeDelta >= 0) glUniform1f(u->iTimeDelta, 1.0f / 60.0f);
     if (u->iFrameRate >= 0) glUniform1f(u->iFrameRate, 60.0f);
     if (u->iFrame >= 0) glUniform1i(u->iFrame, shader->frame_count);
 
-    /* Resolution - changes per pass */
+    /* Resolution */
     if (u->iResolution >= 0) {
         float w = (float)pass->width;
         float h = (float)pass->height;
@@ -1684,12 +1613,14 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
 
     log_debug_frame(shader->frame_count, "Binding textures for pass %d (%s):", pass_index, pass->name);
 
-    /* Use cached uniform locations - textures change every pass so no caching benefit */
+    /* Use cached uniform locations */
     const uniform_locations_t *u = &pass->uniforms;
 
     for (int c = 0; c < MULTIPASS_MAX_CHANNELS; c++) {
         /* Skip if this channel uniform doesn't exist in the shader */
         if (u->iChannel[c] < 0) continue;
+        
+        glActiveTexture(GL_TEXTURE0 + c);
 
         GLuint tex = shader->noise_texture;  /* Default to noise */
         const char *source_name = "noise";
@@ -1736,9 +1667,9 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
                 break;
         }
 
-        /* Direct GL calls - textures change every pass, no caching benefit */
-        glActiveTexture(GL_TEXTURE0 + c);
         glBindTexture(GL_TEXTURE_2D, tex);
+        
+        /* Use cached uniform location instead of glGetUniformLocation */
         glUniform1i(u->iChannel[c], c);
     }
 }
@@ -1765,15 +1696,11 @@ void multipass_render_pass(multipass_shader_t *shader,
     if (!pass->is_compiled || !pass->program) {
         return;
     }
-    
-    /* Track pass rendering for statistics */
-    shader->optimizer.stats.passes_rendered++;
 
     log_debug_frame(shader->frame_count, "Rendering pass %d: %s (program=%u, fbo=%u, size=%dx%d)",
               pass_index, pass->name, pass->program, pass->fbo, pass->width, pass->height);
 
-    /* Bind FBO for buffer passes, or default framebuffer for Image pass
-     * FBOs change every pass - use direct GL calls */
+    /* Bind FBO for buffer passes, or default framebuffer for Image pass */
     if (pass->fbo) {
         glBindFramebuffer(GL_FRAMEBUFFER, pass->fbo);
 
@@ -1806,7 +1733,8 @@ void multipass_render_pass(multipass_shader_t *shader,
 
     glViewport(0, 0, pass->width, pass->height);
 
-    /* Use program and set uniforms - program is set in set_uniforms via optimizer */
+    /* Use program and set uniforms */
+    glUseProgram(pass->program);
     multipass_set_uniforms(shader, pass_index, time, mouse_x, mouse_y, mouse_click);
     multipass_bind_textures(shader, pass_index);
 
@@ -1843,121 +1771,6 @@ void multipass_render(multipass_shader_t *shader,
                       bool mouse_click) {
     if (!shader || !shader->is_initialized) return;
 
-    /* ========================================================================
-     * SINGLE-PASS SHADER FAST PATH
-     * 
-     * For shaders with only an Image pass (no buffers), skip ALL buffer
-     * optimizations. These shaders render directly to screen at full resolution
-     * every frame - no adaptive scaling, no pass skipping, no half-rate.
-     * ======================================================================== */
-    bool is_single_pass = (shader->pass_count == 1 && shader->image_pass_index == 0);
-    
-    if (is_single_pass) {
-        /* Single-pass shader: render directly to screen, no optimizations */
-        
-        /* Query the CURRENT framebuffer binding */
-        GLint current_fbo = 0;
-        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &current_fbo);
-        shader->default_framebuffer = current_fbo;
-        
-        /* Set optimal render state */
-        glDisable(GL_DEPTH_TEST);
-        glDisable(GL_BLEND);
-        glDisable(GL_CULL_FACE);
-        glDisable(GL_SCISSOR_TEST);
-        glDepthMask(GL_FALSE);
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        
-        /* Setup vertex state */
-        glBindVertexArray(shader->vao);
-        glBindBuffer(GL_ARRAY_BUFFER, shader->vbo);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
-        
-        /* Render Image pass directly to screen at FULL resolution */
-        glBindFramebuffer(GL_FRAMEBUFFER, shader->default_framebuffer);
-        multipass_pass_t *image_pass = &shader->passes[0];
-        glViewport(0, 0, image_pass->width, image_pass->height);
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        
-        multipass_render_pass(shader, 0, time, mouse_x, mouse_y, mouse_click);
-        
-        /* Cleanup */
-        glDisableVertexAttribArray(0);
-        shader->frame_count++;
-        return;
-    }
-    
-    /* ========================================================================
-     * MULTIPASS SHADER PATH (with buffers)
-     * 
-     * Full optimization pipeline for shaders with BufferA-D passes.
-     * ======================================================================== */
-
-    /* Start GPU timing for this frame (if enabled) */
-    adaptive_begin_frame(&shader->adaptive);
-    
-    /* Begin optimizer frame for state caching and temporal analysis */
-    render_optimizer_begin_frame(&shader->optimizer, time, mouse_x, mouse_y, mouse_click);
-    
-    /* Begin multipass optimizer frame for static scene detection */
-    multipass_optimizer_begin_frame(&shader->multipass_opt, time, mouse_x, mouse_y, mouse_click);
-    
-    /* Reset per-frame workload tracking for accurate feedback to adaptive_scale */
-    multipass_optimizer_reset_frame_workload(&shader->multipass_opt);
-    
-    /* ========================================================================
-     * SYNCHRONIZED OPTIMIZATION MODE
-     * 
-     * Coordinate between adaptive_scale (global resolution) and multipass_optimizer
-     * (per-buffer resolution + pass skipping) for maximum performance.
-     * 
-     * Three optimization levels:
-     * 1. NORMAL: Per-buffer smart resolution only
-     * 2. AGGRESSIVE: Enable half-rate buffer updates  
-     * 3. EMERGENCY: Maximum savings - all optimizations active
-     * ======================================================================== */
-    
-    float current_fps = adaptive_get_current_fps(&shader->adaptive);
-    float target_fps = shader->adaptive.config.target_fps;
-    bool adaptive_emergency = shader->adaptive.in_emergency;
-    bool adaptive_thermal = shader->adaptive.thermal_throttling;
-    float stability = shader->adaptive.stability_score;
-    
-    if (target_fps > 0.0f) {
-        float fps_ratio = current_fps / target_fps;
-        
-        /* EMERGENCY MODE: Sync with adaptive_scale's emergency state
-         * When adaptive detects severe performance drop, go maximum aggressive */
-        if (adaptive_emergency || adaptive_thermal) {
-            if (!shader->multipass_opt.half_rate_enabled) {
-                shader->multipass_opt.half_rate_enabled = true;
-                shader->multipass_opt.global_quality = 0.5f;  /* Reduce quality bias */
-                log_info("Optimizer: EMERGENCY MODE - enabling all optimizations "
-                         "(adaptive emergency=%d, thermal=%d)",
-                         adaptive_emergency, adaptive_thermal);
-            }
-        }
-        /* AGGRESSIVE MODE: Enable half-rate if FPS is struggling */
-        else if (fps_ratio < 0.90f && !shader->multipass_opt.half_rate_enabled) {
-            shader->multipass_opt.half_rate_enabled = true;
-            shader->multipass_opt.global_quality = 0.6f;
-            log_info("Optimizer: AGGRESSIVE MODE - enabling half-rate updates "
-                     "(FPS: %.1f / %.1f = %.0f%%)",
-                     current_fps, target_fps, fps_ratio * 100.0f);
-        }
-        /* NORMAL MODE: Disable aggressive optimizations when performance is good */
-        else if (fps_ratio > 0.98f && stability > 0.7f && 
-                 shader->multipass_opt.half_rate_enabled) {
-            shader->multipass_opt.half_rate_enabled = false;
-            shader->multipass_opt.global_quality = 0.8f;  /* Restore quality */
-            log_info("Optimizer: NORMAL MODE - performance recovered "
-                     "(FPS: %.1f, stability: %.0f%%)",
-                     current_fps, stability * 100.0f);
-        }
-    }
-
     /* Update adaptive resolution using wall-clock time (not shader time)
      * This ensures proper FPS measurement even when shader time is paused/scaled */
     double wall_time;
@@ -1971,10 +1784,7 @@ void multipass_render(multipass_shader_t *shader,
     gettimeofday(&tv, NULL);
     wall_time = (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
 #endif
-    adaptive_update(&shader->adaptive, wall_time);
-    
-    /* Sync resolution scale from adaptive system */
-    shader->resolution_scale = adaptive_get_scale(&shader->adaptive);
+    multipass_update_adaptive_resolution(shader, wall_time);
 
     /* Query the CURRENT framebuffer binding every frame
      * GTK's GtkGLArea can change its FBO on resize, so we must always query */
@@ -1984,14 +1794,13 @@ void multipass_render(multipass_shader_t *shader,
 
     log_debug_frame(shader->frame_count, "=== Frame %d ===", shader->frame_count);
 
-    /* Set optimal render state ONCE at start of frame
-     * These are the ONLY things worth caching - they're set once and never change */
-    opt_disable(&shader->optimizer, GL_DEPTH_TEST);
-    opt_disable(&shader->optimizer, GL_BLEND);
-    opt_disable(&shader->optimizer, GL_CULL_FACE);
-    opt_disable(&shader->optimizer, GL_SCISSOR_TEST);
-    opt_depth_mask(&shader->optimizer, GL_FALSE);
-    opt_color_mask(&shader->optimizer, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    /* Set optimal render state ONCE at start of frame */
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_SCISSOR_TEST);
+    glDepthMask(GL_FALSE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     /*
      * Setup vertex state ONCE for all passes (major performance optimization)
@@ -2010,32 +1819,12 @@ void multipass_render(multipass_shader_t *shader,
      * 3. Render Image pass last to the screen
      */
 
-    /* Render buffer passes first (in order A, B, C, D) 
-     * Use multipass optimizer to skip passes when scene is static */
+    /* Render buffer passes first (in order A, B, C, D) */
     for (int type = PASS_TYPE_BUFFER_A; type <= PASS_TYPE_BUFFER_D; type++) {
         for (int i = 0; i < shader->pass_count; i++) {
             if ((int)shader->passes[i].type == type) {
-                /* Check if optimizer says we can skip this pass */
-                bool should_render = multipass_optimizer_should_render_pass(&shader->multipass_opt, i);
-                
-                /* Record pass for workload feedback (pass full base resolution for comparison) */
-                multipass_optimizer_record_pass(&shader->multipass_opt, i,
-                                                shader->passes[i].width,
-                                                shader->passes[i].height,
-                                                shader->scaled_width,
-                                                shader->scaled_height,
-                                                should_render);
-                
-                if (should_render) {
-                    log_debug_frame(shader->frame_count, "Executing buffer pass: %s", shader->passes[i].name);
-                    multipass_render_pass(shader, i, time, mouse_x, mouse_y, mouse_click);
-                    multipass_optimizer_pass_rendered(&shader->multipass_opt, i, 
-                                                      shader->passes[i].width, 
-                                                      shader->passes[i].height);
-                } else {
-                    log_debug_frame(shader->frame_count, "Skipping buffer pass: %s (static scene)", shader->passes[i].name);
-                    multipass_optimizer_pass_skipped(&shader->multipass_opt, i);
-                }
+                log_debug_frame(shader->frame_count, "Executing buffer pass: %s", shader->passes[i].name);
+                multipass_render_pass(shader, i, time, mouse_x, mouse_y, mouse_click);
             }
         }
     }
@@ -2065,69 +1854,28 @@ void multipass_render(multipass_shader_t *shader,
     /* Cleanup vertex state */
     glDisableVertexAttribArray(0);
 
-    /* End GPU timing for this frame */
-    adaptive_end_frame(&shader->adaptive);
-    
-    /* End optimizer frame - updates statistics and temporal state */
-    render_optimizer_end_frame(&shader->optimizer);
-    
-    /* End multipass optimizer frame */
-    multipass_optimizer_end_frame(&shader->multipass_opt);
-    
-    /* Log multipass optimizer stats every 600 frames */
-    if (shader->frame_count > 0 && shader->frame_count % 600 == 0) {
-        multipass_optimizer_log_stats(&shader->multipass_opt);
-        
-        /* Log current optimization mode and sync status */
-        const char *mode_name = "NORMAL";
-        if (shader->adaptive.in_emergency || shader->adaptive.thermal_throttling) {
-            mode_name = "EMERGENCY";
-        } else if (shader->multipass_opt.half_rate_enabled) {
-            mode_name = "AGGRESSIVE";
-        }
-        
-        log_info("  Optimization mode: %s (adaptive scale: %.0f%%, quality: %.0f%%)",
-                 mode_name,
-                 shader->adaptive.current_scale * 100.0f,
-                 shader->multipass_opt.global_quality * 100.0f);
-        
-        /* Log combined effective savings */
-        float base_pixels = (float)(shader->scaled_width * shader->scaled_height);
-        float actual_pixels = 0.0f;
-        for (int i = 0; i < shader->pass_count; i++) {
-            if (shader->passes[i].type != PASS_TYPE_IMAGE) {
-                actual_pixels += (float)(shader->passes[i].width * shader->passes[i].height);
-            }
-        }
-        if (base_pixels > 0.0f) {
-            float savings = (1.0f - actual_pixels / (base_pixels * (shader->pass_count - 1))) * 100.0f;
-            log_info("  Buffer pixel savings: %.1f%% (per-buffer smart resolution)", savings);
-        }
-        
-        /* Log workload feedback metrics */
-        float effective_workload = multipass_optimizer_get_effective_workload(&shader->multipass_opt);
-        float pixel_reduction = multipass_optimizer_get_pixel_reduction(&shader->multipass_opt);
-        log_info("  Effective workload: %.1f%% (pixel reduction: %.1f%%)",
-                 effective_workload * 100.0f, pixel_reduction * 100.0f);
-    }
-
     shader->frame_count++;
+    shader->frames_since_fps_update++;
 }
-
-/* ============================================
- * Adaptive Resolution API (delegates to adaptive_scale module)
- * ============================================ */
 
 void multipass_set_resolution_scale(multipass_shader_t *shader, float scale) {
     if (!shader) return;
-    adaptive_force_scale(&shader->adaptive, scale);
-    shader->resolution_scale = adaptive_get_scale(&shader->adaptive);
-    shader->scaled_width = 0;
-    shader->scaled_height = 0;
+    
+    /* Clamp scale to reasonable values */
+    if (scale < 0.1f) scale = 0.1f;
+    if (scale > 2.0f) scale = 2.0f;
+    
+    if (shader->resolution_scale != scale) {
+        shader->resolution_scale = scale;
+        /* Force resize on next frame by invalidating cached size */
+        shader->scaled_width = 0;
+        shader->scaled_height = 0;
+        log_info("Resolution scale changed to %.2f", scale);
+    }
 }
 
 float multipass_get_resolution_scale(const multipass_shader_t *shader) {
-    return shader ? adaptive_get_scale(&shader->adaptive) : 1.0f;
+    return shader ? shader->resolution_scale : 1.0f;
 }
 
 void multipass_set_adaptive_resolution(multipass_shader_t *shader, 
@@ -2137,42 +1885,302 @@ void multipass_set_adaptive_resolution(multipass_shader_t *shader,
                                         float max_scale) {
     if (!shader) return;
     
-    adaptive_set_enabled(&shader->adaptive, enabled);
-    adaptive_set_target_fps(&shader->adaptive, target_fps);
-    adaptive_set_scale_range(&shader->adaptive, min_scale, max_scale);
+    shader->adaptive_resolution = enabled;
+    shader->target_fps = (target_fps > 0) ? target_fps : 55.0f;
+    shader->min_resolution_scale = (min_scale > 0.1f) ? min_scale : 0.1f;
+    shader->max_resolution_scale = (max_scale <= 2.0f) ? max_scale : 2.0f;
     
-    /* Sync to shader fields */
-    shader->min_resolution_scale = shader->adaptive.config.min_scale;
-    shader->max_resolution_scale = shader->adaptive.config.max_scale;
-}
-
-void multipass_configure_adaptive(multipass_shader_t *shader,
-                                  const adaptive_config_t *config) {
-    if (!shader || !config) return;
-    shader->adaptive.config = *config;
-    shader->min_resolution_scale = config->min_scale;
-    shader->max_resolution_scale = config->max_scale;
-}
-
-void multipass_set_adaptive_mode(multipass_shader_t *shader, adaptive_mode_t mode) {
-    if (!shader) return;
-    adaptive_set_mode(&shader->adaptive, mode);
+    if (shader->min_resolution_scale > shader->max_resolution_scale) {
+        shader->min_resolution_scale = shader->max_resolution_scale;
+    }
+    
+    log_info("Adaptive resolution: %s, target=%.0f FPS, scale range=[%.2f, %.2f]",
+             enabled ? "ON" : "OFF", shader->target_fps,
+             shader->min_resolution_scale, shader->max_resolution_scale);
 }
 
 bool multipass_is_adaptive_resolution(const multipass_shader_t *shader) {
-    return shader ? shader->adaptive.enabled : false;
+    return shader ? shader->adaptive_resolution : false;
 }
 
 float multipass_get_current_fps(const multipass_shader_t *shader) {
-    return shader ? adaptive_get_current_fps(&shader->adaptive) : 0.0f;
+    return shader ? shader->current_fps : 0.0f;
 }
 
-adaptive_stats_t multipass_get_adaptive_stats(const multipass_shader_t *shader) {
-    if (!shader) {
-        adaptive_stats_t empty = {0};
-        return empty;
+void multipass_update_adaptive_resolution(multipass_shader_t *shader, double current_time) {
+    if (!shader || !shader->adaptive_resolution) return;
+    
+    /* Initialize timing on first call */
+    if (shader->last_fps_update_time == 0.0) {
+        shader->last_fps_update_time = current_time;
+        shader->last_scale_adjust_time = current_time;
+        shader->calibration_start_time = current_time;
+        shader->calibration_frames = 0;
+        shader->initial_calibration_done = false;
+        shader->scale_locked = false;
+        shader->stable_frames = 0;
+        shader->oscillation_count = 0;
+        return;
     }
-    return adaptive_get_stats(&shader->adaptive);
+    
+    /* Track frame time for this frame */
+    double frame_time = current_time - shader->last_fps_update_time;
+    if (frame_time > 0.001 && frame_time < 1.0) {
+        shader->frame_times[shader->fps_history_index] = (float)frame_time;
+    }
+    
+    /*
+     * ========================================================================
+     * PHASE 1: FAST INITIAL CALIBRATION (first 0.3 seconds)
+     * Measure actual GPU performance and jump directly to optimal scale
+     * ========================================================================
+     */
+    if (!shader->initial_calibration_done) {
+        shader->calibration_frames++;
+        double calibration_elapsed = current_time - shader->calibration_start_time;
+        
+        if (calibration_elapsed >= 0.3 && shader->calibration_frames >= 8) {
+            float measured_fps = (float)shader->calibration_frames / (float)calibration_elapsed;
+            
+            if (measured_fps < shader->target_fps * 0.95f) {
+                /* 
+                 * Calculate optimal scale using quadratic relationship:
+                 * render_time ∝ pixels = width * height = scale²
+                 * So: optimal_scale = current_scale * sqrt(measured_fps / target_fps)
+                 * Apply 0.9 safety factor to avoid oscillation
+                 */
+                float fps_ratio = measured_fps / shader->target_fps;
+                float optimal_scale = sqrtf(fps_ratio) * shader->resolution_scale * 0.9f;
+                
+                /* Clamp and apply */
+                if (optimal_scale < shader->min_resolution_scale) {
+                    optimal_scale = shader->min_resolution_scale;
+                }
+                if (optimal_scale > shader->max_resolution_scale) {
+                    optimal_scale = shader->max_resolution_scale;
+                }
+                
+                shader->target_resolution_scale = optimal_scale;
+                shader->resolution_scale = optimal_scale;
+                shader->scaled_width = 0;
+                shader->scaled_height = 0;
+                
+                log_info("Calibration: %.1f FPS @ 100%% -> jumping to %.0f%% scale",
+                         measured_fps, optimal_scale * 100.0f);
+            } else {
+                log_info("Calibration: %.1f FPS @ 100%% -> full resolution OK", measured_fps);
+            }
+            
+            /* Initialize history with measured values */
+            for (int i = 0; i < 16; i++) {
+                shader->fps_history[i] = measured_fps;
+                shader->frame_times[i] = 1.0f / measured_fps;
+            }
+            shader->current_fps = measured_fps;
+            shader->initial_calibration_done = true;
+            shader->last_fps_update_time = current_time;
+            shader->last_scale_adjust_time = current_time;
+        }
+        return;
+    }
+    
+    /*
+     * ========================================================================
+     * PHASE 2: CONTINUOUS FPS MONITORING
+     * Use frame time analysis for accurate, responsive measurements
+     * ========================================================================
+     */
+    double time_since_fps_update = current_time - shader->last_fps_update_time;
+    if (time_since_fps_update >= 0.1 && shader->frames_since_fps_update > 0) {
+        float instant_fps = (float)shader->frames_since_fps_update / (float)time_since_fps_update;
+        
+        /* Update rolling history (16 samples for stability) */
+        shader->fps_history[shader->fps_history_index] = instant_fps;
+        shader->fps_history_index = (shader->fps_history_index + 1) % 16;
+        
+        /* Calculate weighted average: recent samples weighted more */
+        float weighted_sum = 0.0f;
+        float weight_sum = 0.0f;
+        for (int i = 0; i < 16; i++) {
+            int age = (shader->fps_history_index - 1 - i + 16) % 16;
+            float weight = 1.0f + (15 - age) * 0.1f;  /* Newer = higher weight */
+            weighted_sum += shader->fps_history[i] * weight;
+            weight_sum += weight;
+        }
+        shader->current_fps = weighted_sum / weight_sum;
+        
+        /* Also compute FPS variance to detect instability */
+        float variance = 0.0f;
+        for (int i = 0; i < 16; i++) {
+            float diff = shader->fps_history[i] - shader->current_fps;
+            variance += diff * diff;
+        }
+        variance /= 16.0f;
+        float fps_stddev = sqrtf(variance);
+        
+        /* Track stability: if FPS is stable near target, lock the scale */
+        float fps_error = fabsf(shader->current_fps - shader->target_fps);
+        if (fps_error < 3.0f && fps_stddev < 5.0f) {
+            shader->stable_frames++;
+            if (shader->stable_frames > 30 && !shader->scale_locked) {
+                shader->scale_locked = true;
+                shader->locked_scale = shader->resolution_scale;
+                log_info("Adaptive: LOCKED at %.0f%% (stable FPS=%.1f±%.1f)",
+                         shader->resolution_scale * 100.0f, shader->current_fps, fps_stddev);
+            }
+        } else {
+            shader->stable_frames = 0;
+            if (shader->scale_locked && fps_error > 8.0f) {
+                /* Unlock if FPS drifts significantly */
+                shader->scale_locked = false;
+                log_info("Adaptive: UNLOCKED (FPS=%.1f, need adjustment)", shader->current_fps);
+            }
+        }
+        
+        shader->frames_since_fps_update = 0;
+        shader->last_fps_update_time = current_time;
+    }
+    
+    /*
+     * ========================================================================
+     * PHASE 3: SMART SCALE ADJUSTMENT
+     * PID-inspired control with oscillation detection and stability locking
+     * ========================================================================
+     */
+    if (shader->scale_locked) {
+        /* When locked, only adjust if FPS drops significantly below target */
+        if (shader->current_fps < shader->target_fps - 10.0f) {
+            shader->scale_locked = false;
+            log_info("Adaptive: Force unlock due to FPS drop (%.1f)", shader->current_fps);
+        } else {
+            /* Maintain locked scale */
+            shader->target_resolution_scale = shader->locked_scale;
+            goto apply_scale;
+        }
+    }
+    
+    double time_since_adjust = current_time - shader->last_scale_adjust_time;
+    
+    /* Adjust every 0.2 seconds for responsive control */
+    if (time_since_adjust >= 0.2) {
+        float fps_error = shader->current_fps - shader->target_fps;
+        float current_scale = shader->resolution_scale;
+        float new_scale = current_scale;
+        int adjustment_direction = 0;
+        
+        /*
+         * DEADBAND: ±2 FPS around target = no adjustment needed
+         * This prevents micro-oscillations when at optimal scale
+         */
+        if (fps_error < -2.0f) {
+            /*
+             * FPS TOO LOW - need to reduce resolution
+             * Use proportional control: bigger error = bigger reduction
+             * Formula: adjustment = k * sqrt(|error| / target)
+             * sqrt() makes it less aggressive for small errors
+             */
+            float error_ratio = -fps_error / shader->target_fps;
+            float adjustment = sqrtf(error_ratio) * 0.12f;
+            
+            /* Clamp: min 2% reduction, max 15% reduction per step */
+            if (adjustment < 0.02f) adjustment = 0.02f;
+            if (adjustment > 0.15f) adjustment = 0.15f;
+            
+            new_scale = current_scale * (1.0f - adjustment);
+            adjustment_direction = -1;
+            
+        } else if (fps_error > 3.0f && current_scale < shader->max_resolution_scale - 0.01f) {
+            /*
+             * FPS HIGH - can try increasing resolution
+             * Be more conservative going up to avoid oscillation
+             * Use theoretical maximum: scale_max = current * sqrt(fps / target)
+             */
+            float fps_ratio = shader->current_fps / shader->target_fps;
+            float theoretical_max = current_scale * sqrtf(fps_ratio);
+            
+            /* Move only 15% towards theoretical max */
+            float target = current_scale + (theoretical_max - current_scale) * 0.15f;
+            float adjustment = (target / current_scale) - 1.0f;
+            
+            /* Clamp: min 1% increase, max 5% increase per step */
+            if (adjustment < 0.01f) adjustment = 0.01f;
+            if (adjustment > 0.05f) adjustment = 0.05f;
+            
+            new_scale = current_scale * (1.0f + adjustment);
+            adjustment_direction = 1;
+        }
+        
+        /*
+         * OSCILLATION DETECTION
+         * If we keep switching directions, we're at the optimal point - lock it
+         */
+        if (adjustment_direction != 0) {
+            if (shader->last_adjustment_direction != 0 && 
+                shader->last_adjustment_direction != adjustment_direction) {
+                shader->oscillation_count++;
+                if (shader->oscillation_count >= 3) {
+                    /* Oscillating - lock at current scale */
+                    shader->scale_locked = true;
+                    shader->locked_scale = current_scale;
+                    shader->oscillation_count = 0;
+                    log_info("Adaptive: LOCKED at %.0f%% (oscillation detected)", 
+                             current_scale * 100.0f);
+                    goto apply_scale;
+                }
+            } else {
+                shader->oscillation_count = 0;
+            }
+            shader->last_adjustment_direction = adjustment_direction;
+        }
+        
+        /* Clamp to allowed range */
+        if (new_scale < shader->min_resolution_scale) {
+            new_scale = shader->min_resolution_scale;
+        }
+        if (new_scale > shader->max_resolution_scale) {
+            new_scale = shader->max_resolution_scale;
+        }
+        
+        /* Only apply if change is significant (>0.5%) */
+        if (fabsf(new_scale - shader->target_resolution_scale) > 0.005f) {
+            shader->target_resolution_scale = new_scale;
+            log_info("Adaptive: FPS=%.1f -> scale %.0f%% to %.0f%%",
+                     shader->current_fps, current_scale * 100.0f, new_scale * 100.0f);
+        }
+        
+        shader->last_scale_adjust_time = current_time;
+    }
+    
+apply_scale:
+    /*
+     * ========================================================================
+     * PHASE 4: SMOOTH SCALE INTERPOLATION
+     * Prevents jarring visual changes by smoothly transitioning
+     * ========================================================================
+     */
+    {
+        float scale_diff = shader->target_resolution_scale - shader->resolution_scale;
+        float abs_diff = fabsf(scale_diff);
+        
+        if (abs_diff > 0.002f) {
+            /* 
+             * Adaptive interpolation speed:
+             * - Fast (40%) when far from target (getting to usable state quickly)
+             * - Slow (15%) when close (smooth final approach)
+             */
+            float lerp_speed = (abs_diff > 0.1f) ? 0.4f : 0.15f;
+            shader->resolution_scale += scale_diff * lerp_speed;
+            
+            /* Force resize */
+            shader->scaled_width = 0;
+            shader->scaled_height = 0;
+        } else if (abs_diff > 0.0005f) {
+            /* Snap when very close */
+            shader->resolution_scale = shader->target_resolution_scale;
+            shader->scaled_width = 0;
+            shader->scaled_height = 0;
+        }
+    }
 }
 
 void multipass_reset(multipass_shader_t *shader) {

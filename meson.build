@@ -4,7 +4,7 @@
 # This meson.build replicates the functionality of the Makefile exactly.
 
 project('neowall', 'c',
-  version: '0.4.5',
+  version: '0.4.4',
   license: 'MIT',
   default_options: [
     'c_std=c11',
@@ -198,9 +198,6 @@ egl_sources = files(
 shader_lib_sources = files(
   'src/shader_lib/shader_core.c',
   'src/shader_lib/shader_multipass.c',
-  'src/shader_lib/adaptive_scale.c',
-  'src/shader_lib/render_optimizer.c',
-  'src/shader_lib/multipass_optimizer.c',
 )
 
 # Transition sources
