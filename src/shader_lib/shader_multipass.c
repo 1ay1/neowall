@@ -709,6 +709,8 @@ static const char *multipass_wrapper_suffix =
     "\n"
     "void main() {\n"
     "    mainImage(fragColor, gl_FragCoord.xy);\n"
+    "    fragColor.rgb = clamp(fragColor.rgb, 0.0, 1.0); // Clamp to prevent over-brightness\n"
+    "    fragColor.a = 1.0; // Force opaque output - prevent transparency issues\n"
     "}\n";
 
 /**
@@ -1830,6 +1832,58 @@ void multipass_render(multipass_shader_t *shader,
                       float mouse_x, float mouse_y,
                       bool mouse_click) {
     if (!shader || !shader->is_initialized) return;
+
+    /* ========================================================================
+     * SINGLE-PASS SHADER FAST PATH
+     * 
+     * For shaders with only an Image pass (no buffers), skip ALL buffer
+     * optimizations. These shaders render directly to screen at full resolution
+     * every frame - no adaptive scaling, no pass skipping, no half-rate.
+     * ======================================================================== */
+    bool is_single_pass = (shader->pass_count == 1 && shader->image_pass_index == 0);
+    
+    if (is_single_pass) {
+        /* Single-pass shader: render directly to screen, no optimizations */
+        
+        /* Query the CURRENT framebuffer binding */
+        GLint current_fbo = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &current_fbo);
+        shader->default_framebuffer = current_fbo;
+        
+        /* Set optimal render state */
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_SCISSOR_TEST);
+        glDepthMask(GL_FALSE);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        
+        /* Setup vertex state */
+        glBindVertexArray(shader->vao);
+        glBindBuffer(GL_ARRAY_BUFFER, shader->vbo);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        
+        /* Render Image pass directly to screen at FULL resolution */
+        glBindFramebuffer(GL_FRAMEBUFFER, shader->default_framebuffer);
+        multipass_pass_t *image_pass = &shader->passes[0];
+        glViewport(0, 0, image_pass->width, image_pass->height);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        
+        multipass_render_pass(shader, 0, time, mouse_x, mouse_y, mouse_click);
+        
+        /* Cleanup */
+        glDisableVertexAttribArray(0);
+        shader->frame_count++;
+        return;
+    }
+    
+    /* ========================================================================
+     * MULTIPASS SHADER PATH (with buffers)
+     * 
+     * Full optimization pipeline for shaders with BufferA-D passes.
+     * ======================================================================== */
 
     /* Start GPU timing for this frame (if enabled) */
     adaptive_begin_frame(&shader->adaptive);
