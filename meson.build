@@ -198,6 +198,7 @@ egl_sources = files(
 shader_lib_sources = files(
   'src/shader_lib/shader_core.c',
   'src/shader_lib/shader_multipass.c',
+  'src/shader_lib/adaptive_scale.c',
 )
 
 # Transition sources
