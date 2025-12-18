@@ -199,6 +199,8 @@ shader_lib_sources = files(
   'src/shader_lib/shader_core.c',
   'src/shader_lib/shader_multipass.c',
   'src/shader_lib/adaptive_scale.c',
+  'src/shader_lib/render_optimizer.c',
+  'src/shader_lib/multipass_optimizer.c',
 )
 
 # Transition sources
