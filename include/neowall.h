@@ -7,9 +7,8 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <EGL/egl.h>
-#include <GLES2/gl2.h>
+#include <GL/gl.h>
 #include "version.h"
-#include "egl/capability.h"
 #include "../src/output/output.h"
 #include "../src/config/config.h"
 
@@ -36,7 +35,6 @@ struct neowall_state {
     EGLDisplay egl_display;
     EGLContext egl_context;
     EGLConfig egl_config;
-    egl_capabilities_t gl_caps;
 
     /* ===== OUTPUTS ===== */
     struct output_state *outputs;
@@ -112,10 +110,12 @@ enum transition_type transition_type_from_string(const char *str);
 
 /* Logging */
 #define LOG_LEVEL_ERROR 0
-#define LOG_LEVEL_INFO  1
-#define LOG_LEVEL_DEBUG 2
+#define LOG_LEVEL_WARN  1
+#define LOG_LEVEL_INFO  2
+#define LOG_LEVEL_DEBUG 3
 
 void log_error(const char *format, ...);
+void log_warn(const char *format, ...);
 void log_info(const char *format, ...);
 void log_debug(const char *format, ...);
 void log_set_level(int level);

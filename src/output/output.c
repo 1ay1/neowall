@@ -12,6 +12,7 @@
 #include "config_access.h"
 #include "constants.h"
 #include "shader.h"
+#include "../shader_lib/shader_multipass.h"
 #include "../render/render.h"  /* Only output.c includes render.h */
 
 /* Helper function to get the preferred output identifier
@@ -255,7 +256,13 @@ void output_destroy(struct output_state *output) {
     /* Clean up rendering resources */
     render_cleanup_output(output);
 
-    /* Clean up shader programs */
+    /* Clean up multipass shader */
+    if (output->multipass_shader != NULL) {
+        multipass_destroy(output->multipass_shader);
+        output->multipass_shader = NULL;
+    }
+
+    /* Clean up legacy shader programs */
     if (output->live_shader_program != 0) {
         shader_destroy_program(output->live_shader_program);
         output->live_shader_program = 0;
@@ -779,131 +786,102 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     log_debug("EGL context made current for output %s",
               output->model[0] ? output->model : "unknown");
 
-    /* If there's an existing shader, compile new shader and switch immediately */
-    if (output->live_shader_program != 0) {
+    /* If there's an existing multipass shader, destroy it first */
+    if (output->multipass_shader != NULL) {
         /* Prevent re-entrant shader changes */
         if (output->shader_fade_start_time > 0 && output->pending_shader_path[0] != '\0') {
             log_debug("Shader change already in progress, ignoring new request for: %s", shader_path);
             return;
         }
 
-        log_debug("Compiling new shader: %s", shader_path);
+        log_debug("Destroying existing multipass shader before loading: %s", shader_path);
+        multipass_destroy(output->multipass_shader);
+        output->multipass_shader = NULL;
+    }
 
-        /* Compile new shader immediately (before switching) to avoid stutter */
-        GLuint new_shader_program = 0;
-        if (!shader_create_live_program(shader_path, &new_shader_program, output->channel_count)) {
-            log_error("Failed to create shader program from: %s", shader_path);
-            return;
-        }
-
-        if (new_shader_program == 0) {
-            log_error("Invalid shader program created for: %s", shader_path);
-            return;
-        }
-
-        /* Successfully compiled - now switch immediately */
-        log_debug("Switching to new shader: %s", shader_path);
-
-        /* Destroy old shader */
+    /* Also clean up legacy single-pass shader if present */
+    if (output->live_shader_program != 0) {
         shader_destroy_program(output->live_shader_program);
+        output->live_shader_program = 0;
+    }
 
-        /* Switch to new shader */
-        output->live_shader_program = new_shader_program;
-        output->shader_start_time = get_time_ms();
-
-        /* Reset shader uniform cache for new program */
-        output->shader_uniforms.position = -2;
-        output->shader_uniforms.texcoord = -2;
-        output->shader_uniforms.tex_sampler = -2;
-        output->shader_uniforms.u_resolution = -2;
-        output->shader_uniforms.u_time = -2;
-        output->shader_uniforms.u_speed = -2;
-
-        /* Reset iChannel uniform locations */
-        if (output->shader_uniforms.iChannel && output->channel_count > 0) {
-            for (size_t i = 0; i < output->channel_count; i++) {
-                output->shader_uniforms.iChannel[i] = -2;
-            }
-        }
-
-        /* Update config with new shader path - protected by state mutex */
-        pthread_mutex_lock(&output->state->state_mutex);
-        strncpy(output->config->shader_path, shader_path, sizeof(output->config->shader_path) - 1);
-        output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
-        pthread_mutex_unlock(&output->state->state_mutex);
-
-        /* Write state to file */
-        const char *mode_str = wallpaper_mode_to_string(output->config->mode);
-        write_wallpaper_state(output_get_identifier(output), shader_path, mode_str,
-                             output->config->current_cycle_index,
-                             output->config->cycle_count,
-                             "active");
-
-        /* Mark for immediate redraw with new shader */
-        output->needs_redraw = true;
-        output->last_cycle_time = get_time_ms();
-
-        /* Configure vsync for shader rendering */
-        output_configure_vsync(output);
-
-        /* Configure frame timer for precise pacing when vsync is disabled */
-        output_configure_frame_timer(output);
-
-        log_debug("Shader switched successfully: %s", shader_path);
+    /* Load shader source from file */
+    char *shader_source = shader_load_file(shader_path);
+    if (!shader_source) {
+        log_error("Failed to load shader source from: %s", shader_path);
         return;
     }
 
-    /* First shader load - no fade needed, load and compile immediately */
+    log_info("Loaded shader source: %zu bytes from %s", strlen(shader_source), shader_path);
 
-    /* Load iChannel textures based on config */
-    if (!render_load_channel_textures(output, output->config)) {
-        log_error("Failed to load iChannel textures for shader: %s", shader_path);
-        /* Continue anyway - shader may work without textures */
-    }
+    /* Create multipass shader from source */
+    output->multipass_shader = multipass_create(shader_source);
+    free(shader_source);
 
-    GLuint new_shader_program = 0;
-    if (!shader_create_live_program(shader_path, &new_shader_program, output->channel_count)) {
-        log_error("Failed to create shader program from: %s", shader_path);
-
-        /* Clean up iChannel textures that were loaded but can't be used */
-        if (output->channel_textures) {
-            for (size_t i = 0; i < output->channel_count; i++) {
-                if (output->channel_textures[i] != 0) {
-                    render_destroy_texture(output->channel_textures[i]);
-                    output->channel_textures[i] = 0;
-                }
-            }
-            free(output->channel_textures);
-            output->channel_textures = NULL;
-        }
-        if (output->shader_uniforms.iChannel) {
-            free(output->shader_uniforms.iChannel);
-            output->shader_uniforms.iChannel = NULL;
-        }
-        output->channel_count = 0;
-
+    if (!output->multipass_shader) {
+        log_error("Failed to create multipass shader from: %s", shader_path);
         return;
     }
 
-    output->live_shader_program = new_shader_program;
+    /* Initialize GL resources for multipass rendering */
+    if (!multipass_init_gl(output->multipass_shader, output->width, output->height)) {
+        log_error("Failed to initialize multipass GL resources for: %s", shader_path);
+        multipass_destroy(output->multipass_shader);
+        output->multipass_shader = NULL;
+        return;
+    }
+
+    /* Compile all passes */
+    if (!multipass_compile_all(output->multipass_shader)) {
+        char *errors = multipass_get_all_errors(output->multipass_shader);
+        log_error("Failed to compile multipass shader: %s", shader_path);
+        if (errors) {
+            log_error("Compilation errors:\n%s", errors);
+            free(errors);
+        }
+        multipass_destroy(output->multipass_shader);
+        output->multipass_shader = NULL;
+        return;
+    }
+
+    /* Configure adaptive resolution scaling to target the config's FPS */
+    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : 60;
+    multipass_set_adaptive_resolution(output->multipass_shader, 
+                                      true,           /* enabled */
+                                      (float)target_fps,
+                                      0.25f,          /* min_scale */
+                                      1.0f);          /* max_scale */
+    log_info("Adaptive resolution targeting %d FPS for shader: %s", target_fps, shader_path);
+
     output->shader_start_time = get_time_ms();
 
-    /* Reset shader uniform cache for new program */
-    output->shader_uniforms.position = -2;
-    output->shader_uniforms.texcoord = -2;
-    output->shader_uniforms.tex_sampler = -2;
-    output->shader_uniforms.u_resolution = -2;
-    output->shader_uniforms.u_time = -2;
-    output->shader_uniforms.u_speed = -2;
+    log_info("Successfully loaded multipass shader with %d pass(es): %s",
+             output->multipass_shader->pass_count, shader_path);
 
-    /* Reset iChannel uniform locations to uninitialized */
-    if (output->shader_uniforms.iChannel && output->channel_count > 0) {
-        for (size_t i = 0; i < output->channel_count; i++) {
-            output->shader_uniforms.iChannel[i] = -2;
-        }
-    }
+    /* Debug dump shader structure */
+    multipass_debug_dump(output->multipass_shader);
 
-    log_debug("Shader loaded (first): %s", shader_path);
+    /* Update config with new shader path - protected by state mutex */
+    pthread_mutex_lock(&output->state->state_mutex);
+    strncpy(output->config->shader_path, shader_path, sizeof(output->config->shader_path) - 1);
+    output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
+    output->config->type = WALLPAPER_SHADER;
+    pthread_mutex_unlock(&output->state->state_mutex);
+
+    /* Write state to file */
+    const char *mode_str = wallpaper_mode_to_string(output->config->mode);
+    write_wallpaper_state(output_get_identifier(output), shader_path, mode_str,
+                         output->config->current_cycle_index,
+                         output->config->cycle_count,
+                         "active");
+
+    /* Mark for immediate redraw with new shader */
+    output->needs_redraw = true;
+    
+    /* Initialize frame time for animation */
+    uint64_t now = get_time_ms();
+    output->last_frame_time = now;
+    output->last_cycle_time = now;
 
     /* Configure vsync based on shader_fps setting */
     if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
@@ -937,29 +915,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         output->next_texture = 0;
     }
 
-    /* Update config - protected by state mutex */
-    pthread_mutex_lock(&output->state->state_mutex);
-    strncpy(output->config->shader_path, shader_path, sizeof(output->config->shader_path) - 1);
-    output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
-    output->config->type = WALLPAPER_SHADER;
-    pthread_mutex_unlock(&output->state->state_mutex);
-
-    /* Initialize frame time for animation */
-    uint64_t now = get_time_ms();
-    output->last_frame_time = now;
-    output->last_cycle_time = now;
-
-    /* Mark for redraw */
-    output->needs_redraw = true;
-
-    /* Write current state to file */
-    const char *mode_str = wallpaper_mode_to_string(output->config->mode);
-    write_wallpaper_state(output_get_identifier(output), shader_path, mode_str,
-                         output->config->current_cycle_index,
-                         output->config->cycle_count,
-                         "active");
-
-    log_debug("Live shader wallpaper loaded successfully");
+    log_debug("Multipass shader wallpaper loaded successfully");
 }
 
 /* Cycle to next wallpaper in the cycle list */
@@ -1189,7 +1145,7 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
         return false;
     }
 
-    if (output->config->type == WALLPAPER_SHADER && output->live_shader_program == 0) {
+    if (output->config->type == WALLPAPER_SHADER && output->multipass_shader == NULL && output->live_shader_program == 0) {
         return false;
     }
 
@@ -1415,7 +1371,7 @@ void output_apply_deferred_config(struct output_state *output) {
     /* Check if there's a deferred config to apply */
     if (output->config->type == WALLPAPER_SHADER && output->config->shader_path[0] != '\0') {
         /* Check if shader is not yet loaded */
-        if (output->live_shader_program == 0) {
+        if (output->multipass_shader == NULL && output->live_shader_program == 0) {
             log_info("Applying deferred shader config to output %s: %s",
                      output->model[0] ? output->model : "unknown",
                      output->config->shader_path);
@@ -1431,7 +1387,7 @@ void output_apply_deferred_config(struct output_state *output) {
         }
     } else if (output->config->cycle && output->config->cycle_count > 0 && output->config->cycle_paths) {
         /* Handle cycling mode */
-        if (!output->current_image && output->texture == 0 && output->live_shader_program == 0) {
+        if (!output->current_image && output->texture == 0 && output->multipass_shader == NULL && output->live_shader_program == 0) {
             const char *initial_path = output->config->cycle_paths[output->config->current_cycle_index];
             log_info("Applying deferred cycle config to output %s: %s",
                      output->model[0] ? output->model : "unknown",

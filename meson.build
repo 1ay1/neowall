@@ -31,9 +31,9 @@ message('Detected session type: ' + (session_type != '' ? session_type : 'unknow
 egl_dep = dependency('egl', required: true)
 message('EGL detected: ' + egl_dep.version())
 
-# OpenGL ES 2.0 is the minimum requirement
-glesv2_dep = dependency('glesv2', required: true)
-message('OpenGL ES 2.0 detected')
+# Desktop OpenGL for Shadertoy compatibility (uses #version 330 core)
+gl_dep = dependency('gl', required: true)
+message('Desktop OpenGL detected')
 
 # Image loading libraries
 libpng_dep = dependency('libpng', required: true)
@@ -43,60 +43,10 @@ libjpeg_dep = dependency('libjpeg', required: true)
 m_dep = cc.find_library('m', required: true)
 thread_dep = dependency('threads', required: true)
 
-# =============================================================================
-# Optional OpenGL ES Versions
-# =============================================================================
-
-# OpenGL ES 1.x (legacy, optional)
-glesv1_dep = dependency('glesv1_cm', required: false)
-has_gles1 = glesv1_dep.found()
-if has_gles1
-  message('OpenGL ES 1.x detected (legacy support)')
-else
-  message('OpenGL ES 1.x not found (optional)')
-endif
-
-# Check for OpenGL ES 3.x headers
-has_gles30 = cc.has_header('GLES3/gl3.h')
-has_gles31 = cc.has_header('GLES3/gl31.h')
-has_gles32 = cc.has_header('GLES3/gl32.h')
-
-# OpenGL ES 3.x implies lower versions
-if has_gles32
-  has_gles31 = true
-  has_gles30 = true
-elif has_gles31
-  has_gles30 = true
-endif
-
-if has_gles30
-  message('OpenGL ES 3.0 detected (enhanced Shadertoy support)')
-else
-  message('OpenGL ES 3.0 not found (Shadertoy compatibility limited)')
-endif
-
-if has_gles31
-  message('OpenGL ES 3.1 detected (compute shader support)')
-else
-  message('OpenGL ES 3.1 not found (optional)')
-endif
-
-if has_gles32
-  message('OpenGL ES 3.2 detected (geometry/tessellation shaders)')
-else
-  message('OpenGL ES 3.2 not found (optional)')
-endif
-
-# Check EGL extensions
-has_egl_khr_image = cc.has_header_symbol('EGL/eglext.h', 'EGL_KHR_image_base')
-has_egl_khr_fence = cc.has_header_symbol('EGL/eglext.h', 'EGL_KHR_fence_sync')
-
-if has_egl_khr_image
-  message('EGL_KHR_image extension available')
-endif
-
-if has_egl_khr_fence
-  message('EGL_KHR_fence_sync extension available')
+# Check for OpenGL 3.3 support (required for Shadertoy shaders)
+has_gl33 = cc.has_header('GL/gl.h')
+if has_gl33
+  message('Desktop OpenGL 3.3+ available (full Shadertoy support)')
 endif
 
 # =============================================================================
@@ -201,35 +151,10 @@ version_h = configure_file(
 add_project_arguments('-D_POSIX_C_SOURCE=200809L', language: 'c')
 add_project_arguments('-DNEOWALL_VERSION="' + meson.project_version() + '"', language: 'c')
 
-# EGL/OpenGL ES flags (always set)
+# EGL and Desktop OpenGL flags
 add_project_arguments('-DHAVE_EGL', language: 'c')
-add_project_arguments('-DHAVE_GLES2', language: 'c')
-
-# Optional OpenGL ES versions
-if has_gles1
-  add_project_arguments('-DHAVE_GLES1', language: 'c')
-endif
-
-if has_gles30
-  add_project_arguments('-DHAVE_GLES3', '-DHAVE_GLES30', language: 'c')
-endif
-
-if has_gles31
-  add_project_arguments('-DHAVE_GLES31', language: 'c')
-endif
-
-if has_gles32
-  add_project_arguments('-DHAVE_GLES32', language: 'c')
-endif
-
-# EGL extensions
-if has_egl_khr_image
-  add_project_arguments('-DHAVE_EGL_KHR_IMAGE', language: 'c')
-endif
-
-if has_egl_khr_fence
-  add_project_arguments('-DHAVE_EGL_KHR_FENCE_SYNC', language: 'c')
-endif
+add_project_arguments('-DHAVE_GL33', language: 'c')
+add_project_arguments('-DGL_GLEXT_PROTOTYPES', language: 'c')
 
 # Backend flags
 if has_wayland
@@ -264,56 +189,18 @@ core_sources = files(
   'src/utils.c',
 )
 
-# EGL core sources (always compiled)
-egl_core_sources = files(
-  'src/egl/capability.c',
+# EGL sources (desktop OpenGL 3.3)
+egl_sources = files(
   'src/egl/egl_core.c',
 )
-
-# EGL version sources (always include for runtime detection)
-egl_version_sources = files(
-  'src/egl/egl_v10.c',
-  'src/egl/egl_v11.c',
-  'src/egl/egl_v12.c',
-  'src/egl/egl_v13.c',
-  'src/egl/egl_v14.c',
-  'src/egl/egl_v15.c',
-)
-
-# OpenGL ES version-specific sources (conditional)
-gles_sources = files(
-  'src/egl/gles_v20.c',  # ES 2.0 always included (minimum requirement)
-)
-
-if has_gles1
-  gles_sources += files(
-    'src/egl/gles_v10.c',
-    'src/egl/gles_v11.c',
-  )
-endif
-
-if has_gles30
-  gles_sources += files('src/egl/gles_v30.c')
-endif
-
-if has_gles31
-  gles_sources += files('src/egl/gles_v31.c')
-endif
-
-if has_gles32
-  gles_sources += files('src/egl/gles_v32.c')
-endif
-
-# All EGL sources
-egl_sources = egl_core_sources + egl_version_sources + gles_sources
 
 # Shader library sources
 shader_lib_sources = files(
   'src/shader_lib/shader_core.c',
-  'src/shader_lib/shader_adaptation.c',
-  'src/shader_lib/shadertoy_compat.c',
-  'src/shader_lib/shader_utils.c',
-  'src/shader_lib/neowall_shader_api.c',
+  'src/shader_lib/shader_multipass.c',
+  'src/shader_lib/adaptive_scale.c',
+  'src/shader_lib/render_optimizer.c',
+  'src/shader_lib/multipass_optimizer.c',
 )
 
 # Transition sources
@@ -400,16 +287,12 @@ endif
 
 deps = [
   egl_dep,
-  glesv2_dep,
+  gl_dep,
   libpng_dep,
   libjpeg_dep,
   m_dep,
   thread_dep,
 ]
-
-if has_gles1
-  deps += glesv1_dep
-endif
 
 if has_wayland
   deps += [wayland_client_dep, wayland_egl_dep]
@@ -530,14 +413,5 @@ summary({
 }, section: 'Backends')
 
 summary({
-  'OpenGL ES 1.x': has_gles1,
-  'OpenGL ES 2.0': true,
-  'OpenGL ES 3.0': has_gles30,
-  'OpenGL ES 3.1': has_gles31,
-  'OpenGL ES 3.2': has_gles32,
-}, section: 'OpenGL ES Support')
-
-summary({
-  'EGL_KHR_image': has_egl_khr_image,
-  'EGL_KHR_fence_sync': has_egl_khr_fence,
-}, section: 'EGL Extensions')
+  'Desktop OpenGL 3.3': has_gl33,
+}, section: 'OpenGL Support')

@@ -23,16 +23,6 @@ bool shader_create_program_from_sources(const char *vertex_src,
  */
 void shader_destroy_program(GLuint program);
 
-/**
- * Create live wallpaper shader program from file
- * 
- * @param shader_path Path to fragment shader file
- * @param program Pointer to store the created program ID
- * @param channel_count Number of iChannels to declare (0 = default 5)
- * @return true on success, false on failure
- */
-bool shader_create_live_program(const char *shader_path, GLuint *program, size_t channel_count);
-
 /* Transition-specific shader creation functions (defined in transition files) */
 bool shader_create_fade_program(GLuint *program);
 bool shader_create_slide_program(GLuint *program);
@@ -45,5 +35,13 @@ bool shader_create_pixelate_program(GLuint *program);
  * @return Pointer to static error log buffer (valid until next compilation)
  */
 const char *shader_get_last_error_log(void);
+
+/**
+ * Load shader source from file
+ * 
+ * @param path Path to shader file (absolute or relative to config dir)
+ * @return Shader source string (caller must free) or NULL on failure
+ */
+char *shader_load_file(const char *path);
 
 #endif /* SHADER_H */
