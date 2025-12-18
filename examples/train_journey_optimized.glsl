@@ -264,6 +264,7 @@ float phaseFunction(float lightDotView) {
 // ============================================================================
 // Buffer A: Main scene rendering with temporal accumulation
 // ============================================================================
+// Buffer A
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     time = iTime;
     vec2 invRes = 1.0 / iResolution.xy;
@@ -321,6 +322,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 // ============================================================================
 // Buffer B: God rays at half resolution
 // ============================================================================
+// Buffer B
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 invRes = 1.0 / iResolution.xy;
     vec2 uv = fragCoord * invRes * 2.0;
@@ -362,6 +364,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 // ============================================================================
 // Buffer C: Depth-aware blur
 // ============================================================================
+// Buffer C
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 invRes = 1.0 / iResolution.xy;
     vec2 uv = fragCoord * invRes;
@@ -394,6 +397,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 // ============================================================================
 // Image: Final compositing
 // ============================================================================
+// Image
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 invRes = 1.0 / iResolution.xy;
     vec2 uv = fragCoord * invRes;
