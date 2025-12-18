@@ -6,6 +6,7 @@
  */
 
 #include "shader_multipass.h"
+#include "adaptive_scale.h"
 #include "shader_log.h"
 #include "platform_compat.h"
 #include <stdio.h>
@@ -925,56 +926,8 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
     shader->scaled_width = 0;
     shader->scaled_height = 0;
     
-    /* Initialize optimized adaptive resolution system */
-    adaptive_config_t default_config = multipass_default_adaptive_config();
-    shader->adaptive.config = default_config;
-    shader->adaptive.enabled = true;
-    shader->adaptive.current_scale = 1.0f;
-    shader->adaptive.target_scale = 1.0f;
-    shader->adaptive.current_fps = default_config.target_fps;
-    shader->adaptive.current_frame_time = 1.0f / default_config.target_fps;
-    shader->adaptive.fps_derivative = 0.0f;
-    shader->adaptive.prev_fps = default_config.target_fps;
-    shader->adaptive.timer_queries[0] = 0;
-    shader->adaptive.timer_queries[1] = 0;
-    shader->adaptive.current_query = 0;
-    shader->adaptive.gpu_timing_available = false;
-    shader->adaptive.query_in_flight = false;
-    shader->adaptive.gpu_frame_time = 0.0f;
-    shader->adaptive.last_frame_time = 0.0;
-    shader->adaptive.last_adjust_time = 0.0;
-    shader->adaptive.stable_time = 0.0f;
-    shader->adaptive.locked = false;
-    shader->adaptive.locked_scale = 1.0f;
-    shader->adaptive.oscillation_count = 0;
-    shader->adaptive.last_direction = 0;
-    shader->adaptive.adaptive_deadband = default_config.deadband_fps;
-    shader->adaptive.calibrated = false;
-    shader->adaptive.calibration_frames = 0;
-    shader->adaptive.calibration_start = 0.0;
-    shader->adaptive.calibration_sum = 0.0f;
-    
-    /* Legacy field mappings for API compatibility */
-    shader->adaptive_resolution = true;
-    shader->target_fps = default_config.target_fps;
-    shader->current_fps = default_config.target_fps;
-    shader->target_resolution_scale = 1.0f;
-    shader->fps_history_index = 0;
-    shader->last_fps_update_time = 0.0;
-    shader->frames_since_fps_update = 0;
-    shader->last_scale_adjust_time = 0.0;
-    shader->initial_calibration_done = false;
-    shader->calibration_frames = 0;
-    shader->calibration_start_time = 0.0;
-    shader->stable_frames = 0;
-    shader->last_adjustment_direction = 0;
-    shader->oscillation_count = 0;
-    shader->locked_scale = 0.0f;
-    shader->scale_locked = false;
-    for (int i = 0; i < 16; i++) {
-        shader->fps_history[i] = default_config.target_fps;
-        shader->frame_times[i] = 1.0f / default_config.target_fps;
-    }
+    /* Initialize industry-grade adaptive resolution system */
+    adaptive_init(&shader->adaptive, NULL);  /* Use default config */
 
     for (int i = 0; i < parse_result->pass_count; i++) {
         multipass_pass_t *pass = &shader->passes[i];
@@ -1300,7 +1253,7 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
     shader->frame_count = 0;
 
     /* Initialize GPU timer queries for accurate frame time measurement */
-    multipass_init_gpu_timing(shader);
+    adaptive_init_gpu_timing(&shader->adaptive);
 
     return true;
 }
@@ -1563,10 +1516,8 @@ void multipass_destroy(multipass_shader_t *shader) {
     if (shader->noise_texture) glDeleteTextures(1, &shader->noise_texture);
     if (shader->keyboard_texture) glDeleteTextures(1, &shader->keyboard_texture);
     
-    /* Delete GPU timer queries */
-    if (shader->adaptive.timer_queries[0]) {
-        glDeleteQueries(2, shader->adaptive.timer_queries);
-    }
+    /* Cleanup adaptive resolution system */
+    adaptive_destroy(&shader->adaptive);
 
     free(shader->common_source);
     free(shader);
@@ -1809,7 +1760,7 @@ void multipass_render(multipass_shader_t *shader,
     if (!shader || !shader->is_initialized) return;
 
     /* Start GPU timing for this frame (if enabled) */
-    multipass_begin_frame_timing(shader);
+    adaptive_begin_frame(&shader->adaptive);
 
     /* Update adaptive resolution using wall-clock time (not shader time)
      * This ensures proper FPS measurement even when shader time is paused/scaled */
@@ -1824,7 +1775,10 @@ void multipass_render(multipass_shader_t *shader,
     gettimeofday(&tv, NULL);
     wall_time = (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
 #endif
-    multipass_update_adaptive_resolution(shader, wall_time);
+    adaptive_update(&shader->adaptive, wall_time);
+    
+    /* Sync resolution scale from adaptive system */
+    shader->resolution_scale = adaptive_get_scale(&shader->adaptive);
 
     /* Query the CURRENT framebuffer binding every frame
      * GTK's GtkGLArea can change its FBO on resize, so we must always query */
@@ -1895,59 +1849,25 @@ void multipass_render(multipass_shader_t *shader,
     glDisableVertexAttribArray(0);
 
     /* End GPU timing for this frame */
-    multipass_end_frame_timing(shader);
+    adaptive_end_frame(&shader->adaptive);
 
     shader->frame_count++;
-    shader->frames_since_fps_update++;
 }
 
 /* ============================================
- * Optimized Adaptive Resolution System
- * 
- * Features:
- * - GPU timer queries for accurate render time (excludes vsync)
- * - Exponential Moving Average (EMA) for efficient smoothing  
- * - Predictive scaling using FPS derivative
- * - Adaptive hysteresis that grows with stability
- * - Configurable via adaptive_config_t
+ * Adaptive Resolution API (delegates to adaptive_scale module)
  * ============================================ */
-
-adaptive_config_t multipass_default_adaptive_config(void) {
-    /* Note: target_fps defaults to 60 here but is typically overridden
-     * by the shader_fps setting from the user's config file when
-     * multipass_set_adaptive_resolution() is called from output_set_shader() */
-    return (adaptive_config_t){
-        .target_fps = 60.0f,
-        .min_scale = 0.25f,
-        .max_scale = 1.0f,
-        .deadband_fps = 2.0f,
-        .ema_alpha = 0.15f,          /* Balance between responsiveness and stability */
-        .scale_down_rate = 0.5f,     /* Can halve scale in 1 second if needed */
-        .scale_up_rate = 0.2f,       /* Slower upscaling to avoid oscillation */
-        .stability_threshold = 1.0f, /* Lock after 1 second of stability */
-        .use_gpu_timing = true,
-        .verbose_logging = false
-    };
-}
 
 void multipass_set_resolution_scale(multipass_shader_t *shader, float scale) {
     if (!shader) return;
-    
-    /* Clamp scale to reasonable values */
-    if (scale < 0.1f) scale = 0.1f;
-    if (scale > 2.0f) scale = 2.0f;
-    
-    if (shader->resolution_scale != scale) {
-        shader->resolution_scale = scale;
-        shader->adaptive.current_scale = scale;
-        shader->adaptive.target_scale = scale;
-        shader->scaled_width = 0;
-        shader->scaled_height = 0;
-    }
+    adaptive_force_scale(&shader->adaptive, scale);
+    shader->resolution_scale = adaptive_get_scale(&shader->adaptive);
+    shader->scaled_width = 0;
+    shader->scaled_height = 0;
 }
 
 float multipass_get_resolution_scale(const multipass_shader_t *shader) {
-    return shader ? shader->resolution_scale : 1.0f;
+    return shader ? adaptive_get_scale(&shader->adaptive) : 1.0f;
 }
 
 void multipass_set_adaptive_resolution(multipass_shader_t *shader, 
@@ -1957,38 +1877,26 @@ void multipass_set_adaptive_resolution(multipass_shader_t *shader,
                                         float max_scale) {
     if (!shader) return;
     
-    shader->adaptive.enabled = enabled;
-    shader->adaptive.config.target_fps = (target_fps > 0) ? target_fps : 60.0f;
-    shader->adaptive.config.min_scale = (min_scale > 0.1f) ? min_scale : 0.1f;
-    shader->adaptive.config.max_scale = (max_scale <= 2.0f) ? max_scale : 2.0f;
+    adaptive_set_enabled(&shader->adaptive, enabled);
+    adaptive_set_target_fps(&shader->adaptive, target_fps);
+    adaptive_set_scale_range(&shader->adaptive, min_scale, max_scale);
     
-    if (shader->adaptive.config.min_scale > shader->adaptive.config.max_scale) {
-        shader->adaptive.config.min_scale = shader->adaptive.config.max_scale;
-    }
-    
-    /* Update legacy fields */
-    shader->adaptive_resolution = enabled;
-    shader->target_fps = shader->adaptive.config.target_fps;
+    /* Sync to shader fields */
     shader->min_resolution_scale = shader->adaptive.config.min_scale;
     shader->max_resolution_scale = shader->adaptive.config.max_scale;
-    
-    if (shader->adaptive.config.verbose_logging) {
-        log_info("Adaptive: %s, target=%.0f FPS, scale=[%.0f%%, %.0f%%]",
-                 enabled ? "ON" : "OFF", shader->adaptive.config.target_fps,
-                 shader->adaptive.config.min_scale * 100.0f,
-                 shader->adaptive.config.max_scale * 100.0f);
-    }
 }
 
 void multipass_configure_adaptive(multipass_shader_t *shader,
                                   const adaptive_config_t *config) {
     if (!shader || !config) return;
     shader->adaptive.config = *config;
-    
-    /* Sync legacy fields */
-    shader->target_fps = config->target_fps;
     shader->min_resolution_scale = config->min_scale;
     shader->max_resolution_scale = config->max_scale;
+}
+
+void multipass_set_adaptive_mode(multipass_shader_t *shader, adaptive_mode_t mode) {
+    if (!shader) return;
+    adaptive_set_mode(&shader->adaptive, mode);
 }
 
 bool multipass_is_adaptive_resolution(const multipass_shader_t *shader) {
@@ -1996,366 +1904,15 @@ bool multipass_is_adaptive_resolution(const multipass_shader_t *shader) {
 }
 
 float multipass_get_current_fps(const multipass_shader_t *shader) {
-    return shader ? shader->adaptive.current_fps : 0.0f;
-}
-
-/* Initialize GPU timer queries if available */
-void multipass_init_gpu_timing(multipass_shader_t *shader) {
-    if (!shader) return;
-    
-    /* Check for timer query extension - available in GL 3.3+ */
-    shader->adaptive.gpu_timing_available = true;  /* Assume available in GL 3.3 */
-    
-    if (shader->adaptive.gpu_timing_available && shader->adaptive.config.use_gpu_timing) {
-        glGenQueries(2, shader->adaptive.timer_queries);
-        shader->adaptive.current_query = 0;
-        shader->adaptive.query_in_flight = false;
-        
-        if (shader->adaptive.config.verbose_logging) {
-            log_info("Adaptive: GPU timing initialized");
-        }
-    }
-}
-
-void multipass_begin_frame_timing(multipass_shader_t *shader) {
-    if (!shader || !shader->adaptive.gpu_timing_available) return;
-    if (!shader->adaptive.config.use_gpu_timing) return;
-    
-    /* Start timer query for this frame */
-    glBeginQuery(GL_TIME_ELAPSED, shader->adaptive.timer_queries[shader->adaptive.current_query]);
-}
-
-void multipass_end_frame_timing(multipass_shader_t *shader) {
-    if (!shader || !shader->adaptive.gpu_timing_available) return;
-    if (!shader->adaptive.config.use_gpu_timing) return;
-    
-    glEndQuery(GL_TIME_ELAPSED);
-    
-    /* Try to read result from previous frame's query (avoids stall) */
-    if (shader->adaptive.query_in_flight) {
-        int prev_query = 1 - shader->adaptive.current_query;
-        GLuint64 elapsed_ns = 0;
-        GLint available = 0;
-        
-        glGetQueryObjectiv(shader->adaptive.timer_queries[prev_query], 
-                          GL_QUERY_RESULT_AVAILABLE, &available);
-        
-        if (available) {
-            glGetQueryObjectui64v(shader->adaptive.timer_queries[prev_query],
-                                 GL_QUERY_RESULT, &elapsed_ns);
-            shader->adaptive.gpu_frame_time = (float)elapsed_ns / 1000000000.0f;
-        }
-    }
-    
-    shader->adaptive.query_in_flight = true;
-    shader->adaptive.current_query = 1 - shader->adaptive.current_query;
+    return shader ? adaptive_get_current_fps(&shader->adaptive) : 0.0f;
 }
 
 adaptive_stats_t multipass_get_adaptive_stats(const multipass_shader_t *shader) {
-    adaptive_stats_t stats = {0};
-    if (!shader) return stats;
-    
-    stats.current_fps = shader->adaptive.current_fps;
-    stats.current_scale = shader->adaptive.current_scale;
-    stats.gpu_frame_time_ms = shader->adaptive.gpu_frame_time * 1000.0f;
-    stats.target_fps = shader->adaptive.config.target_fps;
-    stats.is_locked = shader->adaptive.locked;
-    stats.gpu_timing_active = shader->adaptive.gpu_timing_available && 
-                              shader->adaptive.config.use_gpu_timing;
-    stats.fps_derivative = shader->adaptive.fps_derivative;
-    
-    return stats;
-}
-
-/* 
- * Core adaptive resolution update - called once per frame
- * Uses EMA for smoothing, derivative for prediction, and adaptive hysteresis
- */
-void multipass_update_adaptive_resolution(multipass_shader_t *shader, double current_time) {
-    if (!shader || !shader->adaptive.enabled) return;
-    
-    adaptive_state_t *state = &shader->adaptive;
-    const adaptive_config_t *cfg = &state->config;
-    
-    /* ========================================================================
-     * TIMING: Get frame time from GPU query or wall clock
-     * ======================================================================== */
-    float frame_time;
-    
-    if (state->last_frame_time == 0.0) {
-        /* First frame - initialize */
-        state->last_frame_time = current_time;
-        state->last_adjust_time = current_time;
-        state->calibration_start = current_time;
-        state->calibration_frames = 0;
-        state->calibration_sum = 0.0f;
-        state->calibrated = false;
-        state->current_fps = cfg->target_fps;
-        state->current_frame_time = 1.0f / cfg->target_fps;
-        state->prev_fps = cfg->target_fps;
-        state->fps_derivative = 0.0f;
-        state->adaptive_deadband = cfg->deadband_fps;
-        return;
+    if (!shader) {
+        adaptive_stats_t empty = {0};
+        return empty;
     }
-    
-    /* Prefer GPU timing if available (excludes vsync wait) */
-    if (state->gpu_timing_available && cfg->use_gpu_timing && state->gpu_frame_time > 0.0001f) {
-        frame_time = state->gpu_frame_time;
-    } else {
-        /* Fall back to wall clock */
-        frame_time = (float)(current_time - state->last_frame_time);
-    }
-    state->last_frame_time = current_time;
-    
-    /* Sanity check frame time */
-    if (frame_time < 0.0001f || frame_time > 1.0f) {
-        frame_time = 1.0f / cfg->target_fps;
-    }
-    
-    /* ========================================================================
-     * PHASE 1: FAST CALIBRATION (first ~200ms)
-     * Measure baseline performance and jump to estimated optimal scale
-     * ======================================================================== */
-    if (!state->calibrated) {
-        state->calibration_frames++;
-        state->calibration_sum += frame_time;
-        
-        double elapsed = current_time - state->calibration_start;
-        
-        /* Calibrate after 200ms or 12 frames, whichever comes first */
-        if ((elapsed >= 0.2 && state->calibration_frames >= 6) || state->calibration_frames >= 12) {
-            float avg_frame_time = state->calibration_sum / (float)state->calibration_frames;
-            float measured_fps = 1.0f / avg_frame_time;
-            
-            /* Initialize EMA with measured values */
-            state->current_fps = measured_fps;
-            state->current_frame_time = avg_frame_time;
-            state->prev_fps = measured_fps;
-            
-            /* If below target, calculate optimal starting scale */
-            if (measured_fps < cfg->target_fps * 0.92f) {
-                /* scale² ∝ render_time, so optimal_scale = current * sqrt(fps/target) * safety */
-                float fps_ratio = measured_fps / cfg->target_fps;
-                float optimal = state->current_scale * sqrtf(fps_ratio) * 0.88f;
-                
-                optimal = fmaxf(cfg->min_scale, fminf(cfg->max_scale, optimal));
-                
-                state->target_scale = optimal;
-                state->current_scale = optimal;  /* Jump immediately during calibration */
-                shader->resolution_scale = optimal;
-                shader->scaled_width = 0;
-                shader->scaled_height = 0;
-                
-                if (cfg->verbose_logging) {
-                    log_info("Adaptive: Calibrated %.0f FPS -> %.0f%% scale", 
-                             measured_fps, optimal * 100.0f);
-                }
-            } else if (cfg->verbose_logging) {
-                log_info("Adaptive: Calibrated %.0f FPS, full resolution OK", measured_fps);
-            }
-            
-            state->calibrated = true;
-            state->last_adjust_time = current_time;
-        }
-        return;
-    }
-    
-    /* ========================================================================
-     * PHASE 2: EMA SMOOTHING
-     * Exponential moving average is O(1) and naturally weights recent data
-     * ======================================================================== */
-    /* EMA update: new_value = alpha * sample + (1 - alpha) * old_value */
-    float alpha = cfg->ema_alpha;
-    state->current_frame_time = alpha * frame_time + (1.0f - alpha) * state->current_frame_time;
-    state->current_fps = 1.0f / state->current_frame_time;
-    
-    /* Compute FPS derivative (rate of change) for prediction */
-    float fps_delta = state->current_fps - state->prev_fps;
-    state->fps_derivative = alpha * fps_delta + (1.0f - alpha) * state->fps_derivative;
-    state->prev_fps = state->current_fps;
-    
-    /* Sync legacy field */
-    shader->current_fps = state->current_fps;
-    
-    /* ========================================================================
-     * PHASE 3: STABILITY DETECTION & LOCKING
-     * Adaptive hysteresis: widen deadband when stable, narrow when volatile
-     * ======================================================================== */
-    float fps_error = fabsf(state->current_fps - cfg->target_fps);
-    float deriv_magnitude = fabsf(state->fps_derivative);
-    
-    /* Check if we're in the stable zone */
-    bool in_stable_zone = (fps_error < state->adaptive_deadband + 1.0f) && 
-                          (deriv_magnitude < 2.0f);
-    
-    if (in_stable_zone) {
-        state->stable_time += frame_time;
-        
-        /* Gradually widen deadband with stability (up to 2x base) */
-        float stability_bonus = fminf(state->stable_time / cfg->stability_threshold, 1.0f);
-        state->adaptive_deadband = cfg->deadband_fps * (1.0f + stability_bonus);
-        
-        /* Lock scale after stability threshold */
-        if (state->stable_time >= cfg->stability_threshold && !state->locked) {
-            state->locked = true;
-            state->locked_scale = state->current_scale;
-            state->oscillation_count = 0;
-            
-            if (cfg->verbose_logging) {
-                log_info("Adaptive: LOCKED at %.0f%% (FPS=%.1f, stable %.1fs)",
-                         state->current_scale * 100.0f, state->current_fps, state->stable_time);
-            }
-        }
-    } else {
-        /* Reset stability when outside zone */
-        if (state->stable_time > 0.0f) {
-            state->stable_time = fmaxf(0.0f, state->stable_time - frame_time * 3.0f);
-        }
-        state->adaptive_deadband = cfg->deadband_fps;
-        
-        /* Unlock if FPS drifts too far */
-        if (state->locked && fps_error > cfg->deadband_fps * 3.0f) {
-            state->locked = false;
-            if (cfg->verbose_logging) {
-                log_info("Adaptive: UNLOCKED (FPS=%.1f, error=%.1f)", 
-                         state->current_fps, fps_error);
-            }
-        }
-    }
-    
-    /* Sync legacy fields */
-    shader->scale_locked = state->locked;
-    shader->locked_scale = state->locked_scale;
-    
-    /* ========================================================================
-     * PHASE 4: SCALE ADJUSTMENT (if not locked)
-     * Uses proportional control with predictive component
-     * ======================================================================== */
-    if (state->locked) {
-        state->target_scale = state->locked_scale;
-    } else {
-        double time_since_adjust = current_time - state->last_adjust_time;
-        
-        /* Adjust at most every 100ms to avoid over-correction */
-        if (time_since_adjust >= 0.1) {
-            float current_scale = state->current_scale;
-            float new_scale = current_scale;
-            int direction = 0;
-            
-            /* Effective FPS includes prediction: if derivative is negative, 
-             * FPS is dropping and we should react sooner */
-            float effective_fps = state->current_fps + state->fps_derivative * 0.3f;
-            float effective_error = effective_fps - cfg->target_fps;
-            
-            /* Below target - reduce resolution */
-            if (effective_error < -state->adaptive_deadband) {
-                /* 
-                 * Proportional reduction based on how far below target
-                 * Use quadratic relationship: adjustment ∝ sqrt(error_ratio)
-                 */
-                float error_ratio = -effective_error / cfg->target_fps;
-                float max_step = cfg->scale_down_rate * (float)time_since_adjust;
-                
-                /* Proportional + derivative: faster reduction if FPS is dropping */
-                float p_term = sqrtf(error_ratio) * 0.15f;
-                float d_term = (state->fps_derivative < -1.0f) ? 0.05f : 0.0f;
-                float adjustment = fminf(p_term + d_term, max_step);
-                
-                new_scale = current_scale * (1.0f - adjustment);
-                direction = -1;
-                
-            /* Above target - try increasing resolution */
-            } else if (effective_error > state->adaptive_deadband + 1.0f && 
-                       current_scale < cfg->max_scale - 0.01f) {
-                /*
-                 * Conservative upscaling: only if FPS is stable or improving
-                 * Theoretical max: scale_max = current * sqrt(fps / target)
-                 */
-                if (state->fps_derivative >= -0.5f) {  /* Not declining */
-                    float fps_ratio = state->current_fps / cfg->target_fps;
-                    float theoretical_max = current_scale * sqrtf(fps_ratio);
-                    float max_step = cfg->scale_up_rate * (float)time_since_adjust;
-                    
-                    /* Move 20% towards theoretical max, capped by rate */
-                    float target = current_scale + (theoretical_max - current_scale) * 0.2f;
-                    float adjustment = fminf(target - current_scale, max_step);
-                    
-                    if (adjustment > 0.005f) {
-                        new_scale = current_scale + adjustment;
-                        direction = 1;
-                    }
-                }
-            }
-            
-            /* Oscillation detection */
-            if (direction != 0) {
-                if (state->last_direction != 0 && state->last_direction != direction) {
-                    state->oscillation_count++;
-                    
-                    /* If oscillating, lock at midpoint */
-                    if (state->oscillation_count >= 2) {
-                        state->locked = true;
-                        state->locked_scale = current_scale;
-                        state->target_scale = current_scale;
-                        state->oscillation_count = 0;
-                        
-                        if (cfg->verbose_logging) {
-                            log_info("Adaptive: LOCKED at %.0f%% (oscillation)", 
-                                     current_scale * 100.0f);
-                        }
-                        goto apply_scale;
-                    }
-                } else {
-                    state->oscillation_count = 0;
-                }
-                state->last_direction = direction;
-            }
-            
-            /* Clamp and apply */
-            new_scale = fmaxf(cfg->min_scale, fminf(cfg->max_scale, new_scale));
-            
-            if (fabsf(new_scale - state->target_scale) > 0.003f) {
-                state->target_scale = new_scale;
-                
-                if (cfg->verbose_logging) {
-                    log_info("Adaptive: FPS=%.1f (d=%.1f) -> scale %.0f%% to %.0f%%",
-                             state->current_fps, state->fps_derivative,
-                             current_scale * 100.0f, new_scale * 100.0f);
-                }
-            }
-            
-            state->last_adjust_time = current_time;
-        }
-    }
-    
-apply_scale:
-    /* ========================================================================
-     * PHASE 5: SMOOTH INTERPOLATION
-     * Lerp towards target to avoid jarring visual changes
-     * ======================================================================== */
-    {
-        float diff = state->target_scale - state->current_scale;
-        float abs_diff = fabsf(diff);
-        
-        if (abs_diff > 0.001f) {
-            /* Faster when far (emergency), slower when close (polish) */
-            float lerp_rate = (abs_diff > 0.1f) ? 0.35f : 0.12f;
-            state->current_scale += diff * lerp_rate;
-            
-            /* Apply to shader */
-            shader->resolution_scale = state->current_scale;
-            shader->target_resolution_scale = state->target_scale;
-            shader->scaled_width = 0;
-            shader->scaled_height = 0;
-        } else if (abs_diff > 0.0003f) {
-            /* Snap when very close */
-            state->current_scale = state->target_scale;
-            shader->resolution_scale = state->current_scale;
-            shader->target_resolution_scale = state->target_scale;
-            shader->scaled_width = 0;
-            shader->scaled_height = 0;
-        }
-    }
+    return adaptive_get_stats(&shader->adaptive);
 }
 
 void multipass_reset(multipass_shader_t *shader) {
