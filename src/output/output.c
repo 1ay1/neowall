@@ -844,6 +844,15 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         return;
     }
 
+    /* Configure adaptive resolution scaling to target the config's FPS */
+    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : 60;
+    multipass_set_adaptive_resolution(output->multipass_shader, 
+                                      true,           /* enabled */
+                                      (float)target_fps,
+                                      0.25f,          /* min_scale */
+                                      1.0f);          /* max_scale */
+    log_info("Adaptive resolution targeting %d FPS for shader: %s", target_fps, shader_path);
+
     output->shader_start_time = get_time_ms();
 
     log_info("Successfully loaded multipass shader with %d pass(es): %s",
