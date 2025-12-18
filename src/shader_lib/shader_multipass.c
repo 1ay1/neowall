@@ -705,12 +705,20 @@ static const char *multipass_wrapper_prefix =
     "out vec4 fragColor;\n"
     "\n";
 
-static const char *multipass_wrapper_suffix =
+/* Wrapper suffix for buffer passes - no modifications to preserve HDR/data */
+static const char *multipass_wrapper_suffix_buffer =
     "\n"
     "void main() {\n"
     "    mainImage(fragColor, gl_FragCoord.xy);\n"
-    "    fragColor.rgb = clamp(fragColor.rgb, 0.0, 1.0); // Clamp to prevent over-brightness\n"
-    "    fragColor.a = 1.0; // Force opaque output - prevent transparency issues\n"
+    "}\n";
+
+/* Wrapper suffix for Image pass - clamp and force alpha for display */
+static const char *multipass_wrapper_suffix_image =
+    "\n"
+    "void main() {\n"
+    "    mainImage(fragColor, gl_FragCoord.xy);\n"
+    "    fragColor.rgb = clamp(fragColor.rgb, 0.0, 1.0);\n"
+    "    fragColor.a = 1.0;\n"
     "}\n";
 
 /**
@@ -850,11 +858,12 @@ static char *fix_shadertoy_compatibility(const char *source) {
 }
 
 /* Wrap a pass source with Shadertoy compatibility layer */
-static char *wrap_pass_source(const char *common, const char *pass_source) {
+static char *wrap_pass_source(const char *common, const char *pass_source, bool is_image_pass) {
+    const char *suffix = is_image_pass ? multipass_wrapper_suffix_image : multipass_wrapper_suffix_buffer;
     size_t prefix_len = strlen(multipass_wrapper_prefix);
     size_t common_len = common ? strlen(common) : 0;
     size_t pass_len = pass_source ? strlen(pass_source) : 0;
-    size_t suffix_len = strlen(multipass_wrapper_suffix);
+    size_t suffix_len = strlen(suffix);
 
     /* Extra space for .xy additions (worst case: every iChannelResolution gets .xy) */
     size_t total = prefix_len + (common_len * 2) + (pass_len * 2) + suffix_len + 64;
@@ -886,7 +895,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source) {
             strcat(wrapped, pass_source);
         }
     }
-    strcat(wrapped, multipass_wrapper_suffix);
+    strcat(wrapped, suffix);
 
     return wrapped;
 }
@@ -1397,7 +1406,8 @@ bool multipass_compile_pass(multipass_shader_t *shader, int pass_index) {
     }
 
     /* Wrap pass source with compatibility layer */
-    char *wrapped = wrap_pass_source(shader->common_source, pass->source);
+    bool is_image_pass = (pass->type == PASS_TYPE_IMAGE);
+    char *wrapped = wrap_pass_source(shader->common_source, pass->source, is_image_pass);
     if (!wrapped) {
         pass->compile_error = str_dup("Failed to allocate memory for shader wrapping");
         pass->is_compiled = false;
