@@ -15,6 +15,8 @@
 #include <stddef.h>
 #include "platform_compat.h"
 #include "adaptive_scale.h"
+#include "render_optimizer.h"
+#include "multipass_optimizer.h"
 
 /* Maximum number of passes supported (BufferA-D + Image) */
 #define MULTIPASS_MAX_BUFFERS 4
@@ -117,6 +119,16 @@ typedef struct {
     
     /* Industry-grade adaptive resolution scaling */
     adaptive_state_t adaptive;
+    
+    /* GPU state optimization */
+    render_optimizer_t optimizer;
+    
+    /* Smart multipass optimization (per-buffer resolution, half-rate updates) */
+    multipass_optimizer_t multipass_opt;
+    
+    /* Per-buffer resolution analysis (legacy - use multipass_opt instead) */
+    buffer_analysis_t buffer_analysis[MULTIPASS_MAX_BUFFERS];
+    bool use_smart_buffer_sizing;            /* Auto-detect optimal buffer resolutions */
     
     bool is_initialized;                     /* OpenGL resources initialized */
 } multipass_shader_t;
