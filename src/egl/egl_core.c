@@ -4,14 +4,15 @@
 #include <stdbool.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES2/gl2.h>
+#include <GL/gl.h>
 #include "../../include/neowall.h"
 #include "../../include/compositor.h"
 #include "../../include/egl/egl_core.h"
-#include "../../include/egl/capability.h"
 
 /**
- * EGL Core Dispatch System - Simplified for compilation
+ * EGL Core - Simple Desktop OpenGL 3.3 Context Management
+ * 
+ * Uses desktop OpenGL 3.3 Core profile for Shadertoy compatibility.
  */
 
 const char *egl_error_string(EGLint error) {
@@ -47,16 +48,15 @@ bool egl_check_error(const char *context) {
     return false;
 }
 
-/* Simple implementation - uses new modular system */
 bool egl_core_init(struct neowall_state *state) {
     if (!state) {
         log_error("Invalid state");
         return false;
     }
 
-    log_info("Initializing EGL with multi-version support...");
+    log_info("Initializing EGL with desktop OpenGL 3.3...");
 
-    /* Get native display and platform from compositor backend */
+    /* Get native display from compositor backend */
     if (!state->compositor_backend || !state->compositor_backend->ops) {
         log_error("No compositor backend available for EGL initialization");
         return false;
@@ -70,28 +70,22 @@ bool egl_core_init(struct neowall_state *state) {
         native_display = ops->get_native_display(backend_data);
     }
 
-    EGLenum platform = EGL_PLATFORM_WAYLAND_KHR;  /* Default */
+    EGLenum platform = EGL_PLATFORM_WAYLAND_KHR;
     if (ops->get_egl_platform) {
         platform = ops->get_egl_platform(backend_data);
     }
 
-    /* Get EGL display using platform-specific method */
+    /* Get EGL display */
     if (native_display) {
-        /* Use eglGetPlatformDisplay for proper platform handling */
         PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT =
             (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
 
         if (eglGetPlatformDisplayEXT) {
             state->egl_display = eglGetPlatformDisplayEXT(platform, native_display, NULL);
-            log_info("Using eglGetPlatformDisplayEXT with platform 0x%x", platform);
         } else {
-            /* Fallback to eglGetDisplay */
             state->egl_display = eglGetDisplay((EGLNativeDisplayType)native_display);
-            log_info("Using eglGetDisplay (fallback)");
         }
     } else {
-        /* No native display - use default */
-        log_info("Using EGL default display");
         state->egl_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     }
 
@@ -109,30 +103,17 @@ bool egl_core_init(struct neowall_state *state) {
 
     log_info("EGL version: %d.%d", major, minor);
 
-    /* Bind OpenGL ES API */
-    if (!eglBindAPI(EGL_OPENGL_ES_API)) {
-        log_error("Failed to bind OpenGL ES API");
+    /* Use desktop OpenGL for Shadertoy compatibility */
+    if (!eglBindAPI(EGL_OPENGL_API)) {
+        log_error("Failed to bind desktop OpenGL API");
         eglTerminate(state->egl_display);
         return false;
     }
 
-    /* Detect capabilities */
-    egl_detect_capabilities(state->egl_display, &state->gl_caps);
-
-    /* Try ES 3.0 first, then ES 2.0 */
-    const EGLint config_attribs_es3[] = {
+    /* Desktop OpenGL 3.3 Core Profile config */
+    const EGLint config_attribs[] = {
         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-        EGL_RED_SIZE, 8,
-        EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE, 8,
-        EGL_ALPHA_SIZE, 8,
-        EGL_NONE
-    };
-
-    const EGLint config_attribs_es2[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
         EGL_RED_SIZE, 8,
         EGL_GREEN_SIZE, 8,
         EGL_BLUE_SIZE, 8,
@@ -141,66 +122,39 @@ bool egl_core_init(struct neowall_state *state) {
     };
 
     EGLint num_configs;
-    bool using_es3 = false;
-
-    /* Try ES 3.0 */
-    if (eglChooseConfig(state->egl_display, config_attribs_es3,
-                        &state->egl_config, 1, &num_configs) && num_configs > 0) {
-        const EGLint context_attribs_es3[] = {
-            EGL_CONTEXT_MAJOR_VERSION, 3,
-            EGL_CONTEXT_MINOR_VERSION, 0,
-            EGL_NONE
-        };
-
-        state->egl_context = eglCreateContext(state->egl_display,
-                                             state->egl_config,
-                                             EGL_NO_CONTEXT,
-                                             context_attribs_es3);
-        if (state->egl_context != EGL_NO_CONTEXT) {
-            using_es3 = true;
-            state->gl_caps.gles_version = GLES_VERSION_3_0;
-            log_info("Created OpenGL ES 3.0 context (enhanced Shadertoy support)");
-        }
+    if (!eglChooseConfig(state->egl_display, config_attribs,
+                         &state->egl_config, 1, &num_configs) || num_configs == 0) {
+        log_error("Failed to choose EGL config for desktop OpenGL");
+        eglTerminate(state->egl_display);
+        return false;
     }
 
-    /* Fallback to ES 2.0 */
-    if (!using_es3) {
-        log_info("OpenGL ES 3.0 not available, falling back to ES 2.0");
+    /* Create OpenGL 3.3 Core context */
+    const EGLint context_attribs[] = {
+        EGL_CONTEXT_MAJOR_VERSION, 3,
+        EGL_CONTEXT_MINOR_VERSION, 3,
+        EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+        EGL_NONE
+    };
 
-        if (!eglChooseConfig(state->egl_display, config_attribs_es2,
-                            &state->egl_config, 1, &num_configs) || num_configs == 0) {
-            log_error("No suitable EGL configs found");
-            eglTerminate(state->egl_display);
-            return false;
-        }
-
-        const EGLint context_attribs_es2[] = {
-            EGL_CONTEXT_CLIENT_VERSION, 2,
-            EGL_NONE
-        };
-
-        state->egl_context = eglCreateContext(state->egl_display,
-                                             state->egl_config,
-                                             EGL_NO_CONTEXT,
-                                             context_attribs_es2);
-        if (state->egl_context == EGL_NO_CONTEXT) {
-            log_error("Failed to create EGL context");
-            eglTerminate(state->egl_display);
-            return false;
-        }
-
-        state->gl_caps.gles_version = GLES_VERSION_2_0;
-        log_info("Created OpenGL ES 2.0 context");
+    state->egl_context = eglCreateContext(state->egl_display,
+                                          state->egl_config,
+                                          EGL_NO_CONTEXT,
+                                          context_attribs);
+    if (state->egl_context == EGL_NO_CONTEXT) {
+        log_error("Failed to create OpenGL 3.3 context");
+        eglTerminate(state->egl_display);
+        return false;
     }
 
-    /* BUG FIX #2: Protect output list traversal with read lock */
-    /* Create surfaces and detect GL capabilities - FIRST TRAVERSAL */
+    log_info("Created OpenGL 3.3 Core context (full Shadertoy compatibility)");
+
+    /* Create surfaces for outputs */
     pthread_rwlock_rdlock(&state->output_list_lock);
 
     struct output_state *output = state->outputs;
     while (output) {
         if (output->width > 0 && output->height > 0) {
-            /* Create EGL surface using compositor abstraction */
             if (output_create_egl_surface(output)) {
                 log_debug("Created EGL surface for output %s",
                           output->model[0] ? output->model : "unknown");
@@ -214,59 +168,49 @@ bool egl_core_init(struct neowall_state *state) {
 
     pthread_rwlock_unlock(&state->output_list_lock);
 
-    /* BUG FIX #2: Second traversal also needs lock protection */
-    /* Make context current to detect GL capabilities - SECOND TRAVERSAL */
+    /* Make context current and enable vsync */
     pthread_rwlock_rdlock(&state->output_list_lock);
 
     output = state->outputs;
-    if (output && output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-        /* Enable vsync to reduce GPU usage and prevent tearing */
+    if (output && output->compositor_surface && 
+        output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+        
         if (!eglSwapInterval(state->egl_display, 1)) {
-            EGLint err = eglGetError();
-            log_debug("Could not set swap interval (vsync): 0x%x - continuing without vsync", err);
-            log_debug("This is normal on some compositors/drivers and won't affect functionality");
+            log_debug("Could not set vsync - continuing without");
         } else {
-            log_info("Enabled vsync (swap interval = 1) for power efficiency");
+            log_info("Enabled vsync");
         }
 
-        if (output->compositor_surface &&
-            eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
+        if (eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
                           output->compositor_surface->egl_surface, state->egl_context)) {
-            gles_detect_capabilities_for_context(state->egl_display,
-                                                 state->egl_context,
-                                                 &state->gl_caps);
-
-            log_info("Using OpenGL ES %s (%s Shadertoy compatibility)",
-                     gles_version_string(state->gl_caps.gles_version),
-                     state->gl_caps.gles_version >= GLES_VERSION_3_0 ? "enhanced" : "basic");
+            /* Log OpenGL info */
+            const char *gl_version = (const char *)glGetString(GL_VERSION);
+            const char *gl_renderer = (const char *)glGetString(GL_RENDERER);
+            log_info("OpenGL: %s", gl_version ? gl_version : "unknown");
+            log_info("Renderer: %s", gl_renderer ? gl_renderer : "unknown");
         }
     }
 
     pthread_rwlock_unlock(&state->output_list_lock);
 
-    /* BUG FIX #10: Third traversal also needs lock protection */
-    /* Initialize rendering resources for each output - THIRD TRAVERSAL */
-    log_debug("Initializing rendering resources for outputs...");
+    /* Initialize rendering for outputs */
     pthread_rwlock_rdlock(&state->output_list_lock);
 
     output = state->outputs;
     while (output) {
-        if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-            /* CRITICAL: Make context current for THIS output before initializing rendering
-             * Each output needs its GL resources created with its own surface current */
+        if (output->compositor_surface && 
+            output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+            
             if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
                                output->compositor_surface->egl_surface, state->egl_context)) {
-                log_error("Failed to make context current for output %s: 0x%x",
-                         output->model[0] ? output->model : "unknown", eglGetError());
+                log_error("Failed to make context current for output %s",
+                         output->model[0] ? output->model : "unknown");
                 output = output->next;
                 continue;
             }
 
             if (!output_init_render(output)) {
                 log_error("Failed to initialize rendering for output %s",
-                          output->model[0] ? output->model : "unknown");
-            } else {
-                log_debug("Initialized rendering for output %s",
                           output->model[0] ? output->model : "unknown");
             }
         }
@@ -275,9 +219,7 @@ bool egl_core_init(struct neowall_state *state) {
 
     pthread_rwlock_unlock(&state->output_list_lock);
 
-    /* BUG FIX #10: Fourth traversal also needs lock protection */
-    /* Apply any deferred configuration now that surfaces are ready - FOURTH TRAVERSAL */
-    log_debug("Applying deferred configuration to outputs...");
+    /* Apply deferred configuration */
     pthread_rwlock_rdlock(&state->output_list_lock);
 
     output = state->outputs;
@@ -296,7 +238,8 @@ void egl_core_cleanup(struct neowall_state *state) {
 
     struct output_state *output = state->outputs;
     while (output) {
-        if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+        if (output->compositor_surface && 
+            output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
             compositor_surface_destroy_egl(output->compositor_surface, state->egl_display);
         }
         output = output->next;
@@ -326,7 +269,8 @@ bool egl_core_make_current(struct neowall_state *state, struct output_state *out
                              EGL_NO_SURFACE, EGL_NO_CONTEXT);
     }
 
-    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) return false;
+    if (!output->compositor_surface || 
+        output->compositor_surface->egl_surface == EGL_NO_SURFACE) return false;
 
     return eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
                          output->compositor_surface->egl_surface, state->egl_context);
@@ -334,6 +278,7 @@ bool egl_core_make_current(struct neowall_state *state, struct output_state *out
 
 bool egl_core_swap_buffers(struct neowall_state *state, struct output_state *output) {
     if (!state || !output || state->egl_display == EGL_NO_DISPLAY) return false;
-    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) return false;
+    if (!output->compositor_surface || 
+        output->compositor_surface->egl_surface == EGL_NO_SURFACE) return false;
     return eglSwapBuffers(state->egl_display, output->compositor_surface->egl_surface);
 }

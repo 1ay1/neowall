@@ -1,7 +1,7 @@
 #ifndef TEXTURES_H
 #define TEXTURES_H
 
-#include <GLES2/gl2.h>
+#include <GL/gl.h>
 
 /* Procedural texture generators for iChannel inputs
  * These are the most commonly used textures in Shadertoy shaders

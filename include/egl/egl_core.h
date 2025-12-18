@@ -4,39 +4,19 @@
 #include <stdbool.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include "capability.h"
 
 /* Forward declarations */
 struct neowall_state;
+struct output_state;
 
 /**
- * EGL Core Dispatch System
+ * EGL Core - Simple Desktop OpenGL 3.3 Context Management
  * 
- * This module provides a unified interface for EGL/OpenGL ES initialization
- * that automatically detects and uses the best available version.
+ * Uses desktop OpenGL 3.3 Core profile for Shadertoy compatibility.
  */
 
-/* Context creation strategy */
-typedef enum {
-    CONTEXT_STRATEGY_BEST,      /* Try highest version first, fallback to lower */
-    CONTEXT_STRATEGY_PREFER_32, /* Prefer ES 3.2 if available */
-    CONTEXT_STRATEGY_PREFER_31, /* Prefer ES 3.1 if available */
-    CONTEXT_STRATEGY_PREFER_30, /* Prefer ES 3.0 if available */
-    CONTEXT_STRATEGY_FORCE_20,  /* Force ES 2.0 (for testing) */
-} egl_context_strategy_t;
-
-/* EGL state management */
-typedef struct {
-    EGLDisplay display;
-    EGLContext context;
-    EGLConfig config;
-    egl_capabilities_t caps;
-    egl_context_strategy_t strategy;
-    bool initialized;
-} egl_core_state_t;
-
 /**
- * Initialize EGL with automatic version detection
+ * Initialize EGL with desktop OpenGL 3.3 context
  * 
  * @param state NeoWall global state
  * @return true on success, false on failure
@@ -44,43 +24,11 @@ typedef struct {
 bool egl_core_init(struct neowall_state *state);
 
 /**
- * Initialize EGL with specific strategy
- * 
- * @param state NeoWall global state
- * @param strategy Context creation strategy
- * @return true on success, false on failure
- */
-bool egl_core_init_with_strategy(struct neowall_state *state, 
-                                  egl_context_strategy_t strategy);
-
-/**
  * Cleanup EGL resources
  * 
  * @param state NeoWall global state
  */
 void egl_core_cleanup(struct neowall_state *state);
-
-/**
- * Create best available OpenGL ES context
- * 
- * @param display EGL display
- * @param config EGL config
- * @param caps Capability structure (updated with detected version)
- * @return EGL context or EGL_NO_CONTEXT on failure
- */
-EGLContext egl_create_best_context(EGLDisplay display, EGLConfig config,
-                                    egl_capabilities_t *caps);
-
-/**
- * Create OpenGL ES context with specific version
- * 
- * @param display EGL display
- * @param config EGL config
- * @param version Desired OpenGL ES version
- * @return EGL context or EGL_NO_CONTEXT on failure
- */
-EGLContext egl_create_context_version(EGLDisplay display, EGLConfig config,
-                                       gles_version_t version);
 
 /**
  * Make EGL context current for an output
@@ -101,32 +49,6 @@ bool egl_core_make_current(struct neowall_state *state,
  */
 bool egl_core_swap_buffers(struct neowall_state *state,
                            struct output_state *output);
-
-/**
- * Get EGL config with best attributes
- * 
- * @param display EGL display
- * @param version Desired OpenGL ES version
- * @param config Output config
- * @return true on success, false on failure
- */
-bool egl_get_best_config(EGLDisplay display, gles_version_t version,
-                        EGLConfig *config);
-
-/**
- * Validate EGL setup
- * 
- * @param state NeoWall global state
- * @return true if valid, false otherwise
- */
-bool egl_core_validate(struct neowall_state *state);
-
-/**
- * Print EGL configuration info
- * 
- * @param state NeoWall global state
- */
-void egl_core_print_info(struct neowall_state *state);
 
 /**
  * Get human-readable error string

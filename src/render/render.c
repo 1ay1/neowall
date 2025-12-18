@@ -19,7 +19,7 @@
 #include "constants.h"
 #include "transitions.h"
 #include "shader.h"
-#include "neowall_shader_api.h"
+#include "../shader_lib/shader_multipass.h"
 #include "textures.h"
 #include "compositor.h"
 
@@ -450,6 +450,13 @@ void render_cleanup_output(struct output_state *output) {
         output->pixelate_program = 0;
     }
 
+    /* Clean up multipass shader */
+    if (output->multipass_shader != NULL) {
+        multipass_destroy(output->multipass_shader);
+        output->multipass_shader = NULL;
+    }
+
+    /* Clean up legacy shader program */
     if (output->live_shader_program != 0) {
         shader_destroy_program(output->live_shader_program);
         output->live_shader_program = 0;
@@ -853,12 +860,12 @@ static void calculate_vertex_coords(struct output_state *output, float vertices[
 
 
 
-/* Render shader wallpaper frame
+/* Render shader wallpaper frame using multipass system
  * Matches gleditor's on_gl_render exactly for consistent behavior */
 
 bool render_frame_shader(struct output_state *output) {
-    if (!output || output->live_shader_program == 0) {
-        log_error("Invalid output or shader program for render_frame_shader");
+    if (!output || !output->multipass_shader) {
+        log_error("Invalid output or multipass shader for render_frame_shader");
         return false;
     }
 
@@ -890,13 +897,10 @@ bool render_frame_shader(struct output_state *output) {
     int width = output->width;
     int height = output->height;
 
-    glViewport(0, 0, width, height);
+    /* Resize multipass buffers if needed */
+    multipass_resize(output->multipass_shader, width, height);
 
-    /* Clear to opaque black first */
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    /* Calculate shader time - matching gleditor exactly */
+    /* Calculate shader time */
     uint64_t current_time_ms = get_time_ms();
     uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : current_time_ms;
     double current_time = (current_time_ms - start_time) / 1000.0;
@@ -905,296 +909,29 @@ bool render_frame_shader(struct output_state *output) {
     float shader_speed = output->config->shader_speed > 0.0f ? output->config->shader_speed : 1.0f;
     current_time *= shader_speed;
 
-    /* Track frame count */
-    static int frame_count = 0;
-    frame_count++;
+    /* Get mouse position (or use center if not tracked) */
+    float mouse_x = output->mouse_x >= 0 ? output->mouse_x : (float)width / 2.0f;
+    float mouse_y = output->mouse_y >= 0 ? output->mouse_y : (float)height / 2.0f;
 
-    /* Use shader program */
-    glUseProgram(output->live_shader_program);
-
-    /* Set NeoWall internal uniforms - matching gleditor's on_gl_render exactly */
-    GLint loc;
-
-    loc = glGetUniformLocation(output->live_shader_program, "_neowall_time");
-    if (loc >= 0) {
-        glUniform1f(loc, (float)current_time);
-    }
-
-    loc = glGetUniformLocation(output->live_shader_program, "_neowall_resolution");
-    if (loc >= 0) {
-        glUniform2f(loc, (float)width, (float)height);
-    }
-
-    loc = glGetUniformLocation(output->live_shader_program, "_neowall_mouse");
-    if (loc >= 0) {
-        glUniform4f(loc, 0.0f, 0.0f, 0.0f, 0.0f);
-    }
-
-    loc = glGetUniformLocation(output->live_shader_program, "_neowall_frame");
-    if (loc >= 0) {
-        glUniform1i(loc, frame_count);
-    }
-
-    /* Set _neowall_date uniform (year, month, day, seconds since midnight) - matching gleditor */
-    loc = glGetUniformLocation(output->live_shader_program, "_neowall_date");
-    if (loc >= 0) {
-        struct timeval tv;
-        gettimeofday(&tv, NULL);
-        struct tm *tm_info = localtime(&tv.tv_sec);
-        float year = (float)(tm_info->tm_year + 1900);
-        float month = (float)(tm_info->tm_mon + 1);
-        float day = (float)tm_info->tm_mday;
-        float seconds = (float)(tm_info->tm_hour * 3600 + tm_info->tm_min * 60 + tm_info->tm_sec) + (float)tv.tv_usec / 1000000.0f;
-        glUniform4f(loc, year, month, day, seconds);
-    }
-
-    /* Set Shadertoy uniforms for compatibility - matching gleditor exactly */
-    loc = glGetUniformLocation(output->live_shader_program, "iResolution");
-    if (loc >= 0) {
-        float aspect = (width > 0 && height > 0) ? (float)width / (float)height : 1.0f;
-        glUniform3f(loc, (float)width, (float)height, aspect);
-    }
-
-    loc = glGetUniformLocation(output->live_shader_program, "iTime");
-    if (loc >= 0) {
-        glUniform1f(loc, (float)current_time);
-    }
-
-    loc = glGetUniformLocation(output->live_shader_program, "iTimeDelta");
-    if (loc >= 0) {
-        glUniform1f(loc, 1.0f / 60.0f);
-    }
-
-    loc = glGetUniformLocation(output->live_shader_program, "iFrame");
-    if (loc >= 0) {
-        glUniform1i(loc, frame_count);
-    }
-
-    loc = glGetUniformLocation(output->live_shader_program, "iMouse");
-    if (loc >= 0) {
-        glUniform4f(loc, 0.0f, 0.0f, 0.0f, 0.0f);
-    }
-
-    /* Bind iChannel textures */
-    if (output->channel_textures && output->channel_count > 0) {
-        for (size_t i = 0; i < output->channel_count; i++) {
-            if (output->channel_textures[i] == 0) {
-                continue;
-            }
-
-            /* Get uniform location for this channel */
-            char sampler_name[32];
-            snprintf(sampler_name, sizeof(sampler_name), "iChannel%zu", i);
-            GLint channel_loc = glGetUniformLocation(output->live_shader_program, sampler_name);
-            if (channel_loc < 0) {
-                continue;
-            }
-
-            glActiveTexture(GL_TEXTURE0 + (GLenum)i);
-            glBindTexture(GL_TEXTURE_2D, output->channel_textures[i]);
-            glUniform1i(channel_loc, (GLint)i);
-        }
-
-        /* Reset to texture unit 0 */
-        glActiveTexture(GL_TEXTURE0);
-    }
-
-    /* Draw fullscreen quad - matching gleditor exactly */
-    glBindBuffer(GL_ARRAY_BUFFER, shader_vbo);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
-
-    /* Force opaque output - disable alpha channel writes
-     * Many Shadertoy shaders output alpha=0 which makes them transparent
-     * On layer-shell surfaces, transparent = see-through to desktop */
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-    /* Re-enable alpha writes for other rendering (FPS overlay, etc) */
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-
-    glDisableVertexAttribArray(0);
+    /* Render all passes using multipass system */
+    multipass_render(output->multipass_shader,
+                     (float)current_time,
+                     mouse_x, mouse_y,
+                     false);  /* mouse_click */
 
     /* Log every 60 frames to confirm rendering is happening */
+    static int frame_count = 0;
+    frame_count++;
     if (frame_count % 60 == 0) {
-        log_info("Shader render frame %d (time=%.2f, program=%u)", 
-                 frame_count, (float)current_time, output->live_shader_program);
+        log_info("Multipass shader render frame %d (time=%.2f, passes=%d)", 
+                 frame_count, (float)current_time, output->multipass_shader->pass_count);
     }
 
-    /* Handle cross-fade transition when switching shaders */
-    const uint64_t FADE_OUT_MS = SHADER_FADE_OUT_MS;  /* Fade to black duration */
-    const uint64_t FADE_IN_MS = SHADER_FADE_IN_MS;    /* Fade from black duration */
-    const uint64_t TOTAL_FADE_MS = FADE_OUT_MS + FADE_IN_MS;
-
+    /* Handle cross-fade transition when switching shaders - simplified for multipass */
     if (output->shader_fade_start_time > 0) {
-        uint64_t fade_elapsed = current_time - output->shader_fade_start_time;
-
-        /* Keep redrawing during fade animation */
-        output->needs_redraw = true;
-
-        if (fade_elapsed < FADE_OUT_MS) {
-            /* Phase 1: Fade out to black (0ms -> 400ms) */
-            float fade_out_progress = (float)fade_elapsed / (float)FADE_OUT_MS;
-            /* Ease-in cubic for smooth acceleration */
-            float eased = fade_out_progress * fade_out_progress * fade_out_progress;
-            float fade_alpha = eased; /* 0.0 -> 1.0 (transparent to black) */
-
-            log_debug("Cross-fade phase 1: fade_out %.2f, alpha %.2f", fade_out_progress, fade_alpha);
-
-            /* Draw black overlay with state tracking */
-            set_blend_state(output, true);
-            use_program_cached(output, color_overlay_program);
-
-            GLint color_uniform = glGetUniformLocation(color_overlay_program, "color");
-            if (color_uniform >= 0) {
-                glUniform4f(color_uniform, 0.0f, 0.0f, 0.0f, fade_alpha);
-            }
-
-            /* Use persistent VBO - no upload needed */
-            glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-
-            GLint fade_pos_attrib = glGetAttribLocation(color_overlay_program, "position");
-            if (fade_pos_attrib >= 0) {
-                glVertexAttribPointer(fade_pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-                glEnableVertexAttribArray(fade_pos_attrib);
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-                glDisableVertexAttribArray(fade_pos_attrib);
-            }
-
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
-        }
-        else if (fade_elapsed >= FADE_OUT_MS && fade_elapsed < TOTAL_FADE_MS) {
-            /* Phase 2: Switch shader at blackout point, then fade in */
-            if (output->pending_shader_path[0] != '\0') {
-                /* Ensure EGL context is current before compiling shader */
-                if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE && output->state) {
-                    if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
-                                       output->compositor_surface->egl_surface, output->state->egl_context)) {
-                        log_error("Failed to make EGL context current during shader swap: 0x%x", eglGetError());
-                        output->shader_fade_start_time = 0;
-                        output->pending_shader_path[0] = '\0';
-                        /* Continue with current shader */
-                        return true;
-                    }
-                }
-
-                /* Reload iChannel textures for the new shader (config may have changed) */
-                if (!render_load_channel_textures(output, output->config)) {
-                    log_error("Failed to reload iChannel textures for new shader: %s", output->pending_shader_path);
-                    /* Continue anyway - shader may work without textures */
-                }
-
-                /* Load the new shader */
-                GLuint new_shader_program = 0;
-                if (shader_create_live_program(output->pending_shader_path, &new_shader_program, output->channel_count)) {
-                    /* Validate the new shader program before destroying old one */
-                    if (new_shader_program == 0) {
-                        log_error("Invalid shader program created for: %s", output->pending_shader_path);
-                        output->shader_fade_start_time = 0;
-                        output->pending_shader_path[0] = '\0';
-                        return true;
-                    }
-
-                    /* Destroy old shader and switch to new one */
-                    shader_destroy_program(output->live_shader_program);
-                    output->live_shader_program = new_shader_program;
-                    output->shader_start_time = current_time;
-
-                    /* Reset shader uniform cache for new program */
-                    output->shader_uniforms.position = -2;
-                    output->shader_uniforms.texcoord = -2;
-                    output->shader_uniforms.tex_sampler = -2;
-                    output->shader_uniforms.u_resolution = -2;
-                    output->shader_uniforms.u_time = -2;
-                    output->shader_uniforms.u_speed = -2;
-
-                    /* Reset iChannel uniform locations to uninitialized */
-                    if (output->shader_uniforms.iChannel && output->channel_count > 0) {
-                        for (size_t i = 0; i < output->channel_count; i++) {
-                            output->shader_uniforms.iChannel[i] = -2;
-                        }
-                    }
-
-                    /* Update config with new shader path */
-                    #pragma GCC diagnostic push
-                    #pragma GCC diagnostic ignored "-Wstringop-truncation"
-                    strncpy(output->config->shader_path, output->pending_shader_path,
-                            sizeof(output->config->shader_path) - 1);
-                    #pragma GCC diagnostic pop
-                    output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
-
-                    /* Write state to file */
-                    const char *mode_str = wallpaper_mode_to_string(output->config->mode);
-                    write_wallpaper_state(output_get_identifier(output), output->pending_shader_path, mode_str,
-                                         output->config->current_cycle_index,
-                                         output->config->cycle_count,
-                                         "active");
-
-                    log_info("Shader switched during cross-fade: %s", output->pending_shader_path);
-
-                    /* Clear pending path */
-                    output->pending_shader_path[0] = '\0';
-                } else {
-                    log_error("Failed to load pending shader: %s", output->pending_shader_path);
-
-                    /* Clean up iChannel textures that were loaded but can't be used */
-                    if (output->channel_textures) {
-                        for (size_t i = 0; i < output->channel_count; i++) {
-                            if (output->channel_textures[i] != 0) {
-                                render_destroy_texture(output->channel_textures[i]);
-                                output->channel_textures[i] = 0;
-                            }
-                        }
-                        free(output->channel_textures);
-                        output->channel_textures = NULL;
-                    }
-                    if (output->shader_uniforms.iChannel) {
-                        free(output->shader_uniforms.iChannel);
-                        output->shader_uniforms.iChannel = NULL;
-                    }
-                    output->channel_count = 0;
-
-                    output->shader_fade_start_time = 0;
-                    output->pending_shader_path[0] = '\0';
-                }
-            }
-
-            /* Fade in from black after cross-fade completes */
-            float fade_in_progress = (float)(fade_elapsed - FADE_OUT_MS) / (float)FADE_IN_MS;
-            /* Ease-out cubic for smooth deceleration */
-            float eased = 1.0f - powf(1.0f - fade_in_progress, 3.0f);
-            float fade_alpha = 1.0f - eased; /* 1.0 -> 0.0 (black to transparent) */
-
-            log_debug("Cross-fade phase 3: fade_in %.2f, alpha %.2f", fade_in_progress, fade_alpha);
-
-            /* Draw black overlay with state tracking */
-            set_blend_state(output, true);
-            use_program_cached(output, color_overlay_program);
-
-            GLint color_uniform = glGetUniformLocation(color_overlay_program, "color");
-            if (color_uniform >= 0) {
-                glUniform4f(color_uniform, 0.0f, 0.0f, 0.0f, fade_alpha);
-            }
-
-            /* Use persistent VBO - no upload needed */
-            glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
-
-            GLint fade_pos_attrib = glGetAttribLocation(color_overlay_program, "position");
-            if (fade_pos_attrib >= 0) {
-                glVertexAttribPointer(fade_pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-                glEnableVertexAttribArray(fade_pos_attrib);
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-                glDisableVertexAttribArray(fade_pos_attrib);
-            }
-
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
-        }
-        else {
-            /* Phase 3: Fade complete, reset fade state */
-            log_info("Cross-fade complete");
-            output->shader_fade_start_time = 0;
-        }
+        /* For now, just clear the fade state - multipass handles transitions differently */
+        output->shader_fade_start_time = 0;
+        output->pending_shader_path[0] = '\0';
     }
 
     /* Check for errors */
@@ -1268,8 +1005,8 @@ bool render_frame(struct output_state *output) {
             return false;
         }
 
-        /* Defensive check: ensure shader program is actually loaded */
-        if (output->live_shader_program == 0) {
+        /* Defensive check: ensure multipass shader is actually loaded */
+        if (output->multipass_shader == NULL && output->live_shader_program == 0) {
             /* Track reload attempts to prevent infinite spam */
             static uint64_t last_reload_attempt_time = 0;
             static int consecutive_failures = 0;
@@ -1287,7 +1024,7 @@ bool render_frame(struct output_state *output) {
                 /* Try to load the shader if we have a path */
                 if (output->config->shader_path[0] != '\0') {
                     output_set_shader(output, output->config->shader_path);
-                    if (output->live_shader_program == 0) {
+                    if (output->multipass_shader == NULL && output->live_shader_program == 0) {
                         consecutive_failures++;
                         log_error("Failed to reload shader (attempt %d/3), skipping frame", consecutive_failures);
 
@@ -1325,6 +1062,11 @@ bool render_frame(struct output_state *output) {
                 return false;
             }
         }
+        return render_frame_shader(output);
+    }
+
+    /* Check for multipass shader (new system) */
+    if (output->config->type == WALLPAPER_SHADER && output->multipass_shader != NULL) {
         return render_frame_shader(output);
     }
 

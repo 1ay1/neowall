@@ -68,6 +68,18 @@ void log_error(const char *format, ...) {
     va_end(args);
 }
 
+/* Log warning message */
+void log_warn(const char *format, ...) {
+    if (log_level < LOG_LEVEL_WARN) {
+        return;
+    }
+
+    va_list args;
+    va_start(args, format);
+    log_message("WARN", COLOR_YELLOW, format, args);
+    va_end(args);
+}
+
 /* Log info message */
 void log_info(const char *format, ...) {
     if (log_level < LOG_LEVEL_INFO) {

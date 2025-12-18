@@ -7,6 +7,7 @@
 #include <stdatomic.h>
 #include <GLES2/gl2.h>
 #include "../image/image.h"   /* For struct image_data and enum image_format */
+#include "../shader_lib/shader_multipass.h"  /* For multipass_shader_t */
 
 /* Constants */
 #define OUTPUT_MAX_PATH_LENGTH 4096
@@ -123,7 +124,8 @@ struct output_state {
     GLuint program;
     GLuint glitch_program;              /* Shader program for glitch transition */
     GLuint pixelate_program;            /* Shader program for pixelate transition */
-    GLuint live_shader_program;         /* Shader program for live wallpaper */
+    GLuint live_shader_program;         /* Shader program for live wallpaper (legacy, kept for compatibility) */
+    multipass_shader_t *multipass_shader; /* Multipass shader for live wallpaper (new) */
     GLuint vbo;
 
     /* Cached uniform locations for performance */

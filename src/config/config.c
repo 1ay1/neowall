@@ -226,6 +226,12 @@ char **load_shaders_from_directory(const char *dir_path, size_t *count) {
         expanded_path[sizeof(expanded_path) - 1] = '\0';
     }
 
+    /* Strip trailing slash to avoid double slashes in path construction */
+    size_t path_len = strlen(expanded_path);
+    if (path_len > 1 && expanded_path[path_len - 1] == '/') {
+        expanded_path[path_len - 1] = '\0';
+    }
+
     DIR *dir = opendir(expanded_path);
     if (!dir) {
         return NULL;  /* Not a directory */
