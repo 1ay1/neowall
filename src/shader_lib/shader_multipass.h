@@ -90,6 +90,62 @@ typedef struct {
 } multipass_pass_t;
 
 /* Complete multipass shader configuration */
+/* Adaptive resolution configuration */
+typedef struct {
+    float target_fps;           /* Target FPS (default 60) */
+    float min_scale;            /* Minimum resolution scale (default 0.25) */
+    float max_scale;            /* Maximum resolution scale (default 1.0) */
+    float deadband_fps;         /* FPS tolerance before adjusting (default 2.0) */
+    float ema_alpha;            /* EMA smoothing factor 0-1, higher=more responsive (default 0.15) */
+    float scale_down_rate;      /* Max scale reduction per second (default 0.5) */
+    float scale_up_rate;        /* Max scale increase per second (default 0.2) */
+    float stability_threshold;  /* Seconds of stability before locking (default 1.0) */
+    bool use_gpu_timing;        /* Use GL timer queries if available (default true) */
+    bool verbose_logging;       /* Enable debug logging (default false) */
+} adaptive_config_t;
+
+/* Adaptive resolution state - optimized with EMA and GPU timing */
+typedef struct {
+    /* Configuration */
+    adaptive_config_t config;
+    bool enabled;
+    
+    /* Current state */
+    float current_scale;        /* Current resolution scale */
+    float target_scale;         /* Target scale (smoothly interpolated to) */
+    float current_fps;          /* Smoothed FPS estimate (EMA) */
+    float current_frame_time;   /* Smoothed frame time in seconds (EMA) */
+    
+    /* Derivative tracking for prediction */
+    float fps_derivative;       /* Rate of FPS change (EMA smoothed) */
+    float prev_fps;             /* Previous FPS for derivative calculation */
+    
+    /* GPU timing (more accurate than wall clock) */
+    GLuint timer_queries[2];    /* Ping-pong timer queries */
+    int current_query;          /* Which query to use this frame */
+    bool gpu_timing_available;  /* GL_ARB_timer_query supported */
+    bool query_in_flight;       /* A query result is pending */
+    float gpu_frame_time;       /* Last GPU frame time in seconds */
+    
+    /* Wall clock fallback */
+    double last_frame_time;     /* Wall clock time of last frame */
+    double last_adjust_time;    /* Time of last scale adjustment */
+    
+    /* Stability and oscillation */
+    float stable_time;          /* Seconds spent near target FPS */
+    bool locked;                /* Scale is locked due to stability */
+    float locked_scale;         /* Scale value when locked */
+    int oscillation_count;      /* Consecutive direction reversals */
+    int last_direction;         /* -1=down, 0=none, 1=up */
+    float adaptive_deadband;    /* Current deadband (increases with stability) */
+    
+    /* Calibration */
+    bool calibrated;            /* Initial calibration complete */
+    int calibration_frames;     /* Frames during calibration */
+    double calibration_start;   /* Start time of calibration */
+    float calibration_sum;      /* Sum of frame times during calibration */
+} adaptive_state_t;
+
 typedef struct {
     char *common_source;                     /* Common code shared by all passes */
     multipass_pass_t passes[MULTIPASS_MAX_PASSES];
@@ -106,36 +162,37 @@ typedef struct {
     GLuint keyboard_texture;                 /* Keyboard state texture */
     GLint default_framebuffer;               /* Default framebuffer ID (may not be 0 in GTK) */
     
-    /* Performance settings */
-    float resolution_scale;                  /* Buffer resolution scale (1.0 = full, 0.5 = half) */
-    float target_resolution_scale;           /* Target scale (for smooth transitions) */
+    /* Resolution scaling */
+    float resolution_scale;                  /* Current buffer resolution scale */
     float min_resolution_scale;              /* Minimum allowed scale */
     float max_resolution_scale;              /* Maximum allowed scale */
     int scaled_width;                        /* Cached scaled width */
     int scaled_height;                       /* Cached scaled height */
     
-    /* Adaptive resolution scaling */
-    bool adaptive_resolution;                /* Enable automatic resolution adjustment */
-    float target_fps;                        /* Target FPS (default 60) */
-    float current_fps;                       /* Current measured FPS */
-    float fps_history[16];                   /* Rolling FPS history for smoothing */
-    float frame_times[16];                   /* Frame time history for analysis */
-    int fps_history_index;                   /* Current index in history */
-    double last_fps_update_time;             /* Time of last FPS measurement */
-    int frames_since_fps_update;             /* Frame counter for FPS calculation */
-    double last_scale_adjust_time;           /* Time of last scale adjustment */
+    /* Optimized adaptive resolution system */
+    adaptive_state_t adaptive;
     
-    /* Stability tracking */
-    int stable_frames;                       /* Consecutive frames near target FPS */
-    int last_adjustment_direction;           /* -1 = down, 0 = none, 1 = up */
-    int oscillation_count;                   /* Count of direction changes */
-    float locked_scale;                      /* Scale value when locked */
-    bool scale_locked;                       /* True when scale is locked (stable) */
+    /* Legacy compatibility fields (mapped to adaptive state) */
+    bool adaptive_resolution;                /* -> adaptive.enabled */
+    float target_fps;                        /* -> adaptive.config.target_fps */
+    float current_fps;                       /* -> adaptive.current_fps */
+    float target_resolution_scale;           /* -> adaptive.target_scale */
     
-    /* Initial calibration */
-    bool initial_calibration_done;           /* True after initial FPS measurement */
-    int calibration_frames;                  /* Frames counted during calibration */
-    double calibration_start_time;           /* Start time of calibration period */
+    /* Legacy fields kept for API compatibility - unused internally */
+    float fps_history[16];
+    float frame_times[16];
+    int fps_history_index;
+    double last_fps_update_time;
+    int frames_since_fps_update;
+    double last_scale_adjust_time;
+    int stable_frames;
+    int last_adjustment_direction;
+    int oscillation_count;
+    float locked_scale;
+    bool scale_locked;
+    bool initial_calibration_done;
+    int calibration_frames;
+    double calibration_start_time;
     
     bool is_initialized;                     /* OpenGL resources initialized */
 } multipass_shader_t;
@@ -374,6 +431,35 @@ void multipass_set_adaptive_resolution(multipass_shader_t *shader,
                                         float target_fps,
                                         float min_scale,
                                         float max_scale);
+
+/* Configure adaptive resolution with full options */
+void multipass_configure_adaptive(multipass_shader_t *shader,
+                                  const adaptive_config_t *config);
+
+/* Get default adaptive configuration */
+adaptive_config_t multipass_default_adaptive_config(void);
+
+/* Initialize GPU timer queries (call after GL context is ready) */
+void multipass_init_gpu_timing(multipass_shader_t *shader);
+
+/* Signal start of frame rendering (for GPU timing) */
+void multipass_begin_frame_timing(multipass_shader_t *shader);
+
+/* Signal end of frame rendering (for GPU timing) */
+void multipass_end_frame_timing(multipass_shader_t *shader);
+
+/* Get performance statistics */
+typedef struct {
+    float current_fps;
+    float current_scale;
+    float gpu_frame_time_ms;
+    float target_fps;
+    bool is_locked;
+    bool gpu_timing_active;
+    float fps_derivative;       /* Positive = improving, negative = degrading */
+} adaptive_stats_t;
+
+adaptive_stats_t multipass_get_adaptive_stats(const multipass_shader_t *shader);
 
 /**
  * Check if adaptive resolution is enabled
