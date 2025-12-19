@@ -76,16 +76,21 @@ float catenary(vec3 p) {
     vec3 pp = p;
     p.x = mod(p.x,10.)-5.;
 
-    // base poles
+    // base poles with cross arm
     float d = box(p-vec3(0.,0.,0.), vec3(.0,3.,.0), .1);
     d = smin(d, box(p-vec3(0.,2.,0.), vec3(.0,0.,1.), .1), 0.05);
+
     p.z = abs(p.z-0.)-2.;
     d = smin(d, box(p-vec3(0.,2.2,-1.), vec3(.0,0.2,0.), .1), 0.01);
 
     // power lines with catenary sag
     pp.z = abs(pp.z-0.)-2.;
-    d = min(d, capsule(p-vec3(-5.,2.4-abs(cos(pp.x*.1*PI)),-1.),10000.,.02));
-    d = min(d, capsule(p-vec3(-5.,2.9-abs(cos(pp.x*.1*PI)),-2.),10000.,.02));
+    float sag = abs(cos(pp.x*.1*PI));
+
+    // main contact wire + messenger wire
+    d = min(d, capsule(p-vec3(-5.,2.4-sag,-1.),10000.,.022));
+    d = min(d, capsule(p-vec3(-5.,2.85-sag*0.6,-1.),10000.,.015));
+    d = min(d, capsule(p-vec3(-5.,2.5-sag,-2.),10000.,.02));
 
     return d;
 }
@@ -193,8 +198,19 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     // Camera
     vec3 ro = vec3(-1.5, -.4, 1.2);
+
+    // Train shake - combined for efficiency
+    float shakeY = sin(time * 15.7) * 0.002 + sin(time * 8.3) * 0.0015;
+    float shakeX = sin(time * 4.1) * 0.0012;
+
+    // Random track joints (simplified)
+    float jointBump = pow(max(0., sin(fract(time * 0.4) * 6.28)), 16.0) * step(0.65, fract(sin(floor(time * 0.4) * 127.1) * 43758.5453)) * 0.006;
+
+    ro.y += shakeY + jointBump;
+    ro.x += shakeX;
+
     vec3 rd = normalize(vec3(v, 2.5));
-    rd.xz = rot(.15) * rd.xz;
+    rd.xz = rot(.15 + sin(time * 6.5) * 0.001) * rd.xz;
     rd.yz = rot(.1) * rd.yz;
 
     // Trace main ray
