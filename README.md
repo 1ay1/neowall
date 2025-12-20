@@ -135,9 +135,9 @@ yay -S gleditor-git
 ┌────────────────────────────────────────┐
 │            NeoWall Daemon              │
 ├────────────────────────────────────────┤
-│  Config Parser → Event Loop → Shaders │
+│  Config Parser → Event Loop → Shaders  │
 ├────────────────────────────────────────┤
-│  Wayland (layer-shell)  │  X11 (EWMH) │
+│  Wayland (layer-shell)  │  X11 (EWMH)  │
 ├────────────────────────────────────────┤
 │           EGL / OpenGL 3.3             │
 └────────────────────────────────────────┘
