@@ -2,8 +2,6 @@
   <img src="packaging/neowall.svg" alt="NeoWall" width="300"/>
 </p>
 
-<h1 align="center">NeoWall</h1>
-
 <p align="center">
   <strong>Live GPU shaders as your wallpaper. Yes, really.</strong>
 </p>
