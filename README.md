@@ -29,12 +29,21 @@ neowall   # That's it. You now have an animated wallpaper.
 
 ## Install
 
+**Pre-built binaries:**
+
+Download from [Releases](https://github.com/1ay1/neowall/releases/latest):
+```bash
+# Arch, Debian/Ubuntu, or Fedora
+tar -xzf neowall-linux-x86_64-*.tar.gz
+sudo mv neowall /usr/local/bin/
+```
+
 **Arch (AUR):**
 ```bash
 yay -S neowall-git
 ```
 
-**Build it yourself:**
+**Build from source:**
 ```bash
 git clone https://github.com/1ay1/neowall && cd neowall
 meson setup build && ninja -C build
