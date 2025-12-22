@@ -4,7 +4,7 @@
 # This meson.build replicates the functionality of the Makefile exactly.
 
 project('neowall', 'c',
-  version: '0.4.4',
+  version: '0.4.5',
   license: 'MIT',
   default_options: [
     'c_std=c11',
