@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <math.h>
-#include <GLES2/gl2.h>
+#include <GL/gl.h>
 #include "neowall.h"
 
 /* Generate grayscale noise texture

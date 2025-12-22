@@ -32,12 +32,11 @@ typedef struct {
 bool transition_begin(transition_context_t *ctx, struct output_state *output, GLuint program);
 bool transition_draw_textured_quad(transition_context_t *ctx, GLuint texture, 
                                     float alpha, const float *custom_vertices);
+bool transition_draw_blended_textures(transition_context_t *ctx, 
+                                       GLuint texture0, GLuint texture1,
+                                       float progress, float time,
+                                       const float *resolution);
 void transition_end(transition_context_t *ctx);
-
-/* Low-level helper functions (for advanced use) */
-void transition_setup_fullscreen_quad(GLuint vbo, float vertices[16]);
-void transition_bind_texture_for_transition(GLuint texture, GLenum texture_unit);
-void transition_setup_common_attributes(GLuint program, GLuint vbo);
 
 /* Individual transition implementations */
 bool transition_fade_render(struct output_state *output, float progress);

@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <pthread.h>
 #include <stdatomic.h>
-#include <GLES2/gl2.h>
+#include <GL/gl.h>
 #include "../image/image.h"   /* For struct image_data and enum image_format */
 #include "../shader_lib/shader_multipass.h"  /* For multipass_shader_t */
 
@@ -126,6 +126,7 @@ struct output_state {
     GLuint pixelate_program;            /* Shader program for pixelate transition */
     GLuint live_shader_program;         /* Shader program for live wallpaper (legacy, kept for compatibility) */
     multipass_shader_t *multipass_shader; /* Multipass shader for live wallpaper (new) */
+    GLuint vao;                         /* Vertex array object (required for OpenGL 3.3 Core) */
     GLuint vbo;
 
     /* Cached uniform locations for performance */

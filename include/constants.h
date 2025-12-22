@@ -36,8 +36,8 @@
 /* ============================================================================
  * OpenGL/Shader Version
  * ============================================================================ */
-#define GLSL_VERSION_STRING     "#version 100\n"        /* OpenGL ES 2.0 */
-#define GLSL_VERSION_LINE       "#version 100\\n"       /* For concatenated strings */
+#define GLSL_VERSION_STRING     "#version 330 core\n"   /* OpenGL 3.3 Core */
+#define GLSL_VERSION_LINE       "#version 330 core\\n"  /* For concatenated strings */
 
 /* ============================================================================
  * Default Values

@@ -4,7 +4,7 @@
 #include <math.h>
 #include <time.h>
 #include <sys/time.h>
-#include <GLES2/gl2.h>
+#include <GL/gl.h>
 #include <EGL/egl.h>
 
 /* GPU timeout detection threshold in milliseconds.
@@ -40,18 +40,18 @@ static bool render_frame_transition(struct output_state *output, float progress)
 
 /* Simple color shader for overlay effects */
 static const char *color_vertex_shader =
-    "#version 100\n"
-    "attribute vec2 position;\n"
+    "#version 330 core\n"
+    "in vec2 position;\n"
     "void main() {\n"
     "    gl_Position = vec4(position, 0.0, 1.0);\n"
     "}\n";
 
 static const char *color_fragment_shader =
-    "#version 100\n"
-    "precision mediump float;\n"
+    "#version 330 core\n"
+    "out vec4 fragColor;\n"
     "uniform vec4 color;\n"
     "void main() {\n"
-    "    gl_FragColor = color;\n"
+    "    fragColor = color;\n"
     "}\n";
 
 static GLuint color_overlay_program = 0;
@@ -365,6 +365,10 @@ bool render_init_output(struct output_state *output) {
         return false;
     }
 
+    /* Create VAO - required for OpenGL 3.3 Core Profile */
+    glGenVertexArrays(1, &output->vao);
+    glBindVertexArray(output->vao);
+
     /* Create persistent VBO with static data - eliminates per-frame uploads */
     glGenBuffers(1, &output->vbo);
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
@@ -398,6 +402,12 @@ void render_cleanup_output(struct output_state *output) {
     }
 
     log_debug("Cleaning up rendering for output %s", output->model);
+
+    /* Delete VAO */
+    if (output->vao) {
+        glDeleteVertexArrays(1, &output->vao);
+        output->vao = 0;
+    }
 
     /* Delete textures */
     if (output->texture != 0) {
@@ -1086,6 +1096,9 @@ bool render_frame(struct output_state *output) {
         /* Use transition rendering */
         return render_frame_transition(output, output->transition_progress);
     }
+
+    /* Bind VAO - required for OpenGL 3.3 Core Profile */
+    glBindVertexArray(output->vao);
 
     /* Set viewport */
     glViewport(0, 0, output->width, output->height);

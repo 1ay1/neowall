@@ -1,6 +1,17 @@
+/**
+ * Transition System - Unified API for wallpaper transitions
+ *
+ * Provides a single source of truth for transition rendering with:
+ * - Common OpenGL state management (VAO, viewport, clear, blend)
+ * - Single-texture draws (fade, slide)
+ * - Multi-texture blended draws (glitch, pixelate)
+ *
+ * All transitions use transition_begin() / transition_end() for setup/cleanup.
+ */
+
 #include <stddef.h>
-#include <GLES2/gl2.h>
 #include <string.h>
+#include <GL/gl.h>
 #include "neowall.h"
 #include "constants.h"
 #include "transitions.h"
@@ -69,196 +80,77 @@ bool transition_render(struct output_state *output, enum transition_type type, f
     return false;
 }
 
-/**
- * Common Transition Helper Functions (DRY Principle)
- * 
- * These functions provide shared functionality across all transitions
- * to avoid code duplication and ensure consistency.
- */
+/* ============================================================================
+ * Internal Helper Functions (static - not exposed in header)
+ * ============================================================================ */
 
-/**
- * Setup fullscreen quad vertices for transitions
- * 
- * Creates a simple fullscreen quad with standard texture coordinates.
- * This provides consistent rendering during transitions regardless of
- * image aspect ratios or display modes.
- * 
- * @param vbo VBO to bind and upload data to
- * @param vertices Output array to populate (must be 16 floats)
- */
-void transition_setup_fullscreen_quad(GLuint vbo, float vertices[16]) {
-    /* Fullscreen quad: position (x,y) and texcoord (u,v) interleaved */
-    vertices[0]  = -1.0f; vertices[1]  =  1.0f; vertices[2]  = 0.0f; vertices[3]  = 0.0f;  /* top-left */
-    vertices[4]  =  1.0f; vertices[5]  =  1.0f; vertices[6]  = 1.0f; vertices[7]  = 0.0f;  /* top-right */
-    vertices[8]  = -1.0f; vertices[9]  = -1.0f; vertices[10] = 0.0f; vertices[11] = 1.0f;  /* bottom-left */
-    vertices[12] =  1.0f; vertices[13] = -1.0f; vertices[14] = 1.0f; vertices[15] = 1.0f;  /* bottom-right */
-    
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 16, vertices, GL_DYNAMIC_DRAW);
+static void setup_fullscreen_quad(float vertices[16]) {
+    vertices[0]  = -1.0f; vertices[1]  =  1.0f; vertices[2]  = 0.0f; vertices[3]  = 0.0f;
+    vertices[4]  =  1.0f; vertices[5]  =  1.0f; vertices[6]  = 1.0f; vertices[7]  = 0.0f;
+    vertices[8]  = -1.0f; vertices[9]  = -1.0f; vertices[10] = 0.0f; vertices[11] = 1.0f;
+    vertices[12] =  1.0f; vertices[13] = -1.0f; vertices[14] = 1.0f; vertices[15] = 1.0f;
 }
 
-/**
- * Bind texture for transition rendering with consistent settings
- * 
- * @param texture Texture to bind
- * @param texture_unit GL_TEXTURE0, GL_TEXTURE1, etc.
- */
-void transition_bind_texture_for_transition(GLuint texture, GLenum texture_unit) {
+static void bind_texture(GLuint texture, GLenum texture_unit) {
     glActiveTexture(texture_unit);
     glBindTexture(GL_TEXTURE_2D, texture);
-    
-    /* Always use CLAMP_TO_EDGE during transitions to prevent artifacts
-     * This ensures edges don't wrap or repeat unexpectedly */
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
 
-/**
- * Setup common vertex attributes for transitions
- * 
- * Most transitions use position and texcoord attributes with the same layout.
- * This function sets them up consistently.
- * 
- * @param program Shader program to get attribute locations from
- * @param vbo VBO that's already bound with vertex data
- */
-void transition_setup_common_attributes(GLuint program, GLuint vbo) {
-    GLint pos_attrib = glGetAttribLocation(program, "position");
-    GLint tex_attrib = glGetAttribLocation(program, "texcoord");
-    
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    
-    /* Position attribute (x, y) - first 2 floats of each vertex */
-    if (pos_attrib >= 0) {
-        glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
-                             4 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(pos_attrib);
-    }
-    
-    /* Texcoord attribute (u, v) - last 2 floats of each vertex */
-    if (tex_attrib >= 0) {
-        glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
-                             4 * sizeof(float), (void*)(2 * sizeof(float)));
-        glEnableVertexAttribArray(tex_attrib);
-    }
-}
+/* ============================================================================
+ * Public Transition Context API
+ * ============================================================================ */
 
-/**
- * High-Level Transition Context API
- * 
- * This API provides automatic OpenGL state management for transitions,
- * eliminating the need for each transition to manually handle:
- * - Error clearing
- * - Viewport setup
- * - Vertex attribute management
- * - Buffer binding
- * - State cleanup
- * 
- * This ensures consistent behavior across all transitions and proper
- * multi-monitor support.
- */
-
-/**
- * Begin a transition rendering context
- * 
- * Initializes OpenGL state for transition rendering. This function:
- * - Clears any previous OpenGL errors
- * - Sets up viewport and clears the screen
- * - Activates the shader program
- * - Caches attribute locations
- * - Sets up fullscreen quad vertices
- * - Enables blending
- * 
- * @param ctx Transition context to initialize
- * @param output Output state
- * @param program Shader program to use for rendering
- * @return true on success, false on error
- */
 bool transition_begin(transition_context_t *ctx, struct output_state *output, GLuint program) {
     if (!ctx || !output) {
         log_error("transition_begin: invalid parameters");
         return false;
     }
-    
     if (program == 0) {
         log_error("transition_begin: invalid shader program");
         return false;
     }
-    
-    /* Initialize context */
+
     memset(ctx, 0, sizeof(transition_context_t));
     ctx->output = output;
     ctx->program = program;
-    ctx->blend_enabled = false;
-    ctx->error_occurred = false;
-    
-    /* Clear any previous OpenGL errors (critical for multi-monitor) */
+
+    /* Clear previous GL errors */
     while (glGetError() != GL_NO_ERROR);
-    
-    /* Set viewport */
+
+    /* Bind VAO - required for OpenGL 3.3 Core Profile */
+    glBindVertexArray(output->vao);
+
     glViewport(0, 0, output->width, output->height);
-    
-    /* Clear screen */
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    
-    /* Use shader program */
+
     glUseProgram(program);
-    
-    /* Cache attribute locations */
+
     ctx->pos_attrib = glGetAttribLocation(program, "position");
     ctx->tex_attrib = glGetAttribLocation(program, "texcoord");
-    
-    /* Setup fullscreen quad vertices */
-    ctx->vertices[0]  = -1.0f; ctx->vertices[1]  =  1.0f; ctx->vertices[2]  = 0.0f; ctx->vertices[3]  = 0.0f;
-    ctx->vertices[4]  =  1.0f; ctx->vertices[5]  =  1.0f; ctx->vertices[6]  = 1.0f; ctx->vertices[7]  = 0.0f;
-    ctx->vertices[8]  = -1.0f; ctx->vertices[9]  = -1.0f; ctx->vertices[10] = 0.0f; ctx->vertices[11] = 1.0f;
-    ctx->vertices[12] =  1.0f; ctx->vertices[13] = -1.0f; ctx->vertices[14] = 1.0f; ctx->vertices[15] = 1.0f;
-    
-    /* Enable blending for transitions */
+
+    setup_fullscreen_quad(ctx->vertices);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     ctx->blend_enabled = true;
-    
+
     return true;
 }
 
-/**
- * Draw a textured quad in transition context
- * 
- * This function handles all state management for drawing a single textured quad:
- * - Binds and uploads vertex data
- * - Sets up vertex attributes
- * - Binds texture
- * - Sets alpha uniform
- * - Draws the quad
- * - Maintains proper state between draws
- * 
- * @param ctx Transition context (must be initialized with transition_begin)
- * @param texture Texture to bind (or 0 to skip texture binding)
- * @param alpha Alpha value for the draw (set to 1.0 for opaque, or progress for fade)
- * @param custom_vertices Optional custom vertices (or NULL to use fullscreen quad)
- * @return true on success, false on error
- */
-bool transition_draw_textured_quad(transition_context_t *ctx, GLuint texture, 
+bool transition_draw_textured_quad(transition_context_t *ctx, GLuint texture,
                                     float alpha, const float *custom_vertices) {
-    if (!ctx || !ctx->output) {
-        log_error("transition_draw_textured_quad: invalid context");
+    if (!ctx || !ctx->output || ctx->error_occurred) {
         return false;
     }
-    
-    if (ctx->error_occurred) {
-        return false;  /* Don't attempt more draws if an error occurred */
-    }
-    
-    /* Use custom vertices if provided, otherwise use cached fullscreen quad */
-    const float *vertices_to_use = custom_vertices ? custom_vertices : ctx->vertices;
-    
-    /* Bind VBO and upload vertex data */
+
+    const float *verts = custom_vertices ? custom_vertices : ctx->vertices;
+
     glBindBuffer(GL_ARRAY_BUFFER, ctx->output->vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 16, vertices_to_use, GL_DYNAMIC_DRAW);
-    
-    /* Setup vertex attributes (do this for every draw to ensure state is correct) */
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 16, verts, GL_DYNAMIC_DRAW);
+
     if (ctx->pos_attrib >= 0) {
         glVertexAttribPointer(ctx->pos_attrib, 2, GL_FLOAT, GL_FALSE,
                              4 * sizeof(float), (void*)0);
@@ -269,80 +161,107 @@ bool transition_draw_textured_quad(transition_context_t *ctx, GLuint texture,
                              4 * sizeof(float), (void*)(2 * sizeof(float)));
         glEnableVertexAttribArray(ctx->tex_attrib);
     }
-    
-    /* Bind texture if provided */
+
     if (texture != 0) {
-        transition_bind_texture_for_transition(texture, GL_TEXTURE0);
+        bind_texture(texture, GL_TEXTURE0);
         GLint tex_uniform = glGetUniformLocation(ctx->program, "texture0");
         if (tex_uniform >= 0) {
             glUniform1i(tex_uniform, 0);
         }
     }
-    
-    /* Set alpha uniform if available */
+
     GLint alpha_uniform = glGetUniformLocation(ctx->program, "alpha");
     if (alpha_uniform >= 0) {
         glUniform1f(alpha_uniform, alpha);
     }
-    
-    /* Draw the quad */
+
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    
-    /* Check for errors */
+
     GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
         log_error("OpenGL error during transition draw: 0x%x", error);
         ctx->error_occurred = true;
         return false;
     }
-    
     return true;
 }
 
-/**
- * End transition rendering context
- * 
- * Cleans up all OpenGL state that was set up during transition_begin:
- * - Disables vertex attributes
- * - Unbinds buffers and textures
- * - Disables blending
- * - Unbinds shader program
- * - Checks for final errors
- * 
- * @param ctx Transition context to clean up
- */
-void transition_end(transition_context_t *ctx) {
-    if (!ctx) {
-        return;
+bool transition_draw_blended_textures(transition_context_t *ctx,
+                                       GLuint texture0, GLuint texture1,
+                                       float progress, float time,
+                                       const float *resolution) {
+    if (!ctx || !ctx->output || ctx->error_occurred) {
+        return false;
     }
-    
-    /* Disable vertex attributes */
+
+    glBindBuffer(GL_ARRAY_BUFFER, ctx->output->vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 16, ctx->vertices, GL_DYNAMIC_DRAW);
+
     if (ctx->pos_attrib >= 0) {
-        glDisableVertexAttribArray(ctx->pos_attrib);
+        glVertexAttribPointer(ctx->pos_attrib, 2, GL_FLOAT, GL_FALSE,
+                             4 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(ctx->pos_attrib);
     }
     if (ctx->tex_attrib >= 0) {
-        glDisableVertexAttribArray(ctx->tex_attrib);
+        glVertexAttribPointer(ctx->tex_attrib, 2, GL_FLOAT, GL_FALSE,
+                             4 * sizeof(float), (void*)(2 * sizeof(float)));
+        glEnableVertexAttribArray(ctx->tex_attrib);
     }
-    
-    /* Unbind buffers and textures */
+
+    /* Bind textures */
+    bind_texture(texture0, GL_TEXTURE0);
+    GLint tex0_loc = glGetUniformLocation(ctx->program, "texture0");
+    if (tex0_loc >= 0) glUniform1i(tex0_loc, 0);
+
+    bind_texture(texture1, GL_TEXTURE1);
+    GLint tex1_loc = glGetUniformLocation(ctx->program, "texture1");
+    if (tex1_loc >= 0) glUniform1i(tex1_loc, 1);
+
+    /* Set uniforms */
+    GLint prog_loc = glGetUniformLocation(ctx->program, "progress");
+    if (prog_loc >= 0) glUniform1f(prog_loc, progress);
+
+    GLint time_loc = glGetUniformLocation(ctx->program, "time");
+    if (time_loc >= 0) glUniform1f(time_loc, time);
+
+    if (resolution) {
+        GLint res_loc = glGetUniformLocation(ctx->program, "resolution");
+        if (res_loc >= 0) glUniform2f(res_loc, resolution[0], resolution[1]);
+    }
+
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+    GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        log_error("OpenGL error during blended transition: 0x%x", error);
+        ctx->error_occurred = true;
+        return false;
+    }
+    return true;
+}
+
+void transition_end(transition_context_t *ctx) {
+    if (!ctx) return;
+
+    if (ctx->pos_attrib >= 0) glDisableVertexAttribArray(ctx->pos_attrib);
+    if (ctx->tex_attrib >= 0) glDisableVertexAttribArray(ctx->tex_attrib);
+
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, 0);
-    
-    /* Disable blending if it was enabled */
-    if (ctx->blend_enabled) {
-        glDisable(GL_BLEND);
-    }
-    
-    /* Unbind shader program */
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    if (ctx->blend_enabled) glDisable(GL_BLEND);
     glUseProgram(0);
-    
-    /* Final error check */
+
     GLenum error = glGetError();
     if (error != GL_NO_ERROR && !ctx->error_occurred) {
         log_error("OpenGL error during transition cleanup: 0x%x", error);
     }
-    
-    /* Update output state */
+
     if (ctx->output && !ctx->error_occurred) {
         ctx->output->needs_redraw = true;
         ctx->output->frames_rendered++;

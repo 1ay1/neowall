@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <GLES2/gl2.h>
+#include <GL/gl.h>
 
 /* Forward declarations */
 struct output_state;
