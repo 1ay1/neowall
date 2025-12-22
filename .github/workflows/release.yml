@@ -1,4 +1,4 @@
-name: Create Release
+name: Release
 
 on:
   push:
@@ -7,12 +7,119 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version number (e.g., 0.4.4)"
+        description: "Version number (e.g., 0.4.5)"
         required: true
         type: string
 
 jobs:
+  build-arch:
+    name: Build (Arch Linux)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          meson setup build --buildtype=release -Doptimization=2
+          ninja -C build
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp build/neowall dist/
+          strip dist/neowall
+          cd dist && tar -czf neowall-linux-x86_64-arch.tar.gz neowall
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neowall-arch
+          path: dist/neowall-linux-x86_64-arch.tar.gz
+
+  build-debian:
+    name: Build (Debian/Ubuntu)
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bookworm
+
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential git pkg-config meson ninja-build \
+            libwayland-dev wayland-protocols libwayland-egl1-mesa \
+            libx11-dev libxrandr-dev \
+            libegl1-mesa-dev libgl-dev \
+            libpng-dev libjpeg-dev
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          meson setup build --buildtype=release -Doptimization=2
+          ninja -C build
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp build/neowall dist/
+          strip dist/neowall
+          cd dist && tar -czf neowall-linux-x86_64-debian.tar.gz neowall
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neowall-debian
+          path: dist/neowall-linux-x86_64-debian.tar.gz
+
+  build-fedora:
+    name: Build (Fedora)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y gcc meson ninja-build wayland-devel mesa-libGL-devel \
+            mesa-libEGL-devel libpng-devel libjpeg-turbo-devel \
+            wayland-protocols-devel libX11-devel libXrandr-devel git
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          meson setup build --buildtype=release -Doptimization=2
+          ninja -C build
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp build/neowall dist/
+          strip dist/neowall
+          cd dist && tar -czf neowall-linux-x86_64-fedora.tar.gz neowall
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neowall-fedora
+          path: dist/neowall-linux-x86_64-fedora.tar.gz
+
   release:
+    name: Create Release
+    needs: [build-arch, build-debian, build-fedora]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -36,85 +143,103 @@ jobs:
             echo "TAG=$TAG" >> $GITHUB_OUTPUT
           fi
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            meson \
-            ninja-build \
-            wayland-protocols \
-            libwayland-dev \
-            libpng-dev \
-            libjpeg-dev \
-            libgles2-mesa-dev \
-            libegl1-mesa-dev \
-            libx11-dev \
-            libxrandr-dev \
-            pkg-config \
-            gcc
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
-      - name: Build neowall
-        run: |
-          meson setup build
-          ninja -C build
-
-      - name: Create tarball
+      - name: Prepare release assets
         run: |
           mkdir -p release
-          tar -czf release/neowall-${{ steps.version.outputs.VERSION }}.tar.gz \
+          cp artifacts/neowall-arch/*.tar.gz release/
+          cp artifacts/neowall-debian/*.tar.gz release/
+          cp artifacts/neowall-fedora/*.tar.gz release/
+
+          # Create source tarball
+          tar -czf release/neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz \
             --exclude='.git' \
             --exclude='release' \
+            --exclude='artifacts' \
             --exclude='.github' \
             --exclude='build' \
+            --exclude='builddir' \
             --transform "s,^,neowall-${{ steps.version.outputs.VERSION }}/," \
             *
+
+          # Create checksums
+          cd release
+          sha256sum *.tar.gz > SHA256SUMS.txt
 
       - name: Generate changelog
         id: changelog
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            # Get previous tag
-            PREV_TAG=$(git describe --abbrev=0 --tags ${{ steps.version.outputs.TAG }}^ 2>/dev/null || echo "")
-            if [ -n "$PREV_TAG" ]; then
-              echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
-              git log $PREV_TAG..${{ steps.version.outputs.TAG }} --pretty=format:"- %s (%h)" >> $GITHUB_OUTPUT
-              echo "" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-            else
-              echo "CHANGELOG=Initial release" >> $GITHUB_OUTPUT
-            fi
+          PREV_TAG=$(git describe --abbrev=0 --tags ${{ steps.version.outputs.TAG }}^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            {
+              echo "CHANGELOG<<EOF"
+              git log $PREV_TAG..${{ steps.version.outputs.TAG }} --pretty=format:"- %s" | head -20
+              echo ""
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
           else
-            echo "CHANGELOG=Manual release of version ${{ steps.version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+            echo "CHANGELOG=Initial release" >> $GITHUB_OUTPUT
           fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.TAG }}
-          name: Release ${{ steps.version.outputs.TAG }}
+          name: NeoWall ${{ steps.version.outputs.TAG }}
           body: |
             ## NeoWall ${{ steps.version.outputs.VERSION }}
+
+            GPU-accelerated live shader wallpapers for Wayland & X11.
 
             ### Changes
             ${{ steps.changelog.outputs.CHANGELOG }}
 
+            ### Downloads
+
+            | File | Description |
+            |------|-------------|
+            | `neowall-linux-x86_64-arch.tar.gz` | Binary for Arch Linux |
+            | `neowall-linux-x86_64-debian.tar.gz` | Binary for Debian/Ubuntu |
+            | `neowall-linux-x86_64-fedora.tar.gz` | Binary for Fedora |
+            | `neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz` | Source code |
+
             ### Installation
+
+            #### From Binary
+            ```bash
+            # Download the appropriate binary for your distro
+            tar -xzf neowall-linux-x86_64-*.tar.gz
+            sudo mv neowall /usr/local/bin/
+
+            # Copy shaders (optional - download source for shaders)
+            mkdir -p ~/.config/neowall/shaders
+            ```
 
             #### Arch Linux (AUR)
             ```bash
             yay -S neowall-git
             ```
 
-            #### From source
+            #### From Source
             ```bash
-            tar -xzf neowall-${{ steps.version.outputs.VERSION }}.tar.gz
+            tar -xzf neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz
             cd neowall-${{ steps.version.outputs.VERSION }}
             meson setup build
             ninja -C build
             sudo ninja -C build install
             ```
+
+            ### Requirements
+            - OpenGL 3.3+ compatible GPU
+            - Wayland compositor with layer-shell support (Hyprland, Sway, etc.) OR X11
+
           files: |
-            release/neowall-${{ steps.version.outputs.VERSION }}.tar.gz
+            release/*.tar.gz
+            release/SHA256SUMS.txt
           draft: false
           prerelease: false
         env:
