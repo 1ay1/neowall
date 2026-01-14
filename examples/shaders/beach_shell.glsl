@@ -1,6 +1,6 @@
 // Common: Modeling
 // Image: Rendering
-// Optimized version: reduced redundant calculations, cached trig/sqrt, inlined functions
+// Quality restored version
 
 
 // Constants/Uniforms
@@ -182,9 +182,8 @@ float mapShell(vec3 p) {
 
 // Numerical gradient of the shell SDF
 vec3 gradShell(vec3 p) {
-    const float h = 0.001;
-    const float h2 = 0.002;
-    // Tetrahedron gradient - unrolled for optimization
+    const float h = 0.0005;
+    // Tetrahedron gradient
     vec3 e0 = vec3(1,1,1);
     vec3 e1 = vec3(1,-1,-1);
     vec3 e2 = vec3(-1,1,-1);
@@ -257,17 +256,13 @@ vec4 mapGround(vec3 p) {
     float beachSeaDiff = beach - sea;
     float seaBeachDiff = sea - beach;
 
-    // Sea wave - only compute when close
-    if (abs(p.z - sea) < 0.1) {
-        float waveFade = 0.005*tanh(2.0*max(seaBeachDiff, 0.0));
-        sea += waveFade * sin(10.0*(p.x-uTime-sin(p.y))) * sin(10.0*(p.y+uTime-sin(p.x)));
-    }
+    // Sea wave
+    float waveFade = 0.005*tanh(2.0*max(seaBeachDiff, 0.0));
+    sea += waveFade * sin(10.0*(p.x-uTime-sin(p.y))) * sin(10.0*(p.y+uTime-sin(p.x)));
 
-    // Sand grains - only compute when close
-    if (abs(p.z - beach) < 0.1) {
-        float grainFade = 0.005*tanh(5.0*max(beachSeaDiff, 0.0));
-        beach += grainFade * GradientNoise2D(50.0*p.xy);
-    }
+    // Sand grains
+    float grainFade = 0.005*tanh(5.0*max(beachSeaDiff, 0.0));
+    beach += grainFade * GradientNoise2D(50.0*p.xy);
 
     // Recalculate after modifications
     beachSeaDiff = beach - sea;
@@ -286,7 +281,7 @@ vec4 mapGround(vec3 p) {
 }
 
 vec3 gradGround(vec3 p) {
-    const float h = 0.01;
+    const float h = 0.002;
     vec3 e0 = vec3(1,1,1);
     vec3 e1 = vec3(1,-1,-1);
     vec3 e2 = vec3(-1,1,-1);
@@ -318,13 +313,13 @@ bool intersectConch(vec3 ro, vec3 rd, inout float t, float tf, float eps) {
     t = t0;
 
     float v0 = 0.0, v, dt;
-    for (int i=ZERO; i<80; i++) {
+    for (int i=ZERO; i<120; i++) {
         v = mapShell(ro+rd*t);
         if (v*v0 < 0.0) {
             t -= dt * v/(v-v0);
             return true;
         }
-        dt = max(abs(v), eps);
+        dt = max(abs(v), eps*0.5);
         t += dt;
         if (t > t1) return false;
         v0 = v;
@@ -337,12 +332,12 @@ float calcShadow(vec3 ro, vec3 rd) {
     if (!boxIntersection(0.2, ro, rd, t0, t1)) return 1.0;
 
     float sh = 1.0;
-    float t = max(t0, 0.01) + 0.02*hash22(rd.xy).x;
+    float t = max(t0, 0.01) + 0.01*hash22(rd.xy).x;
 
-    for (int i=ZERO; i<40; i++) {
+    for (int i=ZERO; i<64; i++) {
         float h = 0.8*mapShell(ro + rd*t);
-        sh = min(sh, smoothstep(0.0, 1.0, 20.0*h/t));
-        t += clamp(h, 0.02, 0.5);
+        sh = min(sh, smoothstep(0.0, 1.0, 32.0*h/t));
+        t += clamp(h, 0.01, 0.3);
         if (h < 0.0) return 0.0;
         if (t > t1) break;
     }
@@ -355,12 +350,12 @@ float calcShadow(vec3 ro, vec3 rd) {
 bool intersectBeach(vec3 ro, vec3 rd, out float t, float tf) {
     t = 0.01;
     float v0 = 0.0, v, dt;
-    for (int i = ZERO; i < 50; i++) {
+    for (int i = ZERO; i < 80; i++) {
         if (t > tf) return false;
         v = mapGround(ro+rd*t).x;
         if (v*v0 < 0.0) break;
         dt = (i == ZERO) ? v : dt*v/abs(v-v0);
-        dt = sign(dt)*clamp(abs(dt), 0.02, 1.0);
+        dt = sign(dt)*clamp(abs(dt), 0.01, 0.8);
         t += dt;
         v0 = v;
     }
@@ -414,7 +409,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float t, t1 = 40.0;
     int intersect_id = -1;
     if (intersectBeach(ro, rd, t, t1)) { intersect_id = 0; t1 = t; }
-    if (intersectConch(ro, rd, t, t1, 0.02)) { intersect_id = 1; t1 = t; }
+    if (intersectConch(ro, rd, t, t1, 0.005)) { intersect_id = 1; t1 = t; }
     t = t1;
 
     // Shading
@@ -434,7 +429,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
         vec3 refl = reflect(rd, n);
         float t_refl = 2.0;
-        vec3 spc = intersectConch(p, refl, t_refl, 2.0, 0.05)
+        vec3 spc = intersectConch(p, refl, t_refl, 2.0, 0.01)
             ? vec3(0.05, 0.045, 0.04)
             : vec3(0.2-0.1*tanh(0.5*p.y)) * getSkyCol(refl);
         col = amb + dif + spc;
@@ -446,8 +441,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float ndotr = dot(rd, n);
         vec3 amb = (0.4-0.1*ndotr)*albedo;
         float ndotl = max(dot(n, sundir), 0.0);
-        vec3 dif = albedo*(vec3(0.45,0.4,0.35)*ndotl + vec3(0.2,0.3,0.4)*max(n.z, 0.0));
-        col = pow(amb+dif, vec3(0.8));
+        vec3 dif = albedo*(vec3(0.45,0.4,0.35)*ndotl*shadow + vec3(0.2,0.3,0.4)*max(n.z, 0.0));
+        vec3 refl = reflect(rd, n);
+        float fresnel = pow(1.0 - abs(ndotr), 3.0);
+        vec3 spc = 0.15 * fresnel * getSkyCol(refl);
+        col = pow(amb+dif+spc, vec3(0.8));
     }
 
     // Fog and sky blend
