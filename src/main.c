@@ -269,13 +269,20 @@ static bool can_cycle_wallpaper(void) {
     }
 
     char line[MAX_PATH_LENGTH];
-    int cycle_total = 0;
+    int max_cycle_total = 0;
 
+    /* BUG FIX #8: Check ALL outputs for cycle_total, not just the first one.
+     * The state file contains multiple [output] sections, and we need to find
+     * if ANY of them have cycle_total > 1 (can cycle). Previously, we stopped
+     * at the first cycle_total= line, which might be 0 for a non-cycling output. */
     while (fgets(line, sizeof(line), fp)) {
         line[strcspn(line, "\n")] = 0;
         if (strncmp(line, "cycle_total=", 12) == 0) {
-            cycle_total = atoi(line + 12);
-            break;
+            int cycle_total = atoi(line + 12);
+            if (cycle_total > max_cycle_total) {
+                max_cycle_total = cycle_total;
+            }
+            /* Don't break - continue checking all outputs */
         }
     }
 
@@ -284,7 +291,7 @@ static bool can_cycle_wallpaper(void) {
     fcntl(fd, F_SETLK, &lock);
 
     fclose(fp);
-    return cycle_total > 1;  /* Can cycle if we have more than 1 wallpaper */
+    return max_cycle_total > 1;  /* Can cycle if ANY output has more than 1 wallpaper */
 }
 
 static bool send_daemon_signal(int signal, const char *action, bool check_cycle) {
