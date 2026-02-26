@@ -642,7 +642,7 @@ void event_loop_run(struct neowall_state *state) {
             /* Only count shader as active if it loaded successfully and hasn't failed */
             if (output->config->type == WALLPAPER_SHADER &&
                 !output->shader_load_failed &&
-                output->live_shader_program != 0) {
+                (output->live_shader_program != 0 || output->multipass_shader != NULL)) {
                 shader_count++;
                 /* Only log shader detection once, not every frame */
                 if (!shader_mode_logged) {
@@ -808,8 +808,22 @@ void event_loop_run(struct neowall_state *state) {
             }
         }
 
-        /* Render outputs that need updating */
-        render_outputs(state);
+        /* Skip rendering if no output needs a redraw — avoids spinning CPU needlessly */
+        bool any_needs_redraw = false;
+        output = state->outputs;
+        while (output) {
+            if (output->needs_redraw) {
+                any_needs_redraw = true;
+                break;
+            }
+            output = output->next;
+        }
+
+        if (any_needs_redraw ||
+            atomic_load_explicit(&state->next_requested, memory_order_acquire) > 0 ||
+            atomic_load_explicit(&state->set_index_requested, memory_order_acquire) >= 0) {
+            render_outputs(state);
+        }
         frame_count++;
 
         /* Print statistics periodically */
@@ -837,7 +851,7 @@ void event_loop_run(struct neowall_state *state) {
              * For shaders with vsync disabled, only redraw when frame timer fires (handled above) */
             if (output->config->type == WALLPAPER_SHADER &&
                 !output->shader_load_failed &&
-                output->live_shader_program != 0) {
+                (output->live_shader_program != 0 || output->multipass_shader != NULL)) {
                 /* Only auto-redraw if vsync is enabled (paced by eglSwapBuffers)
                  * or if there's no frame timer configured */
                 if (output->config->vsync || output_get_frame_timer_fd(output) < 0) {

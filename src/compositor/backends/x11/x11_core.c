@@ -8,6 +8,12 @@
 #include <X11/extensions/Xrandr.h>
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
+
+/* GL_BGRA is not in GLES3/gl3.h but is available on desktop GL (OpenGL 1.2+).
+ * Used for efficient pixel readback matching X11's native BGRA byte order. */
+#ifndef GL_BGRA
+#define GL_BGRA 0x80E1
+#endif
 #include "compositor.h"
 #include "neowall.h"
 #include "egl/egl_core.h"
@@ -670,58 +676,62 @@ static void x11_commit_surface(struct compositor_surface *surface) {
         x11_update_mouse_position(backend);
     }
 
-    /* Copy the OpenGL rendered content to the root pixmap for Conky pseudo-transparency */
+    /* Copy the OpenGL rendered content to the root pixmap for Conky pseudo-transparency.
+     * This is expensive (glReadPixels stalls the GPU pipeline), so throttle to 1 FPS
+     * for live shader wallpapers. Static images always update immediately. */
     if (surf_data->root_pixmap && surf_data->gc && surf_data->pixel_buffer && surf_data->ximage) {
-        /* Read pixels from OpenGL framebuffer */
-        glReadPixels(0, 0, surface->width, surface->height, GL_RGBA, GL_UNSIGNED_BYTE,
-                    surf_data->pixel_buffer);
+        static uint64_t last_pixmap_update = 0;
+        uint64_t now = get_time_ms();
+        bool is_shader = backend->state && backend->state->outputs &&
+                         backend->state->outputs->config->type == WALLPAPER_SHADER;
+        bool should_update = !is_shader || (now - last_pixmap_update >= 1000);
 
-        /* Debug: Log first time we copy pixels */
-        static bool first_copy = true;
-        if (first_copy) {
-            log_debug("Copying OpenGL framebuffer to root pixmap (%dx%d)", surface->width, surface->height);
-            first_copy = false;
-        }
+        if (should_update) {
+            last_pixmap_update = now;
+            int row_size = surface->width * 4;
 
-        /* Flip image vertically (OpenGL origin is bottom-left, X11 is top-left)
-         * and swap R and B channels (RGBA -> BGRA for X11) */
-        int row_size = surface->width * 4;
-        unsigned char *temp_row = malloc(row_size);
-        if (temp_row) {
-            for (int y = 0; y < surface->height / 2; y++) {
-                unsigned char *top = surf_data->pixel_buffer + (y * row_size);
-                unsigned char *bottom = surf_data->pixel_buffer + ((surface->height - 1 - y) * row_size);
-                memcpy(temp_row, top, row_size);
-                memcpy(top, bottom, row_size);
-                memcpy(bottom, temp_row, row_size);
+            /* Read pixels in GL_BGRA format — matches X11's native byte order,
+             * eliminating the per-pixel RGBA→BGRA channel swap loop entirely */
+            glReadPixels(0, 0, surface->width, surface->height, GL_BGRA, GL_UNSIGNED_BYTE,
+                        surf_data->pixel_buffer);
+
+            /* Flip image vertically in-place (OpenGL origin is bottom-left, X11 is top-left) */
+            {
+                unsigned char temp_row[32768];  /* Covers up to 8K displays */
+                int chunk = row_size <= (int)sizeof(temp_row) ? row_size : (int)sizeof(temp_row);
+                for (int y = 0; y < surface->height / 2; y++) {
+                    unsigned char *top = surf_data->pixel_buffer + (y * row_size);
+                    unsigned char *bottom = surf_data->pixel_buffer + ((surface->height - 1 - y) * row_size);
+                    for (int off = 0; off < row_size; off += chunk) {
+                        int len = (row_size - off < chunk) ? (row_size - off) : chunk;
+                        memcpy(temp_row, top + off, len);
+                        memcpy(top + off, bottom + off, len);
+                        memcpy(bottom + off, temp_row, len);
+                    }
+                }
             }
-            free(temp_row);
+
+            /* Put image data to pixmap */
+            XPutImage(backend->x_display, surf_data->root_pixmap, surf_data->gc,
+                     surf_data->ximage, 0, 0, 0, 0, surface->width, surface->height);
+
+            /* Update root window background */
+            XSetWindowBackgroundPixmap(backend->x_display, backend->root_window, surf_data->root_pixmap);
+            XClearWindow(backend->x_display, backend->root_window);
+
+            /* Notify apps like Conky that background changed */
+            static Atom prop_root = 0;
+            if (!prop_root) {
+                prop_root = XInternAtom(backend->x_display, "_XROOTPMAP_ID", False);
+            }
+            XEvent event;
+            memset(&event, 0, sizeof(event));
+            event.type = PropertyNotify;
+            event.xproperty.window = backend->root_window;
+            event.xproperty.atom = prop_root;
+            event.xproperty.state = PropertyNewValue;
+            XSendEvent(backend->x_display, backend->root_window, False, PropertyChangeMask, &event);
         }
-
-        /* Swap R and B channels for X11 (RGBA -> BGRA) */
-        for (int i = 0; i < surface->width * surface->height * 4; i += 4) {
-            unsigned char temp = surf_data->pixel_buffer[i];
-            surf_data->pixel_buffer[i] = surf_data->pixel_buffer[i + 2];
-            surf_data->pixel_buffer[i + 2] = temp;
-        }
-
-        /* Put image data to pixmap */
-        XPutImage(backend->x_display, surf_data->root_pixmap, surf_data->gc,
-                 surf_data->ximage, 0, 0, 0, 0, surface->width, surface->height);
-
-        /* Update root window background */
-        XSetWindowBackgroundPixmap(backend->x_display, backend->root_window, surf_data->root_pixmap);
-        XClearWindow(backend->x_display, backend->root_window);
-
-        /* Notify apps like Conky that background changed */
-        Atom prop_root = XInternAtom(backend->x_display, "_XROOTPMAP_ID", False);
-        XEvent event;
-        memset(&event, 0, sizeof(event));
-        event.type = PropertyNotify;
-        event.xproperty.window = backend->root_window;
-        event.xproperty.atom = prop_root;
-        event.xproperty.state = PropertyNewValue;
-        XSendEvent(backend->x_display, backend->root_window, False, PropertyChangeMask, &event);
     }
 
     /* Keep wallpaper window at the bottom of the stack */
