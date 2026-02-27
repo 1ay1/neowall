@@ -749,6 +749,12 @@ void event_loop_run(struct neowall_state *state) {
                 ssize_t s = read(state->timer_fd, &expirations, sizeof(expirations));
                 if (s == sizeof(expirations)) {
                     log_debug("Cycle timer expired (%lu expirations), checking outputs", expirations);
+                    /* Mark all outputs for redraw so render_outputs() is called */
+                    struct output_state *timer_output = state->outputs;
+                    while (timer_output) {
+                        timer_output->needs_redraw = true;
+                        timer_output = timer_output->next;
+                    }
                 }
             }
 
