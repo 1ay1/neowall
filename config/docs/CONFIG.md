@@ -184,6 +184,26 @@ transition_duration 500   # Smooth
 transition_duration 1000  # Slow
 ```
 
+### Performance Options
+
+#### `pause_on_fullscreen` - Pause When Occluded
+
+Automatically pause rendering when a fullscreen window covers the wallpaper:
+
+```vibe
+pause_on_fullscreen true    # Pause rendering (default)
+pause_on_fullscreen false   # Keep rendering behind fullscreen apps
+```
+
+Saves GPU/CPU when wallpaper isn't visible (e.g. fullscreen games, videos).
+
+Works per-output — if only one monitor has a fullscreen window, the other monitors keep rendering.
+
+**Compositor support:**
+- **Wayland**: Hyprland, Sway, River (via `wlr-foreign-toplevel-management`)
+- **X11**: Any EWMH-compliant window manager (i3, bspwm, dwm, etc.)
+- **KDE/GNOME**: Not yet supported (gracefully falls back to always rendering)
+
 ## Example Configurations
 
 ### Matrix Rain (Default)
@@ -404,6 +424,7 @@ Browse shaders: [shadertoy.com](https://www.shadertoy.com/)
 - Shaders: ~2% CPU at 60 FPS (GPU accelerated)
 - Static images: ~0% CPU (after load)
 - Image cycling: Brief spike during transition
+- Fullscreen apps: 0% CPU/GPU (auto-paused by default)
 
 ### Memory Usage
 - Base: ~10-20 MB

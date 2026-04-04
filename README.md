@@ -155,6 +155,7 @@ yay -S gleditor-git
 - Pure C, single binary
 - GPU does the work, CPU chills
 - timerfd/signalfd — no busy loops
+- Auto-pauses when fullscreen windows cover wallpaper
 - Same code runs everywhere
 
 ## vs Others
@@ -168,6 +169,7 @@ yay -S gleditor-git
 | X11 | ✅ | ❌ | ❌ | ❌ |
 | Wayland | ✅ | ✅ | ✅ | ✅ |
 | Interactive | ✅ | ❌ | ❌ | ❌ |
+| Fullscreen pause | ✅ | ❌ | ❌ | ❌ |
 
 **NeoWall = only Linux tool for live GPU shader wallpapers.**
 
