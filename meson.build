@@ -248,6 +248,11 @@ compositor_sources = files(
   'src/compositor/compositor_surface.c',
 )
 
+# Occlusion detection sources (always include dispatcher)
+occlusion_sources = files(
+  'src/occlusion/occlusion.c',
+)
+
 # Wayland protocol sources (pre-generated, only when Wayland backend enabled)
 wayland_protocol_sources = []
 if has_wayland
@@ -258,7 +263,9 @@ if has_wayland
     'protocols/xdg-output-unstable-v1-client-protocol.c',
     'protocols/plasma-shell-client-protocol.c',
     'protocols/tearing-control-v1-client-protocol.c',
+    'protocols/wlr-foreign-toplevel-management-unstable-v1-client-protocol.c',
   )
+  occlusion_sources += files('src/occlusion/occlusion_wayland.c')
 endif
 
 # Wayland backend sources (conditional)
@@ -279,6 +286,7 @@ if has_x11
   x11_sources = files(
     'src/compositor/backends/x11/x11_core.c',
   )
+  occlusion_sources += files('src/occlusion/occlusion_x11.c')
 endif
 
 # =============================================================================
@@ -317,6 +325,7 @@ all_sources = (
   render_sources +
   image_sources +
   compositor_sources +
+  occlusion_sources +
   wayland_protocol_sources +
   wayland_sources +
   x11_sources

@@ -58,6 +58,7 @@ struct wallpaper_config {
     int shader_fps;                     /* Target FPS for shader rendering (default 60) */
     bool vsync;                         /* Enable vsync (sync to monitor refresh, ignores shader_fps) */
     bool show_fps;                      /* Show FPS watermark on screen (default false) */
+    bool pause_on_fullscreen;           /* Pause rendering when output is occluded by fullscreen window */
     bool cycle;                         /* Enable wallpaper cycling */
     char **cycle_paths;                 /* Array of paths for cycling */
     size_t cycle_count;                 /* Number of wallpapers to cycle */
@@ -92,6 +93,7 @@ struct output_state {
 
     bool configured;
     bool needs_redraw;
+    atomic_bool_t occluded;             /* Output is fully occluded by a fullscreen window */
 
     struct neowall_state *state;  /* Back-pointer to global state */
 

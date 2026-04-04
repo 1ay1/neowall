@@ -483,6 +483,7 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->shader_fps = 60;  /* Default 60 FPS for shaders */
     config->vsync = false;  /* Default: vsync off, use custom FPS with tearing control */
     config->show_fps = false;  /* Default: no FPS watermark */
+    config->pause_on_fullscreen = true;  /* Default: pause rendering when occluded */
     config->cycle = false;
     config->cycle_paths = NULL;
     config->cycle_count = 0;
@@ -832,6 +833,19 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         log_info("[%s] FPS watermark: %s", context_name, config->show_fps ? "enabled" : "disabled");
     }
 
+    /* Parse pause_on_fullscreen */
+    VibeValue *pause_fs_val = vibe_object_get(obj->as_object, "pause_on_fullscreen");
+    if (pause_fs_val) {
+        if (pause_fs_val->type != VIBE_TYPE_BOOLEAN) {
+            log_error("[%s] 'pause_on_fullscreen' must be a boolean (true or false), got type: %d",
+                     context_name, pause_fs_val->type);
+            return false;
+        }
+        config->pause_on_fullscreen = pause_fs_val->as_boolean;
+        log_info("[%s] Pause on fullscreen: %s", context_name,
+                 config->pause_on_fullscreen ? "enabled" : "disabled");
+    }
+
     /* Parse channels (only relevant for shader mode) */
     VibeValue *channels_val = vibe_object_get(obj->as_object, "channels");
     if (channels_val) {
@@ -882,7 +896,8 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     /* Warn about unknown keys */
     const char *known_keys[] = {
         "path", "shader", "mode", "duration", "transition",
-        "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps"
+        "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps",
+        "pause_on_fullscreen"
     };
     size_t known_key_count = sizeof(known_keys) / sizeof(known_keys[0]);
 

@@ -12,6 +12,7 @@
 #include "config_access.h"
 #include "constants.h"
 #include "compositor.h"
+#include "occlusion/occlusion.h"
 
 /* Forward declarations */
 extern void handle_signal_from_fd(struct neowall_state *state, int signum);
@@ -224,6 +225,13 @@ static void render_outputs(struct neowall_state *state) {
                 /* Update timer for next cycle */
                 update_cycle_timer(state);
             }
+        }
+
+        /* Skip rendering if output is occluded by a fullscreen window */
+        if (output->config->pause_on_fullscreen &&
+            atomic_load_explicit(&output->occluded, memory_order_acquire)) {
+            output = output->next;
+            continue;
         }
 
         /* Check if this output needs rendering */
@@ -526,6 +534,9 @@ void event_loop_run(struct neowall_state *state) {
         return;
     }
 
+    /* Initialize occlusion detection (pause rendering when fullscreen windows cover outputs) */
+    bool has_occlusion = occlusion_init(state);
+
     /* Base file descriptors - always polled */
     #define BASE_FD_COUNT 4
     #define MAX_POLL_FDS (BASE_FD_COUNT + MAX_OUTPUTS)
@@ -625,6 +636,13 @@ void event_loop_run(struct neowall_state *state) {
         memset(frame_timer_outputs, 0, sizeof(frame_timer_outputs));
 
         while (output) {
+            /* Skip frame timer for occluded outputs */
+            if (output->config->pause_on_fullscreen &&
+                atomic_load_explicit(&output->occluded, memory_order_acquire)) {
+                output = output->next;
+                continue;
+            }
+
             /* Check for active frame timer (vsync disabled shaders) */
             int frame_fd = output_get_frame_timer_fd(output);
             if (frame_fd >= 0) {
@@ -804,6 +822,11 @@ void event_loop_run(struct neowall_state *state) {
             }
         }
 
+        /* Update occlusion state after processing compositor events */
+        if (has_occlusion) {
+            occlusion_update(state);
+        }
+
         /* Additional check for compositor errors after dispatching events */
         if (ops && ops->get_error) {
             int display_error = ops->get_error(backend_data);
@@ -848,6 +871,13 @@ void event_loop_run(struct neowall_state *state) {
         /* Keep redrawing during active transitions and for shader wallpapers */
         output = state->outputs;
         while (output) {
+            /* Don't schedule redraws for occluded outputs */
+            if (output->config->pause_on_fullscreen &&
+                atomic_load_explicit(&output->occluded, memory_order_acquire)) {
+                output = output->next;
+                continue;
+            }
+
             /* Keep redrawing during transitions */
             if (output->transition_start_time > 0 &&
                 output->config->transition != TRANSITION_NONE) {
@@ -873,6 +903,11 @@ void event_loop_run(struct neowall_state *state) {
             log_debug("Shader animation active: %d output(s) rendering", shader_count);
             log_throttle_counter = 0;
         }
+    }
+
+    /* Clean up occlusion detection */
+    if (has_occlusion) {
+        occlusion_cleanup(state);
     }
 
     /* Clean up file descriptors */

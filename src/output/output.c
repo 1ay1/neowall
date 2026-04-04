@@ -175,6 +175,7 @@ struct output_state *output_create(struct neowall_state *state,
     out->transform = COMPOSITOR_TRANSFORM_NORMAL;
     out->configured = false;
     out->needs_redraw = true;
+    atomic_store(&out->occluded, false);
     out->state = state;
     out->connector_name[0] = '\0';
 
