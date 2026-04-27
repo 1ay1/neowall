@@ -527,6 +527,29 @@ bool wayland_init_registry(struct neowall_state *state) {
     /* Mark as initialized */
     wl->initialized = true;
 
+    /* Shared memory buffers not available */
+    if (!wl->shm) {
+        log_debug("Wayland shared memory buffers not available");
+        return false;
+    }
+
+    /* Initialize cursor theme and surface for pointer enter events */
+    wl->cursor_theme = wl_cursor_theme_load(NULL, 24, wl->shm);
+    if (!wl->cursor_theme) {
+        log_warn("Failed to load cursor theme");
+        /* This is an acceptable minor issue */
+        return true;
+    }
+
+    wl->cursor_surface = wl_compositor_create_surface(wl->compositor);
+    if (wl->cursor_surface) {
+        log_info("Cursor theme loaded for pointer enter handling");
+    } else {
+        log_error("Failed to create cursor surface");
+        wl_cursor_theme_destroy(wl->cursor_theme);
+        wl->cursor_theme = NULL;
+    }
+
     return true;
 }
 
@@ -610,6 +633,17 @@ void wayland_cleanup(void) {
             compositor_backend_cleanup(state->compositor_backend);
             state->compositor_backend = NULL;
         }
+    }
+
+    /* Destroy cursor resources */
+    if (wl->cursor_surface) {
+        wl_surface_destroy(wl->cursor_surface);
+        wl->cursor_surface = NULL;
+    }
+
+    if (wl->cursor_theme) {
+        wl_cursor_theme_destroy(wl->cursor_theme);
+        wl->cursor_theme = NULL;
     }
 
     /* Destroy Wayland objects */

@@ -60,10 +60,11 @@ x11_backend_option = get_option('x11_backend')
 # Wayland dependencies
 wayland_client_dep = dependency('wayland-client', required: false)
 wayland_egl_dep = dependency('wayland-egl', required: false)
+wayland_cursor_dep = dependency('wayland-cursor', required: false)
 wayland_protocols_dep = dependency('wayland-protocols', required: false)
 
 # We use pre-generated protocol files, so only need client libs at runtime
-has_wayland_deps = wayland_client_dep.found() and wayland_egl_dep.found() and wayland_protocols_dep.found()
+has_wayland_deps = wayland_client_dep.found() and wayland_egl_dep.found() and wayland_cursor_dep.found() and wayland_protocols_dep.found()
 
 # Determine if Wayland backend should be enabled
 if wayland_backend_option.disabled()
@@ -303,7 +304,7 @@ deps = [
 ]
 
 if has_wayland
-  deps += [wayland_client_dep, wayland_egl_dep]
+  deps += [wayland_client_dep, wayland_egl_dep, wayland_cursor_dep]
 endif
 
 if has_x11
