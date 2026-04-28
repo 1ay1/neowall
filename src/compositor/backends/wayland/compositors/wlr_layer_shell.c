@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <wayland-client.h>
+#include <wayland-cursor.h>
 #include <wayland-egl.h>
 #include "compositor.h"
 #include "compositor/backends/wayland.h"
@@ -118,14 +119,35 @@ static void pointer_handle_enter(void *data, struct wl_pointer *pointer,
                                  uint32_t serial, struct wl_surface *surface,
                                  wl_fixed_t surface_x, wl_fixed_t surface_y) {
     (void)data;
-    (void)pointer;
-    (void)serial;
     (void)surface;
 
     double x = wl_fixed_to_double(surface_x);
     double y = wl_fixed_to_double(surface_y);
 
     log_debug("Wayland pointer entered surface at (%.2f, %.2f)", x, y);
+
+    /* Set the default arrow cursor when pointer enters the wallpaper surface */
+    wayland_t *wl = wayland_get();
+    if (!wl || !wl->cursor_theme || !wl->cursor_surface) {
+        return;
+    }
+
+    struct wl_cursor *cursor = wl_cursor_theme_get_cursor(wl->cursor_theme, "left_ptr");
+    if (!cursor || cursor->image_count == 0) {
+        return;
+    }
+
+    struct wl_cursor_image *image = cursor->images[0];
+    struct wl_buffer *buffer = wl_cursor_image_get_buffer(image);
+    if (!buffer) {
+        return;
+    }
+
+    wl_surface_attach(wl->cursor_surface, buffer, 0, 0);
+    wl_surface_damage(wl->cursor_surface, 0, 0, image->width, image->height);
+    wl_surface_commit(wl->cursor_surface);
+    wl_pointer_set_cursor(pointer, serial, wl->cursor_surface,
+                          image->hotspot_x, image->hotspot_y);
 }
 
 static void pointer_handle_leave(void *data, struct wl_pointer *pointer,

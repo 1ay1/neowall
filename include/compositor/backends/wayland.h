@@ -21,6 +21,7 @@
  */
 
 #include <wayland-client.h>
+#include <wayland-cursor.h>
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
 
@@ -44,6 +45,10 @@ typedef struct wayland {
     /* Back-pointer to main neowall state */
     struct neowall_state *state;
     
+    /* Cursor state for setting cursor on pointer enter */
+    struct wl_cursor_theme *cursor_theme;
+    struct wl_surface *cursor_surface;
+
     /* Initialization flag */
     bool initialized;
 } wayland_t;
