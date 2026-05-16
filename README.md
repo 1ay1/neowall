@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="packaging/neowall.svg" alt="NeoWall" width="300"/>
+  <img src="packaging/neowall.svg" alt="NeoWall" width="280"/>
 </p>
 
 <p align="center">
-  <strong>Live GPU shaders as your wallpaper. Yes, really.</strong>
+  <strong>Run GLSL shaders as your Linux wallpaper.</strong>
 </p>
 
 <p align="center">
@@ -19,39 +19,33 @@
 
 ---
 
-## What is this?
-
-NeoWall renders **Shadertoy shaders** directly on your desktop. Wayland, X11, multi-monitor, 60fps, ~2% CPU.
+Paste a [Shadertoy](https://www.shadertoy.com/) shader into a file, point neowall at it, get an animated desktop. Wayland + X11, multi-monitor, single static binary, no daemon-in-Python anywhere.
 
 ```bash
-neowall   # That's it. You now have an animated wallpaper.
+neowall
 ```
+
+It pauses itself the moment a window covers the wallpaper, so it isn't burning your battery while you actually use the computer.
 
 ## Install
 
-**Pre-built binaries:**
-
-Download from [Releases](https://github.com/1ay1/neowall/releases/latest):
 ```bash
-# Arch, Debian/Ubuntu, or Fedora
-tar -xzf neowall-linux-x86_64-*.tar.gz
-sudo mv neowall /usr/local/bin/
-```
-
-**Arch (AUR):**
-```bash
+# Arch (AUR)
 yay -S neowall-git
-```
 
-**Build from source:**
-```bash
+# Prebuilt binary
+# https://github.com/1ay1/neowall/releases/latest
+tar -xzf neowall-linux-x86_64-*.tar.gz
+sudo install -m755 neowall /usr/local/bin/
+
+# From source
 git clone https://github.com/1ay1/neowall && cd neowall
 meson setup build && ninja -C build
 sudo ninja -C build install
 ```
 
 <details>
-<summary>Dependencies</summary>
+<summary>Build dependencies</summary>
 
 ```bash
 # Debian/Ubuntu
@@ -72,9 +66,8 @@ sudo dnf install gcc meson ninja-build wayland-devel mesa-libGLES-devel \
 
 ## Config
 
-Lives at `~/.config/neowall/config.vibe`
+`~/.config/neowall/config.vibe`
 
-**Shader wallpaper:**
 ```
 default {
   shader retro_wave.glsl
@@ -82,7 +75,8 @@ default {
 }
 ```
 
-**Image slideshow:**
+Image slideshow:
+
 ```
 default {
   path ~/Pictures/Wallpapers/
@@ -91,94 +85,83 @@ default {
 }
 ```
 
-**Multi-monitor:**
+Per-output:
+
 ```
 output {
-  DP-1 { shader matrix_rain.glsl }
+  DP-1     { shader matrix_rain.glsl }
   HDMI-A-1 { path ~/Pictures/ duration 600 }
 }
 ```
+
+Full reference: [`config/docs/CONFIG.md`](config/docs/CONFIG.md).
 
 ## Commands
 
 ```bash
 neowall          # start
 neowall kill     # stop
-neowall next     # next wallpaper
-neowall pause    # pause
-neowall resume   # resume
-neowall list     # show cycle
-neowall set 3    # jump to index 3
-neowall current  # what's playing?
+neowall reload   # reload config
+neowall next     # next wallpaper / shader
+neowall pause    # pause cycling
+neowall resume
+neowall list     # show queue
+neowall set 3    # jump to index
+neowall current  # print what's playing
 ```
 
 ## Shaders
 
-30+ included. Some highlights:
+30+ in the box. Bring your own — neowall accepts unmodified [Shadertoy](https://www.shadertoy.com/) GLSL: drop a `.glsl` file into `~/.config/neowall/shaders/` and reference it from your config.
 
-| Vibe | Shaders |
-|------|---------|
-| 🌆 Synthwave | `retro_wave` `synthwave` `neonwave_sunrise` |
-| 🌊 Nature | `ocean_waves` `aurora` `sunrise` `moon_ocean` |
-| 💻 Cyber | `matrix_rain` `matrix_real` `glowing_triangles` |
-| 🔮 Abstract | `fractal_land` `plasma` `mandelbrot` |
-| 🌌 Space | `star_next` `starship_reentry` `cross_galactic_ocean` |
+| Vibe | A few |
+|------|-------|
+| Synthwave | `retro_wave` · `synthwave` · `neonwave_sunrise` |
+| Nature | `ocean_waves` · `aurora` · `sunrise` |
+| Cyber | `matrix_rain` · `matrix_real` · `glowing_triangles` |
+| Abstract | `fractal_land` · `plasma` · `mandelbrot` |
+| Space | `star_next` · `starship_reentry` |
 
-**Use any Shadertoy shader:**
-1. Copy code from shadertoy.com
-2. Save to `~/.config/neowall/shaders/cool.glsl`
-3. Config: `shader cool.glsl`
-4. Done
-
-## GLEditor
-
-[**GLEditor**](https://github.com/1ay1/gleditor) — live shader editor that exports directly to NeoWall. Write, preview, one-click install.
-
-```bash
-yay -S gleditor-git
-```
+Pair it with [**GLEditor**](https://github.com/1ay1/gleditor) for a live-preview shader workflow that one-clicks into neowall.
 
 ## How it works
 
+Single C binary. The event loop is built on `timerfd` + `signalfd` — there is no polling thread anywhere. Rendering goes through EGL → OpenGL 3.3 (desktop) with a GLES 2.0 fallback for older GPUs.
+
 ```
-┌────────────────────────────────────────┐
-│            NeoWall Daemon              │
-├────────────────────────────────────────┤
-│  Config Parser → Event Loop → Shaders  │
-├────────────────────────────────────────┤
-│  Wayland (layer-shell)  │  X11 (EWMH)  │
-├────────────────────────────────────────┤
-│           EGL / OpenGL 3.3             │
-└────────────────────────────────────────┘
+config.vibe → event loop ─┬─→ EGL / OpenGL 3.3
+                          ├─→ Wayland (layer-shell)
+                          └─→ X11 (root window + EWMH)
 ```
 
-- Pure C, single binary
-- GPU does the work, CPU chills
-- timerfd/signalfd — no busy loops
-- Auto-pauses when wallpaper is hidden (fullscreen / maximized windows)
-- Same code runs everywhere
+Smart pause is the main thing that separates neowall from the obvious one-evening hack:
 
-## vs Others
+- Wayland: `wl_surface.frame` watchdog + `wlr-foreign-toplevel` state bits, plus a Hyprland-specific IPC path that handles the awkward "tiled mosaic of small windows covers the wallpaper" case
+- X11: EWMH `_NET_WM_STATE_FULLSCREEN` on every output
 
-| | NeoWall | swww | mpvpaper | hyprpaper |
+Result: while a fullscreen game, a maximized browser, or a wall of tiled terminals is covering the screen, neowall draws zero frames. The moment you switch workspaces, it picks back up.
+
+## Compared to
+
+| | neowall | swww | mpvpaper | hyprpaper |
 |-|---------|------|----------|-----------|
-| Live shaders | ✅ | ❌ | ❌ | ❌ |
-| Shadertoy | ✅ | ❌ | ❌ | ❌ |
-| Videos | ❌ | GIFs | ✅ | ❌ |
-| Images | ✅ | ✅ | ❌ | ✅ |
-| X11 | ✅ | ❌ | ❌ | ❌ |
-| Wayland | ✅ | ✅ | ✅ | ✅ |
-| Interactive | ✅ | ❌ | ❌ | ❌ |
-| Fullscreen pause | ✅ | ❌ | ❌ | ❌ |
+| Animated GLSL shaders | ✓ | – | – | – |
+| Drop-in Shadertoy support | ✓ | – | – | – |
+| Image slideshow | ✓ | ✓ | – | ✓ |
+| Video | – | gifs only | ✓ | – |
+| Wayland | ✓ | ✓ | ✓ | ✓ |
+| X11 | ✓ | – | – | – |
+| Pauses when occluded | ✓ | – | – | – |
 
-**NeoWall = only Linux tool for live GPU shader wallpapers.**
+If you want video wallpapers, use mpvpaper — neowall is deliberately not that.
 
-## Caveats
+## Caveats, honestly
 
-- **KDE Plasma**: Desktop icons might hide. Use a dock.
-- **No video wallpapers**: Use mpvpaper for that.
+- **KDE Plasma**: native desktop icons may hide while neowall owns the background layer. Use a dock or `plasma-desktop`'s widgets.
+- **GNOME**: works through the fallback path; Mutter doesn't expose layer-shell, so z-order behavior is less guaranteed than on wlroots compositors.
+- **No video**: by design.
 
-## Contributing
+## Hacking
 
 ```bash
 meson setup build --buildtype=debug
@@ -186,14 +169,14 @@ ninja -C build
 ./build/neowall -f -v
 ```
 
-PRs welcome: shaders, bug fixes, docs, testing.
+Shaders, bug reports, and compositor coverage PRs are all welcome. Issue tracker is the place.
 
 ## License
 
-MIT — do whatever you want.
+MIT.
 
 ---
 
 <p align="center">
-  <a href="https://github.com/1ay1/neowall/issues">Bugs</a> · <a href="https://github.com/1ay1/neowall/discussions">Chat</a> · <a href="https://github.com/1ay1/neowall">⭐ Star if cool</a>
+  <a href="https://github.com/1ay1/neowall/issues">Issues</a> · <a href="https://github.com/1ay1/neowall/discussions">Discussions</a> · <a href="https://github.com/1ay1/neowall">★ if it's your thing</a>
 </p>
