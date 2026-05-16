@@ -11,6 +11,7 @@
 #include "neowall.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
+#include "../frame_watchdog.h"
 
 /*
  * ============================================================================
@@ -473,7 +474,25 @@ static compositor_capabilities_t kde_get_capabilities(void *data) {
     return COMPOSITOR_CAP_LAYER_SHELL |
            COMPOSITOR_CAP_EXCLUSIVE_ZONE |
            COMPOSITOR_CAP_ANCHOR |
-           COMPOSITOR_CAP_MULTI_OUTPUT;
+           COMPOSITOR_CAP_MULTI_OUTPUT |
+           COMPOSITOR_CAP_OCCLUSION;
+}
+
+/* ----- occlusion (frame-callback watchdog) ----- */
+
+static bool kde_occlusion_init(void *data, struct neowall_state *state) {
+    (void)data;
+    return frame_watchdog_init(state);
+}
+
+static void kde_occlusion_update(void *data, struct neowall_state *state) {
+    (void)data;
+    frame_watchdog_update(state);
+}
+
+static void kde_occlusion_cleanup(void *data) {
+    (void)data;
+    frame_watchdog_cleanup();
 }
 
 static void kde_on_output_added(void *data, void *output) {
@@ -645,6 +664,10 @@ static const compositor_backend_ops_t kde_backend_ops = {
     .sync = kde_sync,
     .get_native_display = kde_get_native_display,
     .get_egl_platform = kde_get_egl_platform,
+    /* Occlusion detection (frame-callback watchdog) */
+    .occlusion_init = kde_occlusion_init,
+    .occlusion_update = kde_occlusion_update,
+    .occlusion_cleanup = kde_occlusion_cleanup,
 };
 
 struct compositor_backend *compositor_backend_kde_plasma_init(struct neowall_state *state) {

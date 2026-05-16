@@ -268,6 +268,7 @@ if has_wayland
   )
   occlusion_sources += files(
     'src/compositor/backends/wayland/occlusion.c',
+    'src/compositor/backends/wayland/frame_watchdog.c',
     'src/compositor/backends/wayland/hyprland_coverage.c',
   )
 endif

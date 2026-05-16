@@ -2,25 +2,18 @@
 
 /* Occlusion detection on wlroots compositors.
  *
- * We combine three independent signals because no single one is reliable
- * across every compositor + layout:
+ * Combines three independent signals (OR'd together):
  *
- *   1. Frame-callback watchdog. The wl_surface.frame request asks the
- *      compositor to ping us when it's ready to present a new frame. The spec
- *      says compositors MAY withhold these when the surface is obscured.
- *      Catches true-fullscreen on Hyprland and off-screen/minimized cases.
+ *   1. Frame-callback watchdog (shared frame_watchdog.c). The compositor MAY
+ *      stop sending frame callbacks when our surface is obscured.
  *
- *   2. Toplevel coverage via wlr-foreign-toplevel-management. Tracks per-window
- *      MAXIMIZED / FULLSCREEN state on each output. Catches the Hyprland gap
- *      where the compositor keeps pinging frame callbacks for obscured
- *      surfaces.
+ *   2. wlr-foreign-toplevel-management state bits. Catches fullscreen and
+ *      maximized windows on the output. Needed because some compositors
+ *      (Hyprland) keep firing frame callbacks even when fully occluded.
  *
- *   3. Hyprland IPC coverage (hyprland_coverage.c). When running under
- *      Hyprland, query its socket for window geometry and rasterize coverage
- *      per output. Catches the "mosaic of small non-maximized windows covers
- *      the wallpaper" case that signals 1 and 2 miss. No-op elsewhere.
- *
- * The output is occluded if ANY signal says so. */
+ *   3. Hyprland IPC coverage (hyprland_coverage.c). Catches the tiled-mosaic
+ *      case where many small windows together cover the wallpaper but no
+ *      single window is maximized. No-op outside Hyprland. */
 
 #include <stdlib.h>
 #include <string.h>
@@ -30,90 +23,8 @@
 #include "compositor.h"
 #include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 #include "wayland_occlusion.h"
+#include "frame_watchdog.h"
 #include "hyprland_coverage.h"
-
-/* If no frame callback arrives for this long, declare the surface occluded.
- * At 60 Hz a callback should land every ~16 ms; 500 ms is ~30 missed frames
- * — well past any reasonable jitter while still feeling responsive. */
-#define OCCLUSION_TIMEOUT_MS 500
-
-/* ---------- per-output frame-callback watchdog ---------- */
-
-typedef struct watched_output {
-    struct output_state *output;
-    struct wl_callback *callback;       /* in-flight frame callback, or NULL */
-    uint64_t last_done_ms;              /* monotonic ms of last frame.done */
-    bool armed;                         /* have we ever received a frame.done? */
-    struct watched_output *next;
-} watched_output_t;
-
-static watched_output_t *watched = NULL;
-static const struct wl_callback_listener frame_listener;
-static void arm_callback(watched_output_t *w);
-
-static void on_frame_done(void *data, struct wl_callback *cb, uint32_t time) {
-    (void)time;
-    watched_output_t *w = data;
-    if (cb) {
-        wl_callback_destroy(cb);
-    }
-    w->callback = NULL;
-    w->last_done_ms = get_time_ms();
-    w->armed = true;
-    arm_callback(w);   /* self-perpetuating heartbeat */
-}
-
-static const struct wl_callback_listener frame_listener = {
-    .done = on_frame_done,
-};
-
-static void arm_callback(watched_output_t *w) {
-    if (!w || !w->output || !w->output->compositor_surface || w->callback) {
-        return;
-    }
-    struct wl_surface *surf =
-        (struct wl_surface *)w->output->compositor_surface->native_surface;
-    if (!surf) {
-        return;
-    }
-    w->callback = wl_surface_frame(surf);
-    if (w->callback) {
-        wl_callback_add_listener(w->callback, &frame_listener, w);
-        wl_surface_commit(surf);
-    }
-}
-
-static watched_output_t *watched_for(struct output_state *o) {
-    for (watched_output_t *w = watched; w; w = w->next) {
-        if (w->output == o) {
-            return w;
-        }
-    }
-    return NULL;
-}
-
-static watched_output_t *watched_add(struct output_state *o) {
-    watched_output_t *w = calloc(1, sizeof(*w));
-    if (!w) {
-        return NULL;
-    }
-    w->output = o;
-    w->last_done_ms = get_time_ms();
-    w->next = watched;
-    watched = w;
-    return w;
-}
-
-static void watched_free_all(void) {
-    while (watched) {
-        watched_output_t *next = watched->next;
-        if (watched->callback) {
-            wl_callback_destroy(watched->callback);
-        }
-        free(watched);
-        watched = next;
-    }
-}
 
 /* ---------- per-toplevel state tracking ---------- */
 
@@ -256,9 +167,11 @@ bool wayland_occlusion_init(struct wl_display *display, struct neowall_state *st
     if (!display || !state) {
         return false;
     }
+    frame_watchdog_init(state);
+
     /* Bind wlr-foreign-toplevel-management for the per-window state signal.
-     * This is best-effort: if the compositor doesn't expose it (very rare on
-     * wlroots), we fall back to frame-callback-only. */
+     * Best-effort: if the compositor doesn't expose it, the other two signals
+     * still work. */
     struct wl_registry *registry = wl_display_get_registry(display);
     if (registry) {
         wl_registry_add_listener(registry, &reg_listener, NULL);
@@ -276,7 +189,6 @@ void wayland_occlusion_update(struct neowall_state *state) {
     if (!state) {
         return;
     }
-    uint64_t now = get_time_ms();
 
     /* Refresh Hyprland snapshot (self-throttled). No-op elsewhere. */
     hyprland_coverage_refresh();
@@ -291,28 +203,12 @@ void wayland_occlusion_update(struct neowall_state *state) {
             continue;
         }
 
-        /* Ensure a watchdog entry + in-flight frame callback for this output. */
-        watched_output_t *w = watched_for(o);
-        if (!w) {
-            w = watched_add(o);
-            if (!w) {
-                continue;
-            }
-        }
-        if (!w->callback) {
-            arm_callback(w);
-        }
+        /* Keep the shared watchdog armed for this output. */
+        frame_watchdog_arm(o);
 
-        /* Signal 1: frame-callback silence. Only trust after we've seen the
-         * first done, otherwise we'd false-positive at startup. */
-        bool cb_says_occluded =
-            w->armed && (now - w->last_done_ms) > OCCLUSION_TIMEOUT_MS;
-
-        /* Signal 2: any maximized/fullscreen toplevel on this output. */
+        bool cb_says_occluded = frame_watchdog_output_occluded(o);
         bool toplevel_says_occluded =
             any_covering_toplevel_on((struct wl_output *)o->native_output);
-
-        /* Signal 3: Hyprland-specific tiled coverage (>=80% of monitor). */
         bool hypr_says_occluded = hyprland_output_covered(o, 0.80f);
 
         bool was = atomic_load_explicit(&o->occluded, memory_order_acquire);
@@ -338,7 +234,7 @@ void wayland_occlusion_update(struct neowall_state *state) {
 }
 
 void wayland_occlusion_cleanup(void) {
-    watched_free_all();
+    frame_watchdog_cleanup();
     while (toplevels) {
         tracked_toplevel_t *next = toplevels->next;
         zwlr_foreign_toplevel_handle_v1_destroy(toplevels->handle);

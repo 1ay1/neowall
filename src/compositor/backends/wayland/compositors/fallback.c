@@ -8,7 +8,7 @@
 #include "compositor.h"
 #include "compositor/backends/wayland.h"
 #include "neowall.h"
-
+#include "../frame_watchdog.h"
 /*
  * ============================================================================
  * FALLBACK BACKEND
@@ -421,7 +421,26 @@ static compositor_capabilities_t fallback_get_capabilities(void *data) {
         caps |= COMPOSITOR_CAP_SUBSURFACES;
     }
 
+    caps |= COMPOSITOR_CAP_OCCLUSION;
+
     return caps;
+}
+
+/* ----- occlusion (frame-callback watchdog) ----- */
+
+static bool fallback_occlusion_init(void *data, struct neowall_state *state) {
+    (void)data;
+    return frame_watchdog_init(state);
+}
+
+static void fallback_occlusion_update(void *data, struct neowall_state *state) {
+    (void)data;
+    frame_watchdog_update(state);
+}
+
+static void fallback_occlusion_cleanup(void *data) {
+    (void)data;
+    frame_watchdog_cleanup();
 }
 
 static void fallback_on_output_added(void *data, void *output) {
@@ -610,6 +629,10 @@ static const compositor_backend_ops_t fallback_backend_ops = {
     /* Display/EGL operations */
     .get_native_display = fallback_get_native_display,
     .get_egl_platform = fallback_get_egl_platform,
+    /* Occlusion detection (frame-callback watchdog) */
+    .occlusion_init = fallback_occlusion_init,
+    .occlusion_update = fallback_occlusion_update,
+    .occlusion_cleanup = fallback_occlusion_cleanup,
 };
 
 struct compositor_backend *compositor_backend_fallback_init(struct neowall_state *state) {

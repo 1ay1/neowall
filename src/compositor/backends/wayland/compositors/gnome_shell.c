@@ -9,6 +9,7 @@
 #include "compositor.h"
 #include "compositor/backends/wayland.h"
 #include "neowall.h"
+#include "../frame_watchdog.h"
 
 /*
  * ============================================================================
@@ -292,7 +293,24 @@ static compositor_capabilities_t gnome_get_capabilities(void *data) {
     (void)data;
 
     /* Limited capabilities - subsurface fallback */
-    return COMPOSITOR_CAP_SUBSURFACES;
+    return COMPOSITOR_CAP_SUBSURFACES | COMPOSITOR_CAP_OCCLUSION;
+}
+
+/* ----- occlusion (frame-callback watchdog) ----- */
+
+static bool gnome_occlusion_init(void *data, struct neowall_state *state) {
+    (void)data;
+    return frame_watchdog_init(state);
+}
+
+static void gnome_occlusion_update(void *data, struct neowall_state *state) {
+    (void)data;
+    frame_watchdog_update(state);
+}
+
+static void gnome_occlusion_cleanup(void *data) {
+    (void)data;
+    frame_watchdog_cleanup();
 }
 
 static void gnome_on_output_added(void *data, void *output) {
@@ -474,6 +492,10 @@ static const compositor_backend_ops_t gnome_backend_ops = {
     .sync = gnome_sync,
     .get_native_display = gnome_get_native_display,
     .get_egl_platform = gnome_get_egl_platform,
+    /* Occlusion detection (frame-callback watchdog) */
+    .occlusion_init = gnome_occlusion_init,
+    .occlusion_update = gnome_occlusion_update,
+    .occlusion_cleanup = gnome_occlusion_cleanup,
 };
 
 struct compositor_backend *compositor_backend_gnome_shell_init(struct neowall_state *state) {

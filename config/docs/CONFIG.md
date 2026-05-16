@@ -206,10 +206,12 @@ Works per-output — if only one monitor is covered, the others keep rendering.
 - On Hyprland: tiled/floating windows that together cover ≥80% of the output (via Hyprland's IPC socket)
 
 **Compositor support:**
-- **Hyprland**: full coverage detection (fullscreen, maximized, tiled mosaic)
-- **Wayland (other wlroots)**: Sway, River — fullscreen + maximized via `wlr-foreign-toplevel-management`
+- **Hyprland**: full coverage detection (fullscreen, maximized, tiled mosaic via IPC)
+- **Sway / River / other wlroots**: fullscreen + maximized (via `wlr-foreign-toplevel-management`) + frame-callback watchdog
+- **KDE Plasma (KWin)**: frame-callback watchdog (pauses when KWin throttles obscured surfaces)
+- **GNOME (Mutter)**: frame-callback watchdog (pauses when Mutter throttles obscured surfaces)
+- **Other / unknown Wayland**: frame-callback watchdog (best-effort)
 - **X11**: Any EWMH-compliant window manager (i3, bspwm, dwm, etc.)
-- **KDE/GNOME**: Not yet supported (gracefully falls back to always rendering)
 
 ## Example Configurations
 

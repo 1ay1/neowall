@@ -18,7 +18,6 @@
 #include <errno.h>
 #include <pthread.h>
 #include "neowall.h"
-#include "utils.h"
 #include "hyprland_coverage.h"
 
 #define HYPR_REFRESH_MS    500
