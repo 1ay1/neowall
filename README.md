@@ -155,7 +155,7 @@ yay -S gleditor-git
 - Pure C, single binary
 - GPU does the work, CPU chills
 - timerfd/signalfd — no busy loops
-- Auto-pauses when fullscreen windows cover wallpaper
+- Auto-pauses when wallpaper is hidden (fullscreen / maximized windows)
 - Same code runs everywhere
 
 ## vs Others

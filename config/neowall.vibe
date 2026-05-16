@@ -91,7 +91,7 @@ default {
   transition_duration 300
 
   # Pause rendering when a fullscreen window covers this output (default: true)
-  # Saves GPU/CPU when the wallpaper isn't visible behind fullscreen apps/games
+  # Saves GPU/CPU when the wallpaper isn't visible (fullscreen, maximized, etc.)
   # Requires compositor support: wlr-foreign-toplevel on Wayland, EWMH on X11
   # pause_on_fullscreen true
 

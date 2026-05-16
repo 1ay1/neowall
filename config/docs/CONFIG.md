@@ -188,19 +188,26 @@ transition_duration 1000  # Slow
 
 #### `pause_on_fullscreen` - Pause When Occluded
 
-Automatically pause rendering when a fullscreen window covers the wallpaper:
+Automatically pause rendering when the wallpaper is covered:
 
 ```vibe
 pause_on_fullscreen true    # Pause rendering (default)
-pause_on_fullscreen false   # Keep rendering behind fullscreen apps
+pause_on_fullscreen false   # Keep rendering behind covering windows
 ```
 
-Saves GPU/CPU when wallpaper isn't visible (e.g. fullscreen games, videos).
+Saves GPU/CPU when the wallpaper isn't visible (fullscreen games, videos, maximized apps).
 
-Works per-output — if only one monitor has a fullscreen window, the other monitors keep rendering.
+Works per-output — if only one monitor is covered, the others keep rendering.
+
+**What triggers a pause:**
+- A fullscreen window on the output
+- A maximized window on the output
+- The compositor stops requesting frames for the wallpaper surface (500ms watchdog)
+
+**Known limitation:** A mosaic of small non-maximized windows that together cover the wallpaper may not trigger a pause on compositors that keep sending frame callbacks to obscured surfaces (e.g. Hyprland). Wayland exposes no cross-client geometry, so we can't compute exact overlap.
 
 **Compositor support:**
-- **Wayland**: Hyprland, Sway, River (via `wlr-foreign-toplevel-management`)
+- **Wayland**: Hyprland, Sway, River (via `wlr-foreign-toplevel-management` + frame callbacks)
 - **X11**: Any EWMH-compliant window manager (i3, bspwm, dwm, etc.)
 - **KDE/GNOME**: Not yet supported (gracefully falls back to always rendering)
 
