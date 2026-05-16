@@ -124,7 +124,7 @@ void frame_watchdog_update(struct neowall_state *state) {
 
         const char *name = o->connector_name[0] ? o->connector_name : o->model;
         if (was && !nowocc) {
-            o->needs_redraw = true;
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
             log_info("Output %s un-occluded, rendering", name);
         } else if (!was && nowocc) {
             log_info("Output %s occluded (compositor stopped frame callbacks), pausing", name);

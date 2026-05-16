@@ -19,17 +19,31 @@ extern void handle_signal_from_fd(struct neowall_state *state, int signum);
 
 static struct neowall_state *event_loop_state = NULL;
 
-/* Update timerfd to wake up at next cycle time */
+/* Poll-set sizing. File-scope (was a function-scoped #define which leaked
+ * into following translation units — see audit fix #36). */
+enum {
+    BASE_FD_COUNT = 4,
+    MAX_POLL_FDS  = BASE_FD_COUNT + MAX_OUTPUTS,
+};
+
+/* Internal: compute & arm the cycle timer. Caller must NOT hold output_list_lock
+ * (we take it ourselves). The _locked variant skips the lock for callers that
+ * already hold it as reader. */
+static void update_cycle_timer_locked(struct neowall_state *state);
 static void update_cycle_timer(struct neowall_state *state) {
+    if (!state) return;
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    update_cycle_timer_locked(state);
+    pthread_rwlock_unlock(&state->output_list_lock);
+}
+
+static void update_cycle_timer_locked(struct neowall_state *state) {
     if (!state || state->timer_fd < 0) {
         return;
     }
 
     uint64_t now = get_time_ms();
     uint64_t next_wake_ms = UINT64_MAX;
-
-    /* Find the earliest cycle time across all outputs - use read lock */
-    pthread_rwlock_rdlock(&state->output_list_lock);
 
     bool paused = atomic_load_explicit(&state->paused, memory_order_acquire);
     struct output_state *output = state->outputs;
@@ -53,8 +67,6 @@ static void update_cycle_timer(struct neowall_state *state) {
         output = output->next;
     }
 
-    pthread_rwlock_unlock(&state->output_list_lock);
-
     /* Set the timer */
     struct itimerspec timer_spec;
     memset(&timer_spec, 0, sizeof(timer_spec));
@@ -63,6 +75,11 @@ static void update_cycle_timer(struct neowall_state *state) {
         /* No cycling needed, disarm timer */
         timer_spec.it_value.tv_sec = 0;
         timer_spec.it_value.tv_nsec = 0;
+    } else if (next_wake_ms == 0) {
+        /* Fire immediately. timerfd treats {0,0} as DISARM, so use 1ns instead
+         * (audit fix #35). */
+        timer_spec.it_value.tv_sec = 0;
+        timer_spec.it_value.tv_nsec = 1;
     } else {
         /* Set timer to wake at next cycle time */
         timer_spec.it_value.tv_sec = next_wake_ms / MS_PER_SECOND;
@@ -80,11 +97,9 @@ static void update_cycle_timer(struct neowall_state *state) {
 }
 
 /* Render all outputs that need redrawing */
-/* Structure to track outputs that need buffer swapping */
 struct swap_info {
     struct output_state *output;
     bool render_success;
-    struct swap_info *next;
 };
 
 static void render_outputs(struct neowall_state *state) {
@@ -94,9 +109,6 @@ static void render_outputs(struct neowall_state *state) {
 
     uint64_t current_time = get_time_ms();
 
-    /* BUG FIX #3: Check if config reload is in progress */
-    /* No reload support - config is immutable after startup */
-
     /* Check if there are any pending next requests - cycle ALL outputs with matching configs */
     int next_count = atomic_load_explicit(&state->next_requested, memory_order_acquire);
     int set_index = atomic_load_explicit(&state->set_index_requested, memory_order_acquire);
@@ -105,52 +117,54 @@ static void render_outputs(struct neowall_state *state) {
     bool has_cycleable_output = false;
     int total_outputs = 0;
 
-    /* Acquire read lock for output list traversal */
+    /* === PHASE 1: snapshot the output list under the read lock ============
+     * We copy the pointer list to a stack array and then drop the lock so
+     * that all GL/EGL work below (which may BLOCK on vsync inside
+     * eglMakeCurrent / eglSwapBuffers) runs without holding output_list_lock.
+     * The outputs themselves stay alive as long as removal requires the
+     * write lock, so the pointers remain valid for the duration of this
+     * call as long as no writer can complete during it. */
+    struct output_state *outputs_snapshot[MAX_OUTPUTS];
+    size_t output_n = 0;
+
     pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o && output_n < MAX_OUTPUTS; o = o->next) {
+        outputs_snapshot[output_n++] = o;
+        total_outputs++;
+        if (o->config->cycle && o->config->cycle_count > 0) {
+            has_cycleable_output = true;
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
 
     if (next_count > 0) {
         log_debug("Processing next request: %d pending in queue", next_count);
-
-        /* First pass: check if any output can actually cycle */
-        struct output_state *check_output = state->outputs;
-        while (check_output) {
-            total_outputs++;
-            if (check_output->config->cycle && check_output->config->cycle_count > 0) {
-                has_cycleable_output = true;
-            }
-            check_output = check_output->next;
-        }
     }
 
-    /* List to track outputs that need buffer swapping (built while holding lock) */
-    struct swap_info *swap_list = NULL;
-    struct swap_info *swap_tail = NULL;
+    /* === PHASE 2: handle set-index / next requests and per-output cycling ===
+     * These call back into output_set_* and output_cycle_* which take their
+     * own locks; we must NOT be holding output_list_lock here. */
+    struct swap_info swap_list[MAX_OUTPUTS];
+    size_t swap_n = 0;
 
-    struct output_state *output = state->outputs;
-    while (output) {
+    for (size_t idx = 0; idx < output_n; idx++) {
+        struct output_state *output = outputs_snapshot[idx];
+
         /* Handle set-index request - set ALL outputs with same config to the specified index */
         if (set_index >= 0 && !processed_set_index && output->config->cycle && output->config->cycle_count > 0) {
-            /* Set this output and all others with matching configuration to the specified index */
-            struct output_state *sync_output = output;
             int set_count = 0;
-
-            while (sync_output) {
-                /* Check if this output has the same cycle configuration */
+            for (size_t j = idx; j < output_n; j++) {
+                struct output_state *sync_output = outputs_snapshot[j];
                 bool same_config = (sync_output->config->cycle &&
                                    sync_output->config->cycle_count == output->config->cycle_count);
-
-                /* Also verify the paths match if both have cycle paths */
                 if (same_config && sync_output->config->cycle_paths && output->config->cycle_paths) {
-                    same_config = true;
                     for (size_t i = 0; i < output->config->cycle_count && same_config; i++) {
                         if (strcmp(sync_output->config->cycle_paths[i], output->config->cycle_paths[i]) != 0) {
                             same_config = false;
                         }
                     }
                 }
-
                 if (same_config) {
-                    /* Validate index is within bounds for this output */
                     if ((size_t)set_index < sync_output->config->cycle_count) {
                         log_debug("Setting wallpaper index %d for output %s (synchronized)",
                                  set_index, sync_output->model[0] ? sync_output->model : "unknown");
@@ -162,283 +176,215 @@ static void render_outputs(struct neowall_state *state) {
                                  sync_output->config->cycle_count - 1);
                     }
                 }
-
-                sync_output = sync_output->next;
             }
-
             current_time = get_time_ms();
             processed_set_index = true;
-
             log_info("Set wallpaper index %d on %d output(s) with matching configuration",
                      set_index, set_count);
-
-            /* Clear the request after processing */
             atomic_store_explicit(&state->set_index_requested, -1, memory_order_release);
         }
 
         /* Handle next wallpaper request - cycle ALL outputs with same config for synchronization */
         if (next_count > 0 && !processed_next && output->config->cycle && output->config->cycle_count > 0) {
-            /* Cycle this output and all others with matching configuration */
-            struct output_state *sync_output = output;
             int cycled_count = 0;
-
-            while (sync_output) {
-                /* Check if this output has the same cycle configuration */
+            for (size_t j = idx; j < output_n; j++) {
+                struct output_state *sync_output = outputs_snapshot[j];
                 bool same_config = (sync_output->config->cycle &&
                                    sync_output->config->cycle_count == output->config->cycle_count);
-
-                /* Also verify the paths match if both have cycle paths */
                 if (same_config && sync_output->config->cycle_paths && output->config->cycle_paths) {
-                    same_config = true;
                     for (size_t i = 0; i < output->config->cycle_count && same_config; i++) {
                         if (strcmp(sync_output->config->cycle_paths[i], output->config->cycle_paths[i]) != 0) {
                             same_config = false;
                         }
                     }
                 }
-
                 if (same_config) {
                     log_debug("Cycling to next wallpaper for output %s (synchronized)",
                              sync_output->model[0] ? sync_output->model : "unknown");
                     output_cycle_wallpaper(sync_output);
                     cycled_count++;
                 }
-
-                sync_output = sync_output->next;
             }
-
             current_time = get_time_ms();
             processed_next = true;
-
             log_info("Cycled %d output(s) with matching configuration (%d requests remaining)",
                      cycled_count, next_count - 1);
-
-            /* Decrement counter after processing all synchronized outputs */
             atomic_fetch_sub_explicit(&state->next_requested, 1, memory_order_acq_rel);
         }
 
         /* Check if we should cycle wallpaper (timer-driven) */
-        if (!state->paused && output->config->cycle && output->config->duration > 0.0f) {
+        if (!atomic_load_explicit(&state->paused, memory_order_acquire) &&
+            output->config->cycle && output->config->duration > 0.0f) {
             if (output_should_cycle(output, current_time)) {
                 output_cycle_wallpaper(output);
                 current_time = get_time_ms();
-                /* Update timer for next cycle */
-                update_cycle_timer(state);
             }
         }
 
         /* Skip rendering if output is occluded by a fullscreen window */
         if (output->config->pause_on_fullscreen &&
             atomic_load_explicit(&output->occluded, memory_order_acquire)) {
-            output = output->next;
             continue;
         }
 
         /* Check if this output needs rendering */
-        if (output->needs_redraw && output->compositor_surface &&
-            output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-            /* Make EGL context current for this output */
-            if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
-                               output->compositor_surface->egl_surface, state->egl_context)) {
-                log_error("Failed to make EGL context current for output %s: 0x%x",
-                         output->model, eglGetError());
-                output = output->next;
-                continue;
-            }
+        if (!atomic_load_explicit(&output->needs_redraw, memory_order_acquire) ||
+            !output->compositor_surface ||
+            output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
+            continue;
+        }
 
-            /* Recalculate time for accurate transition timing */
-            current_time = get_time_ms();
+        /* Make EGL context current for this output. Note: eglMakeCurrent can
+         * synchronize with the GPU — we are NOT holding output_list_lock here. */
+        if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
+                           output->compositor_surface->egl_surface, state->egl_context)) {
+            log_error("Failed to make EGL context current for output %s: 0x%x",
+                     output->model, eglGetError());
+            continue;
+        }
 
-            /* Check if background thread finished decoding - upload to GPU now */
-            if (atomic_load(&output->preload_upload_pending)) {
-                pthread_mutex_lock(&output->preload_mutex);
+        /* Recalculate time for accurate transition timing */
+        current_time = get_time_ms();
 
-                if (output->preload_decoded_image) {
-                    /* Ensure EGL context is current for this output */
-                    if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-                        if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
-                                           output->compositor_surface->egl_surface, state->egl_context)) {
-                            log_error("Failed to make EGL context current for preload upload");
-                        } else {
-                            /* Upload decoded image to GPU (fast - just texture creation) */
-                            GLuint new_texture = output_upload_preload_texture(output);
-                            if (new_texture == 0) {
-                                log_error("Failed to upload preload texture");
-                            }
-                        }
-                    }
-                }
-
-                atomic_store(&output->preload_upload_pending, false);
-                pthread_mutex_unlock(&output->preload_mutex);
-            }
-
-            /* Handle image transitions */
-            if (output->transition_start_time > 0 &&
-                output->config->transition != TRANSITION_NONE) {
-                uint64_t elapsed = current_time - output->transition_start_time;
-                uint64_t transition_duration_ms = (uint64_t)(output->config->transition_duration * 1000.0f);
-                float progress = (float)elapsed / (float)transition_duration_ms;
-
-                if (progress >= 1.0f) {
-                    /* Clamp progress to 1.0 for final frame */
-                    output->transition_progress = 1.0f;
-                } else {
-                    /* Apply easing function */
-                    output->transition_progress = ease_in_out_cubic(progress);
+        /* Check if background thread finished decoding - upload to GPU now.
+         * The EGL context is already current from the call above. */
+        if (atomic_load(&output->preload_upload_pending)) {
+            pthread_mutex_lock(&output->preload_mutex);
+            if (output->preload_decoded_image) {
+                GLuint new_texture = output_upload_preload_texture(output);
+                if (new_texture == 0) {
+                    log_error("Failed to upload preload texture");
                 }
             }
+            atomic_store(&output->preload_upload_pending, false);
+            pthread_mutex_unlock(&output->preload_mutex);
+        }
 
-            /* Render frame */
-            uint64_t frame_start = get_time_ms();
-            bool render_success = output_render_frame(output);
-            uint64_t frame_end = get_time_ms();
-
-            /* FPS measurement for shaders */
-            if (render_success && output->config->type == WALLPAPER_SHADER) {
-                output->fps_frame_count++;
-
-                if (output->fps_last_log_time == 0) {
-                    output->fps_last_log_time = frame_end;
-                }
-
-                uint64_t elapsed = frame_end - output->fps_last_log_time;
-                if (elapsed >= 2000) {  /* Log every 2 seconds */
-                    float actual_fps = (float)output->fps_frame_count / ((float)elapsed / 1000.0f);
-                    output->fps_current = actual_fps;
-                    uint64_t frame_time = frame_end - frame_start;
-                    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : FPS_TARGET;
-
-                    if (output->config->vsync) {
-                        log_info("FPS [%s]: %.1f FPS (vsync: monitor sync, frame_time: %lums)",
-                                 output->model, actual_fps, frame_time);
-                    } else {
-                        log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums)",
-                                 output->model, actual_fps, target_fps, frame_time);
-                    }
-
-                    output->fps_frame_count = 0;
-                    output->fps_last_log_time = frame_end;
-                }
-            }
-
-            if (!render_success) {
-                /* Only log if shader hasn't permanently failed (after 3 attempts, be silent) */
-                if (!output->shader_load_failed) {
-                    /* Throttle error logging to prevent spam when shader fails to load */
-                    static uint64_t last_render_error_time = 0;
-                    static int render_error_count = 0;
-                    uint64_t current_time = get_time_ms();
-
-                    if (current_time - last_render_error_time >= 1000) {
-                        /* Log once per second */
-                        if (render_error_count > 0) {
-                            log_error("Failed to render frame for output %s (%d failures in last second)",
-                                     output->model, render_error_count + 1);
-                        } else {
-                            log_error("Failed to render frame for output %s", output->model);
-                        }
-                        last_render_error_time = current_time;
-                        render_error_count = 0;
-                    } else {
-                        render_error_count++;
-                    }
-                }
-                state->errors_count++;
-            }
-
-            /* BUG FIX #10: Add output to swap list to defer eglSwapBuffers until after lock release
-             * This prevents deadlock where render thread holds read lock while blocking in
-             * eglSwapBuffers, and config reload tries to acquire write lock */
-            struct swap_info *info = malloc(sizeof(struct swap_info));
-            if (info) {
-                info->output = output;
-                info->render_success = render_success;
-                info->next = NULL;
-
-                if (swap_tail) {
-                    swap_tail->next = info;
-                } else {
-                    swap_list = info;
-                }
-                swap_tail = info;
+        /* Handle image transitions */
+        if (output->transition_start_time > 0 &&
+            output->config->transition != TRANSITION_NONE) {
+            uint64_t elapsed = current_time - output->transition_start_time;
+            uint64_t transition_duration_ms = (uint64_t)(output->config->transition_duration * 1000.0f);
+            float progress = transition_duration_ms > 0
+                ? (float)elapsed / (float)transition_duration_ms
+                : 1.0f;
+            if (progress >= 1.0f) {
+                output->transition_progress = 1.0f;
+            } else {
+                output->transition_progress = ease_in_out_cubic(progress);
             }
         }
 
-        output = output->next;
+        /* Render frame */
+        uint64_t frame_start = get_time_ms();
+        bool render_success = output_render_frame(output);
+        uint64_t frame_end = get_time_ms();
+
+        /* FPS measurement for shaders */
+        if (render_success && output->config->type == WALLPAPER_SHADER) {
+            output->fps_frame_count++;
+            if (output->fps_last_log_time == 0) {
+                output->fps_last_log_time = frame_end;
+            }
+            uint64_t elapsed = frame_end - output->fps_last_log_time;
+            if (elapsed >= 2000) {
+                float actual_fps = (float)output->fps_frame_count / ((float)elapsed / 1000.0f);
+                output->fps_current = actual_fps;
+                uint64_t frame_time = frame_end - frame_start;
+                int target_fps = shader_fps_resolve(output->config->shader_fps);
+                if (output->config->vsync) {
+                    log_info("FPS [%s]: %.1f FPS (vsync: monitor sync, frame_time: %lums)",
+                             output->model, actual_fps, frame_time);
+                } else {
+                    log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums)",
+                             output->model, actual_fps, target_fps, frame_time);
+                }
+                output->fps_frame_count = 0;
+                output->fps_last_log_time = frame_end;
+            }
+        }
+
+        if (!render_success) {
+            if (!output->shader_load_failed) {
+                static uint64_t last_render_error_time = 0;
+                static int render_error_count = 0;
+                uint64_t err_now = get_time_ms();
+                if (err_now - last_render_error_time >= 1000) {
+                    if (render_error_count > 0) {
+                        log_error("Failed to render frame for output %s (%d failures in last second)",
+                                 output->model, render_error_count + 1);
+                    } else {
+                        log_error("Failed to render frame for output %s", output->model);
+                    }
+                    last_render_error_time = err_now;
+                    render_error_count = 0;
+                } else {
+                    render_error_count++;
+                }
+            }
+            state->errors_count++;
+        }
+
+        /* Queue for swap. swap_n cannot exceed output_n which is bounded by MAX_OUTPUTS. */
+        swap_list[swap_n].output = output;
+        swap_list[swap_n].render_success = render_success;
+        swap_n++;
     }
 
-    /* BUG FIX #10: Release read lock BEFORE calling eglSwapBuffers
-     * eglSwapBuffers can block (waiting for vsync), and if we hold the lock during
-     * that block, a signal handler (like SIGHUP config reload) trying to acquire
-     * a write lock will deadlock. Always release locks before blocking operations! */
-    pthread_rwlock_unlock(&state->output_list_lock);
+    /* === PHASE 3: damage + swap + commit (still no locks held) ============= */
+    for (size_t i = 0; i < swap_n; i++) {
+        struct output_state *output = swap_list[i].output;
+        if (!swap_list[i].render_success) {
+            continue;
+        }
 
-    /* Now perform buffer swaps without holding any locks */
-    struct swap_info *swap = swap_list;
-    while (swap) {
-        struct output_state *output = swap->output;
+        if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
+                           output->compositor_surface->egl_surface, state->egl_context)) {
+            log_error("Failed to make context current before swap for output %s: 0x%x",
+                     output->model, eglGetError());
+            continue;
+        }
 
-        if (swap->render_success) {
-            /* CRITICAL: Make context current before swapping buffers
-             * The context must be current for the surface we're swapping */
-            if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
-                               output->compositor_surface->egl_surface, state->egl_context)) {
-                log_error("Failed to make context current before swap for output %s: 0x%x",
-                         output->model, eglGetError());
-                swap = swap->next;
-                continue;
-            }
+        /* Damage BEFORE swap+commit — wl_surface damage must be queued before
+         * the commit that publishes the new buffer (audit fix #17). */
+        compositor_surface_damage(output->compositor_surface, 0, 0, INT32_MAX, INT32_MAX);
 
-            /* Swap buffers - this can BLOCK waiting for vsync, so no locks must be held */
-            if (!eglSwapBuffers(state->egl_display, output->compositor_surface->egl_surface)) {
-                log_error("Failed to swap buffers for output %s: 0x%x",
-                         output->model, eglGetError());
-                state->errors_count++;
-            } else {
-                /* Log swap success every 60 frames to verify buffer swapping is working */
-                static uint64_t swap_counter = 0;
-                swap_counter++;
-                if (swap_counter % 60 == 0) {
-                    log_info("Buffer swap #%lu successful for output %s", swap_counter, output->model);
-                }
-                /* Damage the entire surface to tell compositor it needs repainting */
-                compositor_surface_damage(output->compositor_surface, 0, 0, INT32_MAX, INT32_MAX);
+        /* Swap can block waiting for vsync; we hold no locks here. */
+        if (!eglSwapBuffers(state->egl_display, output->compositor_surface->egl_surface)) {
+            log_error("Failed to swap buffers for output %s: 0x%x",
+                     output->model, eglGetError());
+            state->errors_count++;
+            continue;
+        }
 
-                /* Commit surface changes */
-                compositor_surface_commit(output->compositor_surface);
+        static uint64_t swap_counter = 0;
+        swap_counter++;
+        if (swap_counter % 60 == 0) {
+            log_info("Buffer swap #%lu successful for output %s", swap_counter, output->model);
+        }
 
-                output->last_frame_time = current_time;
-                state->frames_rendered++;
+        compositor_surface_commit(output->compositor_surface);
 
-                /* Clean up transition after final frame is rendered */
-                if (output->transition_start_time > 0 &&
-                    output->transition_progress >= 1.0f) {
-                    output->transition_start_time = 0;
+        output->last_frame_time = current_time;
+        state->frames_rendered++;
 
-                    /* Clean up old texture via output module */
-                    output_cleanup_transition(output);
-
-                    /* Preload next wallpaper after transition completes */
-                    if (output->config->cycle && output->config->cycle_count > 1 &&
-                        output->config->type == WALLPAPER_IMAGE) {
-                        output_preload_next_wallpaper(output);
-                    }
-                }
-
-                /* Reset needs_redraw unless we're in a transition or using a shader wallpaper */
-                if ((output->transition_start_time == 0 ||
-                     output->config->transition == TRANSITION_NONE) &&
-                    output->config->type != WALLPAPER_SHADER) {
-                    output->needs_redraw = false;
-                }
+        /* Clean up transition after final frame is rendered */
+        if (output->transition_start_time > 0 &&
+            output->transition_progress >= 1.0f) {
+            output->transition_start_time = 0;
+            output_cleanup_transition(output);
+            if (output->config->cycle && output->config->cycle_count > 1 &&
+                output->config->type == WALLPAPER_IMAGE) {
+                output_preload_next_wallpaper(output);
             }
         }
 
-        /* Free this swap info node and move to next */
-        struct swap_info *next = swap->next;
-        free(swap);
-        swap = next;
+        /* Reset needs_redraw unless we're in a transition or using a shader wallpaper */
+        if ((output->transition_start_time == 0 ||
+             output->config->transition == TRANSITION_NONE) &&
+            output->config->type != WALLPAPER_SHADER) {
+            atomic_store_explicit(&output->needs_redraw, false, memory_order_release);
+        }
     }
 
     /* If we had a next request but couldn't process it, inform the user */
@@ -457,8 +403,6 @@ static void render_outputs(struct neowall_state *state) {
                 log_info("Hint: Configure cycling with directory paths or duration settings");
             }
         }
-
-        /* Decrement the counter since we can't fulfill the request */
         atomic_fetch_sub(&state->next_requested, 1);
     }
 
@@ -537,10 +481,8 @@ void event_loop_run(struct neowall_state *state) {
     /* Initialize occlusion detection (pause rendering when fullscreen windows cover outputs) */
     bool has_occlusion = occlusion_init(state);
 
-    /* Base file descriptors - always polled */
-    #define BASE_FD_COUNT 4
-    #define MAX_POLL_FDS (BASE_FD_COUNT + MAX_OUTPUTS)
-
+    /* Base file descriptors - always polled (BASE_FD_COUNT/MAX_POLL_FDS are
+     * declared at file scope as an enum). */
     struct pollfd fds[MAX_POLL_FDS];
     fds[0].fd = compositor_fd;  /* -1 if no compositor, valid fd for Wayland/X11 */
     fds[0].events = compositor_fd >= 0 ? POLLIN : 0;  /* Don't poll invalid fd */
@@ -557,7 +499,7 @@ void event_loop_run(struct neowall_state *state) {
     pthread_rwlock_rdlock(&state->output_list_lock);
     output = state->outputs;
     while (output) {
-        output->needs_redraw = true;
+        atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
         output = output->next;
     }
     pthread_rwlock_unlock(&state->output_list_lock);
@@ -664,7 +606,7 @@ void event_loop_run(struct neowall_state *state) {
                 shader_count++;
                 /* Only log shader detection once, not every frame */
                 if (!shader_mode_logged) {
-                    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : FPS_TARGET;
+                    int target_fps = shader_fps_resolve(output->config->shader_fps);
                     if (output->config->vsync) {
                         log_info("Shader active on %s with vsync (monitor refresh rate)", output->model);
                     } else {
@@ -768,11 +710,12 @@ void event_loop_run(struct neowall_state *state) {
                 if (s == sizeof(expirations)) {
                     log_debug("Cycle timer expired (%lu expirations), checking outputs", expirations);
                     /* Mark all outputs for redraw so render_outputs() is called */
-                    struct output_state *timer_output = state->outputs;
-                    while (timer_output) {
-                        timer_output->needs_redraw = true;
-                        timer_output = timer_output->next;
+                    pthread_rwlock_rdlock(&state->output_list_lock);
+                    for (struct output_state *timer_output = state->outputs;
+                         timer_output; timer_output = timer_output->next) {
+                        atomic_store_explicit(&timer_output->needs_redraw, true, memory_order_release);
                     }
+                    pthread_rwlock_unlock(&state->output_list_lock);
                 }
             }
 
@@ -804,7 +747,7 @@ void event_loop_run(struct neowall_state *state) {
                         }
                         /* Mark the specific output for redraw */
                         if (frame_timer_outputs[i]) {
-                            frame_timer_outputs[i]->needs_redraw = true;
+                            atomic_store_explicit(&frame_timer_outputs[i]->needs_redraw, true, memory_order_release);
                         }
                     }
                 }
@@ -837,16 +780,17 @@ void event_loop_run(struct neowall_state *state) {
             }
         }
 
-        /* Skip rendering if no output needs a redraw — avoids spinning CPU needlessly */
+        /* Skip rendering if no output needs a redraw — avoids spinning CPU needlessly.
+         * Walking the output list requires holding the read lock. */
         bool any_needs_redraw = false;
-        output = state->outputs;
-        while (output) {
-            if (output->needs_redraw) {
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        for (struct output_state *o = state->outputs; o; o = o->next) {
+            if (atomic_load_explicit(&o->needs_redraw, memory_order_acquire)) {
                 any_needs_redraw = true;
                 break;
             }
-            output = output->next;
         }
+        pthread_rwlock_unlock(&state->output_list_lock);
 
         if (any_needs_redraw ||
             atomic_load_explicit(&state->next_requested, memory_order_acquire) > 0 ||
@@ -868,34 +812,32 @@ void event_loop_run(struct neowall_state *state) {
             frame_count = 0;
         }
 
-        /* Keep redrawing during active transitions and for shader wallpapers */
-        output = state->outputs;
-        while (output) {
+        /* Keep redrawing during active transitions and for shader wallpapers.
+         * Traversal requires the rwlock. */
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        for (struct output_state *o = state->outputs; o; o = o->next) {
             /* Don't schedule redraws for occluded outputs */
-            if (output->config->pause_on_fullscreen &&
-                atomic_load_explicit(&output->occluded, memory_order_acquire)) {
-                output = output->next;
+            if (o->config->pause_on_fullscreen &&
+                atomic_load_explicit(&o->occluded, memory_order_acquire)) {
                 continue;
             }
 
             /* Keep redrawing during transitions */
-            if (output->transition_start_time > 0 &&
-                output->config->transition != TRANSITION_NONE) {
-                output->needs_redraw = true;
+            if (o->transition_start_time > 0 &&
+                o->config->transition != TRANSITION_NONE) {
+                atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
             }
             /* For shader wallpapers with vsync enabled, always redraw (vsync paces us)
              * For shaders with vsync disabled, only redraw when frame timer fires (handled above) */
-            if (output->config->type == WALLPAPER_SHADER &&
-                !output->shader_load_failed &&
-                (output->live_shader_program != 0 || output->multipass_shader != NULL)) {
-                /* Only auto-redraw if vsync is enabled (paced by eglSwapBuffers)
-                 * or if there's no frame timer configured */
-                if (output->config->vsync || output_get_frame_timer_fd(output) < 0) {
-                    output->needs_redraw = true;
+            if (o->config->type == WALLPAPER_SHADER &&
+                !o->shader_load_failed &&
+                (o->live_shader_program != 0 || o->multipass_shader != NULL)) {
+                if (o->config->vsync || output_get_frame_timer_fd(o) < 0) {
+                    atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
                 }
             }
-            output = output->next;
         }
+        pthread_rwlock_unlock(&state->output_list_lock);
 
         /* Throttle debug logging - only every 300 frames (~5 seconds at 60fps) */
         log_throttle_counter++;
@@ -926,7 +868,7 @@ void event_loop_run(struct neowall_state *state) {
 /* Stop the event loop */
 void event_loop_stop(struct neowall_state *state) {
     if (state) {
-        state->running = false;
+        atomic_store_explicit(&state->running, false, memory_order_release);
         log_info("Event loop stop requested");
     }
 }
@@ -937,16 +879,16 @@ void event_loop_request_redraw(struct neowall_state *state) {
         return;
     }
 
-    struct output_state *output = state->outputs;
-    while (output) {
-        output->needs_redraw = true;
-        output = output->next;
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *output = state->outputs; output; output = output->next) {
+        atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
     }
+    pthread_rwlock_unlock(&state->output_list_lock);
 }
 
 /* Request a redraw for a specific output */
 void event_loop_request_output_redraw(struct output_state *output) {
     if (output) {
-        output->needs_redraw = true;
+        atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
     }
 }

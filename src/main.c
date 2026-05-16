@@ -37,16 +37,38 @@ static const char *get_set_index_file_path(void) {
     return path;
 }
 
-/* Write the requested index to a file for the daemon to read */
+/* Write the requested index to a file for the daemon to read.
+ *
+ * Atomic via O_CREAT|O_EXCL + rename(): if two `neowall set N` commands race,
+ * the daemon will never observe a half-written file or the wrong index from
+ * an earlier write (audit fix #21). */
 static bool write_set_index_file(int index) {
     const char *path = get_set_index_file_path();
-    FILE *fp = fopen(path, "w");
-    if (!fp) {
-        fprintf(stderr, "Failed to write index file: %s\n", strerror(errno));
+    char tmp[MAX_PATH_LENGTH];
+    int n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", path);
+    if (n < 0 || (size_t)n >= sizeof(tmp)) {
+        fprintf(stderr, "set-index path too long\n");
         return false;
     }
-    fprintf(fp, "%d\n", index);
-    fclose(fp);
+    int fd = mkstemp(tmp);
+    if (fd < 0) {
+        fprintf(stderr, "Failed to create set-index file: %s\n", strerror(errno));
+        return false;
+    }
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%d\n", index);
+    if (len <= 0 || write(fd, buf, (size_t)len) != len) {
+        fprintf(stderr, "Failed to write set-index file: %s\n", strerror(errno));
+        close(fd);
+        unlink(tmp);
+        return false;
+    }
+    close(fd);
+    if (rename(tmp, path) != 0) {
+        fprintf(stderr, "Failed to install set-index file: %s\n", strerror(errno));
+        unlink(tmp);
+        return false;
+    }
     return true;
 }
 
@@ -88,7 +110,7 @@ typedef struct {
 
 /* Centralized command registry - Single source of truth
  * Note: 'set' command is handled specially, not via this table */
-static DaemonCommand daemon_commands[] = {
+static const DaemonCommand daemon_commands[] = {
     {"next",              SIGUSR1,      "Skip to next wallpaper",                  "Skipping to next wallpaper...",      NULL,  false, true},   /* check_cycle = true */
     {"pause",             SIGUSR2,      "Pause wallpaper cycling",                 "Pausing wallpaper cycling...",       NULL,  false, false},
     {"resume",            SIGCONT,      "Resume wallpaper cycling",                "Resuming wallpaper cycling...",      NULL,  false, false},
@@ -120,21 +142,53 @@ static const char *get_pid_file_path(void) {
     return pid_path;
 }
 
-/* Write PID file */
+/* Write PID file atomically.
+ *
+ * Race-free against concurrent neowall invocations: O_CREAT|O_EXCL ensures
+ * only one process can create the file. If creation fails because the file
+ * already exists, the caller is expected to look at the existing PID, decide
+ * whether it's stale, and try again. */
 static bool write_pid_file(void) {
     const char *pid_path = get_pid_file_path();
-    FILE *fp = fopen(pid_path, "w");
-
-    if (!fp) {
-        log_error("Failed to create PID file %s: %s", pid_path, strerror(errno));
+    int fd = open(pid_path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+    if (fd < 0) {
+        if (errno != EEXIST) {
+            log_error("Failed to create PID file %s: %s", pid_path, strerror(errno));
+        }
         return false;
     }
 
-    fprintf(fp, "%d\n", getpid());
-    fclose(fp);
+    char buf[32];
+    int n = snprintf(buf, sizeof(buf), "%d\n", (int)getpid());
+    if (n <= 0 || write(fd, buf, (size_t)n) != n) {
+        log_error("Failed to write PID to %s: %s", pid_path, strerror(errno));
+        close(fd);
+        unlink(pid_path);
+        return false;
+    }
+    close(fd);
 
     log_debug("Created PID file: %s", pid_path);
     return true;
+}
+
+/* Rewrite the PID file in-place (no O_EXCL). Used by the daemonize grandchild
+ * to record its own PID after the parent has already created the file. */
+static bool update_pid_file(void) {
+    const char *pid_path = get_pid_file_path();
+    int fd = open(pid_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) {
+        log_error("Failed to update PID file %s: %s", pid_path, strerror(errno));
+        return false;
+    }
+    char buf[32];
+    int n = snprintf(buf, sizeof(buf), "%d\n", (int)getpid());
+    bool ok = (n > 0 && write(fd, buf, (size_t)n) == n);
+    close(fd);
+    if (!ok) {
+        log_error("Failed to write PID to %s: %s", pid_path, strerror(errno));
+    }
+    return ok;
 }
 
 /* Remove PID file */
@@ -145,42 +199,57 @@ static void remove_pid_file(void) {
     }
 }
 
-/* Check if daemon is already running */
-static bool is_daemon_running(void) {
+/* Try to atomically claim the PID file. Returns true if we now own it.
+ *
+ * If the file already exists and points to a live process, returns false
+ * (another daemon is running). If it points to a dead process or contains
+ * garbage, unlinks it and tries once more. This collapses the old
+ * is_daemon_running() + write_pid_file() TOCTOU into a single race-free
+ * sequence. */
+static bool try_take_pid_file(pid_t *existing_pid_out) {
     const char *pid_path = get_pid_file_path();
-    FILE *fp = fopen(pid_path, "r");
 
-    if (!fp) {
-        /* No PID file, daemon not running */
-        return false;
-    }
-
-    pid_t pid;
-    if (fscanf(fp, "%d", &pid) != 1) {
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (write_pid_file()) {
+            return true;
+        }
+        /* EEXIST: someone else owns the file. Check who. */
+        FILE *fp = fopen(pid_path, "r");
+        if (!fp) {
+            /* Vanished between failing O_EXCL and our open — retry. */
+            continue;
+        }
+        pid_t pid = 0;
+        int got = fscanf(fp, "%d", &pid);
         fclose(fp);
-        /* Invalid PID file, clean it up */
-        log_debug("Invalid PID file, removing");
-        remove_pid_file();
+        if (got != 1 || pid <= 0) {
+            log_debug("PID file %s contains garbage, removing", pid_path);
+            unlink(pid_path);
+            continue;
+        }
+        if (kill(pid, 0) == 0) {
+            /* Live. We're not the daemon. */
+            if (existing_pid_out) *existing_pid_out = pid;
+            return false;
+        }
+        if (errno == ESRCH) {
+            log_debug("Stale PID file found (PID %d not running), removing", pid);
+            unlink(pid_path);
+            continue;
+        }
+        /* EPERM or similar — process exists, just not ours to signal. */
+        if (existing_pid_out) *existing_pid_out = pid;
         return false;
     }
-    fclose(fp);
-
-    /* Check if process exists */
-    if (kill(pid, 0) == 0) {
-        /* Process exists and we can signal it */
-        return true;
-    }
-
-    if (errno == ESRCH) {
-        /* Process doesn't exist, stale PID file */
-        log_debug("Stale PID file found (PID %d not running), removing", pid);
-        remove_pid_file();
-        return false;
-    }
-
-    /* Other error (EPERM, etc.) - assume process exists */
-    return true;
+    log_error("Failed to claim PID file after retries");
+    return false;
 }
+
+/* Check if daemon is already running (read-only — may return stale info if
+ * the daemon dies immediately after this returns true; race-free claiming is
+ * done by try_take_pid_file()). */
+/* Removed: try_take_pid_file() does both check-and-claim atomically. */
+
 
 /* Kill running daemon */
 static bool kill_daemon(void) {
@@ -432,16 +501,24 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
             break;
 
         case SIGUSR1: {
-            int old_count = atomic_fetch_add_explicit(&state->next_requested, 1, memory_order_acq_rel);
-            int new_count = old_count + 1;
-            log_info("Received SIGUSR1, skipping to next wallpaper (queue: %d -> %d)",
-                     old_count, new_count);
-
-            /* Prevent counter overflow */
-            if (new_count > MAX_NEXT_REQUESTS) {
-                log_error("Too many queued next requests (%d), resetting to 10", new_count);
-                /* BUG FIX #6: Use seq_cst to prevent reordering on weak architectures */
-                atomic_store_explicit(&state->next_requested, 10, memory_order_seq_cst);
+            /* Cap-before-increment via CAS loop. The previous code did a
+             * fetch_add then a blind store(10) on overflow — which races with
+             * the main loop's fetch_sub and can corrupt the counter (audit
+             * fix #22). */
+            int cur = atomic_load_explicit(&state->next_requested, memory_order_acquire);
+            for (;;) {
+                if (cur >= MAX_NEXT_REQUESTS) {
+                    log_warn("Skip-next queue is full (%d), ignoring SIGUSR1", cur);
+                    break;
+                }
+                if (atomic_compare_exchange_weak_explicit(
+                        &state->next_requested, &cur, cur + 1,
+                        memory_order_acq_rel, memory_order_acquire)) {
+                    log_info("Received SIGUSR1, skipping to next wallpaper (queue: %d -> %d)",
+                             cur, cur + 1);
+                    break;
+                }
+                /* CAS failed; cur has been reloaded — retry. */
             }
             break;
         }
@@ -474,32 +551,36 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
     }
 }
 
-/* Handle crash signals - these still need traditional handlers */
+/* Handle crash signals - these still need traditional handlers.
+ *
+ * MUST be async-signal-safe: no printf, no malloc, no localtime, no exit().
+ * We use write(2) directly and _exit(2). Stash the running flag too, but
+ * everything else is decoration. See signal-safety(7). */
 static void handle_crash(int signum) {
-    const char *signame = "UNKNOWN";
+    /* Map known signals to short string literals. */
+    const char *msg;
     switch (signum) {
-        case SIGSEGV: signame = "SIGSEGV (Segmentation fault)"; break;
-        case SIGBUS: signame = "SIGBUS (Bus error)"; break;
-        case SIGILL: signame = "SIGILL (Illegal instruction)"; break;
-        case SIGFPE: signame = "SIGFPE (Floating point exception)"; break;
-        case SIGABRT: signame = "SIGABRT (Abort)"; break;
+        case SIGSEGV: msg = "CRASH: SIGSEGV (segfault)\n"; break;
+        case SIGBUS:  msg = "CRASH: SIGBUS (bus error)\n"; break;
+        case SIGILL:  msg = "CRASH: SIGILL (illegal instruction)\n"; break;
+        case SIGFPE:  msg = "CRASH: SIGFPE (floating point exception)\n"; break;
+        case SIGABRT: msg = "CRASH: SIGABRT (abort)\n"; break;
+        default:      msg = "CRASH: fatal signal\n"; break;
     }
 
-    log_error("CRASH: Received %s (signal %d)", signame, signum);
-    log_error("This likely occurred due to GPU/display disconnection or driver issue");
-    log_error("Error count: %lu, Frames rendered: %lu",
-              global_state ? global_state->errors_count : 0,
-              global_state ? global_state->frames_rendered : 0);
+    /* write() is async-signal-safe; printf-family functions are not. */
+    ssize_t n = write(STDERR_FILENO, msg, strlen(msg));
+    (void)n;
 
-    log_error("To get a backtrace, run: gdb -p %d", getpid());
-    log_error("Then use 'bt' command in gdb");
-
+    /* Best-effort: ask the event loop to shut down. atomic_store on a lock-free
+     * atomic is async-signal-safe (we're not taking any libc lock). */
     if (global_state) {
-        log_error("Attempting graceful shutdown...");
         atomic_store_explicit(&global_state->running, false, memory_order_release);
     }
 
-    exit(EXIT_FAILURE);
+    /* _exit (not exit) — don't run atexit handlers / stdio cleanup from a
+     * signal handler; SA_RESETHAND ensures a repeat signal core-dumps cleanly. */
+    _exit(EXIT_FAILURE);
 }
 
 /* ============================================================================
@@ -549,8 +630,13 @@ static void setup_crash_handlers(void) {
     sigaction(SIGFPE, &crash_sa, NULL);
     sigaction(SIGABRT, &crash_sa, NULL);
 
-    /* Ignore SIGPIPE */
-    signal(SIGPIPE, SIG_IGN);
+    /* Ignore SIGPIPE via sigaction — signal(3) semantics are
+     * implementation-defined across SysV/BSD (audit fix #27). */
+    struct sigaction pipe_sa;
+    memset(&pipe_sa, 0, sizeof(pipe_sa));
+    pipe_sa.sa_handler = SIG_IGN;
+    sigemptyset(&pipe_sa.sa_mask);
+    sigaction(SIGPIPE, &pipe_sa, NULL);
 
     log_debug("Crash signal handlers installed");
 }
@@ -591,24 +677,28 @@ static bool daemonize(void) {
         return false;
     }
 
-    /* Close standard file descriptors */
-    close(STDIN_FILENO);
-    close(STDOUT_FILENO);
-    close(STDERR_FILENO);
-
-    /* Redirect to /dev/null */
-    int fd = open("/dev/null", O_RDWR);
-    if (fd >= 0) {
-        dup2(fd, STDIN_FILENO);
-        dup2(fd, STDOUT_FILENO);
-        dup2(fd, STDERR_FILENO);
-        if (fd > 2) {
-            close(fd);
-        }
+    /* Detach stdio: open /dev/null first, then dup2 onto 0/1/2.
+     * The previous code closed 0/1/2 first, which meant if open() failed for
+     * any reason, log_error writes would land on whatever fd table slot got
+     * recycled next — a fun way to corrupt the PID file. */
+    int devnull = open("/dev/null", O_RDWR | O_CLOEXEC);
+    if (devnull < 0) {
+        log_error("Failed to open /dev/null: %s", strerror(errno));
+        return false;
+    }
+    if (dup2(devnull, STDIN_FILENO)  < 0 ||
+        dup2(devnull, STDOUT_FILENO) < 0 ||
+        dup2(devnull, STDERR_FILENO) < 0) {
+        log_error("Failed to dup2 /dev/null onto std fds: %s", strerror(errno));
+        close(devnull);
+        return false;
+    }
+    if (devnull > STDERR_FILENO) {
+        close(devnull);
     }
 
     /* Write PID file */
-    if (!write_pid_file()) {
+    if (!update_pid_file()) {
         log_error("Failed to write PID file, but continuing anyway");
     }
 
@@ -630,12 +720,18 @@ static bool create_config_directory(void) {
         snprintf(config_dir, sizeof(config_dir), "%s/.config/neowall", home);
     }
 
-    /* Create directories recursively */
+    /* Create directories recursively. We append a trailing '/' before walking
+     * so the loop creates the leaf as well (cleaner than the previous "loop
+     * for parents, then stat-and-mkdir leaf" dance — the stat was dead code
+     * because the loop already created the leaf, see audit fix #33). */
     char tmp[MAX_PATH_LENGTH];
-    char *p = NULL;
-    snprintf(tmp, sizeof(tmp), "%s", config_dir);
+    int written = snprintf(tmp, sizeof(tmp), "%s/", config_dir);
+    if (written < 0 || (size_t)written >= sizeof(tmp)) {
+        log_error("Config directory path too long: %s", config_dir);
+        return false;
+    }
 
-    for (p = tmp + 1; *p; p++) {
+    for (char *p = tmp + 1; *p; p++) {
         if (*p == '/') {
             *p = '\0';
             if (mkdir(tmp, 0755) == -1 && errno != EEXIST) {
@@ -646,19 +742,6 @@ static bool create_config_directory(void) {
         }
     }
 
-    struct stat st;
-    bool created_final_dir = false;
-    if (stat(config_dir, &st) == -1) {
-        if (mkdir(tmp, 0755) == -1) {
-            log_error("Failed to create config directory %s: %s", tmp, strerror(errno));
-            return false;
-        }
-        created_final_dir = true;
-    }
-
-    if (created_final_dir) {
-        log_info("Created config directory: %s", config_dir);
-    }
     return true;
 }
 
@@ -837,17 +920,13 @@ int main(int argc, char *argv[]) {
 
     log_info("Using configuration file: %s", config_path);
 
-    /* Check if already running */
-    if (is_daemon_running()) {
+    /* Atomically claim the PID file. This races correctly against another
+     * concurrent `neowall` invocation: only one O_CREAT|O_EXCL succeeds. We
+     * claim BEFORE forking so the grandchild can't be beaten to the file by
+     * a sibling invocation during the fork dance. */
+    pid_t existing_pid = 0;
+    if (!try_take_pid_file(&existing_pid)) {
         const char *pid_path = get_pid_file_path();
-        FILE *fp = fopen(pid_path, "r");
-        pid_t existing_pid = 0;
-        if (fp) {
-            if (fscanf(fp, "%d", &existing_pid) != 1) {
-                existing_pid = 0;
-            }
-            fclose(fp);
-        }
         log_error("NeoWall is already running (PID %d)", existing_pid);
         fprintf(stderr, "Error: NeoWall is already running (PID %d)\n", existing_pid);
         fprintf(stderr, "PID file: %s\n", pid_path);
@@ -855,16 +934,13 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* Daemonize if requested */
+    /* Daemonize if requested. The grandchild will rewrite the PID file to its
+     * own PID via update_pid_file() at the end of daemonize(). */
     if (daemon_mode) {
         log_info("Running as daemon...");
         if (!daemonize()) {
+            remove_pid_file();
             return EXIT_FAILURE;
-        }
-    } else {
-        /* In foreground mode, still write PID file for client commands */
-        if (!write_pid_file()) {
-            log_error("Failed to write PID file, but continuing anyway");
         }
     }
 

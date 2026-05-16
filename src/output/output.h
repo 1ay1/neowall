@@ -92,7 +92,7 @@ struct output_state {
     char connector_name[64];    /* Connector name (e.g., HDMI-A-2, DP-1) from xdg-output */
 
     bool configured;
-    bool needs_redraw;
+    atomic_bool_t needs_redraw;         /* Atomic: written from main loop, occlusion callbacks, render */
     atomic_bool_t occluded;             /* Output is fully occluded by a fullscreen window */
 
     struct neowall_state *state;  /* Back-pointer to global state */
@@ -115,6 +115,7 @@ struct output_state {
     /* Background thread for async image loading */
     pthread_t preload_thread;           /* Background preload thread */
     atomic_bool_t preload_thread_active; /* Is background thread running? */
+    atomic_bool_t preload_should_stop;   /* Cooperative cancellation flag for preload thread */
     pthread_mutex_t preload_mutex;      /* Protects preload_image during thread handoff */
     struct image_data *preload_decoded_image; /* Image decoded in background, ready for GPU upload */
     atomic_bool_t preload_upload_pending; /* Background thread finished, main thread should upload */

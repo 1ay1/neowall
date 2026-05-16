@@ -46,4 +46,10 @@
 #define MIN_SHADER_SPEED        0.1f
 #define SHADER_SPEED_INCREMENT  1.0f
 
+/* Resolve a config shader_fps value with the project default fallback.
+ * Centralized so we don't have four copies of `? FPS_TARGET` / `? 60`. */
+static inline int shader_fps_resolve(int configured) {
+    return configured > 0 ? configured : FPS_TARGET;
+}
+
 #endif /* NEOWALL_CONSTANTS_H */

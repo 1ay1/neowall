@@ -1,10 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <inttypes.h>  /* PRIu64 */
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <strings.h>  /* POSIX strcasecmp — don't redefine it ourselves */
 #include <unistd.h>
 #include <errno.h>
 #include "neowall.h"
@@ -46,8 +48,8 @@ static void log_message(const char *level, const char *color,
     char timestamp[32];
     get_timestamp(timestamp, sizeof(timestamp));
 
-    /* Check if stdout is a TTY for color support */
-    if (use_colors && isatty(STDOUT_FILENO)) {
+    /* Check if stderr (where we actually write) is a TTY for color support */
+    if (use_colors && isatty(STDERR_FILENO)) {
         fprintf(stderr, "%s[%s]%s %s%s%s: ",
                 COLOR_GRAY, timestamp, COLOR_RESET,
                 color, level, COLOR_RESET);
@@ -116,22 +118,9 @@ void log_set_colors(bool enabled) {
     use_colors = enabled;
 }
 
-/* String comparison (case-insensitive) */
-int strcasecmp(const char *s1, const char *s2) {
-    while (*s1 && *s2) {
-        int c1 = (*s1 >= 'A' && *s1 <= 'Z') ? *s1 + 32 : *s1;
-        int c2 = (*s2 >= 'A' && *s2 <= 'Z') ? *s2 + 32 : *s2;
-
-        if (c1 != c2) {
-            return c1 - c2;
-        }
-
-        s1++;
-        s2++;
-    }
-
-    return *s1 - *s2;
-}
+/* NOTE: strcasecmp(3) is provided by POSIX <strings.h>; we used to ship a
+ * locale-ignorant duplicate here that shadowed the libc symbol. Removed in
+ * audit fix #28. */
 
 /* Path expansion (tilde expansion) */
 bool expand_path(const char *path, char *expanded, size_t size) {
@@ -200,7 +189,7 @@ void format_bytes(uint64_t bytes, char *buf, size_t size) {
     }
 
     if (unit_index == 0) {
-        snprintf(buf, size, "%lu %s", (unsigned long)value, units[unit_index]);
+        snprintf(buf, size, "%" PRIu64 " %s", (uint64_t)value, units[unit_index]);
     } else {
         snprintf(buf, size, "%.2f %s", value, units[unit_index]);
     }

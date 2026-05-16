@@ -830,7 +830,7 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
     image_free(img);
 
     /* Mark for redraw */
-    output->needs_redraw = true;
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
 
     return true;
 }
@@ -958,10 +958,10 @@ bool render_frame_shader(struct output_state *output) {
      * - vsync mode: always set needs_redraw (monitor refresh drives rendering)
      * - vsync off: only set if frame timer hasn't expired (timer drives rendering) */
     if (output->config->vsync) {
-        output->needs_redraw = true;
+        atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
     } else {
         /* Frame timer controls redraw scheduling in vsync-off mode */
-        output->needs_redraw = false;
+        atomic_store_explicit(&output->needs_redraw, false, memory_order_release);
     }
     output->frames_rendered++;
 
@@ -1217,7 +1217,7 @@ bool render_frame(struct output_state *output) {
     /* Render FPS watermark if enabled */
     render_fps_watermark(output);
 
-    output->needs_redraw = false;
+    atomic_store_explicit(&output->needs_redraw, false, memory_order_release);
     output->frames_rendered++;
 
     return true;

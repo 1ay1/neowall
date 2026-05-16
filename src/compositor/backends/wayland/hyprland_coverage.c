@@ -48,7 +48,6 @@ static int snap_n_monitors = 0;
 static hypr_client_t snap_clients[MAX_CLIENTS];
 static int snap_n_clients = 0;
 static uint64_t last_refresh_ms = 0;
-static int sock_cache = -1;
 
 /* ---------- IPC ---------- */
 
@@ -335,7 +334,6 @@ void hyprland_coverage_refresh(void) {
     if (cjson) parse_clients(cjson);
     pthread_mutex_unlock(&snap_lock);
 
-    (void)sock_cache;
     free(mjson);
     free(cjson);
 }

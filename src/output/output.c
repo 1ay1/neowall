@@ -105,7 +105,7 @@ static bool output_configure_frame_timer(struct output_state *output) {
     }
 
     /* Configure timer for target FPS */
-    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : 60;
+    int target_fps = shader_fps_resolve(output->config->shader_fps);
     
     /* Calculate interval in seconds and nanoseconds
      * tv_nsec must be < 1000000000 (less than 1 second) */
@@ -174,7 +174,7 @@ struct output_state *output_create(struct neowall_state *state,
     out->scale = 1;
     out->transform = COMPOSITOR_TRANSFORM_NORMAL;
     out->configured = false;
-    out->needs_redraw = true;
+    atomic_store_explicit(&out->needs_redraw, true, memory_order_release);
     atomic_store(&out->occluded, false);
     out->state = state;
     out->connector_name[0] = '\0';
@@ -189,6 +189,7 @@ struct output_state *output_create(struct neowall_state *state,
     pthread_mutex_init(&out->preload_mutex, NULL);
     out->preload_decoded_image = NULL;
     atomic_store(&out->preload_thread_active, false);
+    atomic_store(&out->preload_should_stop, false);
     atomic_store(&out->preload_upload_pending, false);
 
     /* Compositor surface will be created later in output_configure_compositor_surface() */
@@ -287,11 +288,24 @@ void output_destroy(struct output_state *output) {
         output->next_image = NULL;
     }
 
-    /* Cancel and wait for background preload thread if active */
+    /* Wait for background preload thread to finish. We don't pthread_cancel
+     * (libpng/libjpeg are not async-cancel-safe) and we never detached the
+     * thread, so a join here is correct. preload_should_stop tells the thread
+     * to abandon its work if the result is no longer needed. */
     if (atomic_load(&output->preload_thread_active)) {
-        pthread_cancel(output->preload_thread);
+        atomic_store(&output->preload_should_stop, true);
         pthread_join(output->preload_thread, NULL);
         atomic_store(&output->preload_thread_active, false);
+    }
+
+    /* Close frame timer (independent of preload state; do it outside the
+     * preload_mutex which had no business protecting it). The poll loop must
+     * have already stopped using this fd by the time we get here — callers
+     * of output_destroy must hold the output_list_lock as writer, which
+     * serializes against the poll loop's fd-building rdlocked traversal. */
+    if (output->frame_timer_fd >= 0) {
+        close(output->frame_timer_fd);
+        output->frame_timer_fd = -1;
     }
 
     /* Free preload data */
@@ -299,12 +313,6 @@ void output_destroy(struct output_state *output) {
     if (output->preload_texture) {
         render_destroy_texture(output->preload_texture);
         output->preload_texture = 0;
-    }
-
-    /* Close frame timer */
-    if (output->frame_timer_fd >= 0) {
-        close(output->frame_timer_fd);
-        output->frame_timer_fd = -1;
     }
 
     if (output->preload_image) {
@@ -406,18 +414,34 @@ static void *preload_thread_func(void *arg) {
     struct preload_thread_args *args = (struct preload_thread_args *)arg;
     struct output_state *output = args->output;
 
-    /* Enable thread cancellation at any time */
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+    /* Cooperative cancellation only — libpng/libjpeg/etc. are NOT async-cancel-safe.
+     * Caller signals shutdown via output->preload_should_stop. */
+    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 
     log_debug("Background thread: decoding image %s (%dx%d, mode=%d)",
               args->path, args->width, args->height, args->mode);
+
+    /* Bail early if caller already asked us to stop. */
+    if (atomic_load(&output->preload_should_stop)) {
+        atomic_store(&output->preload_thread_active, false);
+        free(args);
+        return NULL;
+    }
 
     /* Decode image in background (CPU-bound, no GL context needed) */
     struct image_data *decoded_image = image_load(args->path, args->width, args->height, args->mode);
 
     if (!decoded_image) {
         log_error("Background thread: failed to decode image: %s", args->path);
+        atomic_store(&output->preload_thread_active, false);
+        free(args);
+        return NULL;
+    }
+
+    /* If caller asked us to stop while we were decoding, throw the result away
+     * rather than handing it off. */
+    if (atomic_load(&output->preload_should_stop)) {
+        image_free(decoded_image);
         atomic_store(&output->preload_thread_active, false);
         free(args);
         return NULL;
@@ -505,7 +529,10 @@ void output_preload_next_wallpaper(struct output_state *output) {
     log_debug("Starting background preload for output %s: %s",
               output->model[0] ? output->model : "unknown", args->path);
 
-    /* Launch background thread */
+    /* Launch background thread. We keep it joinable so output_destroy can wait
+     * for it deterministically (we never call pthread_cancel — image codecs
+     * aren't async-cancel-safe). */
+    atomic_store(&output->preload_should_stop, false);
     atomic_store(&output->preload_thread_active, true);
     if (pthread_create(&output->preload_thread, NULL, preload_thread_func, args) != 0) {
         log_error("Failed to create preload thread");
@@ -513,9 +540,6 @@ void output_preload_next_wallpaper(struct output_state *output) {
         free(args);
         return;
     }
-
-    /* Detach thread so it cleans up automatically when done */
-    pthread_detach(output->preload_thread);
 
     log_debug("Background preload thread started for: %s", args->path);
 }
@@ -551,6 +575,25 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
         if (atomic_load(&output->preload_ready)) {
             log_debug("Preloaded texture mismatch: wanted '%s', have '%s'", path, output->preload_path);
         }
+
+        /* If a background decode is sitting in the handoff slot for a different
+         * path, drop it on the floor now — otherwise render_outputs() will
+         * happily upload it on the next frame and overwrite the texture we're
+         * about to install. Also wait for any still-running decode to finish
+         * so it can't race with us. */
+        if (atomic_load(&output->preload_thread_active)) {
+            atomic_store(&output->preload_should_stop, true);
+            pthread_join(output->preload_thread, NULL);
+            atomic_store(&output->preload_thread_active, false);
+        }
+        pthread_mutex_lock(&output->preload_mutex);
+        if (output->preload_decoded_image) {
+            image_free(output->preload_decoded_image);
+            output->preload_decoded_image = NULL;
+        }
+        atomic_store(&output->preload_upload_pending, false);
+        output->preload_path[0] = '\0';
+        pthread_mutex_unlock(&output->preload_mutex);
 
         /* Load new image with display-aware scaling */
         new_image = image_load(path, output->width, output->height, output->config->mode);
@@ -694,7 +737,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
                          "active");
 
     /* Mark for redraw */
-    output->needs_redraw = true;
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
 
     /* Preload next wallpaper if cycling is enabled */
     if (output->config->cycle && output->config->cycle_count > 1) {
@@ -846,7 +889,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     }
 
     /* Configure adaptive resolution scaling to target the config's FPS */
-    int target_fps = output->config->shader_fps > 0 ? output->config->shader_fps : 60;
+    int target_fps = shader_fps_resolve(output->config->shader_fps);
     multipass_set_adaptive_resolution(output->multipass_shader, 
                                       true,           /* enabled */
                                       (float)target_fps,
@@ -877,7 +920,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
                          "active");
 
     /* Mark for immediate redraw with new shader */
-    output->needs_redraw = true;
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
     
     /* Initialize frame time for animation */
     uint64_t now = get_time_ms();
@@ -1045,7 +1088,7 @@ void output_cycle_wallpaper(struct output_state *output) {
         }
 
         /* Mark the output for redraw to ensure change is visible */
-        output->needs_redraw = true;
+        atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
     }
 
     /* Update cycle list file for 'neowall list' command */
@@ -1115,7 +1158,7 @@ void output_set_cycle_index(struct output_state *output, size_t index) {
     }
 
     /* Mark for redraw */
-    output->needs_redraw = true;
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
 
     /* Update cycle list file for 'neowall list' command */
     if (output->config->cycle_paths && output->config->cycle_count > 0) {
@@ -1352,7 +1395,7 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     output->last_cycle_time = get_time_ms();
 
     /* Request immediate redraw */
-    output->needs_redraw = true;
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
 
     log_info("Successfully applied config to output %s", output->model);
     return true;

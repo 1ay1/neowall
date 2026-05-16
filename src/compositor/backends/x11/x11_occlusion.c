@@ -143,7 +143,7 @@ static void check_fullscreen_state(void) {
 
         const char *name = o->connector_name[0] ? o->connector_name : o->model;
         if (was && !now) {
-            o->needs_redraw = true;
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
             log_info("Output %s un-occluded, resuming rendering", name);
         } else if (!was && now) {
             log_info("Output %s occluded by fullscreen window, pausing rendering", name);

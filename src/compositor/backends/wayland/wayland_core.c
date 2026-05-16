@@ -243,7 +243,7 @@ static bool output_apply_render_size(struct output_state *output,
 
     output->width = physical_w;
     output->height = physical_h;
-    output->needs_redraw = true;
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
 
     if (out_changed) {
         *out_changed = true;

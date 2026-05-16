@@ -117,7 +117,11 @@ static void mgr_toplevel(void *d, struct zwlr_foreign_toplevel_manager_v1 *m,
     zwlr_foreign_toplevel_handle_v1_add_listener(handle, &tl_listener, tl);
 }
 static void mgr_finished(void *d, struct zwlr_foreign_toplevel_manager_v1 *m) {
-    (void)d; (void)m;
+    (void)d;
+    /* Protocol contract: after `finished` we MUST destroy the proxy. */
+    if (m) {
+        zwlr_foreign_toplevel_manager_v1_destroy(m);
+    }
     toplevel_manager = NULL;
 }
 static const struct zwlr_foreign_toplevel_manager_v1_listener mgr_listener = {
@@ -218,7 +222,7 @@ void wayland_occlusion_update(struct neowall_state *state) {
 
         const char *name = o->connector_name[0] ? o->connector_name : o->model;
         if (was && !nowocc) {
-            o->needs_redraw = true;
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
             log_info("Output %s un-occluded, rendering", name);
         } else if (!was && nowocc) {
             const char *why = cb_says_occluded
