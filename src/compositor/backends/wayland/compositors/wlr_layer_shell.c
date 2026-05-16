@@ -118,21 +118,67 @@ static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
 static void pointer_handle_enter(void *data, struct wl_pointer *pointer,
                                  uint32_t serial, struct wl_surface *surface,
                                  wl_fixed_t surface_x, wl_fixed_t surface_y) {
-    (void)data;
-    (void)surface;
+    wlr_backend_data_t *backend = data;
 
     double x = wl_fixed_to_double(surface_x);
     double y = wl_fixed_to_double(surface_y);
 
     log_debug("Wayland pointer entered surface at (%.2f, %.2f)", x, y);
 
-    /* Set the default arrow cursor when pointer enters the wallpaper surface */
+    /* Set the cursor when pointer enters the wallpaper surface.
+     *
+     * We honor the user's XCURSOR_THEME / XCURSOR_SIZE (read at init time)
+     * and load the theme at the entered output's buffer scale so it stays
+     * crisp on HiDPI monitors. Without this, the cursor falls back to a
+     * blurry 24px wlroots default (see GitHub issue: Hyprland + Bibata
+     * losing the user's theme over the wallpaper).
+     */
     wayland_t *wl = wayland_get();
-    if (!wl || !wl->cursor_theme || !wl->cursor_surface) {
+    if (!wl || !wl->cursor_surface || !wl->shm) {
         return;
     }
 
+    /* Find the output whose surface the pointer entered, to get its scale. */
+    int32_t scale = 1;
+    if (backend && backend->state && surface) {
+        pthread_rwlock_rdlock(&backend->state->output_list_lock);
+        for (struct output_state *o = backend->state->outputs; o; o = o->next) {
+            if (o->compositor_surface &&
+                (struct wl_surface *)o->compositor_surface->native_surface == surface) {
+                if (o->scale > 0) {
+                    scale = o->scale;
+                }
+                break;
+            }
+        }
+        pthread_rwlock_unlock(&backend->state->output_list_lock);
+    }
+
+    /* (Re)load the theme if needed: first time, or scale changed. */
+    if (!wl->cursor_theme || wl->cursor_loaded_scale != scale) {
+        if (wl->cursor_theme) {
+            wl_cursor_theme_destroy(wl->cursor_theme);
+            wl->cursor_theme = NULL;
+        }
+        int size = wl->cursor_base_size * scale;
+        wl->cursor_theme = wl_cursor_theme_load(wl->cursor_theme_name, size, wl->shm);
+        if (!wl->cursor_theme) {
+            log_warn("Failed to load cursor theme '%s' at size %d",
+                     wl->cursor_theme_name ? wl->cursor_theme_name : "<default>",
+                     size);
+            return;
+        }
+        wl->cursor_loaded_scale = scale;
+        log_debug("Loaded cursor theme '%s' at size %d (scale %d)",
+                  wl->cursor_theme_name ? wl->cursor_theme_name : "<default>",
+                  size, scale);
+    }
+
     struct wl_cursor *cursor = wl_cursor_theme_get_cursor(wl->cursor_theme, "left_ptr");
+    if (!cursor || cursor->image_count == 0) {
+        /* Fall back to "default" alias used by some themes (e.g. Adwaita). */
+        cursor = wl_cursor_theme_get_cursor(wl->cursor_theme, "default");
+    }
     if (!cursor || cursor->image_count == 0) {
         return;
     }
@@ -143,11 +189,16 @@ static void pointer_handle_enter(void *data, struct wl_pointer *pointer,
         return;
     }
 
+    /* Tell the compositor the cursor buffer is at `scale` so it's displayed
+     * at the correct logical size and not blurry on HiDPI. */
+    wl_surface_set_buffer_scale(wl->cursor_surface, scale);
     wl_surface_attach(wl->cursor_surface, buffer, 0, 0);
-    wl_surface_damage(wl->cursor_surface, 0, 0, image->width, image->height);
+    wl_surface_damage_buffer(wl->cursor_surface, 0, 0,
+                             (int32_t)image->width, (int32_t)image->height);
     wl_surface_commit(wl->cursor_surface);
     wl_pointer_set_cursor(pointer, serial, wl->cursor_surface,
-                          image->hotspot_x, image->hotspot_y);
+                          (int32_t)image->hotspot_x / scale,
+                          (int32_t)image->hotspot_y / scale);
 }
 
 static void pointer_handle_leave(void *data, struct wl_pointer *pointer,

@@ -533,21 +533,40 @@ bool wayland_init_registry(struct neowall_state *state) {
         return false;
     }
 
-    /* Initialize cursor theme and surface for pointer enter events */
-    wl->cursor_theme = wl_cursor_theme_load(NULL, 24, wl->shm);
-    if (!wl->cursor_theme) {
-        log_warn("Failed to load cursor theme");
-        /* This is an acceptable minor issue */
-        return true;
+    /* Initialize cursor state for pointer enter events.
+     *
+     * IMPORTANT: do NOT call wl_cursor_theme_load(NULL, 24, ...) here.
+     * That hardcodes a 24px wlroots default and ignores the user's
+     * XCURSOR_THEME / XCURSOR_SIZE (and Hyprcursor sets XCURSOR_* as a
+     * fallback). Instead read those env vars and defer the actual theme
+     * load to the first pointer enter, where we know the output scale and
+     * can load a HiDPI-correct theme.
+     */
+    const char *xc_theme = getenv("XCURSOR_THEME");
+    wl->cursor_theme_name = (xc_theme && xc_theme[0]) ? strdup(xc_theme) : NULL;
+
+    int base_size = 24;
+    const char *xc_size = getenv("XCURSOR_SIZE");
+    if (xc_size && xc_size[0]) {
+        char *end = NULL;
+        long v = strtol(xc_size, &end, 10);
+        if (end != xc_size && v > 0 && v <= 512) {
+            base_size = (int)v;
+        }
     }
+    wl->cursor_base_size = base_size;
+    wl->cursor_theme = NULL;
+    wl->cursor_loaded_scale = 0;
 
     wl->cursor_surface = wl_compositor_create_surface(wl->compositor);
     if (wl->cursor_surface) {
-        log_info("Cursor theme loaded for pointer enter handling");
+        log_info("Cursor surface ready (theme=%s, size=%d, loaded on demand)",
+                 wl->cursor_theme_name ? wl->cursor_theme_name : "<default>",
+                 wl->cursor_base_size);
     } else {
         log_error("Failed to create cursor surface");
-        wl_cursor_theme_destroy(wl->cursor_theme);
-        wl->cursor_theme = NULL;
+        free(wl->cursor_theme_name);
+        wl->cursor_theme_name = NULL;
     }
 
     return true;
@@ -645,6 +664,10 @@ void wayland_cleanup(void) {
         wl_cursor_theme_destroy(wl->cursor_theme);
         wl->cursor_theme = NULL;
     }
+
+    free(wl->cursor_theme_name);
+    wl->cursor_theme_name = NULL;
+    wl->cursor_loaded_scale = 0;
 
     /* Destroy Wayland objects */
     if (wl->shm) {

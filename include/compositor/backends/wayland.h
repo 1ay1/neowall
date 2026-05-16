@@ -45,9 +45,16 @@ typedef struct wayland {
     /* Back-pointer to main neowall state */
     struct neowall_state *state;
     
-    /* Cursor state for setting cursor on pointer enter */
+    /* Cursor state for setting cursor on pointer enter.
+     * Theme name and base size come from XCURSOR_THEME / XCURSOR_SIZE so we
+     * honor the user's configuration instead of forcing a wlroots default.
+     * The theme is (re)loaded lazily at the entered surface's buffer scale
+     * for crisp HiDPI rendering. */
     struct wl_cursor_theme *cursor_theme;
     struct wl_surface *cursor_surface;
+    char *cursor_theme_name;   /* strdup'd, may be NULL (libwayland-cursor picks default) */
+    int cursor_base_size;      /* unscaled size in logical pixels */
+    int cursor_loaded_scale;   /* scale factor the current theme was loaded at */
 
     /* Initialization flag */
     bool initialized;
