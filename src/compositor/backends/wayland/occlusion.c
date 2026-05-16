@@ -2,27 +2,25 @@
 
 /* Occlusion detection on wlroots compositors.
  *
- * We combine two independent signals because no single one is reliable across
- * every compositor + layout:
+ * We combine three independent signals because no single one is reliable
+ * across every compositor + layout:
  *
  *   1. Frame-callback watchdog. The wl_surface.frame request asks the
  *      compositor to ping us when it's ready to present a new frame. The spec
- *      says compositors MAY withhold these when the surface is obscured. On
- *      Hyprland this works for true fullscreen and for off-monitor/minimized
- *      cases, but NOT for "maximized window covers wallpaper" (Hyprland keeps
- *      pinging anyway).
+ *      says compositors MAY withhold these when the surface is obscured.
+ *      Catches true-fullscreen on Hyprland and off-screen/minimized cases.
  *
  *   2. Toplevel coverage via wlr-foreign-toplevel-management. Tracks per-window
  *      MAXIMIZED / FULLSCREEN state on each output. Catches the Hyprland gap
- *      above.
+ *      where the compositor keeps pinging frame callbacks for obscured
+ *      surfaces.
  *
- * The output is occluded if EITHER signal says so. This gets the user's
- * "stop rendering when nobody can see it" intent right on every tested
- * compositor (Hyprland, Sway, River). The "lots of small windows tiled to
- * cover the screen" case — where no single toplevel is maximized — relies on
- * the frame-callback signal. If a compositor refuses to suspend callbacks for
- * tiled cover (Hyprland today), we render. Not ideal but no worse than the
- * status quo. */
+ *   3. Hyprland IPC coverage (hyprland_coverage.c). When running under
+ *      Hyprland, query its socket for window geometry and rasterize coverage
+ *      per output. Catches the "mosaic of small non-maximized windows covers
+ *      the wallpaper" case that signals 1 and 2 miss. No-op elsewhere.
+ *
+ * The output is occluded if ANY signal says so. */
 
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +30,7 @@
 #include "compositor.h"
 #include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 #include "wayland_occlusion.h"
+#include "hyprland_coverage.h"
 
 /* If no frame callback arrives for this long, declare the surface occluded.
  * At 60 Hz a callback should land every ~16 ms; 500 ms is ~30 missed frames
@@ -279,6 +278,9 @@ void wayland_occlusion_update(struct neowall_state *state) {
     }
     uint64_t now = get_time_ms();
 
+    /* Refresh Hyprland snapshot (self-throttled). No-op elsewhere. */
+    hyprland_coverage_refresh();
+
     pthread_rwlock_rdlock(&state->output_list_lock);
 
     for (struct output_state *o = state->outputs; o; o = o->next) {
@@ -310,8 +312,11 @@ void wayland_occlusion_update(struct neowall_state *state) {
         bool toplevel_says_occluded =
             any_covering_toplevel_on((struct wl_output *)o->native_output);
 
+        /* Signal 3: Hyprland-specific tiled coverage (>=80% of monitor). */
+        bool hypr_says_occluded = hyprland_output_covered(o, 0.80f);
+
         bool was = atomic_load_explicit(&o->occluded, memory_order_acquire);
-        bool nowocc = cb_says_occluded || toplevel_says_occluded;
+        bool nowocc = cb_says_occluded || toplevel_says_occluded || hypr_says_occluded;
 
         atomic_store_explicit(&o->occluded, nowocc, memory_order_release);
 
@@ -322,7 +327,9 @@ void wayland_occlusion_update(struct neowall_state *state) {
         } else if (!was && nowocc) {
             const char *why = cb_says_occluded
                 ? "compositor stopped frame callbacks"
-                : "maximized/fullscreen window covering output";
+                : toplevel_says_occluded
+                    ? "maximized/fullscreen window covering output"
+                    : "tiled windows cover >=80% of output";
             log_info("Output %s occluded (%s), pausing", name, why);
         }
     }

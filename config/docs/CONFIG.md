@@ -203,11 +203,11 @@ Works per-output — if only one monitor is covered, the others keep rendering.
 - A fullscreen window on the output
 - A maximized window on the output
 - The compositor stops requesting frames for the wallpaper surface (500ms watchdog)
-
-**Known limitation:** A mosaic of small non-maximized windows that together cover the wallpaper may not trigger a pause on compositors that keep sending frame callbacks to obscured surfaces (e.g. Hyprland). Wayland exposes no cross-client geometry, so we can't compute exact overlap.
+- On Hyprland: tiled/floating windows that together cover ≥80% of the output (via Hyprland's IPC socket)
 
 **Compositor support:**
-- **Wayland**: Hyprland, Sway, River (via `wlr-foreign-toplevel-management` + frame callbacks)
+- **Hyprland**: full coverage detection (fullscreen, maximized, tiled mosaic)
+- **Wayland (other wlroots)**: Sway, River — fullscreen + maximized via `wlr-foreign-toplevel-management`
 - **X11**: Any EWMH-compliant window manager (i3, bspwm, dwm, etc.)
 - **KDE/GNOME**: Not yet supported (gracefully falls back to always rendering)
 
