@@ -56,6 +56,7 @@ typedef enum {
     COMPOSITOR_CAP_KEYBOARD_INTERACTIVITY = (1 << 4),  /* Can disable keyboard input */
     COMPOSITOR_CAP_ANCHOR           = (1 << 5),  /* Supports surface anchoring */
     COMPOSITOR_CAP_MULTI_OUTPUT     = (1 << 6),  /* Can bind surfaces to specific outputs */
+    COMPOSITOR_CAP_OCCLUSION        = (1 << 7),  /* Reports fullscreen occlusion */
 } compositor_capabilities_t;
 
 /**
@@ -400,6 +401,21 @@ typedef struct compositor_backend_ops {
      * @return EGL_PLATFORM_WAYLAND_KHR, EGL_PLATFORM_X11_KHR, etc.
      */
     EGLenum (*get_egl_platform)(void *backend_data);
+
+    /* ===== OCCLUSION DETECTION (optional) =====
+     * Backends that can detect fullscreen windows over wallpaper outputs
+     * implement these. NULL ops are treated as "not supported". When a
+     * window goes fullscreen on an output, the backend sets that
+     * output->occluded so the event loop can skip rendering. */
+
+    /* Init occlusion tracking. Return true if available. */
+    bool (*occlusion_init)(void *backend_data, struct neowall_state *state);
+
+    /* Recompute occlusion. Called from the event loop after dispatch. */
+    void (*occlusion_update)(void *backend_data, struct neowall_state *state);
+
+    /* Release occlusion resources. */
+    void (*occlusion_cleanup)(void *backend_data);
 } compositor_backend_ops_t;
 
 /* ============================================================================

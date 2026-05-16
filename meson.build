@@ -266,7 +266,7 @@ if has_wayland
     'protocols/tearing-control-v1-client-protocol.c',
     'protocols/wlr-foreign-toplevel-management-unstable-v1-client-protocol.c',
   )
-  occlusion_sources += files('src/occlusion/occlusion_wayland.c')
+  occlusion_sources += files('src/compositor/backends/wayland/occlusion.c')
 endif
 
 # Wayland backend sources (conditional)
@@ -287,7 +287,7 @@ if has_x11
   x11_sources = files(
     'src/compositor/backends/x11/x11_core.c',
   )
-  occlusion_sources += files('src/occlusion/occlusion_x11.c')
+  occlusion_sources += files('src/compositor/backends/x11/x11_occlusion.c')
 endif
 
 # =============================================================================

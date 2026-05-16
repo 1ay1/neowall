@@ -17,6 +17,7 @@
 #include "compositor.h"
 #include "neowall.h"
 #include "egl/egl_core.h"
+#include "x11_occlusion.h"
 
 /*
  * ============================================================================
@@ -72,6 +73,8 @@ typedef struct {
     bool has_xrandr;
     int xrandr_event_base;
     int xrandr_error_base;
+
+    bool occlusion_active;
 
     bool initialized;
 } x11_backend_data_t;
@@ -830,7 +833,34 @@ static compositor_capabilities_t x11_get_capabilities(void *backend_data) {
     (void)backend_data;
 
     /* X11 capabilities are limited compared to Wayland layer-shell */
-    return COMPOSITOR_CAP_MULTI_OUTPUT;  /* XRandR provides multi-monitor */
+    return COMPOSITOR_CAP_MULTI_OUTPUT |  /* XRandR provides multi-monitor */
+           COMPOSITOR_CAP_OCCLUSION;
+}
+
+/* ----- occlusion (EWMH + XRandR) ----- */
+
+static bool x11_occ_init(void *backend_data, struct neowall_state *state) {
+    x11_backend_data_t *b = backend_data;
+    if (!b || !b->x_display) {
+        return false;
+    }
+    b->occlusion_active = x11_occlusion_init(b->x_display, state);
+    return b->occlusion_active;
+}
+
+static void x11_occ_update(void *backend_data, struct neowall_state *state) {
+    x11_backend_data_t *b = backend_data;
+    if (b && b->occlusion_active) {
+        x11_occlusion_update(state);
+    }
+}
+
+static void x11_occ_cleanup(void *backend_data) {
+    x11_backend_data_t *b = backend_data;
+    if (b && b->occlusion_active) {
+        x11_occlusion_cleanup();
+        b->occlusion_active = false;
+    }
 }
 
 /* ============================================================================
@@ -1118,6 +1148,10 @@ static const compositor_backend_ops_t x11_backend_ops = {
     /* Display/EGL operations */
     .get_native_display = x11_get_native_display,
     .get_egl_platform = x11_get_egl_platform,
+    /* Occlusion detection */
+    .occlusion_init = x11_occ_init,
+    .occlusion_update = x11_occ_update,
+    .occlusion_cleanup = x11_occ_cleanup,
 };
 
 /* ============================================================================

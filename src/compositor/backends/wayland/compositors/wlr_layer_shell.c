@@ -11,6 +11,7 @@
 #include "neowall.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
+#include "../wayland_occlusion.h"
 
 /*
  * ============================================================================
@@ -52,6 +53,7 @@ typedef struct {
     struct wl_seat *seat;
     struct wl_pointer *pointer;
     bool initialized;
+    bool occlusion_active;
 } wlr_backend_data_t;
 
 /* Surface backend data */
@@ -794,7 +796,35 @@ static compositor_capabilities_t wlr_get_capabilities(void *data) {
            COMPOSITOR_CAP_EXCLUSIVE_ZONE |
            COMPOSITOR_CAP_KEYBOARD_INTERACTIVITY |
            COMPOSITOR_CAP_ANCHOR |
-           COMPOSITOR_CAP_MULTI_OUTPUT;
+           COMPOSITOR_CAP_MULTI_OUTPUT |
+           COMPOSITOR_CAP_OCCLUSION;
+}
+
+/* ----- occlusion (wlr-foreign-toplevel-management) ----- */
+
+static bool wlr_occlusion_init(void *data, struct neowall_state *state) {
+    wlr_backend_data_t *b = data;
+    wayland_t *wl = wayland_get();
+    if (!b || !wl || !wl->display) {
+        return false;
+    }
+    b->occlusion_active = wayland_occlusion_init(wl->display, state);
+    return b->occlusion_active;
+}
+
+static void wlr_occlusion_update(void *data, struct neowall_state *state) {
+    wlr_backend_data_t *b = data;
+    if (b && b->occlusion_active) {
+        wayland_occlusion_update(state);
+    }
+}
+
+static void wlr_occlusion_cleanup(void *data) {
+    wlr_backend_data_t *b = data;
+    if (b && b->occlusion_active) {
+        wayland_occlusion_cleanup();
+        b->occlusion_active = false;
+    }
 }
 
 static void wlr_on_output_added(void *data, void *output) {
@@ -989,6 +1019,10 @@ static const compositor_backend_ops_t wlr_backend_ops = {
     /* Display/EGL operations */
     .get_native_display = wlr_get_native_display,
     .get_egl_platform = wlr_get_egl_platform,
+    /* Occlusion detection */
+    .occlusion_init = wlr_occlusion_init,
+    .occlusion_update = wlr_occlusion_update,
+    .occlusion_cleanup = wlr_occlusion_cleanup,
 };
 
 struct compositor_backend *compositor_backend_wlr_layer_shell_init(struct neowall_state *state) {
