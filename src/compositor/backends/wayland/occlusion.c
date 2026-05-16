@@ -26,6 +26,15 @@ static tracked_toplevel_t *toplevels = NULL;
 static struct neowall_state *g_state = NULL;
 static bool needs_recalculate = false;
 
+/* Pause when the visible fraction of the output drops below this.
+ * We can't read other clients' geometry (no Wayland protocol exposes it to
+ * unprivileged clients), so we approximate: any toplevel that's MAXIMIZED or
+ * FULLSCREEN on this output covers 100% of it. Everything else contributes 0%
+ * (we don't know its rect). That collapses to: pause if any maximized or
+ * fullscreen toplevel sits on this output. The threshold stays a real knob so
+ * future protocols (e.g. ext-foreign-toplevel-list with geometry) can plug in. */
+#define VISIBLE_FRACTION_THRESHOLD 0.20f
+
 static void recalculate_occlusion(void);
 static void remove_toplevel(tracked_toplevel_t *tl);
 
@@ -140,6 +149,22 @@ static void remove_toplevel(tracked_toplevel_t *tl) {
 
 /* ----- recalculation ----- */
 
+/* Coverage contribution of one toplevel on an output, in [0..1].
+ * MAXIMIZED or FULLSCREEN (and not minimized) covers everything; otherwise we
+ * have no geometry and conservatively say 0. */
+static float toplevel_coverage(const tracked_toplevel_t *tl) {
+    const uint32_t fs = 1u << ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_FULLSCREEN;
+    const uint32_t max = 1u << ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MAXIMIZED;
+    const uint32_t min = 1u << ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MINIMIZED;
+    if (tl->state & min) {
+        return 0.0f;
+    }
+    if (tl->state & (fs | max)) {
+        return 1.0f;
+    }
+    return 0.0f;
+}
+
 static void recalculate_occlusion(void) {
     if (!g_state) {
         return;
@@ -152,25 +177,33 @@ static void recalculate_occlusion(void) {
             continue;
         }
 
-        bool was = atomic_load_explicit(&o->occluded, memory_order_acquire);
-        bool now = false;
-
+        /* Coverage from each toplevel on this output. We clamp the sum at 1.0
+         * because two maximized windows can't cover more than 100%. */
+        float covered = 0.0f;
         for (tracked_toplevel_t *tl = toplevels; tl; tl = tl->next) {
-            if (tl->has_output && tl->output == o->native_output &&
-                (tl->state & (1u << ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_FULLSCREEN))) {
-                now = true;
+            if (!tl->has_output || tl->output != o->native_output) {
+                continue;
+            }
+            covered += toplevel_coverage(tl);
+            if (covered >= 1.0f) {
+                covered = 1.0f;
                 break;
             }
         }
+        float visible = 1.0f - covered;
+        bool was = atomic_load_explicit(&o->occluded, memory_order_acquire);
+        bool now = visible < VISIBLE_FRACTION_THRESHOLD;
 
         atomic_store_explicit(&o->occluded, now, memory_order_release);
 
         const char *name = o->connector_name[0] ? o->connector_name : o->model;
         if (was && !now) {
             o->needs_redraw = true;
-            log_info("Output %s un-occluded, resuming rendering", name);
+            log_info("Output %s un-occluded (visible=%.0f%%), resuming rendering",
+                     name, visible * 100.0f);
         } else if (!was && now) {
-            log_info("Output %s occluded by fullscreen window, pausing rendering", name);
+            log_info("Output %s occluded (visible=%.0f%%), pausing rendering",
+                     name, visible * 100.0f);
         }
     }
 
