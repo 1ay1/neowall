@@ -15,14 +15,23 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/time.h>
 #include <errno.h>
 #include <pthread.h>
 #include "neowall.h"
 #include "hyprland_coverage.h"
 
 #define HYPR_REFRESH_MS    500
-#define GRID_W             64
-#define GRID_H             64
+#define HYPR_RECV_TIMEOUT_MS 200   /* cap blocking time per IPC call */
+#define HYPR_SNAPSHOT_TTL_MS 3000  /* drop snapshot if no successful refresh in this long */
+/* Grid resolution for rasterizing window rects on a monitor. Needs to be fine
+ * enough that typical Hyprland gaps (~10-20 px) actually leave at least one
+ * uncovered cell between adjacent tiles — otherwise inward-rounded edges
+ * coincide and the gap is invisible to the coverage calculation. At 256x256
+ * a cell on a 3440-wide monitor is ~13 px, which resolves single-digit gaps.
+ * 256*256 = 64 KiB static buffer; trivially fits. */
+#define GRID_W             256
+#define GRID_H             256
 #define MAX_MONITORS       16
 #define MAX_CLIENTS        256
 
@@ -30,6 +39,9 @@ typedef struct {
     int id;
     char name[64];
     int x, y, w, h;
+    /* reserved[0..3] = left, top, right, bottom — confirmed against
+     * Hyprland's HyprCtl.cpp (`m_reservedArea.left/top/right/bottom`). */
+    int reserved_left, reserved_top, reserved_right, reserved_bottom;
     int active_ws;
 } hypr_monitor_t;
 
@@ -47,7 +59,8 @@ static hypr_monitor_t snap_monitors[MAX_MONITORS];
 static int snap_n_monitors = 0;
 static hypr_client_t snap_clients[MAX_CLIENTS];
 static int snap_n_clients = 0;
-static uint64_t last_refresh_ms = 0;
+static uint64_t last_refresh_attempt_ms = 0; /* throttles retries */
+static uint64_t last_refresh_ok_ms = 0;      /* freshness of snapshot */
 
 /* ---------- IPC ---------- */
 
@@ -61,6 +74,13 @@ static int open_hypr_socket(void) {
     if (fd < 0) {
         return -1;
     }
+    /* Don't let a wedged Hyprland stall the event loop. */
+    struct timeval tv = {
+        .tv_sec  = HYPR_RECV_TIMEOUT_MS / 1000,
+        .tv_usec = (HYPR_RECV_TIMEOUT_MS % 1000) * 1000,
+    };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     struct sockaddr_un addr = {0};
     addr.sun_family = AF_UNIX;
     int n = snprintf(addr.sun_path, sizeof(addr.sun_path),
@@ -107,6 +127,7 @@ static char *hypr_query(const char *cmd, size_t *out_len) {
         ssize_t r = recv(fd, buf + len, cap - len - 1, 0);
         if (r < 0) {
             if (errno == EINTR) continue;
+            /* Timeout or other error: treat as failure, not as truncated success. */
             free(buf);
             close(fd);
             return NULL;
@@ -116,6 +137,21 @@ static char *hypr_query(const char *cmd, size_t *out_len) {
     }
     buf[len] = '\0';
     close(fd);
+
+    /* Cheap structural sanity check: a complete j/monitors or j/clients reply
+     * is a JSON array, so it must start with '[' and end with ']' (modulo
+     * trailing whitespace). Anything else means we got a truncated read and
+     * must NOT commit a partial parse over the previous good snapshot. */
+    size_t end = len;
+    while (end > 0 && (buf[end - 1] == ' ' || buf[end - 1] == '\t'
+                       || buf[end - 1] == '\n' || buf[end - 1] == '\r')) {
+        end--;
+    }
+    if (end < 2 || buf[0] != '[' || buf[end - 1] != ']') {
+        free(buf);
+        return NULL;
+    }
+
     if (out_len) *out_len = len;
     return buf;
 }
@@ -205,6 +241,28 @@ static bool parse_int_pair(const char *p, int out[2]) {
     return true;
 }
 
+/* Parse "[a, b, c, d]" array of four ints. Returns count actually parsed. */
+static int parse_int_quad(const char *p, int out[4]) {
+    for (int i = 0; i < 4; i++) out[i] = 0;
+    if (!p) return 0;
+    p = skip_ws(p);
+    if (*p != '[') return 0;
+    p++;
+    int n = 0;
+    while (n < 4) {
+        p = skip_ws(p);
+        if (*p == ']' || *p == '\0') break;
+        char *end = NULL;
+        long v = strtol(p, &end, 10);
+        if (end == p) break;
+        out[n++] = (int)v;
+        p = skip_ws(end);
+        if (*p == ',') { p++; continue; }
+        if (*p == ']') break;
+    }
+    return n;
+}
+
 static void parse_string_at(const char *p, char *out, size_t cap) {
     if (!p || !cap) { if (out && cap) out[0] = '\0'; return; }
     p = skip_ws(p);
@@ -276,6 +334,16 @@ static void parse_monitors(const char *json) {
         m->h = parse_int_at(find_key(obj, "height"), 0);
         const char *ws = find_key(obj, "activeWorkspace");
         m->active_ws = parse_int_at(find_key(ws, "id"), -1);
+        /* `reserved`: [left, top, right, bottom] per Hyprland's HyprCtl.cpp.
+         * Strip from the wallpaper region so layer-shell surfaces (waybar etc.)
+         * don't count as "uncovered wallpaper" that drags the fraction below
+         * the threshold. */
+        int rsv[4] = {0, 0, 0, 0};
+        parse_int_quad(find_key(obj, "reserved"), rsv);
+        m->reserved_left   = rsv[0] > 0 ? rsv[0] : 0;
+        m->reserved_top    = rsv[1] > 0 ? rsv[1] : 0;
+        m->reserved_right  = rsv[2] > 0 ? rsv[2] : 0;
+        m->reserved_bottom = rsv[3] > 0 ? rsv[3] : 0;
         if (m->w > 0 && m->h > 0) {
             snap_n_monitors++;
         }
@@ -317,11 +385,17 @@ void hyprland_coverage_refresh(void) {
     }
     uint64_t now = get_time_ms();
     pthread_mutex_lock(&snap_lock);
-    if (now - last_refresh_ms < HYPR_REFRESH_MS) {
+    if (now - last_refresh_attempt_ms < HYPR_REFRESH_MS) {
         pthread_mutex_unlock(&snap_lock);
         return;
     }
-    last_refresh_ms = now;
+    /* Stamp the attempt timestamp so we throttle retries even on failure,
+     * but DO NOT touch last_refresh_ok_ms until both queries succeed. The
+     * previous code bumped the throttle before the queries ran, which meant
+     * a failed IPC left the old (possibly "covered") snapshot in place for
+     * 500ms with no retry — and if failures kept happening, the wallpaper
+     * stayed paused indefinitely even after the user closed every window. */
+    last_refresh_attempt_ms = now;
     pthread_mutex_unlock(&snap_lock);
 
     /* Do network I/O outside the lock. */
@@ -330,8 +404,11 @@ void hyprland_coverage_refresh(void) {
     char *cjson = hypr_query("j/clients", &clen);
 
     pthread_mutex_lock(&snap_lock);
-    if (mjson) parse_monitors(mjson);
-    if (cjson) parse_clients(cjson);
+    if (mjson && cjson) {
+        parse_monitors(mjson);
+        parse_clients(cjson);
+        last_refresh_ok_ms = now;
+    }
     pthread_mutex_unlock(&snap_lock);
 
     free(mjson);
@@ -355,13 +432,40 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
 
     pthread_mutex_lock(&snap_lock);
 
+    /* If the snapshot is too old (IPC has been failing, Hyprland restarted,
+     * socket got wedged, ...), don't trust it. Better to render an extra frame
+     * than to leave the wallpaper frozen forever. */
+    if (last_refresh_ok_ms == 0 ||
+        get_time_ms() - last_refresh_ok_ms > HYPR_SNAPSHOT_TTL_MS) {
+        pthread_mutex_unlock(&snap_lock);
+        return false;
+    }
+
     const hypr_monitor_t *m = find_monitor_for(o);
     if (!m || m->w <= 0 || m->h <= 0) {
         pthread_mutex_unlock(&snap_lock);
         return false;
     }
 
-    /* Rasterize windows on this monitor's active workspace into a grid. */
+    /* Wallpaper region = monitor rect minus reserved zones (layer-shell
+     * surfaces like waybar own those pixels; they are not user-visible
+     * wallpaper and must not count toward the "uncovered" budget). */
+    int wx0 = m->x + m->reserved_left;
+    int wy0 = m->y + m->reserved_top;
+    int wx1 = m->x + m->w - m->reserved_right;
+    int wy1 = m->y + m->h - m->reserved_bottom;
+    int ww = wx1 - wx0;
+    int wh = wy1 - wy0;
+    if (ww <= 0 || wh <= 0) {
+        pthread_mutex_unlock(&snap_lock);
+        return false;
+    }
+
+    /* Rasterize windows on this monitor's active workspace into a grid over
+     * the WALLPAPER region. Use inward rounding (ceil on the low edge, floor
+     * on the high edge) so a small inter-window gap actually leaves at least
+     * one grid cell uncovered — otherwise both edges round to the same
+     * boundary cell and the gap is silently absorbed. */
     static uint8_t grid[GRID_H][GRID_W];
     memset(grid, 0, sizeof(grid));
 
@@ -370,20 +474,23 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
         if (c->monitor != m->id) continue;
         if (c->ws != m->active_ws) continue;
 
-        /* Clip to monitor rect. Client coords are global. */
+        /* Clip the client to the wallpaper region. */
         int x0 = c->x, y0 = c->y;
         int x1 = c->x + c->w, y1 = c->y + c->h;
-        if (x0 < m->x) x0 = m->x;
-        if (y0 < m->y) y0 = m->y;
-        if (x1 > m->x + m->w) x1 = m->x + m->w;
-        if (y1 > m->y + m->h) y1 = m->y + m->h;
+        if (x0 < wx0) x0 = wx0;
+        if (y0 < wy0) y0 = wy0;
+        if (x1 > wx1) x1 = wx1;
+        if (y1 > wy1) y1 = wy1;
         if (x1 <= x0 || y1 <= y0) continue;
 
-        /* Map monitor-local rect to grid cells. */
-        int gx0 = (x0 - m->x) * GRID_W / m->w;
-        int gy0 = (y0 - m->y) * GRID_H / m->h;
-        int gx1 = (x1 - m->x) * GRID_W / m->w;
-        int gy1 = (y1 - m->y) * GRID_H / m->h;
+        /* Map wallpaper-local rect to grid cells, rounding inward so we never
+         * over-claim coverage at edges. (low: ceil; high: floor.) */
+        int gx0 = ((x0 - wx0) * GRID_W + ww - 1) / ww;
+        int gy0 = ((y0 - wy0) * GRID_H + wh - 1) / wh;
+        int gx1 = ((x1 - wx0) * GRID_W) / ww;
+        int gy1 = ((y1 - wy0) * GRID_H) / wh;
+        if (gx0 < 0) gx0 = 0;
+        if (gy0 < 0) gy0 = 0;
         if (gx1 > GRID_W) gx1 = GRID_W;
         if (gy1 > GRID_H) gy1 = GRID_H;
         for (int gy = gy0; gy < gy1; gy++) {
