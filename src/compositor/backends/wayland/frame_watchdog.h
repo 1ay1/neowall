@@ -31,6 +31,12 @@ bool frame_watchdog_output_occluded(struct output_state *o);
  * so the wlr occlusion path can prime per-output entries too. */
 void frame_watchdog_arm(struct output_state *o);
 
+/* Drop the watchdog entry for this output. MUST be called from output_destroy
+ * (or any other path that frees an output_state) — otherwise we leak the
+ * entry and, worse, hold a dangling pointer that the next arm/cleanup will
+ * dereference. The output's pending wl_callback (if any) is destroyed here. */
+void frame_watchdog_remove(struct output_state *o);
+
 void frame_watchdog_cleanup(void);
 
 #endif /* WAYLAND_FRAME_WATCHDOG_H */

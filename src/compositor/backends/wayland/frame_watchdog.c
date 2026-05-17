@@ -107,6 +107,29 @@ bool frame_watchdog_output_occluded(struct output_state *o) {
     return occ;
 }
 
+void frame_watchdog_remove(struct output_state *o) {
+    if (!o) return;
+    pthread_mutex_lock(&lock);
+    watched_output_t **pp = &watched;
+    while (*pp) {
+        watched_output_t *cur = *pp;
+        if (cur->output == o) {
+            *pp = cur->next;
+            if (cur->callback) {
+                /* Detach the listener first: the callback may have queued events
+                 * the compositor hasn't dispatched yet, and we don't want
+                 * on_frame_done firing with a freed `data` pointer. */
+                wl_callback_destroy(cur->callback);
+                cur->callback = NULL;
+            }
+            free(cur);
+            break;
+        }
+        pp = &cur->next;
+    }
+    pthread_mutex_unlock(&lock);
+}
+
 void frame_watchdog_update(struct neowall_state *state) {
     if (!state) return;
 
