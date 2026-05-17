@@ -484,6 +484,7 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->vsync = false;  /* Default: vsync off, use custom FPS with tearing control */
     config->show_fps = false;  /* Default: no FPS watermark */
     config->pause_on_fullscreen = true;  /* Default: pause rendering when occluded */
+    config->pause_coverage_threshold = 0.8f;  /* Default: 80% tiled coverage = occluded */
     config->cycle = false;
     config->cycle_paths = NULL;
     config->cycle_count = 0;
@@ -846,6 +847,29 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
                  config->pause_on_fullscreen ? "enabled" : "disabled");
     }
 
+    /* Parse pause_coverage_threshold */
+    VibeValue *pause_cov_val = vibe_object_get(obj->as_object, "pause_coverage_threshold");
+    if (pause_cov_val) {
+        double cov = 0.0;
+        if (pause_cov_val->type == VIBE_TYPE_FLOAT) {
+            cov = pause_cov_val->as_float;
+        } else if (pause_cov_val->type == VIBE_TYPE_INTEGER) {
+            cov = (double)pause_cov_val->as_integer;
+        } else {
+            log_error("[%s] 'pause_coverage_threshold' must be a number between 0.0 and 1.0, got type: %d",
+                     context_name, pause_cov_val->type);
+            return false;
+        }
+        if (cov < 0.0 || cov > 1.0) {
+            log_error("[%s] 'pause_coverage_threshold' must be between 0.0 and 1.0, got: %.3f",
+                     context_name, cov);
+            return false;
+        }
+        config->pause_coverage_threshold = (float)cov;
+        log_info("[%s] Pause coverage threshold: %.2f (%.0f%%)", context_name,
+                 config->pause_coverage_threshold, config->pause_coverage_threshold * 100.0f);
+    }
+
     /* Parse channels (only relevant for shader mode) */
     VibeValue *channels_val = vibe_object_get(obj->as_object, "channels");
     if (channels_val) {
@@ -897,7 +921,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     const char *known_keys[] = {
         "path", "shader", "mode", "duration", "transition",
         "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps",
-        "pause_on_fullscreen"
+        "pause_on_fullscreen", "pause_coverage_threshold"
     };
     size_t known_key_count = sizeof(known_keys) / sizeof(known_keys[0]);
 

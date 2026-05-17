@@ -95,6 +95,12 @@ default {
   # Requires compositor support: wlr-foreign-toplevel on Wayland, EWMH on X11
   # pause_on_fullscreen true
 
+  # Hyprland only: fraction of the wallpaper region (monitor minus reserved zones)
+  # that tiled/floating windows must cover before we count the output as occluded.
+  # Range 0.0-1.0, default 0.8 (80%). Lower = pause more aggressively, higher = be
+  # more conservative. No effect outside Hyprland or if pause_on_fullscreen is false.
+  # pause_coverage_threshold 0.8
+
   # NOTE: You don't need a 'cycle' option anymore!
   # Just set path to a directory (with trailing /) and set duration > 0
   # NeoWall automatically cycles through all images in the directory

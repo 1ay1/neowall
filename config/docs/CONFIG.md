@@ -203,7 +203,22 @@ Works per-output — if only one monitor is covered, the others keep rendering.
 - A fullscreen window on the output
 - A maximized window on the output
 - The compositor stops requesting frames for the wallpaper surface (500ms watchdog)
-- On Hyprland: tiled/floating windows that together cover ≥80% of the output (via Hyprland's IPC socket)
+- On Hyprland: tiled/floating windows that together cover ≥ `pause_coverage_threshold` of the output (via Hyprland's IPC socket; default 80%)
+
+#### `pause_coverage_threshold` - Tiled-Mosaic Threshold (Hyprland)
+
+Fraction of the wallpaper region that tiled windows must cover before the
+output counts as occluded. Only consulted on Hyprland (other compositors
+don't expose the geometry needed to compute this).
+
+```vibe
+pause_coverage_threshold 0.8    # Default — pause at 80% coverage
+pause_coverage_threshold 0.95   # Conservative — only pause when nearly fully tiled
+pause_coverage_threshold 0.5    # Aggressive — pause as soon as half is tiled
+```
+
+Range: `0.0` to `1.0`. The wallpaper region excludes Hyprland's reserved
+zones (waybar etc.), so those don't count toward "uncovered wallpaper".
 
 **Compositor support:**
 - **Hyprland**: full coverage detection (fullscreen, maximized, tiled mosaic via IPC)

@@ -8,12 +8,11 @@
  *      stop sending frame callbacks when our surface is obscured.
  *
  *   2. wlr-foreign-toplevel-management state bits. Catches fullscreen and
- *      maximized windows on the output. Needed because some compositors
- *      (Hyprland) keep firing frame callbacks even when fully occluded.
+ *      active-maximized windows on the output.
  *
  *   3. Hyprland IPC coverage (hyprland_coverage.c). Catches the tiled-mosaic
- *      case where many small windows together cover the wallpaper but no
- *      single window is maximized. No-op outside Hyprland. */
+ *      case where many small windows together cover >=80% of the wallpaper
+ *      region (monitor minus reserved zone). No-op outside Hyprland. */
 
 #include <stdlib.h>
 #include <string.h>
@@ -146,11 +145,26 @@ static const struct wl_registry_listener reg_listener = {
     .global_remove = reg_global_remove,
 };
 
-/* Is any toplevel maximized or fullscreen on this wl_output? */
+/* Is any toplevel maximized or fullscreen on this wl_output?
+ *
+ * Subtlety: on tiling compositors (Hyprland in particular) every tiled
+ * client gets STATE_MAXIMIZED advertised via wlr-foreign-toplevel, because
+ * the tiling layout fills its allocated cell. Treating bare MAXIMIZED as
+ * "covering" therefore causes a false positive any time *any* tiled window
+ * exists, even on another workspace — the wallpaper stops rendering as
+ * soon as the daemon starts.
+ *
+ * Real fullscreen genuinely covers the output, so we keep that signal
+ * unconditional. For MAXIMIZED we additionally require ACTIVATED (the
+ * window is focused on its workspace) — a maximized but inactive window
+ * on a hidden workspace shouldn't pause us. The tiled-mosaic case where
+ * many small windows together cover the wallpaper is handled by the
+ * Hyprland IPC coverage path, not by this signal. */
 static bool any_covering_toplevel_on(struct wl_output *output) {
     const uint32_t fs = 1u << ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_FULLSCREEN;
     const uint32_t mx = 1u << ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MAXIMIZED;
     const uint32_t mn = 1u << ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MINIMIZED;
+    const uint32_t ac = 1u << ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_ACTIVATED;
     for (tracked_toplevel_t *tl = toplevels; tl; tl = tl->next) {
         if (!tl->has_output || tl->output != output) {
             continue;
@@ -158,7 +172,10 @@ static bool any_covering_toplevel_on(struct wl_output *output) {
         if (tl->state & mn) {
             continue;
         }
-        if (tl->state & (fs | mx)) {
+        if (tl->state & fs) {
+            return true;
+        }
+        if ((tl->state & mx) && (tl->state & ac)) {
             return true;
         }
     }
@@ -213,7 +230,11 @@ void wayland_occlusion_update(struct neowall_state *state) {
         bool cb_says_occluded = frame_watchdog_output_occluded(o);
         bool toplevel_says_occluded =
             any_covering_toplevel_on((struct wl_output *)o->native_output);
-        bool hypr_says_occluded = hyprland_output_covered(o, 0.80f);
+        float threshold = o->config->pause_coverage_threshold;
+        if (!(threshold > 0.0f && threshold <= 1.0f)) {
+            threshold = 0.80f;
+        }
+        bool hypr_says_occluded = hyprland_output_covered(o, threshold);
 
         bool was = atomic_load_explicit(&o->occluded, memory_order_acquire);
         bool nowocc = cb_says_occluded || toplevel_says_occluded || hypr_says_occluded;
@@ -229,7 +250,7 @@ void wayland_occlusion_update(struct neowall_state *state) {
                 ? "compositor stopped frame callbacks"
                 : toplevel_says_occluded
                     ? "maximized/fullscreen window covering output"
-                    : "tiled windows cover >=80% of output";
+                    : "tiled windows cover threshold of wallpaper region";
             log_info("Output %s occluded (%s), pausing", name, why);
         }
     }

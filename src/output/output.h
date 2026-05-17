@@ -59,6 +59,7 @@ struct wallpaper_config {
     bool vsync;                         /* Enable vsync (sync to monitor refresh, ignores shader_fps) */
     bool show_fps;                      /* Show FPS watermark on screen (default false) */
     bool pause_on_fullscreen;           /* Pause rendering when output is occluded by fullscreen window */
+    float pause_coverage_threshold;     /* Fraction (0.0-1.0) of wallpaper region that must be covered by tiled windows to count as occluded. Default 0.8 */
     bool cycle;                         /* Enable wallpaper cycling */
     char **cycle_paths;                 /* Array of paths for cycling */
     size_t cycle_count;                 /* Number of wallpapers to cycle */
