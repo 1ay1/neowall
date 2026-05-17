@@ -868,6 +868,18 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         config->pause_coverage_threshold = (float)cov;
         log_info("[%s] Pause coverage threshold: %.2f (%.0f%%)", context_name,
                  config->pause_coverage_threshold, config->pause_coverage_threshold * 100.0f);
+        /* This setting only affects Hyprland's tiled-coverage path. On every
+         * other compositor it's silently inert — warn the user once so they
+         * don't think the wallpaper is ignoring them. We detect Hyprland via
+         * its IPC env var, the same signal hyprland_coverage_available() uses
+         * at runtime, so this stays accurate even when the binary was built
+         * with both backends. */
+        if (!getenv("HYPRLAND_INSTANCE_SIGNATURE")) {
+            log_info("[%s] Note: pause_coverage_threshold only affects Hyprland's "
+                     "tiled-coverage detection. On other compositors it has no "
+                     "effect (other backends pause via fullscreen/maximized signals "
+                     "or the frame-callback watchdog).", context_name);
+        }
     }
 
     /* Parse channels (only relevant for shader mode) */
