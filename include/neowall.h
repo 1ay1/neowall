@@ -50,6 +50,11 @@ struct neowall_state {
     atomic_bool_t outputs_need_init; /* Flag when new outputs need initialization */
     atomic_int_t next_requested;     /* Counter for skip to next wallpaper requests */
     atomic_int_t set_index_requested; /* Requested wallpaper index (-1 = no request) */
+    atomic_bool_t mouse_interaction;  /* Global: bind wl_pointer / poll X11 mouse / set cursor.
+                                       * Default true. When false, the wallpaper surface receives
+                                       * no pointer events and iMouse stays at center. Read by
+                                       * the Wayland seat-capabilities handler and X11 backend.
+                                       * Atomic so config reload (future) is safe. */
     pthread_mutex_t state_mutex;     /* Protects output list and config data */
     pthread_rwlock_t output_list_lock; /* Read-write lock for output linked list traversal */
     pthread_mutex_t state_file_lock; /* Mutex for state file I/O operations */

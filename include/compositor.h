@@ -416,6 +416,14 @@ typedef struct compositor_backend_ops {
 
     /* Release occlusion resources. */
     void (*occlusion_cleanup)(void *backend_data);
+
+    /* ===== INPUT CONFIG (optional) =====
+     * Called after config_load completes, so backends can react to global
+     * input-related settings (currently just mouse_interaction). The wlr
+     * backend uses this to release wl_pointer if the user set
+     * mouse_interaction=false after we'd already bound it during init.
+     * NULL = no-op. */
+    void (*apply_input_config)(void *backend_data, struct neowall_state *state);
 } compositor_backend_ops_t;
 
 /* ============================================================================

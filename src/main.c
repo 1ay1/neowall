@@ -954,6 +954,7 @@ int main(int argc, char *argv[]) {
     atomic_init(&state.outputs_need_init, false);
     atomic_init(&state.next_requested, 0);
     atomic_init(&state.set_index_requested, -1);  /* -1 means no request */
+    atomic_init(&state.mouse_interaction, true);  /* default: pointer enabled, override from config */
     state.timer_fd = -1;
     state.wakeup_fd = -1;
     strncpy(state.config_path, config_path, sizeof(state.config_path) - 1);

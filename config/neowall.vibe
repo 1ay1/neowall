@@ -107,6 +107,20 @@ default {
 }
 
 # ============================================================================
+# GLOBAL OPTIONS
+# ============================================================================
+# These sit at the TOP LEVEL of the config (outside any default/output block).
+# They configure the daemon process as a whole, not a single wallpaper surface.
+
+# Whether the wallpaper surface receives pointer events.
+# true  (default): wl_pointer is bound; iMouse is fed to shaders; a themed
+#                  cursor is set when the pointer enters the wallpaper.
+# false:           wallpaper is invisible to the pointer. iMouse stays at
+#                  screen center. The compositor routes pointer events to
+#                  whatever is underneath the wallpaper.
+# mouse_interaction true
+
+# ============================================================================
 # PER-MONITOR CONFIGURATION
 # ============================================================================
 # Override default settings for specific monitors.

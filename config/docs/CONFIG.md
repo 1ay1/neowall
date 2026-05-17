@@ -184,6 +184,35 @@ transition_duration 500   # Smooth
 transition_duration 1000  # Slow
 ```
 
+## Global Options
+
+These sit at the top level of `config.vibe`, **outside** any `default {}` or
+`output {}` block. They configure the daemon process as a whole, not a single
+wallpaper surface.
+
+### `mouse_interaction` - Pointer Input
+
+Whether the wallpaper surface receives pointer events.
+
+```vibe
+mouse_interaction true     # default — pointer enters wallpaper, iMouse fed to shaders
+mouse_interaction false    # wallpaper is invisible to the pointer
+```
+
+When `false`:
+
+- Wayland: `wl_pointer` is not bound (or is released if already bound). The
+  compositor routes pointer events to whatever is underneath the wallpaper.
+- X11: `XQueryPointer` polling and Button/Motion events are skipped.
+- Shaders: `iMouse` stays at its initial fallback (screen center).
+- No themed cursor is set on the wallpaper.
+
+Use cases for turning it off:
+- You don't want neowall to override the cursor theme over the wallpaper.
+- Your shader doesn't use `iMouse` and you want to avoid the per-motion lock
+  traffic from pointer events.
+- Principle: a wallpaper shouldn't grab input focus.
+
 ### Performance Options
 
 #### `pause_on_fullscreen` - Pause When Occluded

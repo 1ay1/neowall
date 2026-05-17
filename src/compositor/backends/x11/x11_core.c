@@ -563,6 +563,14 @@ static bool x11_handle_events(x11_backend_data_t *backend) {
         XEvent event;
         XNextEvent(backend->x_display, &event);
 
+        /* Skip mouse-related events entirely if the user disabled mouse
+         * interaction — we still drain the event queue (we have to, the X
+         * server won't unblock us otherwise) but we don't touch any output
+         * state, so iMouse stays at its initial -1 (which render.c maps to
+         * the screen center). */
+        bool mouse_on = backend->state &&
+            atomic_load_explicit(&backend->state->mouse_interaction, memory_order_acquire);
+
         switch (event.type) {
             case ButtonPress:
                 log_debug("X11 mouse button pressed: button %d at (%d, %d)",
@@ -570,6 +578,7 @@ static bool x11_handle_events(x11_backend_data_t *backend) {
                          event.xbutton.x_root,
                          event.xbutton.y_root);
 
+                if (!mouse_on) break;
                 /* Update mouse position in all outputs */
                 pthread_rwlock_rdlock(&backend->state->output_list_lock);
                 struct output_state *output = backend->state->outputs;
@@ -587,6 +596,7 @@ static bool x11_handle_events(x11_backend_data_t *backend) {
                          event.xbutton.x_root,
                          event.xbutton.y_root);
 
+                if (!mouse_on) break;
                 /* Update mouse position in all outputs */
                 pthread_rwlock_rdlock(&backend->state->output_list_lock);
                 output = backend->state->outputs;
@@ -599,6 +609,7 @@ static bool x11_handle_events(x11_backend_data_t *backend) {
                 break;
 
             case MotionNotify: {
+                if (!mouse_on) break;
                 /* Update mouse position for motion events
                  * Use throttling to avoid log spam */
                 static uint64_t last_motion_log = 0;
@@ -675,7 +686,8 @@ static void x11_commit_surface(struct compositor_surface *surface) {
     if (!surf_data) return;
 
     /* Update mouse position for shader uniforms (only if state is initialized) */
-    if (backend->state && backend->state->outputs) {
+    if (backend->state && backend->state->outputs &&
+        atomic_load_explicit(&backend->state->mouse_interaction, memory_order_acquire)) {
         x11_update_mouse_position(backend);
     }
 

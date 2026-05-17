@@ -1526,6 +1526,25 @@ bool config_load(struct neowall_state *state, const char *config_path) {
     /* Track if we successfully applied any configuration */
     bool config_applied = false;
 
+    /* Parse top-level (global) options. These live at the root of the config,
+     * not inside a default/output block, because they configure the daemon
+     * process as a whole — not a single wallpaper surface. */
+    VibeValue *mouse_val = vibe_object_get(root->as_object, "mouse_interaction");
+    if (mouse_val) {
+        if (mouse_val->type != VIBE_TYPE_BOOLEAN) {
+            log_error("Top-level 'mouse_interaction' must be a boolean (true or false), "
+                      "got type: %d — ignoring, keeping default (enabled)",
+                      mouse_val->type);
+        } else {
+            atomic_store_explicit(&state->mouse_interaction,
+                                  mouse_val->as_boolean,
+                                  memory_order_release);
+            log_info("Mouse interaction: %s",
+                     mouse_val->as_boolean ? "enabled (default)"
+                                           : "disabled (no pointer events, iMouse stays at center)");
+        }
+    }
+
     /* Parse default configuration */
     VibeValue *default_obj = vibe_object_get(root->as_object, "default");
     struct wallpaper_config default_config = {0};
@@ -1657,6 +1676,16 @@ bool config_load(struct neowall_state *state, const char *config_path) {
     }
     vibe_value_free(root);
     vibe_parser_free(parser);
+
+    /* Backends may need to react to globals parsed above (e.g. release
+     * wl_pointer if mouse_interaction=false but the seat event already
+     * fired before we got here). Optional op, no-op for backends that
+     * don't implement it. */
+    if (state->compositor_backend && state->compositor_backend->ops &&
+        state->compositor_backend->ops->apply_input_config) {
+        state->compositor_backend->ops->apply_input_config(
+            state->compositor_backend->data, state);
+    }
 
     if (config_applied) {
         log_info("========================================");

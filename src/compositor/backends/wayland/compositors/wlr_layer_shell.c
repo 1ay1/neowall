@@ -330,10 +330,26 @@ static void seat_handle_capabilities(void *data, struct wl_seat *seat,
     log_debug("Wayland seat capabilities: 0x%x", capabilities);
 
     if (capabilities & WL_SEAT_CAPABILITY_POINTER) {
-        if (!backend->pointer) {
+        /* Respect the global mouse_interaction setting. If disabled, don't bind
+         * wl_pointer at all — the compositor will then route pointer events to
+         * whatever surface is underneath us (i.e. the normal desktop), and our
+         * wallpaper stays invisible to the pointer the way the user asked. */
+        bool want_pointer = backend->state
+            ? atomic_load_explicit(&backend->state->mouse_interaction, memory_order_acquire)
+            : true;
+        if (want_pointer && !backend->pointer) {
             backend->pointer = wl_seat_get_pointer(seat);
             wl_pointer_add_listener(backend->pointer, &pointer_listener, backend);
             log_info("Wayland pointer capability enabled");
+        } else if (!want_pointer && !backend->pointer) {
+            log_info("Wayland pointer capability available but mouse_interaction=false, "
+                     "not binding pointer");
+        } else if (!want_pointer && backend->pointer) {
+            /* Capability re-advertise after a config that disabled pointer:
+             * drop our binding so events stop flowing. */
+            wl_pointer_destroy(backend->pointer);
+            backend->pointer = NULL;
+            log_info("Wayland pointer released (mouse_interaction=false)");
         }
     } else {
         if (backend->pointer) {
@@ -827,6 +843,35 @@ static void wlr_occlusion_cleanup(void *data) {
     }
 }
 
+/* Re-apply input config (currently just mouse_interaction) after config_load.
+ * The seat's `capabilities` event already fired during the init roundtrip
+ * — before config was parsed — so if the user set mouse_interaction=false
+ * we have an unwanted wl_pointer binding to release. Conversely if they
+ * enabled it but our binding is missing for some reason, this is the place
+ * to (re-)acquire it. */
+static void wlr_apply_input_config(void *data, struct neowall_state *state) {
+    wlr_backend_data_t *b = data;
+    if (!b || !state) {
+        return;
+    }
+    bool want_pointer = atomic_load_explicit(&state->mouse_interaction, memory_order_acquire);
+
+    if (!want_pointer && b->pointer) {
+        wl_pointer_destroy(b->pointer);
+        b->pointer = NULL;
+        log_info("Wayland pointer released after config load (mouse_interaction=false)");
+        return;
+    }
+
+    if (want_pointer && !b->pointer && b->seat) {
+        b->pointer = wl_seat_get_pointer(b->seat);
+        if (b->pointer) {
+            wl_pointer_add_listener(b->pointer, &pointer_listener, b);
+            log_info("Wayland pointer bound after config load (mouse_interaction=true)");
+        }
+    }
+}
+
 static void wlr_on_output_added(void *data, void *output) {
     (void)data;
     (void)output;
@@ -1023,6 +1068,8 @@ static const compositor_backend_ops_t wlr_backend_ops = {
     .occlusion_init = wlr_occlusion_init,
     .occlusion_update = wlr_occlusion_update,
     .occlusion_cleanup = wlr_occlusion_cleanup,
+    /* Input config (post-config-load hook) */
+    .apply_input_config = wlr_apply_input_config,
 };
 
 struct compositor_backend *compositor_backend_wlr_layer_shell_init(struct neowall_state *state) {
