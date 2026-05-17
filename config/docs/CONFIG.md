@@ -342,23 +342,31 @@ Control running daemon:
 ```bash
 neowall              # Start daemon
 neowall kill         # Stop daemon
-neowall reload       # Reload config
 neowall next         # Skip to next wallpaper/shader
 neowall pause        # Pause cycling
 neowall resume       # Resume cycling
 neowall current      # Show current wallpaper
 ```
 
-## Hot-Reload
+(There is no `neowall reload` — see [Reloading Config](#reloading-config).)
 
-Config auto-reloads on save. No restart needed.
+## Reloading Config
 
-To enable:
+Config is read once at startup. **There is no hot-reload** — changes to
+`~/.config/neowall/config.vibe` take effect on the next daemon start.
+
+To apply a config change:
+
 ```bash
-neowall --watch      # Built-in file watcher
+neowall kill        # Stop the running daemon
+neowall             # Start it again
 ```
 
-Or just edit `~/.config/neowall/config.vibe` - daemon checks for changes automatically.
+Or in one line:
+
+```bash
+neowall kill && neowall
+```
 
 ## Custom Shaders
 
@@ -412,7 +420,7 @@ Browse shaders: [shadertoy.com](https://www.shadertoy.com/)
 ## Troubleshooting
 
 ### Config not reloading
-- Run: `neowall reload`
+- Neowall does **not** hot-reload. Restart the daemon: `neowall kill && neowall`
 - Check: `~/.config/neowall/config.vibe` exists
 - Check logs: `neowall -fv` (foreground, verbose)
 

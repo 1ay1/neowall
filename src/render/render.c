@@ -1047,10 +1047,10 @@ bool render_frame(struct output_state *output) {
                             log_error("║ FIX YOUR CONFIG:                                              ║");
                             log_error("║   1. Edit: ~/.config/neowall/config.vibe                      ║");
                             log_error("║   2. Fix shader path (check spelling, file exists)            ║");
-                            log_error("║   3. Save - hot-reload will detect change automatically       ║");
+                            log_error("║   3. Restart daemon: neowall kill && neowall                  ║");
                             log_error("║                                                               ║");
                             log_error("║ Program will continue running with blank screen               ║");
-                            log_error("║ until you fix config and it reloads.                          ║");
+                            log_error("║ until you fix config and restart.                             ║");
                             log_error("╚═══════════════════════════════════════════════════════════════╝");
                             output->shader_load_failed = true; /* Mark as permanently failed */
                         }

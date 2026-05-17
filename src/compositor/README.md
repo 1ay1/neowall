@@ -569,7 +569,6 @@ Look for log messages:
 - [ ] Surface created successfully
 - [ ] Wallpaper appears behind windows
 - [ ] Multi-monitor support works
-- [ ] Hot-reload works
 - [ ] Clean shutdown
 - [ ] No memory leaks
 

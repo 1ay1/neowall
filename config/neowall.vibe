@@ -244,13 +244,10 @@ output {
 # TIPS & TRICKS
 # ============================================================================
 #
-# 1. Hot-reload configuration:
-#    neowall reload
+# 1. Apply a config change (no hot-reload — restart the daemon):
+#    neowall kill && neowall
 #
-# 2. Run with auto-reload (watches config file for changes):
-#    neowall --watch
-#
-# 3. Test configuration before daemonizing:
+# 2. Test configuration before daemonizing:
 #    neowall -v -f
 #
 # 4. Use absolute paths if ~ doesn't work:
@@ -296,8 +293,7 @@ output {
 #     - Create your own shaders! See shaders/README.md
 #
 # 12. Control the daemon:
-#     neowall kill      # Stop daemon
-#     neowall reload    # Reload config
+#     neowall kill      # Stop daemon (restart to reload config)
 #     neowall next      # Skip to next wallpaper
 #     neowall pause     # Pause cycling
 #     neowall resume    # Resume cycling
