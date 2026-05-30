@@ -170,6 +170,10 @@ struct output_state {
     uint64_t last_cycle_time;           /* Last time wallpaper was changed/cycled */
     uint64_t transition_start_time;
     uint64_t shader_start_time;         /* Time when shader was loaded (for animation) */
+    uint64_t shader_paused_at;          /* Wall-clock ms when shader animation was frozen,
+                                         * 0 when running. On resume, shader_start_time is
+                                         * advanced by (now - shader_paused_at) so animation
+                                         * continues from the same frame. Main-thread only. */
     uint64_t shader_fade_start_time;    /* Time when shader fade started (for cross-fade) */
     char pending_shader_path[OUTPUT_MAX_PATH_LENGTH];  /* Next shader to load after fade-out */
     float transition_progress;

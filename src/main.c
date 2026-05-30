@@ -436,6 +436,9 @@ static void print_usage(const char *program_name) {
         }
         printf("  %-21s %s\n", daemon_commands[i].name, daemon_commands[i].description);
     }
+    /* Shader-animation freeze controls (handled outside the table — RT signals). */
+    printf("  %-21s %s\n", "pause-shader", "Freeze the shader animation in place");
+    printf("  %-21s %s\n", "resume-shader", "Resume a frozen shader animation");
     printf("\n");
     printf("Note: By default, neowall runs as a daemon. Use -f for foreground.\n");
     printf("If a daemon is already running, subsequent calls act as control commands.\n");
@@ -534,7 +537,8 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
             break;
 
         default:
-            /* Check for SIGRTMIN (real-time signal for set-index) */
+            /* Real-time signals (SIGRTMIN+N) aren't compile-time constants, so
+             * they can't sit in the switch above — dispatch them here. */
             if (signum == SIGRTMIN) {
                 /* Read the requested index from file */
                 int index = read_set_index_file();
@@ -544,6 +548,12 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
                 } else {
                     log_error("Received SIGRTMIN but no valid index file found");
                 }
+            } else if (signum == SIGRTMIN + 1) {
+                log_info("Received SIGRTMIN+1, freezing shader animation...");
+                atomic_store_explicit(&state->shader_paused, true, memory_order_release);
+            } else if (signum == SIGRTMIN + 2) {
+                log_info("Received SIGRTMIN+2, resuming shader animation...");
+                atomic_store_explicit(&state->shader_paused, false, memory_order_release);
             } else {
                 log_debug("Received signal: %d", signum);
             }
@@ -597,7 +607,9 @@ static int setup_signalfd(void) {
     sigaddset(&mask, SIGUSR1);
     sigaddset(&mask, SIGUSR2);
     sigaddset(&mask, SIGCONT);
-    sigaddset(&mask, SIGRTMIN);  /* For set-index command */
+    sigaddset(&mask, SIGRTMIN);      /* For set-index command */
+    sigaddset(&mask, SIGRTMIN + 1);  /* For pause-shader command */
+    sigaddset(&mask, SIGRTMIN + 2);  /* For resume-shader command */
 
     /* Block these signals for all threads */
     if (pthread_sigmask(SIG_BLOCK, &mask, NULL) != 0) {
@@ -769,6 +781,18 @@ int main(int argc, char *argv[]) {
             return read_cycle_list() ? EXIT_SUCCESS : EXIT_FAILURE;
         }
 
+        /* Special cases: freeze/resume the shader animation. Delivered via
+         * real-time signals (SIGRTMIN+N), which aren't compile-time constants
+         * and so can't live in the daemon_commands table. */
+        if (strcmp(cmd, "pause-shader") == 0) {
+            return send_daemon_signal(SIGRTMIN + 1, "Freezing shader animation...", false)
+                   ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
+        if (strcmp(cmd, "resume-shader") == 0) {
+            return send_daemon_signal(SIGRTMIN + 2, "Resuming shader animation...", false)
+                   ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
+
         /* Special case: set command requires an index argument */
         if (strcmp(cmd, "set") == 0) {
             if (argc < 3) {
@@ -857,6 +881,7 @@ int main(int argc, char *argv[]) {
         for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
             fprintf(stderr, ", %s", daemon_commands[i].name);
         }
+        fprintf(stderr, ", pause-shader, resume-shader");
         fprintf(stderr, "\n\nRun '%s --help' for more information.\n", argv[0]);
         return EXIT_FAILURE;
     }
@@ -951,6 +976,7 @@ int main(int argc, char *argv[]) {
     /* Initialize atomic state flags - MUST use atomic_init before any access */
     atomic_init(&state.running, true);
     atomic_init(&state.paused, false);
+    atomic_init(&state.shader_paused, false);
     atomic_init(&state.outputs_need_init, false);
     atomic_init(&state.next_requested, 0);
     atomic_init(&state.set_index_requested, -1);  /* -1 means no request */

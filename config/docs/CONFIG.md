@@ -372,10 +372,17 @@ Control running daemon:
 neowall              # Start daemon
 neowall kill         # Stop daemon
 neowall next         # Skip to next wallpaper/shader
-neowall pause        # Pause cycling
+neowall pause        # Pause cycling (stops advancing between wallpapers)
 neowall resume       # Resume cycling
+neowall pause-shader   # Freeze the shader animation in place
+neowall resume-shader  # Resume a frozen shader animation (continues from the same frame)
 neowall current      # Show current wallpaper
 ```
+
+`pause`/`resume` stop the slideshow from advancing between wallpapers;
+`pause-shader`/`resume-shader` freeze the animation of the current shader (its
+time uniform) and stop drawing frames, leaving the last frame on screen. They
+are independent — pausing cycling does not freeze the animation, and vice versa.
 
 (There is no `neowall reload` — see [Reloading Config](#reloading-config).)
 

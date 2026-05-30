@@ -47,6 +47,10 @@ struct neowall_state {
     /* ALL flags must be atomic for thread safety */
     atomic_bool_t running;           /* Main loop running flag - accessed from signal handlers */
     atomic_bool_t paused;            /* Pause wallpaper cycling - set by signal handlers */
+    atomic_bool_t shader_paused;     /* Freeze shader animation (time uniform) - set by signal
+                                      * handlers. Distinct from `paused`: that stops cycling
+                                      * between wallpapers, this stops the shader's animation
+                                      * and resumes it from the same frame. */
     atomic_bool_t outputs_need_init; /* Flag when new outputs need initialization */
     atomic_int_t next_requested;     /* Counter for skip to next wallpaper requests */
     atomic_int_t set_index_requested; /* Requested wallpaper index (-1 = no request) */

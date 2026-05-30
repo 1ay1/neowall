@@ -102,6 +102,34 @@ struct swap_info {
     bool render_success;
 };
 
+/* Freeze or unfreeze the shader animation across every shader output.
+ *
+ * Freezing records the wall-clock instant the animation stopped. Unfreezing
+ * advances each shader's start_time by the frozen duration, so the animation
+ * picks up from the exact frame it stopped on rather than jumping forward by
+ * however long it was paused. Runs on the main loop thread, the only writer of
+ * shader_start_time / shader_paused_at, so those fields need no atomics; the
+ * read lock guards the list walk against output add/remove. */
+static void apply_shader_pause(struct neowall_state *state, bool paused) {
+    uint64_t now = get_time_ms();
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (o->config->type != WALLPAPER_SHADER) {
+            continue;
+        }
+        if (paused) {
+            if (o->shader_paused_at == 0) {
+                o->shader_paused_at = now;
+            }
+        } else if (o->shader_paused_at != 0) {
+            o->shader_start_time += now - o->shader_paused_at;
+            o->shader_paused_at = 0;
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+}
+
 static void render_outputs(struct neowall_state *state) {
     if (!state) {
         return;
@@ -224,6 +252,14 @@ static void render_outputs(struct neowall_state *state) {
         /* Skip rendering if output is occluded by a fullscreen window */
         if (output->config->pause_on_fullscreen &&
             atomic_load_explicit(&output->occluded, memory_order_acquire)) {
+            continue;
+        }
+
+        /* Freeze shader animation while shader-pause is active: skip the draw so
+         * the last rendered frame stays on screen and the GPU stays idle. The
+         * time offset is reconciled on resume in the main loop (apply_shader_pause). */
+        if (output->config->type == WALLPAPER_SHADER &&
+            atomic_load_explicit(&state->shader_paused, memory_order_acquire)) {
             continue;
         }
 
@@ -530,6 +566,10 @@ void event_loop_run(struct neowall_state *state) {
     static bool shader_mode_logged = false;
     uint64_t log_throttle_counter = 0;
 
+    /* Tracks the freeze state we've already applied to outputs, so the
+     * (locked) reconcile only runs on an actual pause<->resume transition. */
+    bool shader_pause_applied = false;
+
     while (atomic_load_explicit(&state->running, memory_order_acquire)) {
 
         /* Handle new outputs that need initialization (reconnected displays) */
@@ -581,6 +621,15 @@ void event_loop_run(struct neowall_state *state) {
             /* Skip frame timer for occluded outputs */
             if (output->config->pause_on_fullscreen &&
                 atomic_load_explicit(&output->occluded, memory_order_acquire)) {
+                output = output->next;
+                continue;
+            }
+
+            /* Skip frame timer for shader outputs whose animation is frozen —
+             * leaving the fd out of the poll set stops vsync-off shaders from
+             * being woken to redraw. Pending expirations are read back on resume. */
+            if (output->config->type == WALLPAPER_SHADER &&
+                atomic_load_explicit(&state->shader_paused, memory_order_acquire)) {
                 output = output->next;
                 continue;
             }
@@ -770,6 +819,16 @@ void event_loop_run(struct neowall_state *state) {
             occlusion_update(state);
         }
 
+        /* Reconcile shader-pause requests (from pause-shader/resume-shader).
+         * Only touches the output list on an actual state transition. Runs
+         * before the redraw decision below so a resume renders this iteration. */
+        bool shader_paused_req = atomic_load_explicit(&state->shader_paused, memory_order_acquire);
+        if (shader_paused_req != shader_pause_applied) {
+            apply_shader_pause(state, shader_paused_req);
+            shader_pause_applied = shader_paused_req;
+            log_info("Shader animation %s", shader_paused_req ? "paused" : "resumed");
+        }
+
         /* Additional check for compositor errors after dispatching events */
         if (ops && ops->get_error) {
             int display_error = ops->get_error(backend_data);
@@ -831,7 +890,8 @@ void event_loop_run(struct neowall_state *state) {
              * For shaders with vsync disabled, only redraw when frame timer fires (handled above) */
             if (o->config->type == WALLPAPER_SHADER &&
                 !o->shader_load_failed &&
-                (o->live_shader_program != 0 || o->multipass_shader != NULL)) {
+                (o->live_shader_program != 0 || o->multipass_shader != NULL) &&
+                !atomic_load_explicit(&state->shader_paused, memory_order_acquire)) {
                 if (o->config->vsync || output_get_frame_timer_fd(o) < 0) {
                     atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
                 }

@@ -105,6 +105,8 @@ neowall reload   # reload config
 neowall next     # next wallpaper / shader
 neowall pause    # pause cycling
 neowall resume
+neowall pause-shader   # freeze the shader animation in place
+neowall resume-shader  # resume a frozen shader animation
 neowall list     # show queue
 neowall set 3    # jump to index
 neowall current  # print what's playing

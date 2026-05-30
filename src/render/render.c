@@ -913,7 +913,12 @@ bool render_frame_shader(struct output_state *output) {
     /* Calculate shader time */
     uint64_t current_time_ms = get_time_ms();
     uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : current_time_ms;
-    double current_time = (current_time_ms - start_time) / 1000.0;
+    /* Guard against start_time being (transiently) in the future — subtracting
+     * unsigned would wrap to an enormous elapsed value. Can happen around a
+     * shader-pause resume that races a shader reload; clamp to 0 instead. */
+    double current_time = current_time_ms > start_time
+        ? (current_time_ms - start_time) / 1000.0
+        : 0.0;
     
     /* Apply shader speed multiplier */
     float shader_speed = output->config->shader_speed > 0.0f ? output->config->shader_speed : 1.0f;

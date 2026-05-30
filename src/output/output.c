@@ -222,6 +222,7 @@ struct output_state *output_create(struct neowall_state *state,
     out->config->channel_count = 0;
 
     out->shader_fade_start_time = 0;
+    out->shader_paused_at = 0;
     out->pending_shader_path[0] = '\0';
 
     /* Initialize FPS tracking */
@@ -898,6 +899,10 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     log_info("Adaptive resolution targeting %d FPS for shader: %s", target_fps, shader_path);
 
     output->shader_start_time = get_time_ms();
+    /* A freshly loaded shader starts from a clean timeline; clear any frozen
+     * baseline so a pending resume doesn't shift start_time into the future
+     * (which would underflow the elapsed-time calculation in render.c). */
+    output->shader_paused_at = 0;
 
     log_info("Successfully loaded multipass shader with %d pass(es): %s",
              output->multipass_shader->pass_count, shader_path);
