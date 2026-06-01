@@ -1311,6 +1311,13 @@ return true;
  * ============================================================================ */
 
 static bool apply_builtin_default_config(struct neowall_state *state) {
+    /* config_load() forwards a NULL state straight here on its early-out path,
+     * so guard before dereferencing state->output_list_lock below. */
+    if (!state) {
+        log_error("Cannot apply built-in default config: state is NULL");
+        return false;
+    }
+
     log_info("Applying built-in default configuration");
 
     /* Create a minimal working config */
