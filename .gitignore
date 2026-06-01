@@ -1,5 +1,7 @@
 # Build artifacts
 build/
+build*/
+/neowall
 *.o
 *.a
 *.so
@@ -7,6 +9,7 @@ build/
 staticwall
 REFACTORING_PLAN.md
 .cache
+compile_commands.json
 
 # Generated files
 include/version.h
