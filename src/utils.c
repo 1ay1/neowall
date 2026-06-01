@@ -291,11 +291,11 @@ const char *get_cycle_list_file_path(void) {
     /* Last resort: tmpfs (will be lost on reboot) */
     else {
         const char *rt = neowall_secure_runtime_dir();
-        if (rt) {
-            snprintf(path, sizeof(path), "%s/cycle_list", rt);
-        } else {
-            /* No safe directory available; return an empty path so callers
-             * fail closed rather than writing into a world-writable /tmp. */
+        int n = rt ? snprintf(path, sizeof(path), "%s/cycle_list", rt) : -1;
+        if (rt == NULL || n < 0 || (size_t)n >= sizeof(path)) {
+            /* No safe directory available (or it would truncate): return an
+             * empty path so callers fail closed rather than writing into a
+             * world-writable /tmp or a clipped path. */
             path[0] = '\0';
         }
     }
@@ -324,9 +324,8 @@ const char *get_state_file_path(void) {
     /* Last resort: tmpfs (will be lost on reboot) */
     else {
         const char *rt = neowall_secure_runtime_dir();
-        if (rt) {
-            snprintf(state_path, sizeof(state_path), "%s/state.txt", rt);
-        } else {
+        int n = rt ? snprintf(state_path, sizeof(state_path), "%s/state.txt", rt) : -1;
+        if (rt == NULL || n < 0 || (size_t)n >= sizeof(state_path)) {
             state_path[0] = '\0';
         }
     }
