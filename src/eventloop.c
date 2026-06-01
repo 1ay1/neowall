@@ -146,17 +146,23 @@ static void render_outputs(struct neowall_state *state) {
     int total_outputs = 0;
 
     /* === PHASE 1: snapshot the output list under the read lock ============
-     * We copy the pointer list to a stack array and then drop the lock so
-     * that all GL/EGL work below (which may BLOCK on vsync inside
-     * eglMakeCurrent / eglSwapBuffers) runs without holding output_list_lock.
-     * The outputs themselves stay alive as long as removal requires the
-     * write lock, so the pointers remain valid for the duration of this
-     * call as long as no writer can complete during it. */
+     * We copy the pointer list to a stack array and take a REFERENCE on each
+     * output, then drop the lock so that all GL/EGL work below (which may
+     * BLOCK on vsync inside eglMakeCurrent / eglSwapBuffers) runs without
+     * holding output_list_lock.
+     *
+     * The ref is what makes this sound: a concurrent hotplug-removal unlinks
+     * the output under the write lock and then output_unref()s the list's
+     * reference. Because we hold our own ref, the object cannot be freed while
+     * we use it here — it is freed when we drop our ref in the cleanup sweep at
+     * the end of this function. Without the ref, an unplug mid-frame would be a
+     * use-after-free. */
     struct output_state *outputs_snapshot[MAX_OUTPUTS];
     size_t output_n = 0;
 
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o && output_n < MAX_OUTPUTS; o = o->next) {
+        output_ref(o);
         outputs_snapshot[output_n++] = o;
         total_outputs++;
         if (o->config->cycle && o->config->cycle_count > 0) {
@@ -440,6 +446,13 @@ static void render_outputs(struct neowall_state *state) {
             }
         }
         atomic_fetch_sub(&state->next_requested, 1);
+    }
+
+    /* Drop the references taken in PHASE 1. For any output that was removed
+     * from the list while we worked (and therefore had the list's reference
+     * dropped), this is the unref that finally frees it. */
+    for (size_t i = 0; i < output_n; i++) {
+        output_unref(outputs_snapshot[i]);
     }
 
     /* Update timer after rendering changes */

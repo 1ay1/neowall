@@ -459,6 +459,16 @@ test_foundation_exe = executable('test_foundation',
 
 test('foundation', test_foundation_exe)
 
+# Output refcount protocol — concurrency test, run under TSan in CI.
+test_refcount_exe = executable('test_output_refcount',
+  files('tests/test_output_refcount.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [thread_dep],
+  build_by_default: false,
+)
+
+test('output_refcount', test_refcount_exe)
+
 # =============================================================================
 # Summary
 # =============================================================================
