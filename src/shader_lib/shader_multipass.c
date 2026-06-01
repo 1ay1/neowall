@@ -947,11 +947,19 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
         pass->is_compiled = false;
 
         /*
-         * VERY SMART CHANNEL BINDING with confidence scoring
+         * CHANNEL BINDING (heuristic, best-effort)
          *
-         * Analyzes shader source with multiple heuristics to determine optimal bindings.
-         * Uses a scoring system to handle ambiguous cases correctly.
-         * 
+         * Shadertoy shaders declare which texture feeds each iChannelN out of
+         * band (in the website UI), so a bare .glsl file carries no binding
+         * metadata. We recover the intent by scoring the source text for
+         * tell-tale usage patterns (noise lookups, self-feedback, buffer
+         * reads). This is correct for the overwhelmingly common Shadertoy
+         * idioms but is fundamentally a guess: an exotic shader can still be
+         * bound wrong, in which case it renders incorrectly rather than
+         * crashing. If you hit that, the per-channel decision is logged below
+         * (noise/buffer/self with scores) so it can be diagnosed, and an
+         * explicit binding syntax in the config is the proper long-term fix.
+         *
          * Heuristics:
          * 1. Noise texture: /1024, /512, /256, *0.001, .x only (single channel read)
          * 2. Self-feedback: uv, fragCoord/iResolution, temporal mixing patterns

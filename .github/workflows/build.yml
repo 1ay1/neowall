@@ -29,6 +29,9 @@ jobs:
       - name: Build
         run: ninja -C build
 
+      - name: Run unit tests
+        run: meson test -C build --print-errorlogs
+
       - name: Check binary
         run: |
           test -f build/neowall

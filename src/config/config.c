@@ -1667,6 +1667,11 @@ bool config_load(struct neowall_state *state, const char *config_path) {
                     }
                     target = target->next;
                 }
+                /* Release the traversal lock before touching output_config or
+                 * looping to the next config block. Previously this rdlock was
+                 * never released, recursively re-locking on each iteration and
+                 * permanently starving any writer (output hotplug/removal). */
+                pthread_rwlock_unlock(&state->output_list_lock);
 
                 if (!found) {
                     log_debug("Output '%s' not connected yet, config saved for when it appears",

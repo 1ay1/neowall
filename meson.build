@@ -412,6 +412,23 @@ if cppcheck.found()
 endif
 
 # =============================================================================
+# Tests
+# =============================================================================
+
+# Headless unit tests for the pure helper functions. These link a small subset
+# of the source (utils.c) and need no display server, so they run in CI via
+# `meson test`. utils.c provides its own log_*() implementations, so no stubs
+# are required; version.h is the generated header.
+test_utils_exe = executable('test_utils',
+  files('tests/test_utils.c', 'src/utils.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep, thread_dep],
+  build_by_default: false,
+)
+
+test('utils', test_utils_exe)
+
+# =============================================================================
 # Summary
 # =============================================================================
 
