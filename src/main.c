@@ -30,7 +30,12 @@ static const char *get_set_index_file_path(void) {
         if (home) {
             snprintf(path, sizeof(path), "%s/.neowall-set-index", home);
         } else {
-            snprintf(path, sizeof(path), "/tmp/neowall-set-index-%d", getuid());
+            const char *rt = neowall_secure_runtime_dir();
+            if (rt) {
+                snprintf(path, sizeof(path), "%s/set-index", rt);
+            } else {
+                path[0] = '\0';
+            }
         }
     }
 
@@ -135,7 +140,12 @@ static const char *get_pid_file_path(void) {
         if (home) {
             snprintf(pid_path, sizeof(pid_path), "%s/.neowall.pid", home);
         } else {
-            snprintf(pid_path, sizeof(pid_path), "/tmp/neowall-%d.pid", getuid());
+            const char *rt = neowall_secure_runtime_dir();
+            if (rt) {
+                snprintf(pid_path, sizeof(pid_path), "%s/neowall.pid", rt);
+            } else {
+                pid_path[0] = '\0';
+            }
         }
     }
 

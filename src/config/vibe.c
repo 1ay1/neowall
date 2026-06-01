@@ -18,6 +18,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <errno.h>
 
 // How deep can we nest? 64 levels should be plenty
 // (if you need more than this, your config is probably too complex)
@@ -479,19 +480,20 @@ static VibeValue* parse_value_from_token(Token* token) {
             return vibe_value_new_boolean(strcmp(token->value, "true") == 0);
 
         case TOKEN_NUMBER: {
+            errno = 0;
             if (strchr(token->value, '.')) {
                 char *endptr;
                 double val = strtod(token->value, &endptr);
-                if (endptr == token->value) {
-                    /* Conversion failed */
+                if (endptr == token->value || *endptr != '\0' || errno == ERANGE) {
+                    /* Conversion failed or out of range */
                     return NULL;
                 }
                 return vibe_value_new_float(val);
             } else {
                 char *endptr;
                 long long val = strtoll(token->value, &endptr, 10);
-                if (endptr == token->value) {
-                    /* Conversion failed */
+                if (endptr == token->value || *endptr != '\0' || errno == ERANGE) {
+                    /* Conversion failed or out of range (overflow/underflow) */
                     return NULL;
                 }
                 return vibe_value_new_integer(val);
@@ -702,9 +704,26 @@ VibeValue* vibe_parse_string(VibeParser* parser, const char* input) {
                     current_key = NULL;
                 } else {
                     /* Simple value */
+                    if (next.type == TOKEN_NEWLINE || next.type == TOKEN_EOF ||
+                        next.type == TOKEN_RIGHT_BRACE || next.type == TOKEN_RIGHT_BRACKET) {
+                        /* Key with no value on the same line. Silently consuming
+                         * the newline used to bind '(null)' to the key and drop
+                         * the real value sitting on the next line. Flag it. */
+                        set_error(parser, "Key '%s' has no value", current_key);
+                        token_free(&next);
+                        free(current_key);
+                        vibe_value_free(root);
+                        return NULL;
+                    }
                     VibeValue* val = parse_value_from_token(&next);
                     if (val) {
                         vibe_object_set(frame->container->as_object, current_key, val);
+                    } else {
+                        set_error(parser, "Invalid value for key '%s'", current_key);
+                        token_free(&next);
+                        free(current_key);
+                        vibe_value_free(root);
+                        return NULL;
                     }
                     token_free(&next);
                     free(current_key);
@@ -734,22 +753,39 @@ VibeValue* vibe_parse_string(VibeParser* parser, const char* input) {
                     stack.frames[stack.depth].state = STATE_OBJECT;
                     stack.frames[stack.depth].container = obj;
                     stack.frames[stack.depth].current_key = NULL;
+                } else {
+                    /* Cannot push a frame for this object. Previously the body
+                     * of the object was then parsed into the PARENT array as
+                     * stray values — silently wrong. Fail loudly instead. */
+                    set_error(parser, "Maximum nesting depth exceeded");
+                    token_free(&token);
+                    free(current_key);
+                    vibe_value_free(root);
+                    return NULL;
+                }
+                token_free(&token);
+            } else if (token.type == TOKEN_IDENTIFIER) {
+                /* A bare word inside an array is a scalar string value (e.g.
+                 * `channels [ noise wood ]`). VIBE has no `key value` pairs
+                 * outside braces, so we never treat this as an object entry;
+                 * we store it as a string, matching how the config layer reads
+                 * array elements. */
+                VibeValue* val = vibe_value_new_string(token.value);
+                if (val) {
+                    vibe_array_push(frame->container->as_array, val);
                 }
                 token_free(&token);
             } else {
-                /* Parse value - this could be a simple value or start of an object */
-                if (token.type == TOKEN_IDENTIFIER) {
-                    /* This might be a key in an object within the array */
-                    /* For now, treat as regular value - objects in arrays need parser rewrite */
-                    VibeValue* val = parse_value_from_token(&token);
-                    if (val) {
-                        vibe_array_push(frame->container->as_array, val);
-                    }
+                /* Simple scalar value (string/number/boolean) */
+                VibeValue* val = parse_value_from_token(&token);
+                if (val) {
+                    vibe_array_push(frame->container->as_array, val);
                 } else {
-                    VibeValue* val = parse_value_from_token(&token);
-                    if (val) {
-                        vibe_array_push(frame->container->as_array, val);
-                    }
+                    set_error(parser, "Invalid value in array");
+                    token_free(&token);
+                    free(current_key);
+                    vibe_value_free(root);
+                    return NULL;
                 }
                 token_free(&token);
             }

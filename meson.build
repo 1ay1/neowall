@@ -438,6 +438,15 @@ test_compat_exe = executable('test_shadertoy_compat',
 
 test('shadertoy_compat', test_compat_exe)
 
+# VIBE config parser is filesystem/GL-free in its string-parse path.
+test_vibe_exe = executable('test_vibe',
+  files('tests/test_vibe.c', 'src/config/vibe.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('vibe', test_vibe_exe)
+
 # =============================================================================
 # Summary
 # =============================================================================

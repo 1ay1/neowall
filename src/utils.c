@@ -218,6 +218,56 @@ float ease_in_out_cubic(float t) {
 }
 
 /* Get state file path - use persistent location that survives reboots */
+/* Create `dir` 0700 if absent, then verify it is a directory we own with no
+ * group/other access and is not a symlink. Returns true only when the path is
+ * safe to drop predictable-named files into. lstat (not stat) is deliberate so
+ * a symlink planted by another user is rejected rather than followed. */
+static bool ensure_private_dir(const char *dir) {
+    if (mkdir(dir, 0700) != 0 && errno != EEXIST) {
+        return false;
+    }
+    struct stat st;
+    if (lstat(dir, &st) != 0) {
+        return false;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        return false;      /* symlink or regular file squatting the name */
+    }
+    if (st.st_uid != getuid()) {
+        return false;      /* someone else owns it */
+    }
+    if (st.st_mode & (S_IRWXG | S_IRWXO)) {
+        /* Tighten perms if a previous umask left it group/other-accessible. */
+        if (chmod(dir, 0700) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+const char *neowall_secure_runtime_dir(void) {
+    static char dir[MAX_PATH_LENGTH];
+
+    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+    if (runtime_dir && runtime_dir[0] != '\0') {
+        /* $XDG_RUNTIME_DIR is already a per-user 0700 tmpfs; a neowall/
+         * subdir under it inherits that isolation. */
+        snprintf(dir, sizeof(dir), "%s/neowall", runtime_dir);
+        if (ensure_private_dir(dir)) {
+            return dir;
+        }
+    }
+
+    /* Fallback: /tmp is world-writable, so the per-uid subdir MUST be created
+     * and ownership-checked rather than blindly written into. */
+    snprintf(dir, sizeof(dir), "/tmp/neowall-%d", (int)getuid());
+    if (ensure_private_dir(dir)) {
+        return dir;
+    }
+
+    return NULL;
+}
+
 /* Get path to the cycle list file (shows all wallpapers with indices) */
 /* Must use same fallback logic as get_state_file_path to stay in sync */
 const char *get_cycle_list_file_path(void) {
@@ -240,11 +290,13 @@ const char *get_cycle_list_file_path(void) {
     }
     /* Last resort: tmpfs (will be lost on reboot) */
     else {
-        const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-        if (runtime_dir) {
-            snprintf(path, sizeof(path), "%s/neowall-cycle-list", runtime_dir);
+        const char *rt = neowall_secure_runtime_dir();
+        if (rt) {
+            snprintf(path, sizeof(path), "%s/cycle_list", rt);
         } else {
-            snprintf(path, sizeof(path), "/tmp/neowall-cycle-list-%d", getuid());
+            /* No safe directory available; return an empty path so callers
+             * fail closed rather than writing into a world-writable /tmp. */
+            path[0] = '\0';
         }
     }
     
@@ -271,11 +323,11 @@ const char *get_state_file_path(void) {
     }
     /* Last resort: tmpfs (will be lost on reboot) */
     else {
-        const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-        if (runtime_dir) {
-            snprintf(state_path, sizeof(state_path), "%s/neowall-state.txt", runtime_dir);
+        const char *rt = neowall_secure_runtime_dir();
+        if (rt) {
+            snprintf(state_path, sizeof(state_path), "%s/state.txt", rt);
         } else {
-            snprintf(state_path, sizeof(state_path), "/tmp/neowall-state-%d.txt", getuid());
+            state_path[0] = '\0';
         }
     }
     
