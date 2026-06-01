@@ -1347,6 +1347,7 @@ static bool apply_builtin_default_config(struct neowall_state *state) {
                 snprintf(expanded, sizeof(expanded), "%s%s", home, try_paths[i] + 1);
             } else {
                 strncpy(expanded, try_paths[i], sizeof(expanded) - 1);
+                expanded[sizeof(expanded) - 1] = '\0';
             }
 
             /* Check if it's a file */

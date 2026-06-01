@@ -114,9 +114,11 @@ static void output_handle_geometry(void *data, struct wl_output *wl_output,
 
     if (make) {
         strncpy(output->make, make, sizeof(output->make) - 1);
+        output->make[sizeof(output->make) - 1] = '\0';
     }
     if (model) {
         strncpy(output->model, model, sizeof(output->model) - 1);
+        output->model[sizeof(output->model) - 1] = '\0';
     }
     output->transform = transform;
 
