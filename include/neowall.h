@@ -63,7 +63,7 @@ struct neowall_state {
     pthread_rwlock_t output_list_lock; /* Read-write lock for output linked list traversal */
     pthread_mutex_t state_file_lock; /* Mutex for state file I/O operations */
     
-    /* BUG FIX #9: LOCK ORDERING POLICY (to prevent deadlock)
+    /* LOCK ORDERING POLICY (to prevent deadlock)
      * ========================================================
      * Always acquire locks in this order:
      * 1. output_list_lock (rwlock)

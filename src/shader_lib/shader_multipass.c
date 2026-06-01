@@ -9,6 +9,7 @@
 #include "adaptive_scale.h"
 #include "render_optimizer.h"
 #include "multipass_optimizer.h"
+#include "shadertoy_compat.h"
 #include "shader_log.h"
 #include "platform_compat.h"
 #include <stdio.h>
@@ -701,6 +702,17 @@ static const char *multipass_wrapper_prefix =
     "uniform vec3 iChannelResolution[4];\n"
     "uniform float iChannelTime[4];\n"
     "\n"
+    "// --- Shadertoy / GLSL-ES compatibility shims ---\n"
+    "// Legacy ES sampling builtins -> desktop core equivalents. Defined as\n"
+    "// macros so we never have to rewrite call sites in the user source.\n"
+    "#define texture2D texture\n"
+    "#define texture2DLod textureLod\n"
+    "#define texture2DProj textureProj\n"
+    "#define textureCube texture\n"
+    "#define textureCubeLod textureLod\n"
+    "// Legacy global-time alias used by older Shadertoy shaders.\n"
+    "#define iGlobalTime iTime\n"
+    "\n"
     "// Output\n"
     "out vec4 fragColor;\n"
     "\n";
@@ -712,139 +724,15 @@ static const char *multipass_wrapper_suffix =
     "}\n";
 
 /**
- * Fix common Shadertoy compatibility issues in shader source.
- * 
- * Handles:
- * - iChannelResolution[n] used as vec2 (add .xy swizzle)
- * - texture(sampler, vec3) -> texture(sampler, (vec3).xy) for 2D textures
- * - Other implicit vec3->vec2 casts
- * 
- * Returns a newly allocated string that must be freed.
+ * Normalize Shadertoy source for desktop OpenGL 3.3 core compilation.
+ *
+ * The implementation lives in the GL-free shadertoy_compat module so it can be
+ * unit-tested headless. See shadertoy_compat.h. The GLSL-ES builtin shims
+ * (texture2D -> texture, etc.) are handled by #define macros in
+ * multipass_wrapper_prefix, not here.
  */
 static char *fix_shadertoy_compatibility(const char *source) {
-    if (!source) return NULL;
-    
-    size_t src_len = strlen(source);
-    /* Allocate extra space for potential .xy additions */
-    size_t alloc_size = src_len * 3 + 1;
-    char *result = malloc(alloc_size);
-    if (!result) return NULL;
-    
-    const char *src = source;
-    char *dst = result;
-    
-    while (*src) {
-        /* Check for iChannelResolution[n] pattern */
-        if (strncmp(src, "iChannelResolution[", 19) == 0) {
-            /* Copy "iChannelResolution[" */
-            memcpy(dst, src, 19);
-            dst += 19;
-            src += 19;
-            
-            /* Copy the index (digit) */
-            while (*src && *src != ']') {
-                *dst++ = *src++;
-            }
-            
-            /* Copy the closing bracket */
-            if (*src == ']') {
-                *dst++ = *src++;
-            }
-            
-            /* Check if already followed by a swizzle or component access */
-            if (*src != '.' && *src != '[') {
-                /* Add .xy swizzle for vec3->vec2 compatibility */
-                memcpy(dst, ".xy", 3);
-                dst += 3;
-            }
-            continue;
-        }
-        
-        /* Check for texture(iChannel, expr) where expr might be vec3 */
-        /* Pattern: "texture(iChannel" followed by digit, comma, then expression */
-        if (strncmp(src, "texture(iChannel", 16) == 0) {
-            /* Copy "texture(iChannel" */
-            memcpy(dst, src, 16);
-            dst += 16;
-            src += 16;
-            
-            /* Copy the channel number */
-            while (*src && *src >= '0' && *src <= '9') {
-                *dst++ = *src++;
-            }
-            
-            /* Skip whitespace and comma */
-            while (*src && (*src == ' ' || *src == '\t')) {
-                *dst++ = *src++;
-            }
-            if (*src == ',') {
-                *dst++ = *src++;
-            }
-            while (*src && (*src == ' ' || *src == '\t')) {
-                *dst++ = *src++;
-            }
-            
-            /* Now we're at the coordinate expression */
-            /* Check if it starts with something that's likely a vec3 */
-            /* Common patterns: variable name, function call, or expression */
-            
-            /* We need to find the end of this expression (the closing paren or next comma) */
-            /* and wrap it with parentheses + .xy if it doesn't already have .xy */
-            
-            /* Count parentheses to find the expression end */
-            int paren_depth = 1; /* We're inside texture( */
-            const char *expr_start = src;
-            const char *expr_end = src;
-            bool has_swizzle = false;
-            
-            while (*expr_end && paren_depth > 0) {
-                if (*expr_end == '(') paren_depth++;
-                else if (*expr_end == ')') paren_depth--;
-                else if (*expr_end == ',' && paren_depth == 1) break; /* Next argument */
-                
-                /* Check for .xy, .xz, .yz etc swizzle at end of expression */
-                if (*expr_end == '.' && paren_depth == 1) {
-                    const char *after_dot = expr_end + 1;
-                    if ((*after_dot == 'x' || *after_dot == 'y' || *after_dot == 'z' || 
-                         *after_dot == 'r' || *after_dot == 'g' || *after_dot == 'b' ||
-                         *after_dot == 's' || *after_dot == 't' || *after_dot == 'p')) {
-                        has_swizzle = true;
-                    }
-                }
-                expr_end++;
-            }
-            
-            /* Back up to the actual end of the expression */
-            if (paren_depth == 0) expr_end--;
-            while (expr_end > expr_start && (*(expr_end-1) == ' ' || *(expr_end-1) == '\t')) {
-                expr_end--;
-            }
-            
-            /* Copy the expression */
-            size_t expr_len = expr_end - expr_start;
-            if (!has_swizzle && expr_len > 0) {
-                /* Wrap with parentheses and add .xy */
-                *dst++ = '(';
-                memcpy(dst, expr_start, expr_len);
-                dst += expr_len;
-                memcpy(dst, ").xy", 4);
-                dst += 4;
-            } else {
-                /* Already has swizzle, copy as-is */
-                memcpy(dst, expr_start, expr_len);
-                dst += expr_len;
-            }
-            
-            src = expr_end;
-            continue;
-        }
-        
-        /* Copy character as-is */
-        *dst++ = *src++;
-    }
-    
-    *dst = '\0';
-    return result;
+    return shadertoy_compat_fix(source);
 }
 
 /* Wrap a pass source with Shadertoy compatibility layer */
@@ -947,11 +835,19 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
         pass->is_compiled = false;
 
         /*
-         * VERY SMART CHANNEL BINDING with confidence scoring
+         * CHANNEL BINDING (heuristic, best-effort)
          *
-         * Analyzes shader source with multiple heuristics to determine optimal bindings.
-         * Uses a scoring system to handle ambiguous cases correctly.
-         * 
+         * Shadertoy shaders declare which texture feeds each iChannelN out of
+         * band (in the website UI), so a bare .glsl file carries no binding
+         * metadata. We recover the intent by scoring the source text for
+         * tell-tale usage patterns (noise lookups, self-feedback, buffer
+         * reads). This is correct for the overwhelmingly common Shadertoy
+         * idioms but is fundamentally a guess: an exotic shader can still be
+         * bound wrong, in which case it renders incorrectly rather than
+         * crashing. If you hit that, the per-channel decision is logged below
+         * (noise/buffer/self with scores) so it can be diagnosed, and an
+         * explicit binding syntax in the config is the proper long-term fix.
+         *
          * Heuristics:
          * 1. Noise texture: /1024, /512, /256, *0.001, .x only (single channel read)
          * 2. Self-feedback: uv, fragCoord/iResolution, temporal mixing patterns

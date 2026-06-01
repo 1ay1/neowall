@@ -199,6 +199,7 @@ egl_sources = files(
 shader_lib_sources = files(
   'src/shader_lib/shader_core.c',
   'src/shader_lib/shader_multipass.c',
+  'src/shader_lib/shadertoy_compat.c',
   'src/shader_lib/adaptive_scale.c',
   'src/shader_lib/render_optimizer.c',
   'src/shader_lib/multipass_optimizer.c',
@@ -410,6 +411,32 @@ if cppcheck.found()
     ],
   )
 endif
+
+# =============================================================================
+# Tests
+# =============================================================================
+
+# Headless unit tests for the pure helper functions. These link a small subset
+# of the source (utils.c) and need no display server, so they run in CI via
+# `meson test`. utils.c provides its own log_*() implementations, so no stubs
+# are required; version.h is the generated header.
+test_utils_exe = executable('test_utils',
+  files('tests/test_utils.c', 'src/utils.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep, thread_dep],
+  build_by_default: false,
+)
+
+test('utils', test_utils_exe)
+
+# Shadertoy source-compat transforms are GL-free and unit-tested directly.
+test_compat_exe = executable('test_shadertoy_compat',
+  files('tests/test_shadertoy_compat.c', 'src/shader_lib/shadertoy_compat.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('shadertoy_compat', test_compat_exe)
 
 # =============================================================================
 # Summary

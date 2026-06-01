@@ -114,9 +114,11 @@ static void output_handle_geometry(void *data, struct wl_output *wl_output,
 
     if (make) {
         strncpy(output->make, make, sizeof(output->make) - 1);
+        output->make[sizeof(output->make) - 1] = '\0';
     }
     if (model) {
         strncpy(output->model, model, sizeof(output->model) - 1);
+        output->model[sizeof(output->model) - 1] = '\0';
     }
     output->transform = transform;
 
@@ -340,8 +342,8 @@ static void output_on_closed_callback(struct compositor_surface *surface) {
     if (state) {
         pthread_rwlock_wrlock(&state->output_list_lock);
 
-        /* BUG FIX #4: Verify output is still in the list before destroying
-         * It might have been removed by another thread */
+        /* Verify the output is still in the list before destroying it: another
+         * thread (e.g. registry global_remove) may have already unlinked it. */
         bool found = false;
         struct output_state *check = state->outputs;
         while (check) {

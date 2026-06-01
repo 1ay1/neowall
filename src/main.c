@@ -313,9 +313,10 @@ static bool kill_daemon(void) {
 /* Send signal to running daemon */
 /* Check if cycling is possible by reading state file */
 static bool can_cycle_wallpaper(void) {
-    /* BUG FIX #7: Add file-level locking for cross-process synchronization
-     * Note: We can't use state_file_lock mutex here because we're in a different
-     * process. We need file-level locking (flock/fcntl) for cross-process sync. */
+    /* Use file-level locking (flock/fcntl) for cross-process synchronization.
+     * We can't use the state_file_lock mutex here because this runs in a
+     * separate process from the daemon; only file locks coordinate across
+     * processes. */
     const char *state_path = get_state_file_path();
     FILE *fp = fopen(state_path, "r");
 
@@ -340,10 +341,10 @@ static bool can_cycle_wallpaper(void) {
     char line[MAX_PATH_LENGTH];
     int max_cycle_total = 0;
 
-    /* BUG FIX #8: Check ALL outputs for cycle_total, not just the first one.
-     * The state file contains multiple [output] sections, and we need to find
-     * if ANY of them have cycle_total > 1 (can cycle). Previously, we stopped
-     * at the first cycle_total= line, which might be 0 for a non-cycling output. */
+    /* Check ALL outputs for cycle_total, not just the first one. The state file
+     * contains multiple [output] sections; cycling is possible if ANY of them
+     * has cycle_total > 1. (A previous version stopped at the first cycle_total
+     * line, which could be 0 for a non-cycling output.) */
     while (fgets(line, sizeof(line), fp)) {
         line[strcspn(line, "\n")] = 0;
         if (strncmp(line, "cycle_total=", 12) == 0) {

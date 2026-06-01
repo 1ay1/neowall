@@ -404,10 +404,13 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
             /* Update existing entry */
             strncpy(states[i].wallpaper_path, wallpaper_path ? wallpaper_path : "none", 
                     sizeof(states[i].wallpaper_path) - 1);
+            states[i].wallpaper_path[sizeof(states[i].wallpaper_path) - 1] = '\0';
             strncpy(states[i].mode, mode ? mode : "fill", sizeof(states[i].mode) - 1);
+            states[i].mode[sizeof(states[i].mode) - 1] = '\0';
             states[i].cycle_index = cycle_index;
             states[i].cycle_total = cycle_total;
             strncpy(states[i].status, status ? status : "active", sizeof(states[i].status) - 1);
+            states[i].status[sizeof(states[i].status) - 1] = '\0';
             states[i].timestamp = (long)time(NULL);
             found_output = true;
             break;
@@ -416,6 +419,10 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
     
     /* Add new entry if not found */
     if (!found_output && state_count < MAX_OUTPUTS) {
+        /* Zero the slot first: this array is uninitialized stack memory and the
+         * strncpy() calls below do not guarantee NUL-termination when the source
+         * is >= the destination size. A later fprintf("%s") would then read OOB. */
+        memset(&states[state_count], 0, sizeof(states[state_count]));
         strncpy(states[state_count].output_name, output_name ? output_name : "unknown", 
                 sizeof(states[state_count].output_name) - 1);
         strncpy(states[state_count].wallpaper_path, wallpaper_path ? wallpaper_path : "none", 

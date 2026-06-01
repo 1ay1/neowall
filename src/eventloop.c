@@ -602,9 +602,9 @@ void event_loop_run(struct neowall_state *state) {
             }
         }
 
-        /* Calculate poll timeout - use 1 second max to ensure signals are processed promptly
-         * BUG FIX: Previously used POLL_TIMEOUT_INFINITE (-1) which caused slow signal response
-         * (Ctrl+C, neowall kill, etc.) because poll wouldn't return until a Wayland event arrived */
+        /* Cap the poll timeout at 1s so signals (Ctrl+C, `neowall kill`, etc.)
+         * are serviced promptly. An infinite timeout would block until a
+         * Wayland event arrived, making signal response feel laggy. */
         int timeout_ms = 1000; /* 1 second max - ensures signals checked regularly */
 
         /* Collect frame timer fds for outputs using vsync-off shaders - use read lock */
