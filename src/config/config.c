@@ -1562,7 +1562,9 @@ bool config_load(struct neowall_state *state, const char *config_path) {
             log_info("Valid default configuration: type=%s, path=%s, mode=%s",
                      type_str, path_str, wallpaper_mode_to_string(default_config.mode));
 
-            /* Apply default config to all outputs */
+            /* Apply default config to all outputs. Traversal needs the read
+             * lock like the output-specific branch below. */
+            pthread_rwlock_rdlock(&state->output_list_lock);
             struct output_state *output = state->outputs;
             while (output) {
                 /* Copy default config */
@@ -1589,9 +1591,15 @@ bool config_load(struct neowall_state *state, const char *config_path) {
                     }
                 }
 
+                /* output_apply_config() deep-copies the path arrays into the
+                 * output's own config rather than taking ownership, so the
+                 * copies we just made here must be freed afterwards or they
+                 * leak once per output per config load. */
                 output_apply_config(output, &config_copy);
+                config_free_wallpaper(&config_copy);
                 output = output->next;
             }
+            pthread_rwlock_unlock(&state->output_list_lock);
 
             config_applied = true;
         } else {
@@ -1663,8 +1671,12 @@ bool config_load(struct neowall_state *state, const char *config_path) {
                 if (!found) {
                     log_debug("Output '%s' not connected yet, config saved for when it appears",
                              output_name);
-                    config_free_wallpaper(&output_config);
                 }
+                /* output_apply_config() deep-copies into the target's own
+                 * config, so the arrays parse_wallpaper_config() allocated in
+                 * output_config are ours to free on every path (matched or
+                 * not) — previously they leaked whenever a match was found. */
+                config_free_wallpaper(&output_config);
             } else {
                 log_error("Configuration validation failed for output '%s'", output_name);
             }

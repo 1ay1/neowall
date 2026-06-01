@@ -342,8 +342,8 @@ static void output_on_closed_callback(struct compositor_surface *surface) {
     if (state) {
         pthread_rwlock_wrlock(&state->output_list_lock);
 
-        /* BUG FIX #4: Verify output is still in the list before destroying
-         * It might have been removed by another thread */
+        /* Verify the output is still in the list before destroying it: another
+         * thread (e.g. registry global_remove) may have already unlinked it. */
         bool found = false;
         struct output_state *check = state->outputs;
         while (check) {

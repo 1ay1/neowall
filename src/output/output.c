@@ -753,7 +753,8 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         return;
     }
 
-    /* BUG FIX #8: Protect model string access with mutex to avoid data race */
+    /* Copy the model string under the state mutex to avoid a data race with
+     * the registry/output-destroy paths that can rewrite it concurrently. */
     char model_copy[64];
 
     /* Acquire state mutex to safely read model string */
