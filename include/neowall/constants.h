@@ -22,7 +22,7 @@
 #define SHADER_FADE_OUT_MS      400
 
 /* Polling and sleep intervals */
-#define POLL_TIMEOUT_INFINITE   -1
+#define POLL_TIMEOUT_INFINITE   (-1)
 #define SLEEP_100MS_NS          100000000  /* 100ms in nanoseconds */
 #define STATS_INTERVAL_MS       10000      /* Print stats every 10 seconds */
 

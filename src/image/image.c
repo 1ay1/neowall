@@ -674,8 +674,10 @@ static struct image_data *image_scale_to_display(struct image_data *img, int32_t
         return img;
     }
     
-    /* Calculate optimal dimensions for this display mode */
-    uint32_t target_width, target_height;
+    /* Calculate optimal dimensions for this display mode. Initialised here so
+     * the static analyzer can see both are always defined even if a future
+     * mode is added to calculate_optimal_dimensions without setting them. */
+    uint32_t target_width = img->width, target_height = img->height;
     calculate_optimal_dimensions(img->width, img->height, display_width, display_height,
                                  mode, &target_width, &target_height);
     

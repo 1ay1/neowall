@@ -351,7 +351,8 @@ static Token next_token(VibeParser* parser) {
         if (c == '-' && parser->pos + 1 < parser->length && isdigit(parser->input[parser->pos + 1])) {
             parser->pos++;
             parser->column++;
-            c = parser->input[parser->pos];
+            /* c is re-read at the top of the collection loop below; no need to
+             * reassign it here. */
         }
 
         /* Collect all valid unquoted string characters */
@@ -811,14 +812,23 @@ VibeValue* vibe_parse_file(VibeParser* parser, const char* filename) {
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    char* buffer = malloc(size + 1);
+    /* ftell() returns -1 on error (e.g. an unseekable stream). Guard against it
+     * so malloc(size + 1) isn't malloc(0) and fread()'s size argument doesn't
+     * wrap to SIZE_MAX. */
+    if (size < 0) {
+        fclose(file);
+        set_error(parser, "Cannot determine size of file '%s'", filename);
+        return NULL;
+    }
+
+    char* buffer = malloc((size_t)size + 1);
     if (!buffer) {
         fclose(file);
         set_error(parser, "Memory allocation failed");
         return NULL;
     }
 
-    size_t bytes_read = fread(buffer, 1, size, file);
+    size_t bytes_read = fread(buffer, 1, (size_t)size, file);
     buffer[bytes_read] = '\0';
     fclose(file);
 
