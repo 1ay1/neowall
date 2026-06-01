@@ -447,6 +447,15 @@ test_vibe_exe = executable('test_vibe',
 
 test('vibe', test_vibe_exe)
 
+# Foundation primitives (result / vec / defer) are header-only and dep-free.
+test_foundation_exe = executable('test_foundation',
+  files('tests/test_foundation.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('foundation', test_foundation_exe)
+
 # =============================================================================
 # Summary
 # =============================================================================
