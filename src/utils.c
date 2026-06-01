@@ -362,8 +362,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
     
     /* Ensure state directory exists */
     char dir_path[MAX_PATH_LENGTH];
-    strncpy(dir_path, state_path, sizeof(dir_path) - 1);
-    dir_path[sizeof(dir_path) - 1] = '\0';
+    snprintf(dir_path, sizeof(dir_path), "%s", state_path);
     char *last_slash = strrchr(dir_path, '/');
     if (last_slash) {
         *last_slash = '\0';
@@ -372,8 +371,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
         if (stat(dir_path, &st) == -1) {
             /* Try to create parent first */
             char parent_path[MAX_PATH_LENGTH];
-            strncpy(parent_path, dir_path, sizeof(parent_path) - 1);
-            parent_path[sizeof(parent_path) - 1] = '\0';
+            snprintf(parent_path, sizeof(parent_path), "%s", dir_path);
             char *parent_slash = strrchr(parent_path, '/');
             if (parent_slash) {
                 *parent_slash = '\0';
@@ -453,15 +451,13 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
     for (int i = 0; i < state_count; i++) {
         if (output_name && strcmp(states[i].output_name, output_name) == 0) {
             /* Update existing entry */
-            strncpy(states[i].wallpaper_path, wallpaper_path ? wallpaper_path : "none", 
-                    sizeof(states[i].wallpaper_path) - 1);
-            states[i].wallpaper_path[sizeof(states[i].wallpaper_path) - 1] = '\0';
-            strncpy(states[i].mode, mode ? mode : "fill", sizeof(states[i].mode) - 1);
-            states[i].mode[sizeof(states[i].mode) - 1] = '\0';
+            snprintf(states[i].wallpaper_path, sizeof(states[i].wallpaper_path), "%s",
+                     wallpaper_path ? wallpaper_path : "none");
+            snprintf(states[i].mode, sizeof(states[i].mode), "%s", mode ? mode : "fill");
             states[i].cycle_index = cycle_index;
             states[i].cycle_total = cycle_total;
-            strncpy(states[i].status, status ? status : "active", sizeof(states[i].status) - 1);
-            states[i].status[sizeof(states[i].status) - 1] = '\0';
+            snprintf(states[i].status, sizeof(states[i].status), "%s",
+                     status ? status : "active");
             states[i].timestamp = (long)time(NULL);
             found_output = true;
             break;
@@ -470,19 +466,19 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
     
     /* Add new entry if not found */
     if (!found_output && state_count < MAX_OUTPUTS) {
-        /* Zero the slot first: this array is uninitialized stack memory and the
-         * strncpy() calls below do not guarantee NUL-termination when the source
-         * is >= the destination size. A later fprintf("%s") would then read OOB. */
+        /* snprintf both guarantees NUL-termination (the source is an unbounded
+         * caller pointer) and silences GCC -O2 -Wstringop-truncation. */
         memset(&states[state_count], 0, sizeof(states[state_count]));
-        strncpy(states[state_count].output_name, output_name ? output_name : "unknown", 
-                sizeof(states[state_count].output_name) - 1);
-        strncpy(states[state_count].wallpaper_path, wallpaper_path ? wallpaper_path : "none", 
-                sizeof(states[state_count].wallpaper_path) - 1);
-        strncpy(states[state_count].mode, mode ? mode : "fill", sizeof(states[state_count].mode) - 1);
+        snprintf(states[state_count].output_name, sizeof(states[state_count].output_name),
+                 "%s", output_name ? output_name : "unknown");
+        snprintf(states[state_count].wallpaper_path, sizeof(states[state_count].wallpaper_path),
+                 "%s", wallpaper_path ? wallpaper_path : "none");
+        snprintf(states[state_count].mode, sizeof(states[state_count].mode),
+                 "%s", mode ? mode : "fill");
         states[state_count].cycle_index = cycle_index;
         states[state_count].cycle_total = cycle_total;
-        strncpy(states[state_count].status, status ? status : "active", 
-                sizeof(states[state_count].status) - 1);
+        snprintf(states[state_count].status, sizeof(states[state_count].status),
+                 "%s", status ? status : "active");
         states[state_count].timestamp = (long)time(NULL);
         state_count++;
     }
@@ -678,8 +674,7 @@ bool write_cycle_list(const char *output_name, char **paths, size_t count, size_
     
     /* Ensure parent directory exists */
     char dir_path[MAX_PATH_LENGTH];
-    strncpy(dir_path, list_path, sizeof(dir_path) - 1);
-    dir_path[sizeof(dir_path) - 1] = '\0';
+    snprintf(dir_path, sizeof(dir_path), "%s", list_path);
     char *last_slash = strrchr(dir_path, '/');
     if (last_slash) {
         *last_slash = '\0';

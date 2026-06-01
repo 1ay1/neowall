@@ -485,8 +485,7 @@ static void *preload_thread_func(void *arg) {
     }
 
     output->preload_decoded_image = decoded_image;
-    strncpy(output->preload_path, args->path, sizeof(output->preload_path) - 1);
-    output->preload_path[sizeof(output->preload_path) - 1] = '\0';
+    snprintf(output->preload_path, sizeof(output->preload_path), "%s", args->path);
 
     pthread_mutex_unlock(&output->preload_mutex);
 
@@ -544,8 +543,7 @@ void output_preload_next_wallpaper(struct output_state *output) {
     }
 
     args->output = output;
-    strncpy(args->path, next_path, sizeof(args->path) - 1);
-    args->path[sizeof(args->path) - 1] = '\0';
+    snprintf(args->path, sizeof(args->path), "%s", next_path);
     args->width = output->width;
     args->height = output->height;
     args->mode = output->config->mode;
@@ -747,8 +745,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     }
 
     /* Update config path */
-    strncpy(output->config->path, path, sizeof(output->config->path) - 1);
-    output->config->path[sizeof(output->config->path) - 1] = '\0';
+    snprintf(output->config->path, sizeof(output->config->path), "%s", path);
 
     /* Initialize frame time for cycling */
     uint64_t now = get_time_ms();
@@ -784,8 +781,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
 
     /* Acquire state mutex to safely read model string */
     pthread_mutex_lock(&output->state->state_mutex);
-    strncpy(model_copy, output->model, sizeof(model_copy) - 1);
-    model_copy[sizeof(model_copy) - 1] = '\0';
+    snprintf(model_copy, sizeof(model_copy), "%s", output->model);
     pthread_mutex_unlock(&output->state->state_mutex);
 
     log_info("Setting shader for output %s: %s",
@@ -818,8 +814,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         log_debug("EGL surface not ready for output %s, deferring shader load: %s",
                   output->model[0] ? output->model : "unknown", shader_path);
         /* Store shader path in config for later application when surface is ready */
-        strncpy(output->config->shader_path, shader_path, sizeof(output->config->shader_path) - 1);
-        output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
+        snprintf(output->config->shader_path, sizeof(output->config->shader_path), "%s", shader_path);
         output->config->type = WALLPAPER_SHADER;
         return;
     }
@@ -938,8 +933,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
 
     /* Update config with new shader path - protected by state mutex */
     pthread_mutex_lock(&output->state->state_mutex);
-    strncpy(output->config->shader_path, shader_path, sizeof(output->config->shader_path) - 1);
-    output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
+    snprintf(output->config->shader_path, sizeof(output->config->shader_path), "%s", shader_path);
     output->config->type = WALLPAPER_SHADER;
     pthread_mutex_unlock(&output->state->state_mutex);
 
@@ -1032,8 +1026,7 @@ void output_cycle_wallpaper(struct output_state *output) {
         output->pending_shader_path[0] != '\0') {
         /* Use local copy of model to avoid race if output is being modified */
         char model_copy[64];
-        strncpy(model_copy, output->model, sizeof(model_copy) - 1);
-        model_copy[sizeof(model_copy) - 1] = '\0';
+        snprintf(model_copy, sizeof(model_copy), "%s", output->model);
         const char *output_name = model_copy[0] ? model_copy : "unknown";
         log_info("Shader transition in progress on output '%s', deferring cycle request",
                  output_name);
@@ -1049,8 +1042,7 @@ void output_cycle_wallpaper(struct output_state *output) {
     /* Copy path before releasing lock to avoid use-after-free if config reloads */
     char next_path_copy[MAX_PATH_LENGTH];
     const char *next_path = output->config->cycle_paths[output->config->current_cycle_index];
-    strncpy(next_path_copy, next_path, sizeof(next_path_copy) - 1);
-    next_path_copy[sizeof(next_path_copy) - 1] = '\0';
+    snprintf(next_path_copy, sizeof(next_path_copy), "%s", next_path);
     pthread_mutex_unlock(&output->state->state_mutex);
 
     /* Use the copied path from here onwards */
@@ -1169,8 +1161,7 @@ void output_set_cycle_index(struct output_state *output, size_t index) {
     /* Copy path before releasing lock */
     char path_copy[MAX_PATH_LENGTH];
     const char *path = output->config->cycle_paths[index];
-    strncpy(path_copy, path, sizeof(path_copy) - 1);
-    path_copy[sizeof(path_copy) - 1] = '\0';
+    snprintf(path_copy, sizeof(path_copy), "%s", path);
     pthread_mutex_unlock(&output->state->state_mutex);
 
     const char *type_str = (output->config->type == WALLPAPER_SHADER) ? "shader" : "wallpaper";
@@ -1343,15 +1334,13 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
 
             /* Update the initial path to use the restored index */
             if (output->config->type == WALLPAPER_SHADER) {
-                strncpy(output->config->shader_path,
-                       output->config->cycle_paths[saved_index],
-                       sizeof(output->config->shader_path) - 1);
-                output->config->shader_path[sizeof(output->config->shader_path) - 1] = '\0';
+                snprintf(output->config->shader_path,
+                         sizeof(output->config->shader_path), "%s",
+                         output->config->cycle_paths[saved_index]);
             } else {
-                strncpy(output->config->path,
-                       output->config->cycle_paths[saved_index],
-                       sizeof(output->config->path) - 1);
-                output->config->path[sizeof(output->config->path) - 1] = '\0';
+                snprintf(output->config->path,
+                         sizeof(output->config->path), "%s",
+                         output->config->cycle_paths[saved_index]);
             }
         }
 
