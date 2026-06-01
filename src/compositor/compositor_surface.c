@@ -3,8 +3,8 @@
 #include <string.h>
 #include <stdbool.h>
 #include <EGL/egl.h>
-#include "compositor.h"
-#include "neowall.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/neowall.h"
 
 /*
  * ============================================================================

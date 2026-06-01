@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <GL/gl.h>
-#include "neowall.h"
+#include "neowall/neowall.h"
 
 /* Generate abstract colorful texture
  * Creates a Voronoi-based abstract pattern useful for artistic backgrounds

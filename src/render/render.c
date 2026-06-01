@@ -13,15 +13,15 @@
 
 /* Number of consecutive slow frames before marking shader as problematic */
 #define GPU_TIMEOUT_FRAME_THRESHOLD 3
-#include "neowall.h"
-#include "../image/image.h"    /* Only for legacy wrapper functions */
-#include "config_access.h"
-#include "constants.h"
-#include "transitions.h"
-#include "shader.h"
-#include "../shader_lib/shader_multipass.h"
-#include "textures.h"
-#include "compositor.h"
+#include "neowall/neowall.h"
+#include "neowall/image/image.h"    /* Only for legacy wrapper functions */
+#include "neowall/config/config_access.h"
+#include "neowall/constants.h"
+#include "neowall/transitions.h"
+#include "neowall/shader/shader.h"
+#include "neowall/shader/shader_multipass.h"
+#include "neowall/textures.h"
+#include "neowall/compositor/compositor.h"
 
 /* Helper function to get the preferred output identifier
  * Prefers connector_name (e.g., "HDMI-A-2", "DP-1") over model name

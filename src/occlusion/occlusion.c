@@ -5,9 +5,9 @@
  * This file just dispatches via the backend ops table, so core code never
  * needs to know which display server is in use. */
 
-#include "occlusion.h"
-#include "neowall.h"
-#include "compositor.h"
+#include "neowall/occlusion/occlusion.h"
+#include "neowall/neowall.h"
+#include "neowall/compositor/compositor.h"
 
 bool occlusion_init(struct neowall_state *state) {
     if (!state || !state->compositor_backend) {

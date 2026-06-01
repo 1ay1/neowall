@@ -16,8 +16,8 @@
  * - Frame pacing analysis for judder detection
  */
 
-#include "adaptive_scale.h"
-#include "shader_log.h"
+#include "neowall/shader/adaptive_scale.h"
+#include "neowall/shader/shader_log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>

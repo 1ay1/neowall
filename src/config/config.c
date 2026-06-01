@@ -9,13 +9,13 @@
 #include <unistd.h>
 #include <strings.h>
 #include <dirent.h>
-#include "config.h"
-#include "vibe.h"
-#include "neowall.h"
-#include "../image/image.h"    /* For image_free() */
-#include "config_access.h"
-#include "compositor.h"
-#include "shader.h"
+#include "neowall/config/config.h"
+#include "neowall/config/vibe.h"
+#include "neowall/neowall.h"
+#include "neowall/image/image.h"    /* For image_free() */
+#include "neowall/config/config_access.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/shader/shader.h"
 
 /* ============================================================================
  * CONFIGURATION PHILOSOPHY

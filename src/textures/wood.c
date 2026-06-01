@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <GL/gl.h>
-#include "neowall.h"
+#include "neowall/neowall.h"
 
 /* Generate wood grain texture
  * Creates a realistic wood grain pattern useful for backgrounds

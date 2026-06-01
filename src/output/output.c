@@ -5,15 +5,15 @@
 #include <sys/stat.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
-#include "neowall.h"
-#include "output.h"
-#include "../image/image.h"    /* For struct image_data definition */
-#include "compositor.h"
-#include "config_access.h"
-#include "constants.h"
-#include "shader.h"
-#include "../shader_lib/shader_multipass.h"
-#include "../render/render.h"  /* Only output.c includes render.h */
+#include "neowall/neowall.h"
+#include "neowall/output/output.h"
+#include "neowall/image/image.h"    /* For struct image_data definition */
+#include "neowall/compositor/compositor.h"
+#include "neowall/config/config_access.h"
+#include "neowall/constants.h"
+#include "neowall/shader/shader.h"
+#include "neowall/shader/shader_multipass.h"
+#include "neowall/render/render.h"  /* Only output.c includes render.h */
 
 /* Helper function to get the preferred output identifier
  * Prefers connector_name (e.g., "HDMI-A-2", "DP-1") over model name
@@ -176,6 +176,7 @@ struct output_state *output_create(struct neowall_state *state,
     out->configured = false;
     atomic_store_explicit(&out->needs_redraw, true, memory_order_release);
     atomic_store(&out->occluded, false);
+    atomic_store_explicit(&out->refcount, 1, memory_order_release);  /* the list's reference */
     out->state = state;
     out->connector_name[0] = '\0';
 
@@ -343,6 +344,30 @@ void output_destroy(struct output_state *output) {
     /* Note: We don't destroy native_output as it's managed by the display server */
 
     free(output);
+}
+
+void output_ref(struct output_state *output) {
+    if (!output) {
+        return;
+    }
+    /* relaxed: an existing valid reference already happens-before this call, so
+     * we only need atomicity of the increment, not ordering. */
+    atomic_fetch_add_explicit(&output->refcount, 1, memory_order_relaxed);
+}
+
+void output_unref(struct output_state *output) {
+    if (!output) {
+        return;
+    }
+    /* acq_rel so that the thread which observes the 1->0 transition sees all
+     * writes made by every other ref-holder before its unref (standard
+     * refcount-release pattern), and the destroy below is properly ordered
+     * after them. */
+    int prev = atomic_fetch_sub_explicit(&output->refcount, 1, memory_order_acq_rel);
+    if (prev == 1) {
+        /* We dropped the final reference. Safe to tear down. */
+        output_destroy(output);
+    }
 }
 
 bool output_create_egl_surface(struct output_state *output) {

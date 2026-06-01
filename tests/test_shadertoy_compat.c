@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "shadertoy_compat.h"
+#include "neowall/shader/shadertoy_compat.h"
 
 static int failures = 0;
 static int checks = 0;

@@ -9,8 +9,8 @@
 #include <EGL/egl.h>
 #include <GL/gl.h>
 #include "version.h"
-#include "../src/output/output.h"
-#include "../src/config/config.h"
+#include "neowall/output/output.h"
+#include "neowall/config/config.h"
 
 /* Thread-safe atomic types for flags accessed from multiple threads */
 typedef atomic_bool atomic_bool_t;
@@ -133,6 +133,15 @@ float ease_in_out_cubic(float t);
 /* State file functions */
 const char *get_state_file_path(void);
 const char *get_cycle_list_file_path(void);
+
+/* Returns a process-private runtime directory for transient IPC/state files.
+ * Prefers $XDG_RUNTIME_DIR/neowall, falling back to /tmp/neowall-<uid>.
+ * The directory is created 0700 and validated to be a real directory we own
+ * (not a symlink, not attacker-controlled) before being returned, closing the
+ * symlink/TOCTOU window that a shared /tmp otherwise opens. Returns NULL if a
+ * safe directory could not be established. The returned pointer is to a static
+ * buffer; do not free it. */
+const char *neowall_secure_runtime_dir(void);
 bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
                            const char *mode, int cycle_index, int cycle_total,
                            const char *status);

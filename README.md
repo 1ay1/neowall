@@ -171,6 +171,16 @@ ninja -C build
 ./build/neowall -f -v
 ```
 
+Architecture, threading model, and contribution conventions are documented in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Run the test suite (headless,
+no display server needed) with `meson test -C build`; for the memory-safety and
+concurrency gates use a sanitized build:
+
+```bash
+meson setup build-asan -Db_sanitize=address,undefined && meson test -C build-asan
+meson setup build-tsan -Db_sanitize=thread && meson test -C build-tsan output_refcount
+```
+
 Shaders, bug reports, and compositor coverage PRs are all welcome. Issue tracker is the place.
 
 ## License

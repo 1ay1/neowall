@@ -6,12 +6,12 @@
 #include <wayland-client.h>
 #include <wayland-cursor.h>
 #include <wayland-egl.h>
-#include "compositor.h"
-#include "compositor/backends/wayland.h"
-#include "neowall.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/compositor/backends/wayland.h"
+#include "neowall/neowall.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
-#include "../wayland_occlusion.h"
+#include "wayland_occlusion.h"
 
 /*
  * ============================================================================

@@ -6,8 +6,8 @@
 #include <stdatomic.h>
 #include <pthread.h>
 #include <wayland-client.h>
-#include "neowall.h"
-#include "compositor.h"
+#include "neowall/neowall.h"
+#include "neowall/compositor/compositor.h"
 #include "frame_watchdog.h"
 
 #define OCCLUSION_TIMEOUT_MS 500

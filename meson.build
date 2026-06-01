@@ -171,9 +171,12 @@ endif
 # =============================================================================
 
 inc_dirs = include_directories(
-  'include',
-  'protocols',
-  'src/shader_lib',
+  'include',         # ALL public headers live under include/neowall/...
+  'protocols',       # generated *-client-protocol.h
+  # Module-private headers (fan-in 1) stay next to their .c and are reached
+  # via these dirs. They are intentionally NOT part of the public include tree.
+  'src/compositor/backends/wayland',
+  'src/compositor/backends/x11',
 )
 
 # Also include the build directory for generated version.h
@@ -195,14 +198,14 @@ egl_sources = files(
   'src/egl/egl_core.c',
 )
 
-# Shader library sources
-shader_lib_sources = files(
-  'src/shader_lib/shader_core.c',
-  'src/shader_lib/shader_multipass.c',
-  'src/shader_lib/shadertoy_compat.c',
-  'src/shader_lib/adaptive_scale.c',
-  'src/shader_lib/render_optimizer.c',
-  'src/shader_lib/multipass_optimizer.c',
+# Shader engine sources
+shader_sources = files(
+  'src/shader/shader_core.c',
+  'src/shader/shader_multipass.c',
+  'src/shader/shadertoy_compat.c',
+  'src/shader/adaptive_scale.c',
+  'src/shader/render_optimizer.c',
+  'src/shader/multipass_optimizer.c',
 )
 
 # Transition sources
@@ -323,7 +326,7 @@ endif
 all_sources = (
   core_sources +
   egl_sources +
-  shader_lib_sources +
+  shader_sources +
   transition_sources +
   texture_sources +
   output_sources +
@@ -431,12 +434,40 @@ test('utils', test_utils_exe)
 
 # Shadertoy source-compat transforms are GL-free and unit-tested directly.
 test_compat_exe = executable('test_shadertoy_compat',
-  files('tests/test_shadertoy_compat.c', 'src/shader_lib/shadertoy_compat.c'),
+  files('tests/test_shadertoy_compat.c', 'src/shader/shadertoy_compat.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   build_by_default: false,
 )
 
 test('shadertoy_compat', test_compat_exe)
+
+# VIBE config parser is filesystem/GL-free in its string-parse path.
+test_vibe_exe = executable('test_vibe',
+  files('tests/test_vibe.c', 'src/config/vibe.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('vibe', test_vibe_exe)
+
+# Foundation primitives (result / vec / defer) are header-only and dep-free.
+test_foundation_exe = executable('test_foundation',
+  files('tests/test_foundation.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('foundation', test_foundation_exe)
+
+# Output refcount protocol — concurrency test, run under TSan in CI.
+test_refcount_exe = executable('test_output_refcount',
+  files('tests/test_output_refcount.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [thread_dep],
+  build_by_default: false,
+)
+
+test('output_refcount', test_refcount_exe)
 
 # =============================================================================
 # Summary

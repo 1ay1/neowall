@@ -1,7 +1,7 @@
 #ifndef COMPOSITOR_BACKENDS_X11_H
 #define COMPOSITOR_BACKENDS_X11_H
 
-#include "compositor.h"
+#include "neowall/compositor/compositor.h"
 
 /*
  * ============================================================================

@@ -1,0 +1,40 @@
+# clang-format configuration for neowall.
+# Matches the existing house style: 4-space indent, K&R braces, 100-col soft
+# limit, pointers bound to the type. Run `clang-format -i $(git ls-files '*.c' '*.h')`
+# or rely on the pre-commit hook / CI check.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+
+# Braces on the same line (K&R / Linux-ish), but functions get their own line.
+BreakBeforeBraces: Linux
+
+# Pointer/reference hug the type: `int *p`, `char **argv`.
+PointerAlignment: Right
+DerivePointerAlignment: false
+
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+
+AlignAfterOpenBracket: Align
+AlignConsecutiveMacros: true
+AlignTrailingComments: true
+
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+
+IndentCaseLabels: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 2
+
+SortIncludes: false   # include order is meaningful in C (system vs project)
+
+IncludeBlocks: Preserve

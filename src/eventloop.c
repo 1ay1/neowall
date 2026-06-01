@@ -8,11 +8,12 @@
 #include <sys/timerfd.h>
 #include <sys/eventfd.h>
 #include <sys/signalfd.h>
-#include "neowall.h"
-#include "config_access.h"
-#include "constants.h"
-#include "compositor.h"
-#include "occlusion/occlusion.h"
+#include "neowall/neowall.h"
+#include "neowall/config/config_access.h"
+#include "neowall/constants.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/occlusion/occlusion.h"
+#include "neowall/vec.h"
 
 /* Forward declarations */
 extern void handle_signal_from_fd(struct neowall_state *state, int signum);
@@ -102,6 +103,13 @@ struct swap_info {
     bool render_success;
 };
 
+/* Growable, allocation-on-demand replacements for the old fixed-size
+ * outputs_snapshot[MAX_OUTPUTS] / swap_list[MAX_OUTPUTS] stack arrays. These
+ * remove the silent 16-output truncation: a machine with more displays than
+ * MAX_OUTPUTS now renders all of them instead of dropping the overflow. */
+NW_VEC_DEFINE_STATIC(output_ptr_vec, struct output_state *)
+NW_VEC_DEFINE_STATIC(swap_vec, struct swap_info)
+
 /* Freeze or unfreeze the shader animation across every shader output.
  *
  * Freezing records the wall-clock instant the animation stopped. Unfreezing
@@ -146,24 +154,39 @@ static void render_outputs(struct neowall_state *state) {
     int total_outputs = 0;
 
     /* === PHASE 1: snapshot the output list under the read lock ============
-     * We copy the pointer list to a stack array and then drop the lock so
-     * that all GL/EGL work below (which may BLOCK on vsync inside
-     * eglMakeCurrent / eglSwapBuffers) runs without holding output_list_lock.
-     * The outputs themselves stay alive as long as removal requires the
-     * write lock, so the pointers remain valid for the duration of this
-     * call as long as no writer can complete during it. */
-    struct output_state *outputs_snapshot[MAX_OUTPUTS];
-    size_t output_n = 0;
+     * We copy the pointer list to a stack array and take a REFERENCE on each
+     * output, then drop the lock so that all GL/EGL work below (which may
+     * BLOCK on vsync inside eglMakeCurrent / eglSwapBuffers) runs without
+     * holding output_list_lock.
+     *
+     * The ref is what makes this sound: a concurrent hotplug-removal unlinks
+     * the output under the write lock and then output_unref()s the list's
+     * reference. Because we hold our own ref, the object cannot be freed while
+     * we use it here — it is freed when we drop our ref in the cleanup sweep at
+     * the end of this function. Without the ref, an unplug mid-frame would be a
+     * use-after-free. */
+    struct output_ptr_vec snapshot;
+    output_ptr_vec_init(&snapshot);
 
     pthread_rwlock_rdlock(&state->output_list_lock);
-    for (struct output_state *o = state->outputs; o && output_n < MAX_OUTPUTS; o = o->next) {
-        outputs_snapshot[output_n++] = o;
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        output_ref(o);
+        if (!output_ptr_vec_push(&snapshot, o)) {
+            /* OOM while snapshotting: drop the ref we just took and stop
+             * growing. We still render everything captured so far rather than
+             * aborting the frame. */
+            output_unref(o);
+            break;
+        }
         total_outputs++;
         if (o->config->cycle && o->config->cycle_count > 0) {
             has_cycleable_output = true;
         }
     }
     pthread_rwlock_unlock(&state->output_list_lock);
+
+    size_t output_n = snapshot.len;
+    struct output_state **outputs_snapshot = snapshot.data;
 
     if (next_count > 0) {
         log_debug("Processing next request: %d pending in queue", next_count);
@@ -172,8 +195,8 @@ static void render_outputs(struct neowall_state *state) {
     /* === PHASE 2: handle set-index / next requests and per-output cycling ===
      * These call back into output_set_* and output_cycle_* which take their
      * own locks; we must NOT be holding output_list_lock here. */
-    struct swap_info swap_list[MAX_OUTPUTS];
-    size_t swap_n = 0;
+    struct swap_vec swaps;
+    swap_vec_init(&swaps);
 
     for (size_t idx = 0; idx < output_n; idx++) {
         struct output_state *output = outputs_snapshot[idx];
@@ -361,16 +384,16 @@ static void render_outputs(struct neowall_state *state) {
             state->errors_count++;
         }
 
-        /* Queue for swap. swap_n cannot exceed output_n which is bounded by MAX_OUTPUTS. */
-        swap_list[swap_n].output = output;
-        swap_list[swap_n].render_success = render_success;
-        swap_n++;
+        /* Queue for swap. The swap vec grows as needed; on OOM we simply skip
+         * presenting this output's frame rather than aborting. */
+        struct swap_info si = { .output = output, .render_success = render_success };
+        swap_vec_push(&swaps, si);
     }
 
     /* === PHASE 3: damage + swap + commit (still no locks held) ============= */
-    for (size_t i = 0; i < swap_n; i++) {
-        struct output_state *output = swap_list[i].output;
-        if (!swap_list[i].render_success) {
+    for (size_t i = 0; i < swaps.len; i++) {
+        struct output_state *output = swaps.data[i].output;
+        if (!swaps.data[i].render_success) {
             continue;
         }
 
@@ -441,6 +464,15 @@ static void render_outputs(struct neowall_state *state) {
         }
         atomic_fetch_sub(&state->next_requested, 1);
     }
+
+    /* Drop the references taken in PHASE 1. For any output that was removed
+     * from the list while we worked (and therefore had the list's reference
+     * dropped), this is the unref that finally frees it. */
+    for (size_t i = 0; i < output_n; i++) {
+        output_unref(outputs_snapshot[i]);
+    }
+    output_ptr_vec_free(&snapshot);
+    swap_vec_free(&swaps);
 
     /* Update timer after rendering changes */
     update_cycle_timer(state);

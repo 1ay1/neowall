@@ -16,6 +16,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include <time.h>
 
 /* Prototypes from src/utils.c (kept in sync with include/neowall.h). */
 float lerp(float a, float b, float t);
@@ -23,6 +27,7 @@ float clamp(float value, float min, float max);
 float ease_in_out_cubic(float t);
 void format_bytes(uint64_t bytes, char *buf, size_t size);
 bool expand_path(const char *path, char *expanded, size_t size);
+const char *neowall_secure_runtime_dir(void);
 
 static int failures = 0;
 static int checks = 0;
@@ -108,12 +113,57 @@ static void test_expand_path(void) {
     CHECK(!expand_path("/x", out, 0));
 }
 
+/* neowall_secure_runtime_dir(): must create a private 0700 directory we own
+ * under XDG_RUNTIME_DIR, and must REFUSE a name already taken by a symlink
+ * (the /tmp squat attack the hardening closes). */
+static void test_secure_runtime_dir(void) {
+    char base[256];
+    snprintf(base, sizeof(base), "/tmp/nw-test-%d-%ld", (int)getpid(), (long)time(NULL));
+    if (mkdir(base, 0700) != 0 && errno != EEXIST) {
+        fprintf(stderr, "SKIP secure_runtime_dir: cannot mkdir %s\n", base);
+        return;
+    }
+    setenv("XDG_RUNTIME_DIR", base, 1);
+
+    /* Happy path: returns <base>/neowall, created 0700, owned by us. */
+    const char *dir = neowall_secure_runtime_dir();
+    CHECK(dir != NULL);
+    if (dir) {
+        struct stat st;
+        CHECK(lstat(dir, &st) == 0);
+        CHECK(S_ISDIR(st.st_mode));
+        CHECK((st.st_mode & (S_IRWXG | S_IRWXO)) == 0);   /* no group/other access */
+        CHECK(st.st_uid == getuid());
+    }
+
+    /* Attack: replace the XDG_RUNTIME_DIR/neowall path with a symlink. The
+     * helper must NOT return that symlinked path. It is allowed to fall back
+     * to the ownership-checked /tmp/neowall-<uid> dir, but whatever it returns
+     * must be a real directory we own and never the planted symlink. */
+    char sub[300];
+    snprintf(sub, sizeof(sub), "%s/neowall", base);
+    rmdir(sub);
+    if (symlink("/tmp", sub) == 0) {
+        const char *d2 = neowall_secure_runtime_dir();
+        /* Must not be the symlinked path itself. */
+        CHECK(d2 == NULL || strcmp(d2, sub) != 0);
+        if (d2) {
+            struct stat st;
+            CHECK(lstat(d2, &st) == 0 && S_ISDIR(st.st_mode));   /* real dir, not symlink */
+            CHECK(st.st_uid == getuid());
+        }
+        unlink(sub);
+    }
+    rmdir(base);
+}
+
 int main(void) {
     test_lerp();
     test_clamp();
     test_ease();
     test_format_bytes();
     test_expand_path();
+    test_secure_runtime_dir();
 
     if (failures == 0) {
         printf("ok - %d checks passed\n", checks);

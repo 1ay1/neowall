@@ -1,0 +1,32 @@
+# clang-tidy configuration for neowall.
+#
+# Focuses on the check families that catch real C defects: undefined behaviour,
+# bug-prone patterns, security (CERT), and portability. Style nags that fight
+# the existing house conventions are disabled explicitly so the signal stays
+# high. Run:  clang-tidy -p build $(git ls-files '*.c')
+---
+Checks: >
+  clang-analyzer-*,
+  bugprone-*,
+  cert-*,
+  misc-*,
+  performance-*,
+  portability-*,
+  readability-inconsistent-declaration-parameter-name,
+  readability-misleading-indentation,
+  readability-non-const-parameter,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -cert-err33-c,
+  -misc-no-recursion,
+  -readability-function-cognitive-complexity
+
+WarningsAsErrors: ''
+
+HeaderFilterRegex: 'include/neowall/.*|src/.*'
+
+CheckOptions:
+  - key: bugprone-assert-side-effect.AssertMacros
+    value: assert
+  - key: cert-str34-c.DiagnoseSignedUnsignedCharComparisons
+    value: '0'

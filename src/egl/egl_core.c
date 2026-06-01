@@ -5,9 +5,9 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GL/gl.h>
-#include "../../include/neowall.h"
-#include "../../include/compositor.h"
-#include "../../include/egl/egl_core.h"
+#include "neowall/neowall.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/egl/egl_core.h"
 
 /**
  * EGL Core - Simple Desktop OpenGL 3.3 Context Management

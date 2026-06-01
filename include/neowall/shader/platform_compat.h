@@ -71,7 +71,7 @@ extern void log_debug(const char *format, ...);
 
 #else
 /* Standalone context - use shader_log.h's implementation */
-#include "shader_log.h"
+#include "neowall/shader/shader_log.h"
 #endif
 
 /* Cross-platform time function */

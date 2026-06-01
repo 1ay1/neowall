@@ -4,7 +4,7 @@
  * pass culling, and temporal optimization techniques.
  */
 
-#include "render_optimizer.h"
+#include "neowall/shader/render_optimizer.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>

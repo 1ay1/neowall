@@ -1,7 +1,7 @@
 /* Shadertoy → desktop-GL source compatibility transforms (implementation).
  * Pure C, no OpenGL — see shadertoy_compat.h. */
 
-#include "shadertoy_compat.h"
+#include "neowall/shader/shadertoy_compat.h"
 
 #include <stdbool.h>
 #include <stdlib.h>

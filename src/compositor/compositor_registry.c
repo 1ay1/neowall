@@ -2,16 +2,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include "compositor.h"
-#include "neowall.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/neowall.h"
 
 #ifdef HAVE_WAYLAND_BACKEND
 #include <wayland-client.h>
-#include "compositor/backends/wayland.h"
+#include "neowall/compositor/backends/wayland.h"
 #endif
 
 #ifdef HAVE_X11_BACKEND
-#include "compositor/backends/x11.h"
+#include "neowall/compositor/backends/x11.h"
 #endif
 
 /*

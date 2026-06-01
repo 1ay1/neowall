@@ -3,7 +3,7 @@
  * Implementation of content-aware buffer optimization for multipass shaders.
  */
 
-#include "multipass_optimizer.h"
+#include "neowall/shader/multipass_optimizer.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>

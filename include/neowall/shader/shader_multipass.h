@@ -13,10 +13,10 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include "platform_compat.h"
-#include "adaptive_scale.h"
-#include "render_optimizer.h"
-#include "multipass_optimizer.h"
+#include "neowall/shader/platform_compat.h"
+#include "neowall/shader/adaptive_scale.h"
+#include "neowall/shader/render_optimizer.h"
+#include "neowall/shader/multipass_optimizer.h"
 
 /* Maximum number of passes supported (BufferA-D + Image) */
 #define MULTIPASS_MAX_BUFFERS 4

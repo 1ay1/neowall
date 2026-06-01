@@ -4,9 +4,9 @@
 #include <errno.h>
 #include <unistd.h>
 #include <time.h>
-#include "neowall.h"
-#include "compositor.h"
-#include "compositor/backends/wayland.h"
+#include "neowall/neowall.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/compositor/backends/wayland.h"
 #include "frame_watchdog.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
@@ -373,11 +373,11 @@ static void output_on_closed_callback(struct compositor_surface *surface) {
         }
 
         frame_watchdog_remove(output);
-        output_destroy(output);
+        output_unref(output);
         pthread_rwlock_unlock(&state->output_list_lock);
     } else {
         frame_watchdog_remove(output);
-        output_destroy(output);
+        output_unref(output);
     }
 }
 
@@ -465,7 +465,7 @@ static void registry_handle_global_remove(void *data, struct wl_registry *regist
             /* Unlock before destroying (destroy might take time) */
             pthread_rwlock_unlock(&state->output_list_lock);
             frame_watchdog_remove(output);
-            output_destroy(output);
+            output_unref(output);
             return;
         }
         output_ptr = &output->next;
@@ -647,7 +647,7 @@ void wayland_cleanup(void) {
         while (state->outputs) {
             struct output_state *next = state->outputs->next;
             frame_watchdog_remove(state->outputs);
-            output_destroy(state->outputs);
+            output_unref(state->outputs);
             state->outputs = next;
         }
         state->output_count = 0;

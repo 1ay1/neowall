@@ -6,8 +6,8 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <GL/gl.h>
-#include "../image/image.h"   /* For struct image_data and enum image_format */
-#include "../shader_lib/shader_multipass.h"  /* For multipass_shader_t */
+#include "neowall/image/image.h"   /* For struct image_data and enum image_format */
+#include "neowall/shader/shader_multipass.h"  /* For multipass_shader_t */
 
 /* Constants */
 #define OUTPUT_MAX_PATH_LENGTH 4096
@@ -95,6 +95,14 @@ struct output_state {
     bool configured;
     atomic_bool_t needs_redraw;         /* Atomic: written from main loop, occlusion callbacks, render */
     atomic_bool_t occluded;             /* Output is fully occluded by a fullscreen window */
+
+    /* Lifetime reference count. Starts at 1 (the output-list's reference).
+     * The render loop takes a transient ref on each output it snapshots so a
+     * concurrent hotplug-removal (which unlinks under the write lock and then
+     * unrefs) cannot free the output while GL work runs with the list lock
+     * dropped. The object is freed only when this hits 0. See output_ref /
+     * output_unref. */
+    atomic_int refcount;
 
     struct neowall_state *state;  /* Back-pointer to global state */
 
@@ -199,6 +207,19 @@ struct output_state {
 struct output_state *output_create(struct neowall_state *state,
                                    void *native_output, uint32_t name);
 void output_destroy(struct output_state *output);
+
+/* Reference counting for safe concurrent lifetime management.
+ *
+ * output_create() returns an output with refcount 1 (the list's reference).
+ * Take a ref before using an output across a window where the list lock is not
+ * held; drop it with output_unref() when done. When the count reaches zero the
+ * output is torn down via output_destroy() and freed.
+ *
+ * Removal from the output list is: unlink under the write lock, then
+ * output_unref() the list's reference. Any outstanding refs (e.g. a render
+ * snapshot) keep the object alive until they too are dropped. */
+void output_ref(struct output_state *output);
+void output_unref(struct output_state *output);
 bool output_configure_compositor_surface(struct output_state *output);
 bool output_create_egl_surface(struct output_state *output);
 void output_set_wallpaper(struct output_state *output, const char *path);

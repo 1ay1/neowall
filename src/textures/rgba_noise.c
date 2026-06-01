@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <GL/gl.h>
-#include "neowall.h"
+#include "neowall/neowall.h"
 
 /* Generate RGBA noise texture - most common Shadertoy texture
  * This creates a tileable RGBA noise texture similar to what's used in many Shadertoy shaders
