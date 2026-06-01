@@ -194,7 +194,7 @@ struct image_data *image_load_png(const char *path) {
     img->height = height;
     img->channels = 4; /* RGBA */
     img->format = FORMAT_PNG;
-    strncpy(img->path, path, sizeof(img->path) - 1);
+    snprintf(img->path, sizeof(img->path), "%s", path);
 
     /* Allocate pixel buffer */
     size_t row_bytes = png_get_rowbytes(png_ptr, info_ptr);
@@ -325,7 +325,7 @@ struct image_data *image_load_jpeg(const char *path) {
     img->height = height;
     img->channels = 4; /* We'll convert RGB to RGBA */
     img->format = FORMAT_JPEG;
-    strncpy(img->path, path, sizeof(img->path) - 1);
+    snprintf(img->path, sizeof(img->path), "%s", path);
 
     /* Allocate pixel buffer (RGBA) - check for overflow */
     size_t pixel_count = (size_t)width * (size_t)height;

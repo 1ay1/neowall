@@ -231,15 +231,13 @@ static bool shader_resolve_path(const char *shader_name, char *resolved_path, si
 
     /* If it's an absolute path or starts with ~, use it directly */
     if (shader_name[0] == '/' || shader_name[0] == '~') {
-        strncpy(resolved_path, shader_name, resolved_size - 1);
-        resolved_path[resolved_size - 1] = '\0';
+        snprintf(resolved_path, resolved_size, "%s", shader_name);
         return true;
     }
 
     /* If it contains a path separator, treat it as a relative path */
     if (strchr(shader_name, '/') != NULL) {
-        strncpy(resolved_path, shader_name, resolved_size - 1);
-        resolved_path[resolved_size - 1] = '\0';
+        snprintf(resolved_path, resolved_size, "%s", shader_name);
         return true;
     }
 
@@ -275,8 +273,7 @@ static bool shader_resolve_path(const char *shader_name, char *resolved_path, si
                 log_error("Resolved shader path too long: %s", search_paths[i]);
                 continue;
             }
-            strncpy(resolved_path, search_paths[i], resolved_size - 1);
-            resolved_path[resolved_size - 1] = '\0';
+            snprintf(resolved_path, resolved_size, "%s", search_paths[i]);
             log_debug("Resolved shader '%s' to: %s", shader_name, resolved_path);
             return true;
         }
@@ -311,12 +308,13 @@ char *shader_load_file(const char *path) {
         if (home) {
             snprintf(expanded_path, sizeof(expanded_path), "%s%s", home, resolved_path + 1);
         } else {
-            strncpy(expanded_path, resolved_path, sizeof(expanded_path) - 1);
-            expanded_path[sizeof(expanded_path) - 1] = '\0';
+            /* snprintf (not strncpy) guarantees NUL-termination and silences
+             * GCC -O2 -Wstringop-truncation, which fires on a strncpy that
+             * copies exactly size-1 bytes even when we terminate manually. */
+            snprintf(expanded_path, sizeof(expanded_path), "%s", resolved_path);
         }
     } else {
-        strncpy(expanded_path, resolved_path, sizeof(expanded_path) - 1);
-        expanded_path[sizeof(expanded_path) - 1] = '\0';
+        snprintf(expanded_path, sizeof(expanded_path), "%s", resolved_path);
     }
 
     /* Open file in binary mode to get accurate byte count */

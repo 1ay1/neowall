@@ -910,7 +910,7 @@ int main(int argc, char *argv[]) {
     while ((opt = getopt_long(argc, argv, "c:fvhV", long_options, NULL)) != -1) {
         switch (opt) {
             case 'c':
-                strncpy(config_path, optarg, sizeof(config_path) - 1);
+                snprintf(config_path, sizeof(config_path), "%s", optarg);
                 break;
             case 'f':
                 daemon_mode = false;  /* Explicit foreground */
@@ -947,7 +947,7 @@ int main(int argc, char *argv[]) {
     if (config_path[0] == '\0') {
         const char *default_path = config_get_default_path();
         if (default_path) {
-            strncpy(config_path, default_path, sizeof(config_path) - 1);
+            snprintf(config_path, sizeof(config_path), "%s", default_path);
         } else {
             log_error("Could not determine config file path");
             return EXIT_FAILURE;
@@ -994,8 +994,10 @@ int main(int argc, char *argv[]) {
     atomic_init(&state.mouse_interaction, true);  /* default: pointer enabled, override from config */
     state.timer_fd = -1;
     state.wakeup_fd = -1;
-    strncpy(state.config_path, config_path, sizeof(state.config_path) - 1);
-    state.config_path[sizeof(state.config_path) - 1] = '\0';
+    /* snprintf guarantees NUL-termination and silences GCC -O2
+     * -Wstringop-truncation (config_path and state.config_path are the same
+     * size, which is exactly the case the warning targets). */
+    snprintf(state.config_path, sizeof(state.config_path), "%s", config_path);
     pthread_mutex_init(&state.state_mutex, NULL);
     pthread_rwlock_init(&state.output_list_lock, NULL);
     pthread_mutex_init(&state.state_file_lock, NULL);

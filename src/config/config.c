@@ -222,8 +222,7 @@ char **load_shaders_from_directory(const char *dir_path, size_t *count) {
         }
         snprintf(expanded_path, sizeof(expanded_path), "%s%s", home, dir_path + 1);
     } else {
-        strncpy(expanded_path, dir_path, sizeof(expanded_path) - 1);
-        expanded_path[sizeof(expanded_path) - 1] = '\0';
+        snprintf(expanded_path, sizeof(expanded_path), "%s", dir_path);
     }
 
     /* Strip trailing slash to avoid double slashes in path construction */
@@ -309,8 +308,7 @@ char **load_images_from_directory(const char *dir_path, size_t *count) {
         }
         snprintf(expanded_path, sizeof(expanded_path), "%s%s", home, dir_path + 1);
     } else {
-        strncpy(expanded_path, dir_path, sizeof(expanded_path) - 1);
-        expanded_path[sizeof(expanded_path) - 1] = '\0';
+        snprintf(expanded_path, sizeof(expanded_path), "%s", dir_path);
     }
 
     DIR *dir = opendir(expanded_path);
@@ -557,8 +555,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             config->current_cycle_index = 0;  /* Will be restored per-output in output_apply_config */
 
             /* Use first image as initial path (will be updated per-output) */
-            strncpy(config->path, image_paths[0], sizeof(config->path) - 1);
-            config->path[sizeof(config->path) - 1] = '\0';
+            snprintf(config->path, sizeof(config->path), "%s", image_paths[0]);
 
             log_info("[%s] IMAGE MODE: Loaded %zu images from directory for cycling",
                     context_name, image_count);
@@ -569,8 +566,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             return false;
         } else {
             /* Single image file */
-            strncpy(config->path, path_str, sizeof(config->path) - 1);
-            config->path[sizeof(config->path) - 1] = '\0';
+            snprintf(config->path, sizeof(config->path), "%s", path_str);
 
             log_info("[%s] IMAGE MODE: Single image '%s'", context_name, path_str);
         }
@@ -607,8 +603,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             config->current_cycle_index = 0;  /* Will be restored per-output in output_apply_config */
 
             /* Use first shader as initial shader_path (will be updated per-output) */
-            strncpy(config->shader_path, shader_paths[0], sizeof(config->shader_path) - 1);
-            config->shader_path[sizeof(config->shader_path) - 1] = '\0';
+            snprintf(config->shader_path, sizeof(config->shader_path), "%s", shader_paths[0]);
 
             log_info("[%s] SHADER MODE: Loaded %zu shaders from directory for cycling",
                     context_name, shader_count);
@@ -619,8 +614,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             return false;
         } else {
             /* Single shader file */
-            strncpy(config->shader_path, shader_str, sizeof(config->shader_path) - 1);
-            config->shader_path[sizeof(config->shader_path) - 1] = '\0';
+            snprintf(config->shader_path, sizeof(config->shader_path), "%s", shader_str);
 
             log_info("[%s] SHADER MODE: Single shader '%s'", context_name, shader_str);
         }
@@ -996,8 +990,7 @@ static bool config_create_default(const char *config_path) {
 
     /* Get directory path */
     char dir_path[MAX_PATH_LENGTH];
-    strncpy(dir_path, config_path, sizeof(dir_path) - 1);
-    dir_path[sizeof(dir_path) - 1] = '\0';
+    snprintf(dir_path, sizeof(dir_path), "%s", config_path);
 
     /* Find last slash to get directory */
     char *last_slash = strrchr(dir_path, '/');
@@ -1346,15 +1339,13 @@ static bool apply_builtin_default_config(struct neowall_state *state) {
             if (try_paths[i][0] == '~') {
                 snprintf(expanded, sizeof(expanded), "%s%s", home, try_paths[i] + 1);
             } else {
-                strncpy(expanded, try_paths[i], sizeof(expanded) - 1);
-                expanded[sizeof(expanded) - 1] = '\0';
+                snprintf(expanded, sizeof(expanded), "%s", try_paths[i]);
             }
 
             /* Check if it's a file */
             struct stat st;
             if (stat(expanded, &st) == 0 && S_ISREG(st.st_mode) && access(expanded, R_OK) == 0) {
-                strncpy(default_config.path, expanded, sizeof(default_config.path) - 1);
-                default_config.path[sizeof(default_config.path) - 1] = '\0';
+                snprintf(default_config.path, sizeof(default_config.path), "%s", expanded);
                 log_info("Using default wallpaper: %s", expanded);
                 break;
             }
@@ -1364,8 +1355,7 @@ static bool apply_builtin_default_config(struct neowall_state *state) {
                 size_t count = 0;
                 char **images = load_images_from_directory(expanded, &count);
                 if (images && count > 0) {
-                    strncpy(default_config.path, images[0], sizeof(default_config.path) - 1);
-                    default_config.path[sizeof(default_config.path) - 1] = '\0';
+                    snprintf(default_config.path, sizeof(default_config.path), "%s", images[0]);
                     log_info("Using default wallpaper from directory: %s", default_config.path);
                     /* Free the list */
                     for (size_t j = 0; j < count; j++) {

@@ -70,8 +70,7 @@ static void xdg_output_handle_name(void *data, struct zxdg_output_v1 *xdg_output
     (void)xdg_output;
 
     if (name) {
-        strncpy(output->connector_name, name, sizeof(output->connector_name) - 1);
-        output->connector_name[sizeof(output->connector_name) - 1] = '\0';
+        snprintf(output->connector_name, sizeof(output->connector_name), "%s", name);
         log_info("Output connector name: %s (model: %s)",
                  output->connector_name, output->model);
     }
@@ -113,12 +112,10 @@ static void output_handle_geometry(void *data, struct wl_output *wl_output,
     (void)subpixel;
 
     if (make) {
-        strncpy(output->make, make, sizeof(output->make) - 1);
-        output->make[sizeof(output->make) - 1] = '\0';
+        snprintf(output->make, sizeof(output->make), "%s", make);
     }
     if (model) {
-        strncpy(output->model, model, sizeof(output->model) - 1);
-        output->model[sizeof(output->model) - 1] = '\0';
+        snprintf(output->model, sizeof(output->model), "%s", model);
     }
     output->transform = transform;
 
