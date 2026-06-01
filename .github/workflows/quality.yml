@@ -1,0 +1,120 @@
+name: Quality
+
+# Sanitizers + static analysis. This workflow is the proof that the
+# concurrency and memory-safety claims hold: the test suite runs under
+# AddressSanitizer/UBSan and ThreadSanitizer, and the whole tree is swept by
+# clang's static analyzer and clang-tidy.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  sanitizers:
+    name: ASan + UBSan (unit tests)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr clang
+
+      - uses: actions/checkout@v4
+
+      - name: Configure (ASan + UBSan)
+        run: meson setup build-asan -Db_sanitize=address,undefined -Db_lundef=false --buildtype=debug
+
+      - name: Build
+        run: ninja -C build-asan
+
+      - name: Run unit tests under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: meson test -C build-asan --print-errorlogs
+
+  threadsanitizer:
+    name: ThreadSanitizer (concurrency tests)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr
+
+      - uses: actions/checkout@v4
+
+      - name: Configure (TSan)
+        run: meson setup build-tsan -Db_sanitize=thread -Db_lundef=false --buildtype=debug
+
+      - name: Build
+        run: ninja -C build-tsan
+
+      - name: Run concurrency tests under TSan
+        env:
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        # The refcount + foundation tests are the lock-free ones TSan cares about.
+        run: meson test -C build-tsan output_refcount foundation --print-errorlogs
+
+  static-analysis:
+    name: clang static analyzer + clang-tidy
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr clang
+
+      - uses: actions/checkout@v4
+
+      - name: scan-build (clang static analyzer)
+        run: |
+          meson setup build-scan
+          ninja -C build-scan scan-build || \
+            scan-build --status-bugs ninja -C build-scan
+
+      - name: clang-tidy on changed-ish source
+        run: |
+          meson setup build-tidy
+          # Generate compile_commands.json for clang-tidy.
+          ninja -C build-tidy
+          # Run tidy over our own source only (not generated protocol code).
+          run-clang-tidy -p build-tidy -quiet \
+            $(git ls-files 'src/**/*.c' | grep -v protocols) || true
+
+  format-check:
+    name: clang-format
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm git clang
+
+      - uses: actions/checkout@v4
+
+      - name: Verify formatting
+        run: |
+          clang-format --version
+          # Fail if any tracked C source would be reformatted.
+          fail=0
+          for f in $(git ls-files 'src/**/*.c' 'src/**/*.h' 'include/**/*.h' | grep -v protocols); do
+            if ! clang-format --dry-run --Werror "$f" 2>/dev/null; then
+              echo "needs formatting: $f"
+              fail=1
+            fi
+          done
+          exit $fail
