@@ -199,6 +199,7 @@ egl_sources = files(
 shader_lib_sources = files(
   'src/shader_lib/shader_core.c',
   'src/shader_lib/shader_multipass.c',
+  'src/shader_lib/shadertoy_compat.c',
   'src/shader_lib/adaptive_scale.c',
   'src/shader_lib/render_optimizer.c',
   'src/shader_lib/multipass_optimizer.c',
@@ -427,6 +428,15 @@ test_utils_exe = executable('test_utils',
 )
 
 test('utils', test_utils_exe)
+
+# Shadertoy source-compat transforms are GL-free and unit-tested directly.
+test_compat_exe = executable('test_shadertoy_compat',
+  files('tests/test_shadertoy_compat.c', 'src/shader_lib/shadertoy_compat.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('shadertoy_compat', test_compat_exe)
 
 # =============================================================================
 # Summary
