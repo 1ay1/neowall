@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <GL/gl.h>
-#include "neowall.h"
+#include "neowall/neowall.h"
 
 /* Generate grayscale noise texture
  * Single channel noise that's useful for many effects

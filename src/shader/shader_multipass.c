@@ -5,13 +5,13 @@
  * No legacy dependencies required.
  */
 
-#include "shader_multipass.h"
-#include "adaptive_scale.h"
-#include "render_optimizer.h"
-#include "multipass_optimizer.h"
-#include "shadertoy_compat.h"
-#include "shader_log.h"
-#include "platform_compat.h"
+#include "neowall/shader/shader_multipass.h"
+#include "neowall/shader/adaptive_scale.h"
+#include "neowall/shader/render_optimizer.h"
+#include "neowall/shader/multipass_optimizer.h"
+#include "neowall/shader/shadertoy_compat.h"
+#include "neowall/shader/shader_log.h"
+#include "neowall/shader/platform_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

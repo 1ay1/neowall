@@ -4,9 +4,9 @@
 #include <errno.h>
 #include <unistd.h>
 #include <time.h>
-#include "neowall.h"
-#include "compositor.h"
-#include "compositor/backends/wayland.h"
+#include "neowall/neowall.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/compositor/backends/wayland.h"
 #include "frame_watchdog.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"

@@ -11,12 +11,12 @@
 #include <time.h>
 #include <sys/signalfd.h>
 #include <ctype.h>
-#include "neowall.h"
-#include "config_access.h"
-#include "constants.h"
-#include "compositor.h"
-#include "egl/egl_core.h"
-#include "output/output.h"
+#include "neowall/neowall.h"
+#include "neowall/config/config_access.h"
+#include "neowall/constants.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/egl/egl_core.h"
+#include "neowall/output/output.h"
 
 /* Get path to the set-index command file */
 static const char *get_set_index_file_path(void) {

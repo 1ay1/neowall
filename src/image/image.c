@@ -6,9 +6,9 @@
 #include <stdint.h>
 #include <png.h>
 #include <jpeglib.h>
-#include "image.h"
-#include "neowall.h"
-#include "constants.h"
+#include "neowall/image/image.h"
+#include "neowall/neowall.h"
+#include "neowall/constants.h"
 
 /* Forward declarations */
 static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 

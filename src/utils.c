@@ -9,8 +9,8 @@
 #include <strings.h>  /* POSIX strcasecmp — don't redefine it ourselves */
 #include <unistd.h>
 #include <errno.h>
-#include "neowall.h"
-#include "constants.h"
+#include "neowall/neowall.h"
+#include "neowall/constants.h"
 
 /* Current log level */
 static int log_level = LOG_LEVEL_INFO;

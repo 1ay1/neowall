@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <GL/gl.h>
-#include "neowall.h"
+#include "neowall/neowall.h"
 
 /* Generate blue noise texture
  * Blue noise has better distribution than white noise - useful for dithering

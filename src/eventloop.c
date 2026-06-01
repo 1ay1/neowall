@@ -8,11 +8,11 @@
 #include <sys/timerfd.h>
 #include <sys/eventfd.h>
 #include <sys/signalfd.h>
-#include "neowall.h"
-#include "config_access.h"
-#include "constants.h"
-#include "compositor.h"
-#include "occlusion/occlusion.h"
+#include "neowall/neowall.h"
+#include "neowall/config/config_access.h"
+#include "neowall/constants.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/occlusion/occlusion.h"
 
 /* Forward declarations */
 extern void handle_signal_from_fd(struct neowall_state *state, int signum);

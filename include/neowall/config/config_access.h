@@ -1,7 +1,7 @@
 #ifndef CONFIG_ACCESS_H
 #define CONFIG_ACCESS_H
 
-#include "neowall.h"
+#include "neowall/neowall.h"
 
 /* ============================================================================
  * CONFIG ACCESS - Simplified (No Hot-Reload)

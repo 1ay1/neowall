@@ -19,7 +19,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/extensions/Xrandr.h>
-#include "neowall.h"
+#include "neowall/neowall.h"
 #include "x11_occlusion.h"
 
 static Display *x_display = NULL;

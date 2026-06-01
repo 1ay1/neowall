@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../src/config/vibe.h"
+#include "neowall/config/vibe.h"
 
 static int failures = 0;
 static int checks = 0;

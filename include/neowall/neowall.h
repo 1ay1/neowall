@@ -9,8 +9,8 @@
 #include <EGL/egl.h>
 #include <GL/gl.h>
 #include "version.h"
-#include "../src/output/output.h"
-#include "../src/config/config.h"
+#include "neowall/output/output.h"
+#include "neowall/config/config.h"
 
 /* Thread-safe atomic types for flags accessed from multiple threads */
 typedef atomic_bool atomic_bool_t;

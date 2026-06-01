@@ -12,9 +12,9 @@
 #include <stddef.h>
 #include <string.h>
 #include <GL/gl.h>
-#include "neowall.h"
-#include "constants.h"
-#include "transitions.h"
+#include "neowall/neowall.h"
+#include "neowall/constants.h"
+#include "neowall/transitions.h"
 
 /**
  * Transition Registry

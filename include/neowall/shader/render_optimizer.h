@@ -36,7 +36,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-#include "platform_compat.h"
+#include "neowall/shader/platform_compat.h"
 
 /* ============================================================================
  * Configuration Constants

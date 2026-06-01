@@ -7,10 +7,10 @@
  */
 
 #include <GL/gl.h>
-#include "neowall.h"
-#include "constants.h"
-#include "transitions.h"
-#include "shader.h"
+#include "neowall/neowall.h"
+#include "neowall/constants.h"
+#include "neowall/transitions.h"
+#include "neowall/shader/shader.h"
 
 /* Vertex shader for slide transition */
 static const char *slide_vertex_shader_source =

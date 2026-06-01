@@ -5,15 +5,15 @@
 #include <sys/stat.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
-#include "neowall.h"
-#include "output.h"
-#include "../image/image.h"    /* For struct image_data definition */
-#include "compositor.h"
-#include "config_access.h"
-#include "constants.h"
-#include "shader.h"
-#include "../shader_lib/shader_multipass.h"
-#include "../render/render.h"  /* Only output.c includes render.h */
+#include "neowall/neowall.h"
+#include "neowall/output/output.h"
+#include "neowall/image/image.h"    /* For struct image_data definition */
+#include "neowall/compositor/compositor.h"
+#include "neowall/config/config_access.h"
+#include "neowall/constants.h"
+#include "neowall/shader/shader.h"
+#include "neowall/shader/shader_multipass.h"
+#include "neowall/render/render.h"  /* Only output.c includes render.h */
 
 /* Helper function to get the preferred output identifier
  * Prefers connector_name (e.g., "HDMI-A-2", "DP-1") over model name

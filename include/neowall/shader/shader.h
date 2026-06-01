@@ -1,7 +1,7 @@
 #ifndef SHADER_H
 #define SHADER_H
 
-#include "platform_compat.h"
+#include "neowall/shader/platform_compat.h"
 #include <stdbool.h>
 
 /**

@@ -5,10 +5,10 @@
 #include <errno.h>
 #include <wayland-client.h>
 #include <wayland-egl.h>
-#include "compositor.h"
-#include "compositor/backends/wayland.h"
-#include "neowall.h"
-#include "../frame_watchdog.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/compositor/backends/wayland.h"
+#include "neowall/neowall.h"
+#include "frame_watchdog.h"
 /*
  * ============================================================================
  * FALLBACK BACKEND

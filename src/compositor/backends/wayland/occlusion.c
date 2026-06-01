@@ -18,8 +18,8 @@
 #include <string.h>
 #include <stdatomic.h>
 #include <wayland-client.h>
-#include "neowall.h"
-#include "compositor.h"
+#include "neowall/neowall.h"
+#include "neowall/compositor/compositor.h"
 #include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 #include "wayland_occlusion.h"
 #include "frame_watchdog.h"

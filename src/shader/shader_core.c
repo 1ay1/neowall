@@ -11,8 +11,8 @@
 #include <string.h>
 #include <stdarg.h>
 #include <unistd.h>
-#include "platform_compat.h"
-#include "shader.h"
+#include "neowall/shader/platform_compat.h"
+#include "neowall/shader/shader.h"
 
 /* Global error log buffer for detailed error reporting */
 #define MAX_ERROR_LOG_SIZE 16384

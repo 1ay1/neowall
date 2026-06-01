@@ -14,9 +14,9 @@
 #ifndef GL_BGRA
 #define GL_BGRA 0x80E1
 #endif
-#include "compositor.h"
-#include "neowall.h"
-#include "egl/egl_core.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/neowall.h"
+#include "neowall/egl/egl_core.h"
 #include "x11_occlusion.h"
 
 /*

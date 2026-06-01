@@ -6,8 +6,8 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <GL/gl.h>
-#include "../image/image.h"   /* For struct image_data and enum image_format */
-#include "../shader_lib/shader_multipass.h"  /* For multipass_shader_t */
+#include "neowall/image/image.h"   /* For struct image_data and enum image_format */
+#include "neowall/shader/shader_multipass.h"  /* For multipass_shader_t */
 
 /* Constants */
 #define OUTPUT_MAX_PATH_LENGTH 4096
