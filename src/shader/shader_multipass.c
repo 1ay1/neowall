@@ -12,6 +12,8 @@
 #include "neowall/shader/shadertoy_compat.h"
 #include "neowall/shader/shader_log.h"
 #include "neowall/shader/platform_compat.h"
+#include "neowall/shader/shader_stdlib.h"
+#include "neowall/shader/reactive.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -362,9 +364,88 @@ const char *multipass_channel_source_name(channel_source_t source) {
         case CHANNEL_SOURCE_KEYBOARD: return "Keyboard";
         case CHANNEL_SOURCE_NOISE:    return "Noise";
         case CHANNEL_SOURCE_SELF:     return "Self";
+        case CHANNEL_SOURCE_AUDIO:    return "Audio";
         default:                      return "None";
     }
 }
+
+/* ---- manifest binding API (Tier 2/3) ---- */
+
+channel_source_t multipass_channel_source_from_name(const char *name) {
+    if (!name) return CHANNEL_SOURCE_NONE;
+    if (!strcasecmp(name, "audio"))    return CHANNEL_SOURCE_AUDIO;
+    if (!strcasecmp(name, "noise"))    return CHANNEL_SOURCE_NOISE;
+    if (!strcasecmp(name, "self"))     return CHANNEL_SOURCE_SELF;
+    if (!strcasecmp(name, "keyboard")) return CHANNEL_SOURCE_KEYBOARD;
+    if (!strcasecmp(name, "texture"))  return CHANNEL_SOURCE_TEXTURE;
+    if (!strcasecmp(name, "bufferA") || !strcasecmp(name, "buffer_a") ||
+        !strcasecmp(name, "a")) return CHANNEL_SOURCE_BUFFER_A;
+    if (!strcasecmp(name, "bufferB") || !strcasecmp(name, "buffer_b") ||
+        !strcasecmp(name, "b")) return CHANNEL_SOURCE_BUFFER_B;
+    if (!strcasecmp(name, "bufferC") || !strcasecmp(name, "buffer_c") ||
+        !strcasecmp(name, "c")) return CHANNEL_SOURCE_BUFFER_C;
+    if (!strcasecmp(name, "bufferD") || !strcasecmp(name, "buffer_d") ||
+        !strcasecmp(name, "d")) return CHANNEL_SOURCE_BUFFER_D;
+    return CHANNEL_SOURCE_NONE;
+}
+
+uniform_bind_t multipass_bind_from_name(const char *name) {
+    if (!name) return UNIFORM_BIND_CONST;
+    if (!strcasecmp(name, "cpu"))          return UNIFORM_BIND_CPU;
+    if (!strcasecmp(name, "ram"))          return UNIFORM_BIND_RAM;
+    if (!strcasecmp(name, "net_down") || !strcasecmp(name, "netdown")) return UNIFORM_BIND_NET_DOWN;
+    if (!strcasecmp(name, "net_up")   || !strcasecmp(name, "netup"))   return UNIFORM_BIND_NET_UP;
+    if (!strcasecmp(name, "battery"))      return UNIFORM_BIND_BATTERY;
+    if (!strcasecmp(name, "time_of_day") || !strcasecmp(name, "timeofday")) return UNIFORM_BIND_TIME_OF_DAY;
+    if (!strcasecmp(name, "sun"))          return UNIFORM_BIND_SUN;
+    if (!strcasecmp(name, "audio") || !strcasecmp(name, "audio_level")) return UNIFORM_BIND_AUDIO_LEVEL;
+    if (!strcasecmp(name, "audio_bass") || !strcasecmp(name, "bass")) return UNIFORM_BIND_AUDIO_BASS;
+    if (!strcasecmp(name, "audio_mid")  || !strcasecmp(name, "mid"))  return UNIFORM_BIND_AUDIO_MID;
+    if (!strcasecmp(name, "audio_treble") || !strcasecmp(name, "treble")) return UNIFORM_BIND_AUDIO_TREBLE;
+    if (!strcasecmp(name, "audio_beat") || !strcasecmp(name, "beat")) return UNIFORM_BIND_AUDIO_BEAT;
+    if (!strcasecmp(name, "key_energy") || !strcasecmp(name, "keys")) return UNIFORM_BIND_KEY_ENERGY;
+    if (!strcasecmp(name, "mouse_energy") || !strcasecmp(name, "mouse")) return UNIFORM_BIND_MOUSE_ENERGY;
+    return UNIFORM_BIND_CONST;
+}
+
+void multipass_set_channel(multipass_shader_t *shader,
+                           multipass_type_t pass_type,
+                           int channel, channel_source_t source) {
+    if (!shader || channel < 0 || channel >= MULTIPASS_MAX_CHANNELS) return;
+    shader->explicit_bindings = true;
+    for (int i = 0; i < shader->pass_count; i++) {
+        if (shader->passes[i].type == pass_type) {
+            shader->passes[i].channels[channel].source = source;
+            /* recompute the cached buffer index for this channel */
+            shader->passes[i].channel_buffer_index[channel] = -1;
+            if (source >= CHANNEL_SOURCE_BUFFER_A && source <= CHANNEL_SOURCE_BUFFER_D) {
+                int target = PASS_TYPE_BUFFER_A + (source - CHANNEL_SOURCE_BUFFER_A);
+                for (int j = 0; j < shader->pass_count; j++) {
+                    if ((int)shader->passes[j].type == target) {
+                        shader->passes[i].channel_buffer_index[channel] = j;
+                        break;
+                    }
+                }
+            }
+            log_info("Manifest: %s iChannel%d -> %s",
+                     shader->passes[i].name, channel,
+                     multipass_channel_source_name(source));
+            return;
+        }
+    }
+}
+
+void multipass_add_user_uniform(multipass_shader_t *shader,
+                                const char *name, uniform_bind_t bind, float value) {
+    if (!shader || !name || shader->user_uniform_count >= MULTIPASS_MAX_USER_UNIFORMS) return;
+    multipass_user_uniform_t *uu = &shader->user_uniforms[shader->user_uniform_count++];
+    snprintf(uu->name, sizeof(uu->name), "%s", name);
+    uu->bind = bind;
+    uu->value = value;
+    uu->location = -1;
+    log_info("Manifest: user uniform '%s' (bind=%d, value=%.3f)", uu->name, bind, value);
+}
+
 
 multipass_channel_t multipass_default_channel(channel_source_t source) {
     multipass_channel_t channel = {
@@ -735,20 +816,35 @@ static char *fix_shadertoy_compatibility(const char *source) {
     return shadertoy_compat_fix(source);
 }
 
-/* Wrap a pass source with Shadertoy compatibility layer */
-static char *wrap_pass_source(const char *common, const char *pass_source) {
+/* Wrap a pass source with Shadertoy compatibility layer + neowall std-lib.
+ * Layout: #version/uniforms (prefix) -> reactive uniforms -> GLSL std-lib ->
+ * user common -> user pass -> main() suffix. The reactive block and std-lib are
+ * injected unconditionally; unused uniforms/functions are stripped by the GLSL
+ * compiler, so plain Shadertoy shaders are unaffected. */
+static char *wrap_pass_source(const char *common, const char *pass_source,
+                              const char *user_uniform_decls) {
     size_t prefix_len = strlen(multipass_wrapper_prefix);
+    size_t react_len  = strlen(neowall_reactive_uniforms);
+    size_t lib_len    = strlen(neowall_glsl_stdlib) + strlen(neowall_glsl_stdlib2);
+    size_t udecl_len  = user_uniform_decls ? strlen(user_uniform_decls) : 0;
     size_t common_len = common ? strlen(common) : 0;
     size_t pass_len = pass_source ? strlen(pass_source) : 0;
     size_t suffix_len = strlen(multipass_wrapper_suffix);
 
     /* Extra space for .xy additions (worst case: every iChannelResolution gets .xy) */
-    size_t total = prefix_len + (common_len * 2) + (pass_len * 2) + suffix_len + 64;
+    size_t total = prefix_len + react_len + lib_len + udecl_len +
+                   (common_len * 2) + (pass_len * 2) + suffix_len + 64;
     char *wrapped = malloc(total);
     if (!wrapped) return NULL;
 
     wrapped[0] = '\0';
     strcat(wrapped, multipass_wrapper_prefix);
+    strcat(wrapped, neowall_reactive_uniforms);
+    strcat(wrapped, neowall_glsl_stdlib);
+    strcat(wrapped, neowall_glsl_stdlib2);
+    if (user_uniform_decls) {
+        strcat(wrapped, user_uniform_decls);
+    }
     
     /* Apply compatibility fixes to common code */
     if (common) {
@@ -1135,6 +1231,22 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
+    /* Live audio texture: width REACTIVE_AUDIO_BINS, 2 rows.
+     * Row 0 = FFT spectrum, row 1 = waveform. Single red channel, float.
+     * Re-uploaded each frame in multipass_set_uniforms from the reactive snap. */
+    glGenTextures(1, &shader->audio_texture);
+    glBindTexture(GL_TEXTURE_2D, shader->audio_texture);
+    {
+        float zero[REACTIVE_AUDIO_BINS * 2];
+        memset(zero, 0, sizeof(zero));
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, REACTIVE_AUDIO_BINS, 2, 0,
+                     GL_RED, GL_FLOAT, zero);
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
     /* Calculate base scaled resolution for buffer passes */
     int base_scaled_w = (int)(width * shader->resolution_scale);
     int base_scaled_h = (int)(height * shader->resolution_scale);
@@ -1231,7 +1343,29 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iChannel[1] = glGetUniformLocation(prog, "iChannel1");
     u->iChannel[2] = glGetUniformLocation(prog, "iChannel2");
     u->iChannel[3] = glGetUniformLocation(prog, "iChannel3");
-    
+
+    /* neowall reactive uniforms */
+    u->iCpu          = glGetUniformLocation(prog, "iCpu");
+    u->iCpuCores     = glGetUniformLocation(prog, "iCpuCores");
+    u->iCpuCoreCount = glGetUniformLocation(prog, "iCpuCoreCount");
+    u->iRam          = glGetUniformLocation(prog, "iRam");
+    u->iNetDown      = glGetUniformLocation(prog, "iNetDown");
+    u->iNetUp        = glGetUniformLocation(prog, "iNetUp");
+    u->iBattery      = glGetUniformLocation(prog, "iBattery");
+    u->iCharging     = glGetUniformLocation(prog, "iCharging");
+    u->iTimeOfDay    = glGetUniformLocation(prog, "iTimeOfDay");
+    u->iSun          = glGetUniformLocation(prog, "iSun");
+    u->iDayFraction  = glGetUniformLocation(prog, "iDayFraction");
+    u->iKeyEnergy    = glGetUniformLocation(prog, "iKeyEnergy");
+    u->iMouseEnergy  = glGetUniformLocation(prog, "iMouseEnergy");
+    u->iAudioLevel   = glGetUniformLocation(prog, "iAudioLevel");
+    u->iAudioBass    = glGetUniformLocation(prog, "iAudioBass");
+    u->iAudioMid     = glGetUniformLocation(prog, "iAudioMid");
+    u->iAudioTreble  = glGetUniformLocation(prog, "iAudioTreble");
+    u->iAudioBeat    = glGetUniformLocation(prog, "iAudioBeat");
+    u->iAudioActive  = glGetUniformLocation(prog, "iAudioActive");
+    u->iAudio        = glGetUniformLocation(prog, "iAudio");
+
     u->cached = true;
     
     log_debug("Cached uniform locations for %s: iTime=%d, iResolution=%d, iFrame=%d",
@@ -1290,8 +1424,22 @@ bool multipass_compile_pass(multipass_shader_t *shader, int pass_index) {
         pass->compile_error = NULL;
     }
 
-    /* Wrap pass source with compatibility layer */
-    char *wrapped = wrap_pass_source(shader->common_source, pass->source);
+    /* Wrap pass source with compatibility layer.
+     * Build the manifest user-uniform declarations (each is a float uniform). */
+    char user_decls[MULTIPASS_MAX_USER_UNIFORMS * (MULTIPASS_UNIFORM_NAME_MAX + 24) + 64];
+    user_decls[0] = '\0';
+    if (shader->user_uniform_count > 0) {
+        strcat(user_decls, "// --- manifest user uniforms ---\n");
+        for (int ui = 0; ui < shader->user_uniform_count; ui++) {
+            char line[MULTIPASS_UNIFORM_NAME_MAX + 24];
+            snprintf(line, sizeof(line), "uniform float %s;\n",
+                     shader->user_uniforms[ui].name);
+            strcat(user_decls, line);
+        }
+    }
+
+    char *wrapped = wrap_pass_source(shader->common_source, pass->source,
+                                     user_decls[0] ? user_decls : NULL);
     if (!wrapped) {
         pass->compile_error = str_dup("Failed to allocate memory for shader wrapping");
         pass->is_compiled = false;
@@ -1478,6 +1626,7 @@ void multipass_destroy(multipass_shader_t *shader) {
     if (shader->vao) glDeleteVertexArrays(1, &shader->vao);
     if (shader->noise_texture) glDeleteTextures(1, &shader->noise_texture);
     if (shader->keyboard_texture) glDeleteTextures(1, &shader->keyboard_texture);
+    if (shader->audio_texture) glDeleteTextures(1, &shader->audio_texture);
     
     /* Cleanup adaptive resolution system */
     adaptive_destroy(&shader->adaptive);
@@ -1558,6 +1707,59 @@ void multipass_set_uniforms(multipass_shader_t *shader,
         };
         glUniform3fv(u->iChannelResolution, 4, resolutions);
     }
+
+    /* --- neowall reactive uniforms (live system + audio) ---
+     * One snapshot per pass; cheap (a struct copy). Each glUniform is skipped
+     * if the shader didn't reference that uniform (location < 0). */
+    reactive_snapshot_t r;
+    reactive_get(&r);
+    if (u->iCpu >= 0)         glUniform1f(u->iCpu, r.cpu);
+    if (u->iCpuCoreCount >= 0) glUniform1i(u->iCpuCoreCount, r.cpu_cores);
+    if (u->iCpuCores >= 0)    glUniform1fv(u->iCpuCores, 8, r.cpu_per);
+    if (u->iRam >= 0)         glUniform1f(u->iRam, r.ram);
+    if (u->iNetDown >= 0)     glUniform1f(u->iNetDown, r.net_down);
+    if (u->iNetUp >= 0)       glUniform1f(u->iNetUp, r.net_up);
+    if (u->iBattery >= 0)     glUniform1f(u->iBattery, r.battery);
+    if (u->iCharging >= 0)    glUniform1f(u->iCharging, r.charging ? 1.0f : 0.0f);
+    if (u->iTimeOfDay >= 0)   glUniform1f(u->iTimeOfDay, r.time_of_day);
+    if (u->iSun >= 0)         glUniform1f(u->iSun, r.sun);
+    if (u->iDayFraction >= 0) glUniform1f(u->iDayFraction, r.day_fraction);
+    if (u->iKeyEnergy >= 0)   glUniform1f(u->iKeyEnergy, r.key_energy);
+    if (u->iMouseEnergy >= 0) glUniform1f(u->iMouseEnergy, r.mouse_energy);
+    if (u->iAudioLevel >= 0)  glUniform1f(u->iAudioLevel, r.audio_level);
+    if (u->iAudioBass >= 0)   glUniform1f(u->iAudioBass, r.audio_bass);
+    if (u->iAudioMid >= 0)    glUniform1f(u->iAudioMid, r.audio_mid);
+    if (u->iAudioTreble >= 0) glUniform1f(u->iAudioTreble, r.audio_treble);
+    if (u->iAudioBeat >= 0)   glUniform1f(u->iAudioBeat, r.audio_beat);
+    if (u->iAudioActive >= 0) glUniform1f(u->iAudioActive, r.audio_active ? 1.0f : 0.0f);
+
+    /* --- manifest user uniforms (Tier 2/3) ---
+     * Resolve location against this pass program (cheap: count is tiny and only
+     * non-zero for manifest-driven shaders) and push the live/const value. */
+    for (int ui = 0; ui < shader->user_uniform_count; ui++) {
+        const multipass_user_uniform_t *uu = &shader->user_uniforms[ui];
+        GLint loc = glGetUniformLocation(pass->program, uu->name);
+        if (loc < 0) continue;
+        float v = uu->value;
+        switch (uu->bind) {
+            case UNIFORM_BIND_CPU:          v = r.cpu; break;
+            case UNIFORM_BIND_RAM:          v = r.ram; break;
+            case UNIFORM_BIND_NET_DOWN:     v = r.net_down; break;
+            case UNIFORM_BIND_NET_UP:       v = r.net_up; break;
+            case UNIFORM_BIND_BATTERY:      v = r.battery; break;
+            case UNIFORM_BIND_TIME_OF_DAY:  v = r.time_of_day; break;
+            case UNIFORM_BIND_SUN:          v = r.sun; break;
+            case UNIFORM_BIND_AUDIO_LEVEL:  v = r.audio_level; break;
+            case UNIFORM_BIND_AUDIO_BASS:   v = r.audio_bass; break;
+            case UNIFORM_BIND_AUDIO_MID:    v = r.audio_mid; break;
+            case UNIFORM_BIND_AUDIO_TREBLE: v = r.audio_treble; break;
+            case UNIFORM_BIND_AUDIO_BEAT:   v = r.audio_beat; break;
+            case UNIFORM_BIND_KEY_ENERGY:   v = r.key_energy; break;
+            case UNIFORM_BIND_MOUSE_ENERGY: v = r.mouse_energy; break;
+            case UNIFORM_BIND_CONST: default: break;
+        }
+        glUniform1f(loc, v);
+    }
 }
 
 void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
@@ -1618,12 +1820,26 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
                 tex = shader->noise_texture;
                 source_name = "noise";
                 break;
+
+            case CHANNEL_SOURCE_AUDIO:
+                tex = shader->audio_texture;
+                source_name = "audio";
+                break;
         }
 
         /* Direct GL calls - textures change every pass, no caching benefit */
         glActiveTexture(GL_TEXTURE0 + c);
         glBindTexture(GL_TEXTURE_2D, tex);
         glUniform1i(u->iChannel[c], c);
+    }
+
+    /* Bind the live audio texture to the dedicated iAudio sampler on unit 4,
+     * separate from the iChannel0..3 units so audioBand()/spectrum() work even
+     * when all four channels are bound to buffers. */
+    if (u->iAudio >= 0) {
+        glActiveTexture(GL_TEXTURE0 + MULTIPASS_MAX_CHANNELS);
+        glBindTexture(GL_TEXTURE_2D, shader->audio_texture);
+        glUniform1i(u->iAudio, MULTIPASS_MAX_CHANNELS);
     }
 }
 
@@ -1815,6 +2031,23 @@ void multipass_render(multipass_shader_t *shader,
     shader->default_framebuffer = current_fbo;
 
     log_debug_frame(shader->frame_count, "=== Frame %d ===", shader->frame_count);
+
+    /* Refresh the live audio texture once per frame from the reactive snapshot.
+     * Row 0 = spectrum, row 1 = waveform. Skipped cheaply if no audio is live
+     * (the texture just stays zero). */
+    if (shader->audio_texture) {
+        reactive_snapshot_t ra;
+        reactive_get(&ra);
+        if (ra.audio_active) {
+            float rows[REACTIVE_AUDIO_BINS * 2];
+            memcpy(&rows[0], ra.audio_spectrum, sizeof(ra.audio_spectrum));
+            memcpy(&rows[REACTIVE_AUDIO_BINS], ra.audio_waveform, sizeof(ra.audio_waveform));
+            glBindTexture(GL_TEXTURE_2D, shader->audio_texture);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, REACTIVE_AUDIO_BINS, 2,
+                            GL_RED, GL_FLOAT, rows);
+        }
+    }
 
     /* Set optimal render state ONCE at start of frame
      * These are the ONLY things worth caching - they're set once and never change */

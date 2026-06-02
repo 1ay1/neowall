@@ -1,0 +1,25 @@
+# audio_pulse.neowall — manifest for audio_pulse.glsl
+#
+# Sidecar manifest: lives next to the shader. neowall auto-loads it when you
+# point your config at audio_pulse.glsl (or load audio_pulse.neowall directly).
+# It gives EXPLICIT channel bindings (no heuristic guessing) and declares
+# custom reactive uniforms wired to live system/audio signals.
+
+shader audio_pulse.glsl
+
+# Explicit iChannel bindings for the Image pass.
+#   audio  -> live FFT texture (row0 spectrum, row1 waveform)
+#   noise  -> built-in noise atlas
+channel0 audio
+channel1 noise
+
+# Custom float uniforms, each bound to a live signal (updated every frame).
+# Reference them in GLSL as e.g. `uniform float uGlow;` (auto-declared).
+uniforms {
+  uGlow      audio_bass     # low-band energy
+  uShimmer   audio_treble   # high-band energy
+  uBeat      audio_beat     # onset pulse
+  uLoad      cpu            # total CPU load
+  uSun       sun            # sun-elevation proxy (warm at noon)
+  uExposure  0.85           # plain constant
+}

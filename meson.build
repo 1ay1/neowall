@@ -206,6 +206,8 @@ shader_sources = files(
   'src/shader/adaptive_scale.c',
   'src/shader/render_optimizer.c',
   'src/shader/multipass_optimizer.c',
+  'src/shader/reactive.c',
+  'src/shader/manifest.c',
 )
 
 # Transition sources

@@ -13,6 +13,7 @@
 #include "neowall/config/config.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/output/output.h"
+#include "neowall/shader/reactive.h"
 #include "neowall/constants.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/occlusion/occlusion.h"
@@ -648,6 +649,10 @@ void event_loop_run(struct neowall_state *state) {
     /* Initialize occlusion detection (pause rendering when fullscreen windows cover outputs) */
     bool has_occlusion = occlusion_init(state);
 
+    /* Initialize the reactive subsystem (live system metrics + audio FFT).
+     * Best-effort: audio capture is optional, everything degrades to zero. */
+    reactive_init();
+
     /* Base file descriptors - always polled (BASE_FD_COUNT/MAX_POLL_FDS are
      * declared at file scope as an enum). */
     struct pollfd fds[MAX_POLL_FDS];
@@ -713,6 +718,9 @@ void event_loop_run(struct neowall_state *state) {
             atomic_store_explicit(&state->outputs_need_init, false, memory_order_release);
             reinit_reconnected_outputs(state);
         }
+
+        /* Refresh live system/audio signals for reactive shaders (self-throttled). */
+        reactive_sample();
 
         /* Prepare for reading events via compositor backend */
         if (ops && ops->prepare_events) {
@@ -1045,6 +1053,9 @@ void event_loop_run(struct neowall_state *state) {
     if (has_occlusion) {
         occlusion_cleanup(state);
     }
+
+    /* Stop the reactive subsystem (joins the audio capture thread). */
+    reactive_shutdown();
 
     /* Clean up file descriptors */
     if (state->timer_fd >= 0) {

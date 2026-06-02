@@ -224,7 +224,7 @@ void shader_destroy_program(GLuint program) {
  * @param resolved_size Size of resolved_path buffer
  * @return true if shader found, false otherwise
  */
-static bool shader_resolve_path(const char *shader_name, char *resolved_path, size_t resolved_size) {
+bool shader_resolve_path(const char *shader_name, char *resolved_path, size_t resolved_size) {
     if (!shader_name || !resolved_path || resolved_size == 0) {
         return false;
     }

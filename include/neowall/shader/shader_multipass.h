@@ -45,7 +45,8 @@ typedef enum {
     CHANNEL_SOURCE_TEXTURE,    /* External texture */
     CHANNEL_SOURCE_KEYBOARD,   /* Keyboard input texture */
     CHANNEL_SOURCE_NOISE,      /* Procedural noise */
-    CHANNEL_SOURCE_SELF        /* Self-reference (previous frame) */
+    CHANNEL_SOURCE_SELF,       /* Self-reference (previous frame) */
+    CHANNEL_SOURCE_AUDIO       /* Live audio: row0 spectrum, row1 waveform */
 } channel_source_t;
 
 /* Channel configuration */
@@ -56,6 +57,36 @@ typedef struct {
     int filter;                /* GL_LINEAR or GL_NEAREST */
     int wrap;                  /* GL_REPEAT, GL_CLAMP_TO_EDGE, etc. */
 } multipass_channel_t;
+
+/* A user-defined uniform supplied by a .neowall manifest. The value is either a
+ * literal (set once) or bound to a live reactive signal that updates per frame. */
+#define MULTIPASS_MAX_USER_UNIFORMS 16
+#define MULTIPASS_UNIFORM_NAME_MAX 48
+
+typedef enum {
+    UNIFORM_BIND_CONST = 0,  /* fixed value from manifest */
+    UNIFORM_BIND_CPU,
+    UNIFORM_BIND_RAM,
+    UNIFORM_BIND_NET_DOWN,
+    UNIFORM_BIND_NET_UP,
+    UNIFORM_BIND_BATTERY,
+    UNIFORM_BIND_TIME_OF_DAY,
+    UNIFORM_BIND_SUN,
+    UNIFORM_BIND_AUDIO_LEVEL,
+    UNIFORM_BIND_AUDIO_BASS,
+    UNIFORM_BIND_AUDIO_MID,
+    UNIFORM_BIND_AUDIO_TREBLE,
+    UNIFORM_BIND_AUDIO_BEAT,
+    UNIFORM_BIND_KEY_ENERGY,
+    UNIFORM_BIND_MOUSE_ENERGY
+} uniform_bind_t;
+
+typedef struct {
+    char name[MULTIPASS_UNIFORM_NAME_MAX]; /* GLSL uniform name (float) */
+    uniform_bind_t bind;                   /* live source, or CONST */
+    float value;                           /* current/constant value */
+    GLint location;                        /* cached per pass at compile (-1) */
+} multipass_user_uniform_t;
 
 /* Cached uniform locations for performance (avoid glGetUniformLocation every frame) */
 typedef struct {
@@ -69,6 +100,12 @@ typedef struct {
     GLint iSampleRate;
     GLint iChannelResolution;
     GLint iChannel[MULTIPASS_MAX_CHANNELS];
+    /* neowall reactive uniforms (see shader_stdlib.h). -1 if shader unused. */
+    GLint iCpu, iCpuCores, iCpuCoreCount, iRam, iNetDown, iNetUp;
+    GLint iBattery, iCharging, iTimeOfDay, iSun, iDayFraction;
+    GLint iKeyEnergy, iMouseEnergy;
+    GLint iAudioLevel, iAudioBass, iAudioMid, iAudioTreble, iAudioBeat, iAudioActive;
+    GLint iAudio;               /* audio spectrum/waveform sampler */
     bool cached;                /* True if locations have been cached */
 } uniform_locations_t;
 
@@ -108,6 +145,7 @@ typedef struct {
     GLuint vbo;                              /* Vertex buffer for fullscreen quad */
     GLuint noise_texture;                    /* Default noise texture */
     GLuint keyboard_texture;                 /* Keyboard state texture */
+    GLuint audio_texture;                    /* Live audio (512x2) for iAudio / CHANNEL_SOURCE_AUDIO */
     GLint default_framebuffer;               /* Default framebuffer ID (may not be 0 in GTK) */
     
     /* Resolution scaling */
@@ -131,6 +169,12 @@ typedef struct {
     bool use_smart_buffer_sizing;            /* Auto-detect optimal buffer resolutions */
     
     bool is_initialized;                     /* OpenGL resources initialized */
+
+    /* User uniforms declared by a .neowall manifest (Tier 2/3). Declared into
+     * the wrapper at compile time and set each frame in multipass_set_uniforms. */
+    multipass_user_uniform_t user_uniforms[MULTIPASS_MAX_USER_UNIFORMS];
+    int user_uniform_count;
+    bool explicit_bindings;                  /* true if channels came from a manifest */
 } multipass_shader_t;
 
 /* Parse result for shader analysis */
@@ -512,5 +556,48 @@ multipass_channel_t multipass_default_channel(channel_source_t source);
  * @param shader Multipass shader
  */
 void multipass_debug_dump(const multipass_shader_t *shader);
+
+/* ============================================
+ * Manifest binding API (Tier 2/3)
+ * ============================================ */
+
+/**
+ * Override the channel source for a given pass channel explicitly, bypassing
+ * the source-text heuristic. Marks the shader as having explicit bindings so
+ * the heuristic is not consulted for any channel. Call before compilation.
+ *
+ * @param shader     Multipass shader
+ * @param pass_type  Which pass (PASS_TYPE_IMAGE / BUFFER_A..D)
+ * @param channel    Channel index 0..3
+ * @param source     The channel source to bind
+ */
+void multipass_set_channel(multipass_shader_t *shader,
+                           multipass_type_t pass_type,
+                           int channel, channel_source_t source);
+
+/**
+ * Register a user uniform declared by a manifest. It is injected into the
+ * shader wrapper and set every frame (from a live reactive signal, or as a
+ * constant). No effect if the uniform table is full.
+ *
+ * @param shader Multipass shader
+ * @param name   GLSL uniform name (float)
+ * @param bind   Live source or UNIFORM_BIND_CONST
+ * @param value  Initial / constant value
+ */
+void multipass_add_user_uniform(multipass_shader_t *shader,
+                                const char *name, uniform_bind_t bind, float value);
+
+/**
+ * Parse a uniform-binding keyword ("cpu", "audio_bass", "const", ...).
+ * Returns UNIFORM_BIND_CONST for unknown / literal values.
+ */
+uniform_bind_t multipass_bind_from_name(const char *name);
+
+/**
+ * Parse a channel-source keyword ("audio", "noise", "bufferA", "self", ...).
+ * Returns CHANNEL_SOURCE_NONE if unknown.
+ */
+channel_source_t multipass_channel_source_from_name(const char *name);
 
 #endif /* SHADER_MULTIPASS_H */

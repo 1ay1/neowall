@@ -44,4 +44,16 @@ const char *shader_get_last_error_log(void);
  */
 char *shader_load_file(const char *path);
 
+/**
+ * Resolve a shader name to a full path (checks config dir, then system dirs).
+ * Absolute / ~ / contains-slash paths are returned as-is.
+ *
+ * @param shader_name   Filename or path
+ * @param resolved_path Output buffer
+ * @param resolved_size Buffer size
+ * @return true if resolved (found, or used verbatim), false otherwise
+ */
+#include <stddef.h>
+bool shader_resolve_path(const char *shader_name, char *resolved_path, size_t resolved_size);
+
 #endif /* SHADER_H */

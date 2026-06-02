@@ -13,6 +13,7 @@
 #include "neowall/constants.h"
 #include "neowall/shader/shader.h"
 #include "neowall/shader/shader_multipass.h"
+#include "neowall/shader/manifest.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 
 /* Helper function to get the preferred output identifier
@@ -775,6 +776,19 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         return;
     }
 
+    /* If asked to load a .neowall manifest directly, resolve the .glsl it names
+     * and load that instead (the manifest is re-read below to apply bindings). */
+    char resolved_path[MAX_PATH_LENGTH];
+    const char *manifest_path = shader_path;  /* used to apply bindings later */
+    if (manifest_resolve_shader_path(shader_path, resolved_path, sizeof(resolved_path))) {
+        log_info("Manifest %s -> shader %s", shader_path, resolved_path);
+        shader_path = resolved_path;
+        /* manifest_path stays pointing at the .neowall file */
+    } else {
+        /* Ordinary .glsl: manifest_apply() will look for a <base>.neowall sidecar. */
+        manifest_path = shader_path;
+    }
+
     /* Copy the model string under the state mutex to avoid a data race with
      * the registry/output-destroy paths that can rewrite it concurrently. */
     char model_copy[64];
@@ -888,6 +902,11 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         log_error("Failed to create multipass shader from: %s", shader_path);
         return;
     }
+
+    /* Apply a .neowall manifest if present: explicit channel bindings + custom
+     * reactive uniforms. Must run before compile (uniforms are injected into the
+     * wrapper) and before GL init (so buffer-channel indices are correct). */
+    manifest_apply(output->multipass_shader, manifest_path);
 
     /* Initialize GL resources for multipass rendering */
     if (!multipass_init_gl(output->multipass_shader, output->width, output->height)) {

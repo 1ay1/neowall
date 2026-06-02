@@ -9,6 +9,7 @@
 #include "neowall/compositor/compositor.h"
 #include "neowall/compositor/backends/wayland.h"
 #include "neowall/neowall.h"
+#include "neowall/shader/reactive.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
 #include "wayland_occlusion.h"
@@ -222,6 +223,16 @@ static void pointer_handle_motion(void *data, struct wl_pointer *pointer,
 
     double x = wl_fixed_to_double(surface_x);
     double y = wl_fixed_to_double(surface_y);
+
+    /* Feed motion speed into the reactive subsystem (iMouseEnergy). */
+    {
+        static double prev_x = 0.0, prev_y = 0.0;
+        static bool have_prev = false;
+        if (have_prev) {
+            reactive_note_mouse((float)(x - prev_x), (float)(y - prev_y));
+        }
+        prev_x = x; prev_y = y; have_prev = true;
+    }
 
     /* Throttle logging to avoid spam */
     static uint64_t last_motion_log = 0;
