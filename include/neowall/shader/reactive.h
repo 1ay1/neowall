@@ -31,8 +31,25 @@ typedef struct {
     float cpu_per[8];   /* up to 8 per-core utilisations (0 if absent) */
     int   cpu_cores;    /* number of valid entries in cpu_per */
     float ram;          /* used / total physical memory */
+    float swap;         /* used / total swap (0 if no swap) */
     float net_down;     /* normalised download rate (0..1, log-scaled) */
     float net_up;       /* normalised upload rate   (0..1, log-scaled) */
+    float disk_read;    /* normalised disk read rate  (0..1, log-scaled) */
+    float disk_write;   /* normalised disk write rate (0..1, log-scaled) */
+    float load_avg;     /* 1-min load average / nproc, clamped 0..1 (raw can exceed) */
+    float load_raw;     /* raw 1-min load average (not normalised) */
+
+    /* --- thermals + GPU (best-effort; 0 if unavailable) --- */
+    float cpu_temp;     /* CPU package temp, normalised 0..1 over 30..95 C */
+    float cpu_temp_c;   /* CPU package temp in degrees C (0 if unknown) */
+    float gpu;          /* GPU utilisation 0..1 (amdgpu/nvidia/i915 best-effort) */
+    float gpu_temp;     /* GPU temp normalised 0..1 over 30..95 C */
+    float gpu_temp_c;   /* GPU temp in degrees C (0 if unknown) */
+
+    /* --- uptime + processes --- */
+    float uptime_hours; /* system uptime in hours */
+    float procs;        /* running/total process activity proxy 0..1 */
+    int   proc_count;   /* total process/thread count (capped) */
 
     /* --- power --- */
     float battery;      /* charge fraction 0..1 (1 if no battery present) */

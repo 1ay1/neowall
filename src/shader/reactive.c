@@ -25,6 +25,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <spawn.h>
+#include <dirent.h>
 
 extern char **environ;
 
@@ -143,11 +144,15 @@ static void sample_cpu(reactive_snapshot_t *s) {
 static void sample_ram(reactive_snapshot_t *s) {
     char buf[4096];
     if (read_file("/proc/meminfo", buf, sizeof(buf)) <= 0) return;
-    unsigned long long total = 0, avail = 0;
+    unsigned long long total = 0, avail = 0, swtotal = 0, swfree = 0;
     char *p;
     if ((p = strstr(buf, "MemTotal:"))) sscanf(p, "MemTotal: %llu", &total);
     if ((p = strstr(buf, "MemAvailable:"))) sscanf(p, "MemAvailable: %llu", &avail);
+    if ((p = strstr(buf, "SwapTotal:"))) sscanf(p, "SwapTotal: %llu", &swtotal);
+    if ((p = strstr(buf, "SwapFree:"))) sscanf(p, "SwapFree: %llu", &swfree);
     if (total > 0) s->ram = clampf(1.0f - (float)avail / (float)total, 0.0f, 1.0f);
+    if (swtotal > 0) s->swap = clampf(1.0f - (float)swfree / (float)swtotal, 0.0f, 1.0f);
+    else s->swap = 0.0f;
 }
 
 static void sample_net(reactive_snapshot_t *s, double dt_sec) {
@@ -196,6 +201,157 @@ static void sample_battery(reactive_snapshot_t *s) {
             }
             return;
         }
+    }
+}
+
+/* --- disk I/O from /proc/diskstats (sums whole physical disks) --- */
+static void sample_disk(reactive_snapshot_t *s, double dt_sec) {
+    static unsigned long long prev_rd = 0, prev_wr = 0;
+    char buf[16384];
+    if (read_file("/proc/diskstats", buf, sizeof(buf)) <= 0) return;
+
+    unsigned long long rd = 0, wr = 0;
+    char *line = buf;
+    while (line && *line) {
+        /* fields: major minor name rd_ios rd_merges rd_sectors ... wr_sectors */
+        char name[64];
+        unsigned long long rsec = 0, wsec = 0;
+        if (sscanf(line, " %*u %*u %63s %*u %*u %llu %*u %*u %*u %llu",
+                   name, &rsec, &wsec) == 3) {
+            /* whole disks only: sd?, nvme?n?, vd?, mmcblk? — skip partitions
+             * (names ending in a digit for sd*, or 'p<digit>' for nvme). */
+            size_t L = strlen(name);
+            bool partition = false;
+            if (L > 0 && name[L-1] >= '0' && name[L-1] <= '9') {
+                if (strncmp(name, "sd", 2) == 0 || strncmp(name, "vd", 2) == 0 ||
+                    strncmp(name, "hd", 2) == 0) partition = true;
+                if (strstr(name, "p") && strncmp(name, "nvme", 4) == 0) partition = true;
+            }
+            if (strncmp(name, "loop", 4) == 0 || strncmp(name, "ram", 3) == 0 ||
+                strncmp(name, "zram", 4) == 0 || strncmp(name, "dm-", 3) == 0) partition = true;
+            if (!partition) { rd += rsec; wr += wsec; }
+        }
+        char *nl = strchr(line, '\n');
+        line = nl ? nl + 1 : NULL;
+    }
+
+    if (prev_rd != 0 && dt_sec > 0.0) {
+        /* sectors are 512 bytes */
+        double rbps = (double)(rd - prev_rd) * 512.0 / dt_sec;
+        double wbps = (double)(wr - prev_wr) * 512.0 / dt_sec;
+        /* log-scale to 0..1: ~500 MB/s saturates (NVMe-friendly) */
+        s->disk_read  = clampf((float)(log10(1.0 + rbps) / log10(5.0e8)), 0.0f, 1.0f);
+        s->disk_write = clampf((float)(log10(1.0 + wbps) / log10(5.0e8)), 0.0f, 1.0f);
+    }
+    prev_rd = rd; prev_wr = wr;
+}
+
+/* --- load average + nproc normalisation --- */
+static void sample_load(reactive_snapshot_t *s) {
+    char buf[256];
+    if (read_file("/proc/loadavg", buf, sizeof(buf)) <= 0) return;
+    double l1 = 0.0;
+    /* loadavg: "0.52 0.48 0.44 1/512 12345" -> last token before space is procs */
+    int total_proc = 0, run_proc = 0;
+    sscanf(buf, "%lf %*f %*f %d/%d", &l1, &run_proc, &total_proc);
+    s->load_raw = (float)l1;
+    long nproc = sysconf(_SC_NPROCESSORS_ONLN);
+    if (nproc < 1) nproc = 1;
+    s->load_avg = clampf((float)(l1 / (double)nproc), 0.0f, 1.0f);
+    if (total_proc > 0) {
+        s->proc_count = total_proc;
+        /* activity proxy: fraction of procs that are runnable */
+        s->procs = clampf((float)run_proc / (float)(nproc * 2), 0.0f, 1.0f);
+    }
+}
+
+/* --- uptime --- */
+static void sample_uptime(reactive_snapshot_t *s) {
+    char buf[128];
+    if (read_file("/proc/uptime", buf, sizeof(buf)) <= 0) return;
+    double up = atof(buf);
+    s->uptime_hours = (float)(up / 3600.0);
+}
+
+/* Read an integer from a sysfs file, or fallback. */
+static long read_long(const char *path, long fallback) {
+    char b[64];
+    if (read_file(path, b, sizeof(b)) > 0) return atol(b);
+    return fallback;
+}
+
+/* --- CPU temperature: scan /sys/class/hwmon for a coretemp/k10temp sensor --- */
+static void sample_cpu_temp(reactive_snapshot_t *s) {
+    DIR *d = opendir("/sys/class/hwmon");
+    if (!d) return;
+    struct dirent *e;
+    float best = 0.0f;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        char namep[512], name[64] = {0};
+        snprintf(namep, sizeof(namep), "/sys/class/hwmon/%s/name", e->d_name);
+        if (read_file(namep, name, sizeof(name)) <= 0) continue;
+        bool is_cpu = strncmp(name, "coretemp", 8) == 0 ||
+                      strncmp(name, "k10temp", 7) == 0 ||
+                      strncmp(name, "zenpower", 8) == 0 ||
+                      strncmp(name, "cpu_thermal", 11) == 0;
+        if (!is_cpu) continue;
+        /* temp1_input is usually the package; take the max of temp1..temp4 */
+        for (int i = 1; i <= 4; i++) {
+            char tp[512];
+            snprintf(tp, sizeof(tp), "/sys/class/hwmon/%s/temp%d_input", e->d_name, i);
+            long milli = read_long(tp, -1);
+            if (milli > 0) {
+                float c = (float)milli / 1000.0f;
+                if (c > best) best = c;
+            }
+        }
+    }
+    closedir(d);
+    if (best > 0.0f) {
+        s->cpu_temp_c = best;
+        s->cpu_temp = clampf((best - 30.0f) / 65.0f, 0.0f, 1.0f); /* 30..95C */
+    }
+}
+
+/* --- GPU usage + temp: amdgpu (gpu_busy_percent), i915, or nvidia hwmon --- */
+static void sample_gpu(reactive_snapshot_t *s) {
+    /* 1) AMD: gpu_busy_percent under /sys/class/drm/cardN/device/ */
+    for (int c = 0; c < 4; c++) {
+        char p[256];
+        snprintf(p, sizeof(p), "/sys/class/drm/card%d/device/gpu_busy_percent", c);
+        long busy = read_long(p, -1);
+        if (busy >= 0) {
+            s->gpu = clampf((float)busy / 100.0f, 0.0f, 1.0f);
+            break;
+        }
+    }
+
+    /* GPU temp: scan hwmon for amdgpu / nouveau / nvidia / i915 */
+    DIR *d = opendir("/sys/class/hwmon");
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            if (e->d_name[0] == '.') continue;
+            char namep[512], name[64] = {0};
+            snprintf(namep, sizeof(namep), "/sys/class/hwmon/%s/name", e->d_name);
+            if (read_file(namep, name, sizeof(name)) <= 0) continue;
+            bool is_gpu = strncmp(name, "amdgpu", 6) == 0 ||
+                          strncmp(name, "nouveau", 7) == 0 ||
+                          strncmp(name, "nvidia", 6) == 0 ||
+                          strncmp(name, "i915", 4) == 0;
+            if (!is_gpu) continue;
+            char tp[512];
+            snprintf(tp, sizeof(tp), "/sys/class/hwmon/%s/temp1_input", e->d_name);
+            long milli = read_long(tp, -1);
+            if (milli > 0) {
+                float cc = (float)milli / 1000.0f;
+                s->gpu_temp_c = cc;
+                s->gpu_temp = clampf((cc - 30.0f) / 65.0f, 0.0f, 1.0f);
+            }
+            break;
+        }
+        closedir(d);
     }
 }
 
@@ -416,8 +572,19 @@ void reactive_sample(void) {
     sample_cpu(&g_snap);
     sample_ram(&g_snap);
     sample_net(&g_snap, prev == 0.0 ? 0.0 : dt);
+    sample_disk(&g_snap, prev == 0.0 ? 0.0 : dt);
+    sample_load(&g_snap);
     sample_battery(&g_snap);
     sample_time(&g_snap);
+
+    /* Thermals, GPU, uptime are pricier (sysfs dir scans). Refresh ~1 Hz. */
+    static double last_slow = 0.0;
+    if (last_slow == 0.0 || now - last_slow >= 1.0) {
+        last_slow = now;
+        sample_uptime(&g_snap);
+        sample_cpu_temp(&g_snap);
+        sample_gpu(&g_snap);
+    }
 
     /* decay + fold in input energy */
     int keys = atomic_exchange(&g_key_hits, 0);

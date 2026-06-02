@@ -19,16 +19,16 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 px = 1.0 / iResolution.xy;
 
     // Shift the existing history one pixel to the left by reading from the
-    // right of our own previous frame.
-    vec3 prev = texture(iChannel0, uv + vec2(px.x, 0.0)).rgb;
+    // right of our own previous frame. RGBA = cpu, netDown, netUp, diskIO.
+    vec4 prev = texture(iChannel0, uv + vec2(px.x, 0.0));
 
     // At the right edge, write the newest live sample.
     if (uv.x > 1.0 - px.x) {
-        prev = vec3(iCpu, iNetDown, iNetUp);
+        prev = vec4(iCpu, iNetDown, iNetUp, max(iDiskRead, iDiskWrite));
     }
 
-    if (iFrame < 2) prev = vec3(0.0);
-    fragColor = vec4(prev, 1.0);
+    if (iFrame < 2) prev = vec4(0.0);
+    fragColor = prev;
 }
 
 // ============================== Image =============================
@@ -96,28 +96,57 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 green = vec3(0.3, 1.0, 0.5);
     vec3 red = vec3(1.0, 0.3, 0.25);
 
-    // ============ CPU gauge (left) ============
+    // ============ gauges: CPU (left), GPU (center-low), RAM (right) ============
+    // Each gauge has a thin temperature bar beneath it (CPU/GPU only).
     {
-        vec2 c = P - vec2(-0.55 * aspect * 0.6, 0.12);
+        // CPU
+        vec2 c = P - vec2(-0.62 * aspect * 0.6, 0.12);
         vec3 gcol = mix(green, red, pulse(iCpu));
         col += gauge(c, iCpu) * gcol * 1.6;
-        col += ring(c, 0.34, 0.004) * cyan * 0.4;        // track
+        col += ring(c, 0.34, 0.004) * cyan * 0.4;
         col += ring(c, 0.30, 0.002) * cyan * 0.2;
-        // percent readout in the center
         int pct = int(iCpu * 100.0 + 0.5);
-        vec2 tp = (c + vec2(0.07, -0.03)) / vec2(0.05, 0.08);
-        col += number(pct, tp, vec2(1.0), 3) * gcol * 1.5;
+        col += number(pct, (c + vec2(0.07, -0.03)) / vec2(0.05, 0.08), vec2(1.0), 3) * gcol * 1.5;
+        // CPU temp bar under the gauge
+        if (iCpuTempC > 1.0) {
+            vec2 bp = c - vec2(0.0, 0.40);
+            float bar = step(abs(bp.y), 0.012) * step(abs(bp.x), 0.18);
+            float fill = bar * step((bp.x + 0.18) / 0.36, iCpuTemp);
+            col += bar * cyan * 0.15;
+            col += fill * mix(green, red, iCpuTemp) * 1.0;
+        }
     }
-
-    // ============ RAM gauge (right) ============
     {
-        vec2 c = P - vec2(0.55 * aspect * 0.6, 0.12);
+        // GPU (slightly lower-center so the three form a triangle)
+        vec2 c = P - vec2(0.0, -0.18);
+        vec3 gcol = mix(vec3(0.4, 0.6, 1.0), red, pulse(iGpu));
+        col += gauge(c, iGpu) * gcol * 1.6;
+        col += ring(c, 0.34, 0.004) * vec3(0.4, 0.6, 1.0) * 0.4;
+        col += ring(c, 0.30, 0.002) * vec3(0.4, 0.6, 1.0) * 0.2;
+        int pct = int(iGpu * 100.0 + 0.5);
+        col += number(pct, (c + vec2(0.07, -0.03)) / vec2(0.05, 0.08), vec2(1.0), 3) * gcol * 1.5;
+        if (iGpuTempC > 1.0) {
+            vec2 bp = c - vec2(0.0, 0.40);
+            float bar = step(abs(bp.y), 0.012) * step(abs(bp.x), 0.18);
+            float fill = bar * step((bp.x + 0.18) / 0.36, iGpuTemp);
+            col += bar * vec3(0.4, 0.6, 1.0) * 0.15;
+            col += fill * mix(vec3(0.4, 0.6, 1.0), red, iGpuTemp) * 1.0;
+        }
+    }
+    {
+        // RAM
+        vec2 c = P - vec2(0.62 * aspect * 0.6, 0.12);
         vec3 gcol = mix(cyan, amber, iRam);
         col += gauge(c, iRam) * gcol * 1.6;
         col += ring(c, 0.34, 0.004) * cyan * 0.4;
         int pct = int(iRam * 100.0 + 0.5);
-        vec2 tp = (c + vec2(0.07, -0.03)) / vec2(0.05, 0.08);
-        col += number(pct, tp, vec2(1.0), 3) * gcol * 1.5;
+        col += number(pct, (c + vec2(0.07, -0.03)) / vec2(0.05, 0.08), vec2(1.0), 3) * gcol * 1.5;
+        // swap bar under RAM
+        vec2 bp = c - vec2(0.0, 0.40);
+        float bar = step(abs(bp.y), 0.012) * step(abs(bp.x), 0.18);
+        float fill = bar * step((bp.x + 0.18) / 0.36, iSwap);
+        col += bar * amber * 0.15;
+        col += fill * amber * 0.9;
     }
 
     // ============ CPU history graph (center top) ============
@@ -126,10 +155,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         if (uv.y > 0.62 && uv.y < 0.92 && uv.x > 0.2 && uv.x < 0.8) {
             float gx = (uv.x - 0.2) / 0.6;          // 0..1 across the band
             float baseY = 0.62, h = 0.30;
-            vec3 hist = texture(iChannel1, vec2(gx, 0.5)).rgb;
-            float cpuLine = baseY + hist.r * h;
-            float dnLine  = baseY + hist.g * h;
-            float upLine  = baseY + hist.b * h;
+            vec4 hist = texture(iChannel1, vec2(gx, 0.5));
+            float cpuLine  = baseY + hist.r * h;
+            float dnLine   = baseY + hist.g * h;
+            float upLine   = baseY + hist.b * h;
+            float diskLine = baseY + hist.a * h;
             // filled CPU area + crisp line
             float area = smoothstep(cpuLine, cpuLine - 0.005, uv.y) *
                          step(baseY, uv.y);
@@ -138,6 +168,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             // network traces
             col += smoothstep(0.004, 0.0, abs(uv.y - dnLine)) * cyan * 1.2;
             col += smoothstep(0.004, 0.0, abs(uv.y - upLine)) * amber * 1.2;
+            // disk I/O trace (magenta)
+            col += smoothstep(0.004, 0.0, abs(uv.y - diskLine)) * vec3(0.9, 0.3, 1.0) * 1.2;
             // frame
             col += smoothstep(0.004, 0.0, abs(uv.y - 0.92)) * cyan * 0.3;
             col += smoothstep(0.004, 0.0, abs(uv.y - 0.62)) * cyan * 0.3;
@@ -206,6 +238,21 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                length(uv - base - vec2(0.072, 0.012))) * cyan;
         col += step(0.5, fract(iTime)) * smoothstep(0.01, 0.0,
                length(uv - base - vec2(0.072, 0.030))) * cyan;
+    }
+
+    // ============ load / uptime / processes (top-left readouts) ============
+    {
+        vec2 cell = vec2(0.012, 0.02);
+        // load average x100 (e.g. 1.85 -> 185), top-left
+        int loadx = int(iLoadRaw * 100.0 + 0.5);
+        col += number(loadx, (uv - vec2(0.10, 0.93)) / cell + vec2(2.6, 0.0), vec2(1.0), 3)
+               * mix(green, red, iLoad) * 1.3;
+        // uptime in hours, just below
+        int uph = int(iUptimeHours);
+        col += number(uph, (uv - vec2(0.10, 0.89)) / cell + vec2(3.6, 0.0), vec2(1.0), 4) * cyan * 1.1;
+        // process count, below that
+        col += number(iProcCount, (uv - vec2(0.10, 0.85)) / cell + vec2(3.6, 0.0), vec2(1.0), 4)
+               * amber * 1.1;
     }
 
     // ---- CRT scanlines + flicker + vignette ----

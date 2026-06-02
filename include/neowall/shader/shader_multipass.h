@@ -78,7 +78,16 @@ typedef enum {
     UNIFORM_BIND_AUDIO_TREBLE,
     UNIFORM_BIND_AUDIO_BEAT,
     UNIFORM_BIND_KEY_ENERGY,
-    UNIFORM_BIND_MOUSE_ENERGY
+    UNIFORM_BIND_MOUSE_ENERGY,
+    UNIFORM_BIND_SWAP,
+    UNIFORM_BIND_DISK_READ,
+    UNIFORM_BIND_DISK_WRITE,
+    UNIFORM_BIND_LOAD,
+    UNIFORM_BIND_CPU_TEMP,
+    UNIFORM_BIND_GPU,
+    UNIFORM_BIND_GPU_TEMP,
+    UNIFORM_BIND_UPTIME,
+    UNIFORM_BIND_PROCS
 } uniform_bind_t;
 
 typedef struct {
@@ -102,6 +111,9 @@ typedef struct {
     GLint iChannel[MULTIPASS_MAX_CHANNELS];
     /* neowall reactive uniforms (see shader_stdlib.h). -1 if shader unused. */
     GLint iCpu, iCpuCores, iCpuCoreCount, iRam, iNetDown, iNetUp;
+    GLint iSwap, iDiskRead, iDiskWrite, iLoad, iLoadRaw;
+    GLint iCpuTemp, iCpuTempC, iGpu, iGpuTemp, iGpuTempC;
+    GLint iUptimeHours, iProcs, iProcCount;
     GLint iBattery, iCharging, iTimeOfDay, iSun, iDayFraction;
     GLint iKeyEnergy, iMouseEnergy;
     GLint iAudioLevel, iAudioBass, iAudioMid, iAudioTreble, iAudioBeat, iAudioActive;

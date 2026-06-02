@@ -405,6 +405,15 @@ uniform_bind_t multipass_bind_from_name(const char *name) {
     if (!strcasecmp(name, "audio_beat") || !strcasecmp(name, "beat")) return UNIFORM_BIND_AUDIO_BEAT;
     if (!strcasecmp(name, "key_energy") || !strcasecmp(name, "keys")) return UNIFORM_BIND_KEY_ENERGY;
     if (!strcasecmp(name, "mouse_energy") || !strcasecmp(name, "mouse")) return UNIFORM_BIND_MOUSE_ENERGY;
+    if (!strcasecmp(name, "swap"))        return UNIFORM_BIND_SWAP;
+    if (!strcasecmp(name, "disk_read")  || !strcasecmp(name, "diskread"))  return UNIFORM_BIND_DISK_READ;
+    if (!strcasecmp(name, "disk_write") || !strcasecmp(name, "diskwrite")) return UNIFORM_BIND_DISK_WRITE;
+    if (!strcasecmp(name, "load"))        return UNIFORM_BIND_LOAD;
+    if (!strcasecmp(name, "cpu_temp") || !strcasecmp(name, "cputemp")) return UNIFORM_BIND_CPU_TEMP;
+    if (!strcasecmp(name, "gpu"))         return UNIFORM_BIND_GPU;
+    if (!strcasecmp(name, "gpu_temp") || !strcasecmp(name, "gputemp")) return UNIFORM_BIND_GPU_TEMP;
+    if (!strcasecmp(name, "uptime"))      return UNIFORM_BIND_UPTIME;
+    if (!strcasecmp(name, "procs") || !strcasecmp(name, "processes")) return UNIFORM_BIND_PROCS;
     return UNIFORM_BIND_CONST;
 }
 
@@ -1351,6 +1360,19 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iRam          = glGetUniformLocation(prog, "iRam");
     u->iNetDown      = glGetUniformLocation(prog, "iNetDown");
     u->iNetUp        = glGetUniformLocation(prog, "iNetUp");
+    u->iSwap         = glGetUniformLocation(prog, "iSwap");
+    u->iDiskRead     = glGetUniformLocation(prog, "iDiskRead");
+    u->iDiskWrite    = glGetUniformLocation(prog, "iDiskWrite");
+    u->iLoad         = glGetUniformLocation(prog, "iLoad");
+    u->iLoadRaw      = glGetUniformLocation(prog, "iLoadRaw");
+    u->iCpuTemp      = glGetUniformLocation(prog, "iCpuTemp");
+    u->iCpuTempC     = glGetUniformLocation(prog, "iCpuTempC");
+    u->iGpu          = glGetUniformLocation(prog, "iGpu");
+    u->iGpuTemp      = glGetUniformLocation(prog, "iGpuTemp");
+    u->iGpuTempC     = glGetUniformLocation(prog, "iGpuTempC");
+    u->iUptimeHours  = glGetUniformLocation(prog, "iUptimeHours");
+    u->iProcs        = glGetUniformLocation(prog, "iProcs");
+    u->iProcCount    = glGetUniformLocation(prog, "iProcCount");
     u->iBattery      = glGetUniformLocation(prog, "iBattery");
     u->iCharging     = glGetUniformLocation(prog, "iCharging");
     u->iTimeOfDay    = glGetUniformLocation(prog, "iTimeOfDay");
@@ -1719,6 +1741,19 @@ void multipass_set_uniforms(multipass_shader_t *shader,
     if (u->iRam >= 0)         glUniform1f(u->iRam, r.ram);
     if (u->iNetDown >= 0)     glUniform1f(u->iNetDown, r.net_down);
     if (u->iNetUp >= 0)       glUniform1f(u->iNetUp, r.net_up);
+    if (u->iSwap >= 0)        glUniform1f(u->iSwap, r.swap);
+    if (u->iDiskRead >= 0)    glUniform1f(u->iDiskRead, r.disk_read);
+    if (u->iDiskWrite >= 0)   glUniform1f(u->iDiskWrite, r.disk_write);
+    if (u->iLoad >= 0)        glUniform1f(u->iLoad, r.load_avg);
+    if (u->iLoadRaw >= 0)     glUniform1f(u->iLoadRaw, r.load_raw);
+    if (u->iCpuTemp >= 0)     glUniform1f(u->iCpuTemp, r.cpu_temp);
+    if (u->iCpuTempC >= 0)    glUniform1f(u->iCpuTempC, r.cpu_temp_c);
+    if (u->iGpu >= 0)         glUniform1f(u->iGpu, r.gpu);
+    if (u->iGpuTemp >= 0)     glUniform1f(u->iGpuTemp, r.gpu_temp);
+    if (u->iGpuTempC >= 0)    glUniform1f(u->iGpuTempC, r.gpu_temp_c);
+    if (u->iUptimeHours >= 0) glUniform1f(u->iUptimeHours, r.uptime_hours);
+    if (u->iProcs >= 0)       glUniform1f(u->iProcs, r.procs);
+    if (u->iProcCount >= 0)   glUniform1i(u->iProcCount, r.proc_count);
     if (u->iBattery >= 0)     glUniform1f(u->iBattery, r.battery);
     if (u->iCharging >= 0)    glUniform1f(u->iCharging, r.charging ? 1.0f : 0.0f);
     if (u->iTimeOfDay >= 0)   glUniform1f(u->iTimeOfDay, r.time_of_day);
@@ -1756,6 +1791,15 @@ void multipass_set_uniforms(multipass_shader_t *shader,
             case UNIFORM_BIND_AUDIO_BEAT:   v = r.audio_beat; break;
             case UNIFORM_BIND_KEY_ENERGY:   v = r.key_energy; break;
             case UNIFORM_BIND_MOUSE_ENERGY: v = r.mouse_energy; break;
+            case UNIFORM_BIND_SWAP:         v = r.swap; break;
+            case UNIFORM_BIND_DISK_READ:    v = r.disk_read; break;
+            case UNIFORM_BIND_DISK_WRITE:   v = r.disk_write; break;
+            case UNIFORM_BIND_LOAD:         v = r.load_avg; break;
+            case UNIFORM_BIND_CPU_TEMP:     v = r.cpu_temp; break;
+            case UNIFORM_BIND_GPU:          v = r.gpu; break;
+            case UNIFORM_BIND_GPU_TEMP:     v = r.gpu_temp; break;
+            case UNIFORM_BIND_UPTIME:       v = r.uptime_hours; break;
+            case UNIFORM_BIND_PROCS:        v = r.procs; break;
             case UNIFORM_BIND_CONST: default: break;
         }
         glUniform1f(loc, v);

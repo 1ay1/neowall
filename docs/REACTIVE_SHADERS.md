@@ -64,7 +64,15 @@ System
 |---------|---------|
 | `iCpu` | total CPU load 0..1 |
 | `iCpuCores[8]`, `iCpuCoreCount` | per-core load |
+| `iCpuTemp`, `iCpuTempC` | CPU temp 0..1 (over 30..95°C) and raw °C |
+| `iGpu` | GPU utilisation 0..1 (amdgpu; 0 if unavailable) |
+| `iGpuTemp`, `iGpuTempC` | GPU temp 0..1 and raw °C |
 | `iRam` | memory used 0..1 |
+| `iSwap` | swap used 0..1 |
+| `iDiskRead`, `iDiskWrite` | disk I/O activity 0..1 (log-scaled) |
+| `iLoad`, `iLoadRaw` | 1-min load avg / cores (0..1), and raw value |
+| `iProcs`, `iProcCount` | process activity proxy, total process count |
+| `iUptimeHours` | system uptime in hours |
 | `iNetDown`, `iNetUp` | network activity 0..1 (log-scaled) |
 | `iBattery`, `iCharging` | charge 0..1, 1.0 if on AC |
 | `iTimeOfDay` | 0..1 across the local day |
@@ -126,11 +134,12 @@ uniforms {
 }
 ```
 
-Binding keywords for uniforms: `cpu`, `ram`, `net_down`, `net_up`, `battery`,
-`time_of_day`, `sun`, `audio`/`audio_level`, `audio_bass`/`bass`,
-`audio_mid`/`mid`, `audio_treble`/`treble`, `audio_beat`/`beat`,
-`key_energy`/`keys`, `mouse_energy`/`mouse`. Anything else is treated as a
-numeric constant.
+Binding keywords for uniforms: `cpu`, `ram`, `swap`, `net_down`, `net_up`,
+`disk_read`, `disk_write`, `load`, `cpu_temp`, `gpu`, `gpu_temp`, `uptime`,
+`procs`, `battery`, `time_of_day`, `sun`, `audio`/`audio_level`,
+`audio_bass`/`bass`, `audio_mid`/`mid`, `audio_treble`/`treble`,
+`audio_beat`/`beat`, `key_energy`/`keys`, `mouse_energy`/`mouse`. Anything else
+is treated as a numeric constant.
 
 Per-pass bindings (for multipass shaders) use blocks with `chN` keys:
 
