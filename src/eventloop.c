@@ -21,8 +21,10 @@
 
 /* Forward declarations */
 extern void handle_signal_from_fd(struct neowall_state *state, int signum);
+#ifdef HAVE_WAYLAND_BACKEND
 bool output_configure_compositor_surface(struct output_state *output);
 static void reinit_reconnected_outputs(struct neowall_state *state);
+#endif
 
 static struct neowall_state *event_loop_state = NULL;
 
@@ -505,6 +507,7 @@ static void render_outputs(struct neowall_state *state) {
  *   2. per output: create the EGL surface, init GL render state
  *   3. per output: apply just that output's wallpaper/shader config
  */
+#ifdef HAVE_WAYLAND_BACKEND
 static void reinit_reconnected_outputs(struct neowall_state *state) {
     if (!state || !state->compositor_backend) {
         return;
@@ -580,6 +583,7 @@ static void reinit_reconnected_outputs(struct neowall_state *state) {
         output_unref(pending[i]);
     }
 }
+#endif /* HAVE_WAYLAND_BACKEND */
 
 /* Main event loop */
 void event_loop_run(struct neowall_state *state) {
@@ -716,7 +720,9 @@ void event_loop_run(struct neowall_state *state) {
          * up here. */
         if (atomic_load_explicit(&state->outputs_need_init, memory_order_acquire)) {
             atomic_store_explicit(&state->outputs_need_init, false, memory_order_release);
+#ifdef HAVE_WAYLAND_BACKEND
             reinit_reconnected_outputs(state);
+#endif
         }
 
         /* Refresh live system/audio signals for reactive shaders (self-throttled). */
