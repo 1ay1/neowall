@@ -486,7 +486,8 @@ static void render_outputs(struct neowall_state *state) {
 /* Note: Wayland-specific event handling has been moved to compositor backend operations.
  * All compositor event handling is now done via the compositor abstraction layer. */
 
-/* Bring freshly-appeared outputs (reconnected monitors / DPMS-on) fully online.
+/* Bring freshly-appeared outputs (reconnected monitors / DPMS-on / hotplug)
+ * fully online.
  *
  * On a monitor power-off the compositor removes the wl_output global, which
  * destroys the output entirely. When the monitor returns a new output object
@@ -495,13 +496,14 @@ static void render_outputs(struct neowall_state *state) {
  * just sits there forever and nothing renders — the long-standing "rendering
  * never restarts after the monitor wakes" bug.
  *
- * We mirror the startup bring-up sequence (see wayland_init_full + egl_core)
- * for every output that still lacks a compositor surface:
- *   1. create the layer/compositor surface
- *   2. roundtrip so the configure event populates width/height + configured
- *   3. create the EGL surface and initialise GL render state
- * then re-run config_load() so the wallpaper/shader config is (re)applied and,
- * with the surface now ready, loaded immediately. */
+ * Handles any number of outputs in one pass and never disturbs outputs that
+ * are already live (their config is left exactly as-is). The bring-up mirrors
+ * the startup sequence (wayland_init_full + egl_core):
+ *   1. create every missing compositor surface, then ONE roundtrip so the
+ *      compositor delivers all the configure events (dimensions + configured)
+ *   2. per output: create the EGL surface, init GL render state
+ *   3. per output: apply just that output's wallpaper/shader config
+ */
 static void reinit_reconnected_outputs(struct neowall_state *state) {
     if (!state || !state->compositor_backend) {
         return;
@@ -509,12 +511,9 @@ static void reinit_reconnected_outputs(struct neowall_state *state) {
     const compositor_backend_ops_t *ops = state->compositor_backend->ops;
     void *backend_data = state->compositor_backend->data;
 
-    bool any_brought_up = false;
-
-    /* Collect surface-less outputs under the read lock, then operate on them
-     * with the lock dropped: surface creation roundtrips and GL init can take
-     * time and must not block hotplug writers. Outputs are kept alive by a
-     * transient ref so a concurrent removal can't free them underneath us. */
+    /* Snapshot surface-less outputs under the read lock, taking a transient ref
+     * on each so a concurrent hotplug-removal can't free them while we work
+     * with the lock dropped (surface roundtrips + GL init are slow). */
     struct output_state *pending[MAX_OUTPUTS];
     int n = 0;
     pthread_rwlock_rdlock(&state->output_list_lock);
@@ -527,69 +526,58 @@ static void reinit_reconnected_outputs(struct neowall_state *state) {
     pthread_rwlock_unlock(&state->output_list_lock);
 
     if (n == 0) {
-        log_debug("Reconnect: no surface-less outputs to initialise");
         return;
     }
 
+    /* Phase 1: create every missing surface, then a single roundtrip so all
+     * configure events (which set width/height + configured) arrive at once. */
+    for (int i = 0; i < n; i++) {
+        struct output_state *o = pending[i];
+        const char *name = o->connector_name[0] ? o->connector_name : o->model;
+        log_info("Reconnect: bringing up output %s", name[0] ? name : "unknown");
+        if (!output_configure_compositor_surface(o)) {
+            log_error("Reconnect: failed to create surface for output %s",
+                      name[0] ? name : "unknown");
+        }
+    }
+    if (ops && ops->sync) {
+        ops->sync(backend_data);
+    }
+    if (ops && ops->dispatch_events) {
+        ops->dispatch_events(backend_data);
+    }
+
+    /* Phase 2 + 3: per output, finish GL bring-up and apply its config. */
     for (int i = 0; i < n; i++) {
         struct output_state *o = pending[i];
         const char *name = o->connector_name[0] ? o->connector_name : o->model;
 
-        log_info("Reconnect: bringing up output %s", name[0] ? name : "unknown");
-
-        if (!output_configure_compositor_surface(o)) {
-            log_error("Reconnect: failed to create surface for output %s", name);
-            continue;
+        if (!o->compositor_surface) {
+            continue; /* surface creation failed above */
         }
-
-        /* Roundtrip so the compositor delivers the layer-surface configure,
-         * which sets o->configured and o->width/height. */
-        if (ops && ops->sync) {
-            ops->sync(backend_data);
-        }
-        if (ops && ops->dispatch_events) {
-            ops->dispatch_events(backend_data);
-        }
-
         if (o->width <= 0 || o->height <= 0) {
-            log_error("Reconnect: output %s has no dimensions yet (%dx%d), skipping",
-                      name, o->width, o->height);
+            log_error("Reconnect: output %s has no dimensions (%dx%d), skipping",
+                      name[0] ? name : "unknown", o->width, o->height);
+            continue;
+        }
+        if (!output_create_egl_surface(o) || !egl_core_make_current(state, o) ||
+            !output_init_render(o)) {
+            log_error("Reconnect: GL bring-up failed for output %s",
+                      name[0] ? name : "unknown");
             continue;
         }
 
-        if (!output_create_egl_surface(o)) {
-            log_error("Reconnect: failed to create EGL surface for output %s", name);
-            continue;
+        /* Apply ONLY this output's config — live outputs are untouched. */
+        if (config_apply_to_output(state, o)) {
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+            log_info("Reconnect: output %s online (%dx%d)",
+                     name[0] ? name : "unknown", o->width, o->height);
         }
-
-        if (!egl_core_make_current(state, o)) {
-            log_error("Reconnect: failed to make EGL context current for output %s", name);
-            continue;
-        }
-
-        if (!output_init_render(o)) {
-            log_error("Reconnect: failed to init render for output %s", name);
-            continue;
-        }
-
-        any_brought_up = true;
-        log_info("Reconnect: output %s surface + render ready (%dx%d)",
-                 name, o->width, o->height);
     }
 
     for (int i = 0; i < n; i++) {
         output_unref(pending[i]);
     }
-
-    if (!any_brought_up) {
-        return;
-    }
-
-    /* Re-apply the wallpaper/shader config. config_load() walks the output list
-     * and applies config to each output; for the now-ready reconnected outputs
-     * output_apply_config() loads the shader/image immediately. Outputs that
-     * were already live get their config re-applied (idempotent). */
-    config_load(state, state->config_path);
 }
 
 /* Main event loop */

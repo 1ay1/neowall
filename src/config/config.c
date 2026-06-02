@@ -1408,6 +1408,136 @@ static bool apply_builtin_default_config(struct neowall_state *state) {
  * Main Configuration Loading Function
  * ============================================================================ */
 
+/* Read + parse the config file into a VibeValue tree. On success returns the
+ * root object and hands ownership of the parser back via *out_parser (both must
+ * be freed by the caller: vibe_value_free(root) then vibe_parser_free(parser)).
+ * Returns NULL on any read/parse error (errors are logged). */
+static VibeValue *read_and_parse_config(const char *config_path,
+                                        VibeParser **out_parser) {
+    *out_parser = NULL;
+
+    struct stat st;
+    if (stat(config_path, &st) == -1 || !S_ISREG(st.st_mode) ||
+        st.st_size > 1024 * 1024) {
+        return NULL;
+    }
+
+    FILE *fp = fopen(config_path, "r");
+    if (!fp) {
+        return NULL;
+    }
+    char *content = malloc(st.st_size + 1);
+    if (!content) {
+        fclose(fp);
+        return NULL;
+    }
+    size_t bytes_read = fread(content, 1, st.st_size, fp);
+    content[bytes_read] = '\0';
+    fclose(fp);
+    if (bytes_read != (size_t)st.st_size) {
+        free(content);
+        return NULL;
+    }
+
+    VibeParser *parser = vibe_parser_new();
+    if (!parser) {
+        free(content);
+        return NULL;
+    }
+    VibeValue *root = vibe_parse_string(parser, content);
+    free(content);
+
+    if (!root || root->type != VIBE_TYPE_OBJECT) {
+        if (root) vibe_value_free(root);
+        vibe_parser_free(parser);
+        return NULL;
+    }
+
+    *out_parser = parser;
+    return root;
+}
+
+/* Find the config block that applies to `output`, honoring default ->
+ * output-specific precedence, parse it, and apply it to that single output.
+ * The output is matched by connector name first (e.g. DP-1), then model name. */
+bool config_apply_to_output(struct neowall_state *state, struct output_state *output) {
+    if (!state || !output) {
+        return false;
+    }
+
+    const char *name = output->connector_name[0] ? output->connector_name
+                                                 : output->model;
+
+    VibeParser *parser = NULL;
+    VibeValue *root = read_and_parse_config(state->config_path, &parser);
+    if (!root) {
+        log_error("Reconnect: could not read config for output %s, using built-in default",
+                  name[0] ? name : "unknown");
+        struct wallpaper_config def;
+        init_wallpaper_config_defaults(&def);
+        return output_apply_config(output, &def);
+    }
+
+    /* Start from the default block (if any), then let an output-specific block
+     * override it — exactly the precedence config_load() uses. */
+    struct wallpaper_config merged;
+    bool have_config = false;
+
+    VibeValue *default_obj = vibe_object_get(root->as_object, "default");
+    if (default_obj && default_obj->type == VIBE_TYPE_OBJECT) {
+        if (parse_wallpaper_config(default_obj, &merged, "default")) {
+            have_config = true;
+        }
+    }
+
+    VibeValue *outputs_obj = vibe_object_get(root->as_object, "output");
+    if (!outputs_obj) {
+        outputs_obj = vibe_object_get(root->as_object, "outputs");
+    }
+    if (outputs_obj && outputs_obj->type == VIBE_TYPE_OBJECT) {
+        for (size_t i = 0; i < outputs_obj->as_object->count; i++) {
+            const char *key = outputs_obj->as_object->entries[i].key;
+            VibeValue *blk = outputs_obj->as_object->entries[i].value;
+            if (blk->type != VIBE_TYPE_OBJECT) {
+                continue;
+            }
+            bool matches =
+                (output->connector_name[0] && strcmp(output->connector_name, key) == 0) ||
+                strcmp(output->model, key) == 0;
+            if (!matches) {
+                continue;
+            }
+            char ctx[128];
+            snprintf(ctx, sizeof(ctx), "output.%s", key);
+            struct wallpaper_config specific;
+            if (parse_wallpaper_config(blk, &specific, ctx)) {
+                if (have_config) {
+                    config_free_wallpaper(&merged);
+                }
+                merged = specific;
+                have_config = true;
+            }
+            break;
+        }
+    }
+
+    bool ok = false;
+    if (have_config) {
+        ok = output_apply_config(output, &merged);
+        config_free_wallpaper(&merged);
+    } else {
+        log_info("Reconnect: no matching config for output %s, using built-in default",
+                 name[0] ? name : "unknown");
+        struct wallpaper_config def;
+        init_wallpaper_config_defaults(&def);
+        ok = output_apply_config(output, &def);
+    }
+
+    vibe_value_free(root);
+    vibe_parser_free(parser);
+    return ok;
+}
+
 bool config_load(struct neowall_state *state, const char *config_path) {
     if (!state || !config_path) {
         log_error("Invalid parameters for config_load");
