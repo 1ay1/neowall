@@ -10,6 +10,9 @@
 #include <sys/signalfd.h>
 #include "neowall/neowall.h"
 #include "neowall/config/config_access.h"
+#include "neowall/config/config.h"
+#include "neowall/egl/egl_core.h"
+#include "neowall/output/output.h"
 #include "neowall/constants.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/occlusion/occlusion.h"
@@ -17,6 +20,8 @@
 
 /* Forward declarations */
 extern void handle_signal_from_fd(struct neowall_state *state, int signum);
+bool output_configure_compositor_surface(struct output_state *output);
+static void reinit_reconnected_outputs(struct neowall_state *state);
 
 static struct neowall_state *event_loop_state = NULL;
 
@@ -481,6 +486,112 @@ static void render_outputs(struct neowall_state *state) {
 /* Note: Wayland-specific event handling has been moved to compositor backend operations.
  * All compositor event handling is now done via the compositor abstraction layer. */
 
+/* Bring freshly-appeared outputs (reconnected monitors / DPMS-on) fully online.
+ *
+ * On a monitor power-off the compositor removes the wl_output global, which
+ * destroys the output entirely. When the monitor returns a new output object
+ * is created by the registry handler but it has no compositor surface, no EGL
+ * surface, no GL render state and no wallpaper config applied. Without this it
+ * just sits there forever and nothing renders — the long-standing "rendering
+ * never restarts after the monitor wakes" bug.
+ *
+ * We mirror the startup bring-up sequence (see wayland_init_full + egl_core)
+ * for every output that still lacks a compositor surface:
+ *   1. create the layer/compositor surface
+ *   2. roundtrip so the configure event populates width/height + configured
+ *   3. create the EGL surface and initialise GL render state
+ * then re-run config_load() so the wallpaper/shader config is (re)applied and,
+ * with the surface now ready, loaded immediately. */
+static void reinit_reconnected_outputs(struct neowall_state *state) {
+    if (!state || !state->compositor_backend) {
+        return;
+    }
+    const compositor_backend_ops_t *ops = state->compositor_backend->ops;
+    void *backend_data = state->compositor_backend->data;
+
+    bool any_brought_up = false;
+
+    /* Collect surface-less outputs under the read lock, then operate on them
+     * with the lock dropped: surface creation roundtrips and GL init can take
+     * time and must not block hotplug writers. Outputs are kept alive by a
+     * transient ref so a concurrent removal can't free them underneath us. */
+    struct output_state *pending[MAX_OUTPUTS];
+    int n = 0;
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o && n < MAX_OUTPUTS; o = o->next) {
+        if (!o->compositor_surface) {
+            output_ref(o);
+            pending[n++] = o;
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+
+    if (n == 0) {
+        log_debug("Reconnect: no surface-less outputs to initialise");
+        return;
+    }
+
+    for (int i = 0; i < n; i++) {
+        struct output_state *o = pending[i];
+        const char *name = o->connector_name[0] ? o->connector_name : o->model;
+
+        log_info("Reconnect: bringing up output %s", name[0] ? name : "unknown");
+
+        if (!output_configure_compositor_surface(o)) {
+            log_error("Reconnect: failed to create surface for output %s", name);
+            continue;
+        }
+
+        /* Roundtrip so the compositor delivers the layer-surface configure,
+         * which sets o->configured and o->width/height. */
+        if (ops && ops->sync) {
+            ops->sync(backend_data);
+        }
+        if (ops && ops->dispatch_events) {
+            ops->dispatch_events(backend_data);
+        }
+
+        if (o->width <= 0 || o->height <= 0) {
+            log_error("Reconnect: output %s has no dimensions yet (%dx%d), skipping",
+                      name, o->width, o->height);
+            continue;
+        }
+
+        if (!output_create_egl_surface(o)) {
+            log_error("Reconnect: failed to create EGL surface for output %s", name);
+            continue;
+        }
+
+        if (!egl_core_make_current(state, o)) {
+            log_error("Reconnect: failed to make EGL context current for output %s", name);
+            continue;
+        }
+
+        if (!output_init_render(o)) {
+            log_error("Reconnect: failed to init render for output %s", name);
+            continue;
+        }
+
+        any_brought_up = true;
+        log_info("Reconnect: output %s surface + render ready (%dx%d)",
+                 name, o->width, o->height);
+    }
+
+    for (int i = 0; i < n; i++) {
+        output_unref(pending[i]);
+    }
+
+    if (!any_brought_up) {
+        return;
+    }
+
+    /* Re-apply the wallpaper/shader config. config_load() walks the output list
+     * and applies config to each output; for the now-ready reconnected outputs
+     * output_apply_config() loads the shader/image immediately. Outputs that
+     * were already live get their config re-applied (idempotent). */
+    config_load(state, state->config_path);
+}
+
 /* Main event loop */
 void event_loop_run(struct neowall_state *state) {
     if (!state) {
@@ -604,12 +715,15 @@ void event_loop_run(struct neowall_state *state) {
 
     while (atomic_load_explicit(&state->running, memory_order_acquire)) {
 
-        /* Handle new outputs that need initialization (reconnected displays) */
+        /* Handle new outputs that need initialization (reconnected displays).
+         * A monitor power-off / disable makes the compositor remove the
+         * wl_output global, which tears the output down entirely. When it comes
+         * back a fresh output is created but has no surface, EGL, render state
+         * or wallpaper config — so nothing renders on it. Bring it fully back
+         * up here. */
         if (atomic_load_explicit(&state->outputs_need_init, memory_order_acquire)) {
-            log_info("New outputs detected, will be initialized by normal config load");
             atomic_store_explicit(&state->outputs_need_init, false, memory_order_release);
-            /* Don't call config_reload here - it causes deadlock on startup */
-            /* Outputs will be initialized through the normal config_load path */
+            reinit_reconnected_outputs(state);
         }
 
         /* Prepare for reading events via compositor backend */
