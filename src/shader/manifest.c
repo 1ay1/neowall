@@ -55,10 +55,13 @@ static void apply_channel_block(multipass_shader_t *shader, VibeObject *chans,
                                 multipass_type_t pass_type) {
     if (!chans) return;
     for (size_t i = 0; i < chans->count; i++) {
-        const char *key = chans->entries[i].key;       /* "0".."3" */
+        const char *key = chans->entries[i].key;       /* "ch0".."ch3" or "0".."3" */
         VibeValue *val = chans->entries[i].value;
         if (!val || val->type != VIBE_TYPE_STRING) continue;
-        int ch = atoi(key);
+        /* Accept "ch0", "channel0", or a bare "0". */
+        const char *digits = key;
+        while (*digits && (*digits < '0' || *digits > '9')) digits++;
+        int ch = atoi(digits);
         if (ch < 0 || ch >= MULTIPASS_MAX_CHANNELS) continue;
         channel_source_t src = multipass_channel_source_from_name(val->as_string);
         if (src == CHANNEL_SOURCE_NONE) {

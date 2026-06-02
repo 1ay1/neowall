@@ -126,6 +126,29 @@ neowall current  # print what's playing
 
 Pair it with [**GLEditor**](https://github.com/1ay1/gleditor) for a live-preview shader workflow that one-clicks into neowall.
 
+### Reactive shaders — a living desktop
+
+neowall is a **superset of Shadertoy**: on top of full compatibility it feeds
+shaders *live data from your machine* and ships a GLSL std-lib (noise, SDFs,
+palettes, tonemap) injected automatically — no `#include`. Shaders can react to
+system audio (FFT), CPU/RAM/network load, battery, the real time of day, and
+your mouse/keyboard. See [`docs/REACTIVE_SHADERS.md`](docs/REACTIVE_SHADERS.md).
+
+| Shader | Reacts to |
+|--------|-----------|
+| `audio_pulse` · `audio_bars` | system audio — spectrum, bass, beats |
+| `mouse_ripples` | water ripples from your cursor (click = splash) |
+| `plasma_touch` | plasma you push around with the mouse |
+| `fireflies` | a swarm that gathers at your pointer, flares on beat |
+| `starfield_warp` | warp speed scales with mouse motion + audio |
+| `system_monitor` | CPU heat, RAM tide, network pulses, battery |
+| `rain_window` | rain on glass — heavier with network, lightning on beat |
+| `circadian_sky` | a sky synced to your real clock: dawn → noon → dusk → stars |
+
+Drop a `.neowall` sidecar next to any shader for explicit channel bindings and
+custom reactive uniforms (e.g. `uniform uGlow audio_bass`). Audio capture uses
+`parec` (PipeWire/PulseAudio) and degrades to silence if it's not installed.
+
 ## How it works
 
 Single C binary. The event loop is built on `timerfd` + `signalfd` — there is no polling thread anywhere. Rendering goes through EGL → OpenGL 3.3 (desktop) with a GLES 2.0 fallback for older GPUs.

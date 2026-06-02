@@ -1,0 +1,7 @@
+# mouse_ripples.neowall — explicit bindings for the ripple simulation.
+# Buffer A feeds back on itself (the wave field); the Image pass reads it.
+
+shader mouse_ripples.glsl
+
+bufferA { ch0 self }
+image   { ch0 bufferA }

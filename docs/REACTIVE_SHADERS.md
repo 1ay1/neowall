@@ -132,11 +132,11 @@ Binding keywords for uniforms: `cpu`, `ram`, `net_down`, `net_up`, `battery`,
 `key_energy`/`keys`, `mouse_energy`/`mouse`. Anything else is treated as a
 numeric constant.
 
-Per-pass bindings (for multipass shaders) use blocks:
+Per-pass bindings (for multipass shaders) use blocks with `chN` keys:
 
 ```
-bufferA { 0 self  1 noise }
-image   { 0 bufferA  1 audio }
+bufferA { ch0 self  ch1 noise }
+image   { ch0 bufferA  ch1 audio }
 ```
 
 ---
