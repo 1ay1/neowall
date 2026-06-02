@@ -1,0 +1,8 @@
+# system_deck.neowall — channel bindings for the command-deck HUD.
+# Buffer A is the scrolling history ring buffer (self-feedback).
+# The Image pass reads the live buffers: ch0=self isn't needed, ch1=Buffer A.
+
+shader system_deck.glsl
+
+bufferA { ch0 self }
+image   { ch1 bufferA }

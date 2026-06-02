@@ -142,6 +142,7 @@ your mouse/keyboard. See [`docs/REACTIVE_SHADERS.md`](docs/REACTIVE_SHADERS.md).
 | `fireflies` | a swarm that gathers at your pointer, flares on beat |
 | `starfield_warp` | warp speed scales with mouse motion + audio |
 | `system_monitor` | CPU heat, RAM tide, network pulses, battery |
+| `system_deck` | a command-deck HUD: CPU/RAM gauges, scrolling history graph, per-core meters, net traces, battery, clock |
 | `rain_window` | rain on glass — heavier with network, lightning on beat |
 | `circadian_sky` | a sky synced to your real clock: dawn → noon → dusk → stars |
 
