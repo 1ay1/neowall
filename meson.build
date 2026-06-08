@@ -201,6 +201,7 @@ egl_sources = files(
 # Shader engine sources
 shader_sources = files(
   'src/shader/shader_core.c',
+  'src/shader/shader_error_log.c',
   'src/shader/shader_multipass.c',
   'src/shader/shadertoy_compat.c',
   'src/shader/adaptive_scale.c',

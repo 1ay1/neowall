@@ -13,11 +13,7 @@
 #include <unistd.h>
 #include "neowall/shader/platform_compat.h"
 #include "neowall/shader/shader.h"
-
-/* Global error log buffer for detailed error reporting */
-#define MAX_ERROR_LOG_SIZE 16384
-static char g_last_error_log[MAX_ERROR_LOG_SIZE];
-static size_t g_error_log_pos = 0;
+#include "neowall/shader/shader_error_log.h"
 
 /* Maximum path length */
 #ifndef MAX_PATH_LENGTH
@@ -25,40 +21,14 @@ static size_t g_error_log_pos = 0;
 #endif
 
 /* ============================================
- * Error Logging Functions
+ * Error Logging — delegates to shader_error_log
  * ============================================ */
 
-/* Clear error log */
-static void clear_error_log(void) {
-    g_last_error_log[0] = '\0';
-    g_error_log_pos = 0;
-}
+static void clear_error_log(void) { shader_error_log_clear(); }
 
-/* Append to error log */
-static void append_to_error_log(const char *format, ...) {
-    if (g_error_log_pos >= MAX_ERROR_LOG_SIZE - 1) {
-        return;
-    }
+#define append_to_error_log shader_error_log_append
 
-    va_list args;
-    va_start(args, format);
-    int written = vsnprintf(g_last_error_log + g_error_log_pos,
-                           MAX_ERROR_LOG_SIZE - g_error_log_pos,
-                           format, args);
-    va_end(args);
-
-    if (written > 0) {
-        g_error_log_pos += (size_t)written;
-        if (g_error_log_pos >= MAX_ERROR_LOG_SIZE) {
-            g_error_log_pos = MAX_ERROR_LOG_SIZE - 1;
-        }
-    }
-}
-
-/* Get last error log */
-const char *shader_get_last_error_log(void) {
-    return g_last_error_log;
-}
+const char *shader_get_last_error_log(void) { return shader_error_log_get(); }
 
 /* ============================================
  * Shader Compilation

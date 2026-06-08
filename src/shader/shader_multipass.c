@@ -11,6 +11,7 @@
 #include "neowall/shader/multipass_optimizer.h"
 #include "neowall/shader/shadertoy_compat.h"
 #include "neowall/shader/shader_log.h"
+#include "neowall/shader/shader_error_log.h"
 #include "neowall/shader/platform_compat.h"
 #include "neowall/shader/shader_stdlib.h"
 #include "neowall/shader/reactive.h"
@@ -24,39 +25,14 @@
 #include <stdarg.h>
 
 /* ============================================
- * Error Logging for Shader Compilation
+ * Error Logging — delegates to shader_error_log
  * ============================================ */
 
-#define MAX_ERROR_LOG_SIZE 16384
-static char g_last_error_log[MAX_ERROR_LOG_SIZE];
-static size_t g_error_log_pos = 0;
+static inline void clear_error_log(void) { shader_error_log_clear(); }
 
-static void clear_error_log(void) {
-    g_last_error_log[0] = '\0';
-    g_error_log_pos = 0;
-}
+#define append_to_error_log shader_error_log_append
 
-static void append_to_error_log(const char *format, ...) {
-    if (g_error_log_pos >= MAX_ERROR_LOG_SIZE - 1) return;
-    
-    va_list args;
-    va_start(args, format);
-    int written = vsnprintf(g_last_error_log + g_error_log_pos,
-                           MAX_ERROR_LOG_SIZE - g_error_log_pos,
-                           format, args);
-    va_end(args);
-    
-    if (written > 0) {
-        g_error_log_pos += written;
-        if (g_error_log_pos >= MAX_ERROR_LOG_SIZE) {
-            g_error_log_pos = MAX_ERROR_LOG_SIZE - 1;
-        }
-    }
-}
-
-const char *multipass_get_error_log(void) {
-    return g_last_error_log;
-}
+const char *multipass_get_error_log(void) { return shader_error_log_get(); }
 
 /* ============================================
  * Shader Compilation Utilities
