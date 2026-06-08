@@ -150,6 +150,11 @@ Drop a `.neowall` sidecar next to any shader for explicit channel bindings and
 custom reactive uniforms (e.g. `uniform uGlow audio_bass`). Audio capture uses
 `parec` (PipeWire/PulseAudio) and degrades to silence if it's not installed.
 
+**Changing what feeds `iChannel0..3`** (audio, noise, self-feedback, another
+buffer, a texture): a bare `.glsl` guesses via a heuristic; a `.neowall` sidecar
+lets you bind each channel explicitly — `channel0 audio`, `channel1 self`, etc.
+See [`docs/REACTIVE_SHADERS.md`](docs/REACTIVE_SHADERS.md#3-neowall-manifests).
+
 ## How it works
 
 Single C binary. The event loop is built on `timerfd` + `signalfd` — there is no polling thread anywhere. Rendering goes through EGL → OpenGL 3.3 (desktop) with a GLES 2.0 fallback for older GPUs.
