@@ -504,6 +504,18 @@ if get_option('fuzz')
     link_args: fuzz_args,
     build_by_default: true,
   )
+
+  # Fuzz the multipass GLSL parser — also untrusted user input.
+  executable('fuzz_multipass',
+    files(
+      'tests/fuzz_multipass.c',
+      'src/shader/multipass_parse.c',
+    ),
+    include_directories: [inc_dirs, inc_dirs_build],
+    c_args: fuzz_args,
+    link_args: fuzz_args,
+    build_by_default: true,
+  )
 endif
 
 # =============================================================================
