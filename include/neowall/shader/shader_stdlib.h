@@ -6,11 +6,12 @@
  * copy-paste. It also declares the reactive uniforms (iCpu, iAudioLevel, ...)
  * and the audio channel helpers (audioBand, beat, ...).
  *
- * Everything here is namespaced under nw* / declared as overloadable helpers so
- * it cannot clash with a user shader that defines its own noise(): GLSL allows
- * shadowing of these library functions by user definitions of the same name and
- * signature only if we DON'T define them — so the helpers use nw-prefixed names
- * and we expose a few un-prefixed aliases (palette, fbm) guarded by #ifndef.
+ * Everything here is namespaced under nw* so it cannot clash with a user
+ * shader that defines its own noise()/fbm()/hsv2rgb(). The nw-prefixed names
+ * are the public API; there are deliberately NO unprefixed aliases — GLSL has
+ * no way to detect a user function definition from the preprocessor, so a
+ * `#define hsv2rgb nwHsv2rgb` would rewrite the user's own `vec3 hsv2rgb(...)`
+ * into a duplicate of nwHsv2rgb and fail to compile.
  *
  * Kept as a single C string so it concatenates straight into the wrapper. */
 
@@ -173,13 +174,11 @@ static const char *neowall_glsl_stdlib2 =
     "// warmCool: a color temperature shift driven by time of day.\n"
     "vec3 timeOfDayTint(){ return mix(vec3(0.35,0.45,0.85), vec3(1.05,0.95,0.7), dayNight()); }\n"
     "\n"
-    "// Aliases (only if the user didn't define their own).\n"
-    "#ifndef NW_NO_ALIASES\n"
-    "  #define fbm nwFbm\n"
-    "  #define palette nwPalette\n"
-    "  #define hsv2rgb nwHsv2rgb\n"
-    "  #define rot2d nwRot\n"
-    "#endif\n"
+    "// No unprefixed aliases: GLSL has no way to detect whether the user\n"
+    "// already defined fbm()/hsv2rgb()/etc., so a `#define hsv2rgb nwHsv2rgb`\n"
+    "// turns the user's `vec3 hsv2rgb(...)` into a duplicate definition of\n"
+    "// nwHsv2rgb at preprocess time. Call nwFbm/nwPalette/nwHsv2rgb/nwRot\n"
+    "// directly, or define your own short helper.\n"
     "// ============================================================\n"
     "\n";
 
