@@ -1,17 +1,16 @@
 #ifdef HAVE_X11_BACKEND
 
 /* Occlusion detection on X11. EWMH _NET_CLIENT_LIST_STACKING +
- * _NET_WM_STATE_FULLSCREEN, mapped onto XRandR monitor geometries.
+ * _NET_WM_STATE_FULLSCREEN, evaluated per output.
  * Owned by the X11 backend.
  *
- * Multi-monitor semantics: neowall's X11 backend creates ONE synthetic
- * output that spans the entire X root window (covering every connected
- * monitor). We therefore mark that output occluded only when EVERY
- * XRandR monitor is covered by a fullscreen window — if any monitor is
- * still showing wallpaper, the user can see it and we keep rendering.
- * The previous implementation indexed `monitors[idx]` against the output
- * list, which produced wrong answers as soon as there was more than one
- * monitor (or the orders differed). */
+ * Multi-monitor semantics: the X11 backend creates ONE output per active
+ * monitor, each carrying its own geometry (x_offset/y_offset/width/height).
+ * An output is occluded when a fullscreen window covers its own monitor rect,
+ * independent of what the other monitors are doing — so a fullscreen game on
+ * one screen pauses only that screen's wallpaper, while the others keep
+ * animating. We match against the output's stored geometry directly rather
+ * than indexing RandR monitors, so list/RandR ordering can't desync. */
 
 #include <stdlib.h>
 #include <string.h>
@@ -37,9 +36,7 @@ static int check_counter = 0;
 #define CHECK_INTERVAL 10
 
 /* Coverage threshold: a fullscreen window must cover at least this fraction
- * of a monitor's rect for that monitor to count as "occluded". 9/10 = 90%
- * was the previous magic number; preserved exactly so existing behavior is
- * unchanged on single-monitor setups. */
+ * of an output's rect for that output to count as "occluded". 9/10 = 90%. */
 #define MONITOR_COVERAGE_NUM 9
 #define MONITOR_COVERAGE_DEN 10
 
@@ -87,14 +84,10 @@ static bool get_window_geometry(Display *dpy, Window win,
     return true;
 }
 
-/* Is this monitor covered by any of the fullscreen rects? */
-static bool monitor_is_covered(const XRRMonitorInfo *mon,
-                               const rect_t *fs, int fs_count) {
-    int mx = mon->x, my = mon->y;
-    int mw = mon->width, mh = mon->height;
+/* Is the rect (mx,my,mw,mh) covered by any of the fullscreen rects? */
+static bool rect_is_covered(int mx, int my, int mw, int mh,
+                            const rect_t *fs, int fs_count) {
     if (mw <= 0 || mh <= 0) {
-        /* Degenerate monitor entry — can't be "covered" in any meaningful
-         * sense, treat as visible so we keep rendering. */
         return false;
     }
     for (int i = 0; i < fs_count; i++) {
@@ -131,9 +124,6 @@ static void check_fullscreen_state(void) {
     }
     Window *windows = (Window *)data;
 
-    int num_monitors = 0;
-    XRRMonitorInfo *monitors = XRRGetMonitors(x_display, root_window, True, &num_monitors);
-
     /* Collect fullscreen window rects. Grow geometrically (doubling) instead
      * of one-at-a-time — amortized O(n) instead of O(n^2) reallocations, and
      * a failed grow now logs and bails for the rest of the list rather than
@@ -165,22 +155,8 @@ static void check_fullscreen_state(void) {
     }
     XFree(data);
 
-    /* Decide occlusion for the (single) X11 synthetic output. It spans the
-     * full root window, so it's only truly occluded when EVERY monitor is
-     * covered — if any monitor still shows wallpaper, the user sees it. */
-    bool all_monitors_covered = (num_monitors > 0);
-    if (monitors && num_monitors > 0) {
-        for (int i = 0; i < num_monitors; i++) {
-            if (!monitor_is_covered(&monitors[i], fs, fs_count)) {
-                all_monitors_covered = false;
-                break;
-            }
-        }
-    } else {
-        /* No XRandR monitor info available — can't decide, stay visible. */
-        all_monitors_covered = false;
-    }
-
+    /* Decide occlusion per output: each output is occluded when a fullscreen
+     * window covers its own monitor rect. */
     pthread_rwlock_rdlock(&g_state->output_list_lock);
 
     for (struct output_state *o = g_state->outputs; o; o = o->next) {
@@ -189,7 +165,8 @@ static void check_fullscreen_state(void) {
         }
 
         bool was = atomic_load_explicit(&o->occluded, memory_order_acquire);
-        bool now = all_monitors_covered;
+        bool now = rect_is_covered(o->x_offset, o->y_offset,
+                                   o->width, o->height, fs, fs_count);
 
         atomic_store_explicit(&o->occluded, now, memory_order_release);
 
@@ -198,15 +175,12 @@ static void check_fullscreen_state(void) {
             atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
             log_info("Output %s un-occluded, resuming rendering", name);
         } else if (!was && now) {
-            log_info("Output %s occluded by fullscreen window(s) on all monitors, pausing rendering", name);
+            log_info("Output %s occluded by fullscreen window, pausing rendering", name);
         }
     }
 
     pthread_rwlock_unlock(&g_state->output_list_lock);
 
-    if (monitors) {
-        XRRFreeMonitors(monitors);
-    }
     free(fs);
 }
 

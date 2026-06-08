@@ -85,6 +85,10 @@ typedef struct {
     EGLSurface egl_surface;
     EGLNativeWindowType native_window;
     bool mapped;
+    bool owns_root_pixmap;  /* Only the origin (0,0) surface drives the root-window
+                            * background pixmap for pseudo-transparency. Secondary
+                            * monitors render their own window but must not clobber
+                            * the shared root pixmap with just their slice. */
     Pixmap root_pixmap;  /* Pixmap set on root window for pseudo-transparency */
     GC gc;               /* Graphics context for copying to pixmap */
     XImage *ximage;      /* XImage for transferring OpenGL pixels to pixmap */
@@ -274,11 +278,15 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
     int screen_width, screen_height;
     x11_get_screen_dimensions(backend, &screen_width, &screen_height);
 
-    /* Determine surface dimensions from config or output */
+    /* Determine surface geometry. With a per-monitor layout the caller passes
+     * the monitor's exact size and position; when those are unset we fall back
+     * to the whole screen at the origin (single-output case). */
     int width = config->width > 0 ? config->width : screen_width;
     int height = config->height > 0 ? config->height : screen_height;
+    int pos_x = config->x;
+    int pos_y = config->y;
 
-    log_debug("Creating X11 wallpaper window: %dx%d", width, height);
+    log_debug("Creating X11 wallpaper window: %dx%d at +%d+%d", width, height, pos_x, pos_y);
 
     /* Create pixmap for root window background (for Conky pseudo-transparency) */
     surf_data->root_pixmap = XCreatePixmap(backend->x_display, backend->root_window,
@@ -323,7 +331,7 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
     surf_data->x_window = XCreateWindow(
         backend->x_display,
         backend->root_window,
-        0, 0,  /* Position at top-left */
+        pos_x, pos_y,  /* Position at the monitor's top-left within the screen */
         width, height,
         0,  /* No border */
         CopyFromParent,  /* depth */
@@ -362,26 +370,34 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
         }
     }
 
-    /* Set the pixmap as root window background */
-    XSetWindowBackgroundPixmap(backend->x_display, backend->root_window, surf_data->root_pixmap);
-    XClearWindow(backend->x_display, backend->root_window);
+    /* The root-window background pixmap (for Conky-style pseudo-transparency)
+     * is a single screen-wide concept; only the surface anchored at the origin
+     * owns it. Secondary monitors render their own window and skip this so they
+     * don't paint just their slice onto the whole root. */
+    surf_data->owns_root_pixmap = (pos_x == 0 && pos_y == 0);
 
-    /* Set root window properties for pseudo-transparency apps (Conky, etc) */
-    Atom prop_root = XInternAtom(backend->x_display, "_XROOTPMAP_ID", False);
-    Atom prop_esetroot = XInternAtom(backend->x_display, "ESETROOT_PMAP_ID", False);
-    XChangeProperty(backend->x_display, backend->root_window, prop_root, XA_PIXMAP, 32,
-                   PropModeReplace, (unsigned char *)&surf_data->root_pixmap, 1);
-    XChangeProperty(backend->x_display, backend->root_window, prop_esetroot, XA_PIXMAP, 32,
-                   PropModeReplace, (unsigned char *)&surf_data->root_pixmap, 1);
+    if (surf_data->owns_root_pixmap) {
+        /* Set the pixmap as root window background */
+        XSetWindowBackgroundPixmap(backend->x_display, backend->root_window, surf_data->root_pixmap);
+        XClearWindow(backend->x_display, backend->root_window);
 
-    /* Send PropertyNotify event to notify apps like Conky that background changed */
-    XEvent event;
-    memset(&event, 0, sizeof(event));
-    event.type = PropertyNotify;
-    event.xproperty.window = backend->root_window;
-    event.xproperty.atom = prop_root;
-    event.xproperty.state = PropertyNewValue;
-    XSendEvent(backend->x_display, backend->root_window, False, PropertyChangeMask, &event);
+        /* Set root window properties for pseudo-transparency apps (Conky, etc) */
+        Atom prop_root = XInternAtom(backend->x_display, "_XROOTPMAP_ID", False);
+        Atom prop_esetroot = XInternAtom(backend->x_display, "ESETROOT_PMAP_ID", False);
+        XChangeProperty(backend->x_display, backend->root_window, prop_root, XA_PIXMAP, 32,
+                       PropModeReplace, (unsigned char *)&surf_data->root_pixmap, 1);
+        XChangeProperty(backend->x_display, backend->root_window, prop_esetroot, XA_PIXMAP, 32,
+                       PropModeReplace, (unsigned char *)&surf_data->root_pixmap, 1);
+
+        /* Send PropertyNotify event to notify apps like Conky that background changed */
+        XEvent event;
+        memset(&event, 0, sizeof(event));
+        event.type = PropertyNotify;
+        event.xproperty.window = backend->root_window;
+        event.xproperty.atom = prop_root;
+        event.xproperty.state = PropertyNewValue;
+        XSendEvent(backend->x_display, backend->root_window, False, PropertyChangeMask, &event);
+    }
 
     XFlush(backend->x_display);
 
@@ -393,6 +409,8 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
     surface->egl_window = NULL;  /* X11 uses window directly, not wl_egl_window */
     surface->egl_surface = EGL_NO_SURFACE;
     surface->native_output = NULL;
+    surface->x = pos_x;
+    surface->y = pos_y;
     surface->width = width;
     surface->height = height;
     surface->scale = 1;
@@ -499,6 +517,31 @@ static bool x11_configure_surface(struct compositor_surface *surface,
  * MOUSE TRACKING
  * ============================================================================ */
 
+/* Distribute a root-space pointer position to every output, converting to
+ * coordinates relative to each output's own origin. An output that the pointer
+ * is not currently over gets (-1, -1), which render.c maps to that monitor's
+ * center — so iMouse only tracks the real cursor on the monitor it's actually
+ * on, and the others sit centered instead of all sharing one global coordinate.
+ * Caller must NOT hold output_list_lock. */
+static void x11_distribute_mouse(x11_backend_data_t *backend, int root_x, int root_y) {
+    pthread_rwlock_rdlock(&backend->state->output_list_lock);
+    for (struct output_state *o = backend->state->outputs; o; o = o->next) {
+        int lx = root_x - o->x_offset;
+        int ly = root_y - o->y_offset;
+        bool inside = lx >= 0 && ly >= 0 &&
+                      (o->width <= 0 || lx < o->width) &&
+                      (o->height <= 0 || ly < o->height);
+        if (inside) {
+            o->mouse_x = (float)lx;
+            o->mouse_y = (float)ly;
+        } else {
+            o->mouse_x = -1.0f;
+            o->mouse_y = -1.0f;
+        }
+    }
+    pthread_rwlock_unlock(&backend->state->output_list_lock);
+}
+
 /* Update mouse position for all outputs by querying X11 pointer */
 static void x11_update_mouse_position(x11_backend_data_t *backend) {
     if (!backend || !backend->x_display || !backend->state) return;
@@ -523,21 +566,7 @@ static void x11_update_mouse_position(x11_backend_data_t *backend) {
         last_mouse_log = now;
     }
 
-    /* Update mouse position for all outputs with proper locking */
-    pthread_rwlock_rdlock(&backend->state->output_list_lock);
-
-    struct output_state *output = backend->state->outputs;
-    while (output) {
-        /* Convert root coordinates to output-relative coordinates
-         * For simplicity, we'll use the absolute root coordinates since
-         * X11 backend uses fullscreen windows */
-        output->mouse_x = (float)root_x;
-        output->mouse_y = (float)root_y;
-
-        output = output->next;
-    }
-
-    pthread_rwlock_unlock(&backend->state->output_list_lock);
+    x11_distribute_mouse(backend, root_x, root_y);
 }
 
 /* ============================================================================
@@ -579,15 +608,7 @@ static bool x11_handle_events(x11_backend_data_t *backend) {
                          event.xbutton.y_root);
 
                 if (!mouse_on) break;
-                /* Update mouse position in all outputs */
-                pthread_rwlock_rdlock(&backend->state->output_list_lock);
-                struct output_state *output = backend->state->outputs;
-                while (output) {
-                    output->mouse_x = (float)event.xbutton.x_root;
-                    output->mouse_y = (float)event.xbutton.y_root;
-                    output = output->next;
-                }
-                pthread_rwlock_unlock(&backend->state->output_list_lock);
+                x11_distribute_mouse(backend, event.xbutton.x_root, event.xbutton.y_root);
                 break;
 
             case ButtonRelease:
@@ -597,15 +618,7 @@ static bool x11_handle_events(x11_backend_data_t *backend) {
                          event.xbutton.y_root);
 
                 if (!mouse_on) break;
-                /* Update mouse position in all outputs */
-                pthread_rwlock_rdlock(&backend->state->output_list_lock);
-                output = backend->state->outputs;
-                while (output) {
-                    output->mouse_x = (float)event.xbutton.x_root;
-                    output->mouse_y = (float)event.xbutton.y_root;
-                    output = output->next;
-                }
-                pthread_rwlock_unlock(&backend->state->output_list_lock);
+                x11_distribute_mouse(backend, event.xbutton.x_root, event.xbutton.y_root);
                 break;
 
             case MotionNotify: {
@@ -621,14 +634,7 @@ static bool x11_handle_events(x11_backend_data_t *backend) {
                     last_motion_log = now;
                 }
 
-                pthread_rwlock_rdlock(&backend->state->output_list_lock);
-                output = backend->state->outputs;
-                while (output) {
-                    output->mouse_x = (float)event.xmotion.x_root;
-                    output->mouse_y = (float)event.xmotion.y_root;
-                    output = output->next;
-                }
-                pthread_rwlock_unlock(&backend->state->output_list_lock);
+                x11_distribute_mouse(backend, event.xmotion.x_root, event.xmotion.y_root);
                 break;
             }
 
@@ -692,12 +698,15 @@ static void x11_commit_surface(struct compositor_surface *surface) {
     }
 
     /* Copy the OpenGL rendered content to the root pixmap for Conky pseudo-transparency.
-     * This is expensive (glReadPixels stalls the GPU pipeline), so throttle to 1 FPS
-     * for live shader wallpapers. Static images always update immediately. */
-    if (surf_data->root_pixmap && surf_data->gc && surf_data->pixel_buffer && surf_data->ximage) {
+     * Only the origin surface owns the screen-wide root pixmap; secondary monitors
+     * just present their own window. This glReadPixels stalls the GPU pipeline, so
+     * throttle to 1 FPS for live shader wallpapers. Static images update immediately. */
+    if (surf_data->owns_root_pixmap &&
+        surf_data->root_pixmap && surf_data->gc && surf_data->pixel_buffer && surf_data->ximage) {
         static uint64_t last_pixmap_update = 0;
         uint64_t now = get_time_ms();
-        bool is_shader = backend->state && backend->state->outputs &&
+        bool is_shader = surface->config.layer == COMPOSITOR_LAYER_BACKGROUND &&
+                         backend->state && backend->state->outputs &&
                          backend->state->outputs->config->type == WALLPAPER_SHADER;
         bool should_update = !is_shader || (now - last_pixmap_update >= 1000);
 
@@ -918,130 +927,229 @@ static void x11_set_scale(struct compositor_surface *surface, int32_t scale) {
  * BACKEND OPERATIONS TABLE
  * ============================================================================ */
 
-/* Initialize outputs for X11 backend */
-static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
-    if (!backend_data || !state) {
-        return false;
+/* Geometry of one physical monitor within the X screen. */
+typedef struct {
+    char name[64];   /* RandR connector name, e.g. "DVI-D-0" */
+    int x, y;        /* Top-left within the screen */
+    int width, height;
+} x11_monitor_t;
+
+/* Enumerate the active monitors of the X screen.
+ *
+ * Prefers XRandR 1.5 monitors (XRRGetMonitors) which already merges CRTCs into
+ * logical monitors and carries real connector names. Falls back to walking
+ * active CRTCs (RandR < 1.5), and finally to a single whole-screen monitor when
+ * RandR is unavailable. Writes up to `max` entries and returns the count. */
+static int x11_enumerate_monitors(x11_backend_data_t *backend, x11_monitor_t *mons, int max) {
+    Display *dpy = backend->x_display;
+    int count = 0;
+
+    if (backend->has_xrandr) {
+        int n = 0;
+        XRRMonitorInfo *info = XRRGetMonitors(dpy, backend->root_window, True, &n);
+        if (info && n > 0) {
+            for (int i = 0; i < n && count < max; i++) {
+                if (info[i].width <= 0 || info[i].height <= 0) continue;
+                char *cn = info[i].name ? XGetAtomName(dpy, info[i].name) : NULL;
+                snprintf(mons[count].name, sizeof(mons[count].name), "%.63s",
+                         cn ? cn : "X11-0");
+                if (cn) XFree(cn);
+                mons[count].x = info[i].x;
+                mons[count].y = info[i].y;
+                mons[count].width = info[i].width;
+                mons[count].height = info[i].height;
+                count++;
+            }
+            XRRFreeMonitors(info);
+            if (count > 0) return count;
+        } else if (info) {
+            XRRFreeMonitors(info);
+        }
+
+        /* Fallback: active CRTCs with their connector names (RandR < 1.5). */
+        XRRScreenResources *res = XRRGetScreenResources(dpy, backend->root_window);
+        if (res) {
+            for (int i = 0; i < res->ncrtc && count < max; i++) {
+                XRRCrtcInfo *ci = XRRGetCrtcInfo(dpy, res, res->crtcs[i]);
+                if (!ci) continue;
+                if (ci->mode != None && ci->noutput > 0 && ci->width > 0 && ci->height > 0) {
+                    const char *name = NULL;
+                    XRROutputInfo *oi = XRRGetOutputInfo(dpy, res, ci->outputs[0]);
+                    if (oi && oi->name) name = oi->name;
+                    snprintf(mons[count].name, sizeof(mons[count].name), "%.63s",
+                             name ? name : "X11-0");
+                    if (oi) XRRFreeOutputInfo(oi);
+                    mons[count].x = ci->x;
+                    mons[count].y = ci->y;
+                    mons[count].width = ci->width;
+                    mons[count].height = ci->height;
+                    count++;
+                }
+                XRRFreeCrtcInfo(ci);
+            }
+            XRRFreeScreenResources(res);
+            if (count > 0) return count;
+        }
     }
 
-    log_info("Creating X11 output for default screen");
+    /* Last resort: one monitor covering the whole screen. */
+    snprintf(mons[0].name, sizeof(mons[0].name), "X11-0");
+    mons[0].x = 0;
+    mons[0].y = 0;
+    mons[0].width = DisplayWidth(dpy, backend->screen);
+    mons[0].height = DisplayHeight(dpy, backend->screen);
+    return 1;
+}
 
-    /* Create synthetic output for X11 */
-    struct output_state *x11_output = calloc(1, sizeof(struct output_state));
-    if (!x11_output) {
+/* Build one output_state for a monitor and link it into the global list. The
+ * compositor surface is created lazily by the caller. Returns NULL on OOM. */
+static struct output_state *x11_make_output(struct neowall_state *state,
+                                            const x11_monitor_t *mon) {
+    struct output_state *out = calloc(1, sizeof(struct output_state));
+    if (!out) {
         log_error("Failed to allocate X11 output");
-        return false;
+        return NULL;
     }
 
-    x11_output->state = state;
-    x11_output->native_output = NULL;  /* X11 doesn't use Wayland outputs */
-    x11_output->name = 0;
-    snprintf(x11_output->model, sizeof(x11_output->model), "X11 Screen");
-    snprintf(x11_output->connector_name, sizeof(x11_output->connector_name), "X11-0");
+    out->state = state;
+    out->native_output = NULL;  /* X11 doesn't use Wayland outputs */
+    out->name = 0;
+    /* model and connector_name both carry the real RandR name so per-output
+     * config blocks (matched by either) work and `neowall current` is right. */
+    snprintf(out->model, sizeof(out->model), "%.63s", mon->name);
+    snprintf(out->connector_name, sizeof(out->connector_name), "%.63s", mon->name);
 
-    /* Dimensions will be set to 0 - compositor surface creation will use actual screen size */
-    x11_output->pixel_width = 0;
-    x11_output->pixel_height = 0;
-    x11_output->width = 0;
-    x11_output->height = 0;
-    x11_output->logical_width = 0;
-    x11_output->logical_height = 0;
-    x11_output->scale = 1;
-    x11_output->configured = true;
+    out->x_offset = mon->x;
+    out->y_offset = mon->y;
+    out->pixel_width = mon->width;
+    out->pixel_height = mon->height;
+    out->width = mon->width;
+    out->height = mon->height;
+    out->logical_width = mon->width;
+    out->logical_height = mon->height;
+    out->scale = 1;
+    out->configured = true;
+    atomic_init(&out->refcount, 1);  /* the output list's reference */
 
-    /* Allocate config structure */
-    x11_output->config = calloc(1, sizeof(struct wallpaper_config));
-    if (!x11_output->config) {
+    out->config = calloc(1, sizeof(struct wallpaper_config));
+    if (!out->config) {
         log_error("Failed to allocate config for X11 output");
-        free(x11_output);
+        free(out);
+        return NULL;
+    }
+
+    /* Defaults; the real config is applied by config_load via output_apply_config. */
+    out->config->mode = MODE_FILL;
+    out->config->duration = 0;
+    out->config->transition = TRANSITION_NONE;
+    out->config->transition_duration = 300;
+    out->config->cycle = false;
+    out->config->cycle_paths = NULL;
+    out->config->cycle_count = 0;
+    out->config->current_cycle_index = 0;
+    out->config->type = WALLPAPER_IMAGE;
+    out->config->path[0] = '\0';
+    out->config->shader_path[0] = '\0';
+    out->config->shader_speed = 1.0f;
+    out->config->shader_fps = 60;
+    out->config->show_fps = false;
+    out->config->channel_paths = NULL;
+    out->config->channel_count = 0;
+
+    out->preload_texture = 0;
+    out->preload_image = NULL;
+    out->preload_path[0] = '\0';
+    atomic_store(&out->preload_ready, false);
+
+    pthread_mutex_init(&out->preload_mutex, NULL);
+    out->preload_decoded_image = NULL;
+    atomic_store(&out->preload_thread_active, false);
+    atomic_store(&out->preload_upload_pending, false);
+
+    out->fps_last_log_time = 0;
+    out->fps_frame_count = 0;
+    out->fps_current = 0.0f;
+    out->frame_timer_fd = -1;
+    out->mouse_x = -1.0f;
+    out->mouse_y = -1.0f;
+
+    return out;
+}
+
+/* Initialize outputs for X11 backend: one output + one positioned wallpaper
+ * window per active monitor. */
+static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
+    x11_backend_data_t *backend = backend_data;
+    if (!backend || !state) {
         return false;
     }
 
-    /* Initialize config with defaults */
-    x11_output->config->mode = MODE_FILL;
-    x11_output->config->duration = 0;
-    x11_output->config->transition = TRANSITION_NONE;
-    x11_output->config->transition_duration = 300;
-    x11_output->config->cycle = false;
-    x11_output->config->cycle_paths = NULL;
-    x11_output->config->cycle_count = 0;
-    x11_output->config->current_cycle_index = 0;
-    x11_output->config->type = WALLPAPER_IMAGE;
-    x11_output->config->path[0] = '\0';
-    x11_output->config->shader_path[0] = '\0';
-    x11_output->config->shader_speed = 1.0f;
-    x11_output->config->shader_fps = 60;
-    x11_output->config->show_fps = false;
-    x11_output->config->channel_paths = NULL;
-    x11_output->config->channel_count = 0;
+    x11_monitor_t mons[MAX_OUTPUTS];
+    int n = x11_enumerate_monitors(backend, mons, MAX_OUTPUTS);
+    log_info("X11: detected %d monitor(s)", n);
 
-    /* Initialize preload state */
-    x11_output->preload_texture = 0;
-    x11_output->preload_image = NULL;
-    x11_output->preload_path[0] = '\0';
-    atomic_store(&x11_output->preload_ready, false);
+    int created = 0;
+    for (int i = 0; i < n; i++) {
+        log_info("  monitor %s: %dx%d at +%d+%d",
+                 mons[i].name, mons[i].width, mons[i].height, mons[i].x, mons[i].y);
 
-    /* Initialize background preload thread state */
-    pthread_mutex_init(&x11_output->preload_mutex, NULL);
-    x11_output->preload_decoded_image = NULL;
-    atomic_store(&x11_output->preload_thread_active, false);
-    atomic_store(&x11_output->preload_upload_pending, false);
+        struct output_state *out = x11_make_output(state, &mons[i]);
+        if (!out) continue;
 
-    /* Initialize FPS tracking */
-    x11_output->fps_last_log_time = 0;
-    x11_output->fps_frame_count = 0;
-    x11_output->fps_current = 0.0f;
-
-    /* Initialize frame timer */
-    x11_output->frame_timer_fd = -1;
-
-    /* Add to output list */
-    pthread_rwlock_wrlock(&state->output_list_lock);
-    x11_output->next = state->outputs;
-    state->outputs = x11_output;
-    state->output_count = 1;
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    log_info("X11 output created: %s", x11_output->model);
-
-    /* Create compositor surface for X11 output */
-    compositor_surface_config_t surface_config = {
-        .output = NULL,  /* No Wayland output */
-        .width = x11_output->pixel_width,
-        .height = x11_output->pixel_height,
-        .layer = COMPOSITOR_LAYER_BACKGROUND,
-        .anchor = COMPOSITOR_ANCHOR_TOP | COMPOSITOR_ANCHOR_BOTTOM |
-                  COMPOSITOR_ANCHOR_LEFT | COMPOSITOR_ANCHOR_RIGHT,
-        .exclusive_zone = 0,
-        .keyboard_interactivity = false,
-    };
-
-    x11_output->compositor_surface = compositor_surface_create(
-        state->compositor_backend, &surface_config);
-
-    if (!x11_output->compositor_surface) {
-        log_error("Failed to create compositor surface for X11 output");
+        /* Link into the output list under the write lock. */
         pthread_rwlock_wrlock(&state->output_list_lock);
-        state->outputs = NULL;
-        state->output_count = 0;
+        out->next = state->outputs;
+        state->outputs = out;
+        state->output_count++;
         pthread_rwlock_unlock(&state->output_list_lock);
-        free(x11_output->config);
-        free(x11_output);
-        return false;
+
+        /* Create the positioned wallpaper window for this monitor. */
+        compositor_surface_config_t surface_config = {
+            .output = NULL,
+            .x = mons[i].x,
+            .y = mons[i].y,
+            .width = mons[i].width,
+            .height = mons[i].height,
+            .layer = COMPOSITOR_LAYER_BACKGROUND,
+            .anchor = COMPOSITOR_ANCHOR_FILL,
+            .exclusive_zone = 0,
+            .keyboard_interactivity = false,
+        };
+
+        out->compositor_surface = compositor_surface_create(
+            state->compositor_backend, &surface_config);
+
+        if (!out->compositor_surface) {
+            log_error("Failed to create compositor surface for monitor %s", mons[i].name);
+            /* Unlink and drop the output we just added. */
+            pthread_rwlock_wrlock(&state->output_list_lock);
+            struct output_state **pp = &state->outputs;
+            while (*pp && *pp != out) pp = &(*pp)->next;
+            if (*pp == out) {
+                *pp = out->next;
+                if (state->output_count > 0) state->output_count--;
+            }
+            pthread_rwlock_unlock(&state->output_list_lock);
+            output_unref(out);
+            continue;
+        }
+
+        /* Adopt the real surface geometry (the backend may have clamped). */
+        out->width = out->compositor_surface->width;
+        out->height = out->compositor_surface->height;
+        out->pixel_width = out->compositor_surface->width;
+        out->pixel_height = out->compositor_surface->height;
+        out->logical_width = out->compositor_surface->width;
+        out->logical_height = out->compositor_surface->height;
+
+        log_info("X11 output ready: %s (%dx%d at +%d+%d)",
+                 out->model, out->width, out->height, out->x_offset, out->y_offset);
+        created++;
     }
 
-    log_info("Compositor surface created for X11 output");
-
-    /* Update output dimensions from created surface */
-    if (x11_output->compositor_surface) {
-        x11_output->width = x11_output->compositor_surface->width;
-        x11_output->height = x11_output->compositor_surface->height;
-        x11_output->pixel_width = x11_output->compositor_surface->width;
-        x11_output->pixel_height = x11_output->compositor_surface->height;
-        x11_output->logical_width = x11_output->compositor_surface->width;
-        x11_output->logical_height = x11_output->compositor_surface->height;
-        log_debug("Updated X11 output dimensions to %dx%d",
-                 x11_output->width, x11_output->height);
+    if (created == 0) {
+        log_error("X11: failed to create any outputs");
+        return false;
     }
 
     return true;

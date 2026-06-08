@@ -88,6 +88,14 @@ struct output_state {
     int32_t scale;
     int32_t transform;
 
+    /* Position of this output's top-left within the global screen layout, in
+     * pixels. Zero for single-output / per-output compositors (Wayland binds a
+     * surface per wl_output, so the origin is always 0,0). Set by the X11
+     * backend from the RandR monitor geometry so the wallpaper window lands on
+     * the right monitor and pointer coordinates can be made output-relative. */
+    int32_t x_offset;
+    int32_t y_offset;
+
     char make[64];
     char model[64];
     char connector_name[64];    /* Connector name (e.g., HDMI-A-2, DP-1) from xdg-output */

@@ -181,11 +181,21 @@ EGLDisplay display = eglGetPlatformDisplay(
 
 ### Multi-Monitor Support
 
-XRandR extension provides:
-- Screen enumeration
-- Resolution detection
-- Monitor change notifications
-- Per-monitor surface creation
+The backend creates **one wallpaper window per active monitor**, enumerated via
+XRandR (`XRRGetMonitors`, RandR 1.5; falls back to active CRTCs, then to the
+whole screen). Each window is:
+
+- Positioned at its monitor's `+x+y` origin within the root window and sized to
+  that monitor's resolution — so a 3840×1200 dual-head screen gets two
+  1920×1200 windows, not one stretched surface.
+- Exposed as a separate `output_state` named after the real RandR connector
+  (e.g. `DVI-D-0`, `VGA-0`), so per-output config blocks match and
+  `neowall current` lists each monitor.
+- Independently occluded: a fullscreen window pauses only the monitor it covers,
+  leaving the others animating.
+
+The root-window background pixmap (Conky-style pseudo-transparency) is a single
+screen-wide concept, so only the monitor anchored at the origin (0,0) drives it.
 
 ---
 

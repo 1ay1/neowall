@@ -109,6 +109,10 @@ typedef struct {
     uint32_t anchor;                    /* Anchor flags (compositor_anchor_t) */
     int32_t exclusive_zone;             /* Exclusive zone size (-1 = auto, 0 = none) */
     bool keyboard_interactivity;        /* Whether surface accepts keyboard input */
+    int32_t x;                          /* Desired top-left X within the screen. Honored by
+                                         * backends that place absolutely (X11 multi-monitor);
+                                         * ignored by per-output compositors (Wayland). */
+    int32_t y;                          /* Desired top-left Y within the screen. */
     int32_t width;                      /* Desired width (0 = auto) */
     int32_t height;                     /* Desired height (0 = auto) */
     void *output;                       /* Target output handle (NULL = all outputs) */
@@ -134,6 +138,8 @@ struct compositor_surface {
     EGLSurface egl_surface;             /* EGL surface */
     
     void *native_output;                /* Associated output handle (wl_output* or NULL for X11) */
+    int32_t x;                          /* Surface top-left X within screen (X11 multi-monitor) */
+    int32_t y;                          /* Surface top-left Y within screen (X11 multi-monitor) */
     int32_t width;                      /* Current surface width */
     int32_t height;                     /* Current surface height */
     int32_t scale;                      /* Output scale factor */
