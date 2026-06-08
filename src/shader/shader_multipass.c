@@ -855,8 +855,11 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
         strcat(wrapped, user_uniform_decls);
     }
     
-    /* Apply compatibility fixes to common code */
+    /* Apply compatibility fixes to common code. A #line 1 directive resets the
+     * compiler's line counter so any error the driver reports points at the
+     * user's own source line, not an offset into the injected preamble. */
     if (common) {
+        strcat(wrapped, "#line 1\n");
         char *fixed_common = fix_shadertoy_compatibility(common);
         if (fixed_common) {
             strcat(wrapped, fixed_common);
@@ -866,9 +869,11 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
         }
     }
     strcat(wrapped, "\n");
-    
-    /* Apply compatibility fixes to pass source */
+
+    /* Apply compatibility fixes to pass source. Reset line numbering again so a
+     * single-file shader's errors read as "line N" of that file. */
     if (pass_source) {
+        strcat(wrapped, "#line 1\n");
         char *fixed_pass = fix_shadertoy_compatibility(pass_source);
         if (fixed_pass) {
             strcat(wrapped, fixed_pass);
