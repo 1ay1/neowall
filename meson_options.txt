@@ -12,3 +12,9 @@ option('x11_backend',
   value: 'auto',
   description: 'Build X11 backend (requires libx11, libxrandr)'
 )
+
+option('fuzz',
+  type: 'boolean',
+  value: false,
+  description: 'Build libFuzzer harnesses (requires clang with -fsanitize=fuzzer)'
+)
