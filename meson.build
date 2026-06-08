@@ -201,7 +201,9 @@ egl_sources = files(
 # Shader engine sources
 shader_sources = files(
   'src/shader/shader_core.c',
+  'src/shader/shader_error_log.c',
   'src/shader/shader_multipass.c',
+  'src/shader/multipass_parse.c',
   'src/shader/shadertoy_compat.c',
   'src/shader/adaptive_scale.c',
   'src/shader/render_optimizer.c',
@@ -483,6 +485,16 @@ test_x11_geometry_exe = executable('test_x11_geometry',
 
 test('x11_geometry', test_x11_geometry_exe)
 
+# Reactive audio FFT — pure math, no audio thread / parec needed.
+test_fft_exe = executable('test_reactive_fft',
+  files('tests/test_reactive_fft.c', 'tests/reactive_fft_wrapper.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep],
+  build_by_default: false,
+)
+
+test('reactive_fft', test_fft_exe)
+
 # =============================================================================
 # Fuzzers (opt-in: -Dfuzz=true, clang only)
 # =============================================================================
@@ -497,6 +509,18 @@ if get_option('fuzz')
   fuzz_args = ['-fsanitize=fuzzer']
   executable('fuzz_vibe',
     files('tests/fuzz_vibe.c', 'src/config/vibe.c'),
+    include_directories: [inc_dirs, inc_dirs_build],
+    c_args: fuzz_args,
+    link_args: fuzz_args,
+    build_by_default: true,
+  )
+
+  # Fuzz the multipass GLSL parser — also untrusted user input.
+  executable('fuzz_multipass',
+    files(
+      'tests/fuzz_multipass.c',
+      'src/shader/multipass_parse.c',
+    ),
     include_directories: [inc_dirs, inc_dirs_build],
     c_args: fuzz_args,
     link_args: fuzz_args,

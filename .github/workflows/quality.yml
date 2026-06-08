@@ -93,6 +93,39 @@ jobs:
           run-clang-tidy -p build-tidy -quiet \
             $(git ls-files 'src/**/*.c' | grep -v protocols) || true
 
+  gcc-analyzer:
+    name: gcc -fanalyzer (complementary static analysis)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr gcc
+
+      - uses: actions/checkout@v4
+
+      - name: Configure with -fanalyzer
+        # gcc -fanalyzer catches a different class of bugs than clang's static
+        # analyzer (taint, double-free, leak across paths). Promoted to a
+        # warning-only check rather than gating merges — the analyzer still
+        # has known false-positives on complex code. Re-enable -Werror once
+        # the noise floor is zero.
+        run: |
+          meson setup build-analyzer \
+            -Dc_args='-fanalyzer -Wno-analyzer-malloc-leak'
+
+      - name: Build (report findings without failing)
+        run: ninja -C build-analyzer 2>&1 | tee analyzer.log || true
+
+      - name: Summarise analyzer findings
+        run: |
+          # Print only -fanalyzer lines for a clean signal.
+          grep -E 'analyzer-' analyzer.log | sort -u | head -200 || \
+            echo 'No -fanalyzer findings'
+
   format-check:
     name: clang-format
     runs-on: ubuntu-latest

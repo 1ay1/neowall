@@ -1,5 +1,12 @@
-/* Render Optimizer - High-Performance Multipass Rendering Optimizations
- * 
+/* Render Optimizer — GL-state cache for the multipass renderer.
+ *
+ * SCOPE NOTE (vs. multipass_optimizer.h): this module is the LOW-LEVEL GL-call
+ * deduper. It tracks bound program / texture / FBO / uniform values and
+ * elides redundant glUseProgram, glBindTexture, glUniform* calls. It does
+ * NOT decide WHICH passes run or AT WHAT RESOLUTION — that's the
+ * multipass_optimizer's job. Both are used together: multipass_optimizer
+ * picks the plan, render_optimizer makes the GL calls cheap.
+ *
  * This module provides aggressive GPU-side optimizations for multipass shaders:
  * 
  * 1. GPU State Manager - Tracks and caches OpenGL state to eliminate redundant calls

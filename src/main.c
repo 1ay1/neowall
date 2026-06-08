@@ -119,6 +119,7 @@ static const DaemonCommand daemon_commands[] = {
     {"next",              SIGUSR1,      "Skip to next wallpaper",                  "Skipping to next wallpaper...",      NULL,  false, true},   /* check_cycle = true */
     {"pause",             SIGUSR2,      "Pause wallpaper cycling",                 "Pausing wallpaper cycling...",       NULL,  false, false},
     {"resume",            SIGCONT,      "Resume wallpaper cycling",                "Resuming wallpaper cycling...",      NULL,  false, false},
+    {"reload",            SIGHUP,       "Reload configuration from disk",          "Reloading configuration...",         NULL,  false, false},
     {"set",               0,            "Set wallpaper by index (set <index>)",    NULL,                                 NULL,  false, false},   /* Handled specially */
     {"list",              0,            "List all wallpapers with indices",        NULL,                                 NULL,  false, false},   /* Handled specially */
     {"current",           0,            "Show current wallpaper",                  NULL,                                 NULL,  true,  false},
@@ -547,6 +548,18 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
             atomic_store_explicit(&state->paused, false, memory_order_release);
             break;
 
+        case SIGHUP:
+            log_info("Received SIGHUP, reloading configuration from %s", state->config_path);
+            /* Reload re-runs config_load on the daemon's known config_path.
+             * config_load is best-effort: on failure it falls through to the
+             * built-in default, so a broken config never wedges the daemon. */
+            if (!config_load(state, state->config_path)) {
+                log_error("Reload failed; built-in defaults remain in effect");
+            } else {
+                log_info("Configuration reloaded");
+            }
+            break;
+
         default:
             /* Real-time signals (SIGRTMIN+N) aren't compile-time constants, so
              * they can't sit in the switch above — dispatch them here. */
@@ -618,6 +631,7 @@ static int setup_signalfd(void) {
     sigaddset(&mask, SIGUSR1);
     sigaddset(&mask, SIGUSR2);
     sigaddset(&mask, SIGCONT);
+    sigaddset(&mask, SIGHUP);        /* reload config */
     sigaddset(&mask, SIGRTMIN);      /* For set-index command */
     sigaddset(&mask, SIGRTMIN + 1);  /* For pause-shader command */
     sigaddset(&mask, SIGRTMIN + 2);  /* For resume-shader command */

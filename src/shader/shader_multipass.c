@@ -11,6 +11,8 @@
 #include "neowall/shader/multipass_optimizer.h"
 #include "neowall/shader/shadertoy_compat.h"
 #include "neowall/shader/shader_log.h"
+#include "neowall/shader/shader_error_log.h"
+#include "multipass_internal.h"
 #include "neowall/shader/platform_compat.h"
 #include "neowall/shader/shader_stdlib.h"
 #include "neowall/shader/reactive.h"
@@ -24,39 +26,14 @@
 #include <stdarg.h>
 
 /* ============================================
- * Error Logging for Shader Compilation
+ * Error Logging — delegates to shader_error_log
  * ============================================ */
 
-#define MAX_ERROR_LOG_SIZE 16384
-static char g_last_error_log[MAX_ERROR_LOG_SIZE];
-static size_t g_error_log_pos = 0;
+static inline void clear_error_log(void) { shader_error_log_clear(); }
 
-static void clear_error_log(void) {
-    g_last_error_log[0] = '\0';
-    g_error_log_pos = 0;
-}
+#define append_to_error_log shader_error_log_append
 
-static void append_to_error_log(const char *format, ...) {
-    if (g_error_log_pos >= MAX_ERROR_LOG_SIZE - 1) return;
-    
-    va_list args;
-    va_start(args, format);
-    int written = vsnprintf(g_last_error_log + g_error_log_pos,
-                           MAX_ERROR_LOG_SIZE - g_error_log_pos,
-                           format, args);
-    va_end(args);
-    
-    if (written > 0) {
-        g_error_log_pos += written;
-        if (g_error_log_pos >= MAX_ERROR_LOG_SIZE) {
-            g_error_log_pos = MAX_ERROR_LOG_SIZE - 1;
-        }
-    }
-}
-
-const char *multipass_get_error_log(void) {
-    return g_last_error_log;
-}
+const char *multipass_get_error_log(void) { return shader_error_log_get(); }
 
 /* ============================================
  * Shader Compilation Utilities
@@ -195,125 +172,17 @@ static bool shader_create_program_from_sources(const char *vertex_src,
 
 /* ============================================
  * Internal Helper Functions
+ *
+ * Shared parser helpers (find_pattern, find_function_end, extract_substring,
+ * str_dup) live in multipass_parse.c and are reached through
+ * multipass_internal.h. We keep terse local aliases so the compile/render code
+ * below reads unchanged.
  * ============================================ */
 
-/* Skip whitespace (currently unused but kept for future use) */
-/*
-static const char *skip_whitespace(const char *p) {
-    while (*p && isspace(*p)) p++;
-    return p;
-}
-*/
-
-/* Check if character is valid identifier char (currently unused but kept for future use) */
-/*
-static bool is_ident_char(char c) {
-    return isalnum(c) || c == '_';
-}
-*/
-
-/* Find next occurrence of pattern, respecting comments */
-static const char *find_pattern(const char *source, const char *pattern) {
-    const char *p = source;
-    size_t pat_len = strlen(pattern);
-
-    while (*p) {
-        /* Skip single-line comments */
-        if (p[0] == '/' && p[1] == '/') {
-            while (*p && *p != '\n') p++;
-            if (*p) p++;
-            continue;
-        }
-
-        /* Skip multi-line comments */
-        if (p[0] == '/' && p[1] == '*') {
-            p += 2;
-            while (*p && !(p[0] == '*' && p[1] == '/')) p++;
-            if (*p) p += 2;
-            continue;
-        }
-
-        /* Check for pattern */
-        if (strncmp(p, pattern, pat_len) == 0) {
-            return p;
-        }
-
-        p++;
-    }
-
-    return NULL;
-}
-
-/* Find the end of a function body (matching closing brace) */
-static const char *find_function_end(const char *start) {
-    const char *p = start;
-    int brace_depth = 0;
-    bool in_function = false;
-
-    while (*p) {
-        /* Skip comments */
-        if (p[0] == '/' && p[1] == '/') {
-            while (*p && *p != '\n') p++;
-            if (*p) p++;
-            continue;
-        }
-        if (p[0] == '/' && p[1] == '*') {
-            p += 2;
-            while (*p && !(p[0] == '*' && p[1] == '/')) p++;
-            if (*p) p += 2;
-            continue;
-        }
-
-        /* Skip strings */
-        if (*p == '"') {
-            p++;
-            while (*p && *p != '"') {
-                if (*p == '\\' && p[1]) p++;
-                p++;
-            }
-            if (*p) p++;
-            continue;
-        }
-
-        if (*p == '{') {
-            brace_depth++;
-            in_function = true;
-        } else if (*p == '}') {
-            brace_depth--;
-            if (in_function && brace_depth == 0) {
-                return p + 1;
-            }
-        }
-
-        p++;
-    }
-
-    return p;
-}
-
-/* Extract a substring */
-static char *extract_substring(const char *start, const char *end) {
-    if (!start || !end || end <= start) return NULL;
-
-    size_t len = end - start;
-    char *result = malloc(len + 1);
-    if (!result) return NULL;
-
-    memcpy(result, start, len);
-    result[len] = '\0';
-    return result;
-}
-
-/* Duplicate a string */
-static char *str_dup(const char *s) {
-    if (!s) return NULL;
-    size_t len = strlen(s);
-    char *result = malloc(len + 1);
-    if (result) {
-        memcpy(result, s, len + 1);
-    }
-    return result;
-}
+#define find_pattern        mp_find_pattern
+#define find_function_end   mp_find_function_end
+#define extract_substring   mp_extract_substring
+#define str_dup             mp_str_dup
 
 /* ============================================
  * Pass Type Utilities
@@ -469,85 +338,13 @@ multipass_channel_t multipass_default_channel(channel_source_t source) {
 
 /* ============================================
  * Shader Parsing Functions
+ *
+ * The actual parser lives in multipass_parse.c; declarations are in
+ * shader_multipass.h. Kept here as a signpost.
  * ============================================ */
 
-int multipass_count_main_functions(const char *source) {
-    if (!source) return 0;
-
-    int count = 0;
-    const char *p = source;
-
-    while ((p = find_pattern(p, "mainImage")) != NULL) {
-        /* Check if it's actually a function definition */
-        const char *before = p;
-        if (before > source) {
-            before--;
-            while (before > source && isspace(*before)) before--;
-        }
-
-        /* Skip past "mainImage" */
-        p += 9;
-
-        /* Skip whitespace */
-        while (*p && isspace(*p)) p++;
-
-        /* Must be followed by '(' */
-        if (*p == '(') {
-            count++;
-        }
-    }
-
-    return count;
-}
-
-bool multipass_detect(const char *source) {
-    if (!source) return false;
-
-    /*
-     * All shaders go through the multipass system now.
-     * Single-pass shaders are treated as Image-only multipass.
-     * This simplifies the codebase by removing the legacy single-pass path.
-     */
-    int main_count = multipass_count_main_functions(source);
-    if (main_count >= 1) {
-        return true;
-    }
-
-    /* Check for mainImage function */
-    if (find_pattern(source, "void mainImage") ||
-        find_pattern(source, "void main(")) {
-        return true;
-    }
-
-    return false;
-}
-
-char *multipass_extract_common(const char *source) {
-    if (!source) return NULL;
-
-    /* Find start of first mainImage function */
-    const char *first_main = find_pattern(source, "void mainImage");
-    if (!first_main) {
-        first_main = find_pattern(source, "void main(");
-    }
-
-    if (!first_main) {
-        return NULL;
-    }
-
-    /* Go back to find the start of function (might have return type, etc.) */
-    const char *func_start = first_main;
-    while (func_start > source && *(func_start - 1) != '\n') {
-        func_start--;
-    }
-
-    /* Everything before the first function is common code */
-    if (func_start > source) {
-        return extract_substring(source, func_start);
-    }
-
-    return NULL;
-}
+#if 0 /* moved to multipass_parse.c — retained under #if 0 to keep the diff
+         compact; will be physically deleted in a follow-up commit */
 
 multipass_parse_result_t *multipass_parse_shader(const char *source) {
     multipass_parse_result_t *result = calloc(1, sizeof(multipass_parse_result_t));
@@ -753,16 +550,7 @@ multipass_parse_result_t *multipass_parse_shader(const char *source) {
     return result;
 }
 
-void multipass_free_parse_result(multipass_parse_result_t *result) {
-    if (!result) return;
-
-    for (int i = 0; i < MULTIPASS_MAX_PASSES; i++) {
-        free(result->pass_sources[i]);
-    }
-    free(result->common_source);
-    free(result->error_message);
-    free(result);
-}
+#endif /* moved to multipass_parse.c */
 
 /* ============================================
  * Shader wrapper for each pass
