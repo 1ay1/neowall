@@ -216,3 +216,60 @@ jobs:
         with:
           name: neowall-ubuntu
           path: build/neowall
+
+  x11-multimonitor-smoke:
+    name: X11 multi-monitor smoke test (Xvfb)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git pkg-config meson ninja-build \
+            libx11-dev libxrandr-dev \
+            libegl1-mesa-dev libgles2-mesa-dev libgl1-mesa-dri \
+            libpng-dev libjpeg-dev \
+            xvfb x11-xserver-utils
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build (X11 only)
+        run: |
+          meson setup build -Dwayland_backend=disabled
+          ninja -C build
+
+      # Boot a headless X server, carve the single virtual screen into two
+      # logical monitors with xrandr --setmonitor (the same RandR 1.5 path
+      # neowall enumerates), run neowall briefly with software GL, and assert
+      # it detected BOTH monitors. Regression guard for issue #44.
+      - name: Run under Xvfb with a faked dual-head layout
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 3840x1200x24 +extension RANDR &
+          XVFB_PID=$!
+          sleep 2
+
+          # Split the 3840x1200 root into two 1920x1200 logical monitors,
+          # mirroring the reporter's layout (DVI-D-0 at +0+0, VGA-0 at +1920+0).
+          xrandr --setmonitor NEO-LEFT  1920/600x1200/340+0+0    none
+          xrandr --setmonitor NEO-RIGHT 1920/600x1200/340+1920+0 none
+          xrandr --listmonitors
+
+          # Run for a couple of seconds, capturing verbose logs.
+          timeout 5s ./build/neowall -f -v > neowall.log 2>&1 || true
+          kill $XVFB_PID 2>/dev/null || true
+
+          echo '----- neowall.log -----'
+          cat neowall.log
+
+          echo '----- assertions -----'
+          grep -q 'X11: detected 2 monitor(s)' neowall.log \
+            || { echo 'FAIL: did not detect 2 monitors'; exit 1; }
+          grep -q 'NEO-LEFT'  neowall.log || { echo 'FAIL: NEO-LEFT not enumerated';  exit 1; }
+          grep -q 'NEO-RIGHT' neowall.log || { echo 'FAIL: NEO-RIGHT not enumerated'; exit 1; }
+          echo 'PASS: both monitors detected with their RandR names'
+
