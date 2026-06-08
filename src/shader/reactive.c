@@ -496,6 +496,12 @@ static void *audio_thread_fn(void *arg) {
     }
 
     close(fd);
+    /* Reap parec synchronously — we are the only spawner/owner of g_parec_pid,
+     * so we own the wait. No SIGCHLD handler is installed; we don't need one
+     * because every parec exit (graceful or crash) drops us into this block
+     * via the `break` above, where waitpid() collects the zombie. If parec
+     * already exited on its own, kill() returns ESRCH harmlessly and waitpid
+     * returns immediately. */
     if (g_parec_pid > 0) {
         kill(g_parec_pid, SIGTERM);
         waitpid(g_parec_pid, NULL, 0);
