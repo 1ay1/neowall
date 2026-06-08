@@ -485,6 +485,16 @@ test_x11_geometry_exe = executable('test_x11_geometry',
 
 test('x11_geometry', test_x11_geometry_exe)
 
+# Reactive audio FFT — pure math, no audio thread / parec needed.
+test_fft_exe = executable('test_reactive_fft',
+  files('tests/test_reactive_fft.c', 'tests/reactive_fft_wrapper.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep],
+  build_by_default: false,
+)
+
+test('reactive_fft', test_fft_exe)
+
 # =============================================================================
 # Fuzzers (opt-in: -Dfuzz=true, clang only)
 # =============================================================================
