@@ -17,7 +17,10 @@
 #include "neowall/compositor/compositor.h"
 #include "neowall/neowall.h"
 #include "neowall/egl/egl_core.h"
+#include "neowall/config/config.h"
 #include "x11_occlusion.h"
+#include "x11_geometry.h"
+#include "neowall/output/output.h"
 
 /*
  * ============================================================================
@@ -526,18 +529,11 @@ static bool x11_configure_surface(struct compositor_surface *surface,
 static void x11_distribute_mouse(x11_backend_data_t *backend, int root_x, int root_y) {
     pthread_rwlock_rdlock(&backend->state->output_list_lock);
     for (struct output_state *o = backend->state->outputs; o; o = o->next) {
-        int lx = root_x - o->x_offset;
-        int ly = root_y - o->y_offset;
-        bool inside = lx >= 0 && ly >= 0 &&
-                      (o->width <= 0 || lx < o->width) &&
-                      (o->height <= 0 || ly < o->height);
-        if (inside) {
-            o->mouse_x = (float)lx;
-            o->mouse_y = (float)ly;
-        } else {
-            o->mouse_x = -1.0f;
-            o->mouse_y = -1.0f;
-        }
+        x11_rect_t r = { o->x_offset, o->y_offset, o->width, o->height };
+        int lx, ly;
+        x11_mouse_to_output(r, root_x, root_y, &lx, &ly);
+        o->mouse_x = (float)lx;
+        o->mouse_y = (float)ly;
     }
     pthread_rwlock_unlock(&backend->state->output_list_lock);
 }
@@ -661,12 +657,8 @@ static bool x11_handle_events(x11_backend_data_t *backend) {
                 break;
 
             default:
-                /* Check for XRandR events */
-                if (backend->has_xrandr &&
-                    event.type == backend->xrandr_event_base + RRScreenChangeNotify) {
-                    log_info("X11 XRandR screen change event detected");
-                    /* Screen configuration changed - could trigger output re-initialization */
-                }
+                /* XRandR layout changes are handled in x11_dispatch_events
+                 * (the live event pump). This legacy handler is unused. */
                 break;
         }
     }
@@ -1076,6 +1068,39 @@ static struct output_state *x11_make_output(struct neowall_state *state,
     return out;
 }
 
+/* Create and attach the positioned wallpaper window for an output that has a
+ * geometry but no compositor surface yet. Adopts the real surface geometry the
+ * backend ends up with. Returns false (and leaves the output surface-less) on
+ * failure. Caller must NOT hold output_list_lock. */
+static bool x11_attach_surface(struct neowall_state *state, struct output_state *out) {
+    compositor_surface_config_t surface_config = {
+        .output = NULL,
+        .x = out->x_offset,
+        .y = out->y_offset,
+        .width = out->width,
+        .height = out->height,
+        .layer = COMPOSITOR_LAYER_BACKGROUND,
+        .anchor = COMPOSITOR_ANCHOR_FILL,
+        .exclusive_zone = 0,
+        .keyboard_interactivity = false,
+    };
+
+    out->compositor_surface =
+        compositor_surface_create(state->compositor_backend, &surface_config);
+    if (!out->compositor_surface) {
+        return false;
+    }
+
+    /* Adopt the real surface geometry (the backend may have clamped). */
+    out->width = out->compositor_surface->width;
+    out->height = out->compositor_surface->height;
+    out->pixel_width = out->compositor_surface->width;
+    out->pixel_height = out->compositor_surface->height;
+    out->logical_width = out->compositor_surface->width;
+    out->logical_height = out->compositor_surface->height;
+    return true;
+}
+
 /* Initialize outputs for X11 backend: one output + one positioned wallpaper
  * window per active monitor. */
 static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
@@ -1103,23 +1128,7 @@ static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
         state->output_count++;
         pthread_rwlock_unlock(&state->output_list_lock);
 
-        /* Create the positioned wallpaper window for this monitor. */
-        compositor_surface_config_t surface_config = {
-            .output = NULL,
-            .x = mons[i].x,
-            .y = mons[i].y,
-            .width = mons[i].width,
-            .height = mons[i].height,
-            .layer = COMPOSITOR_LAYER_BACKGROUND,
-            .anchor = COMPOSITOR_ANCHOR_FILL,
-            .exclusive_zone = 0,
-            .keyboard_interactivity = false,
-        };
-
-        out->compositor_surface = compositor_surface_create(
-            state->compositor_backend, &surface_config);
-
-        if (!out->compositor_surface) {
+        if (!x11_attach_surface(state, out)) {
             log_error("Failed to create compositor surface for monitor %s", mons[i].name);
             /* Unlink and drop the output we just added. */
             pthread_rwlock_wrlock(&state->output_list_lock);
@@ -1134,14 +1143,6 @@ static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
             continue;
         }
 
-        /* Adopt the real surface geometry (the backend may have clamped). */
-        out->width = out->compositor_surface->width;
-        out->height = out->compositor_surface->height;
-        out->pixel_width = out->compositor_surface->width;
-        out->pixel_height = out->compositor_surface->height;
-        out->logical_width = out->compositor_surface->width;
-        out->logical_height = out->compositor_surface->height;
-
         log_info("X11 output ready: %s (%dx%d at +%d+%d)",
                  out->model, out->width, out->height, out->x_offset, out->y_offset);
         created++;
@@ -1154,6 +1155,132 @@ static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
 
     return true;
 }
+
+/* ============================================================================
+ * HOTPLUG RECONCILE (RRScreenChangeNotify)
+ * ============================================================================ */
+
+/* True if an output's geometry matches a freshly-enumerated monitor. */
+static bool x11_mon_matches(const struct output_state *o, const x11_monitor_t *m) {
+    if (strncmp(o->connector_name, m->name, sizeof(o->connector_name)) != 0) {
+        return false;
+    }
+    x11_rect_t a = { o->x_offset, o->y_offset, o->width, o->height };
+    x11_rect_t b = { m->x, m->y, m->width, m->height };
+    return x11_rect_equal(a, b);
+}
+
+/* Bring a freshly-added output fully online: surface, EGL surface, GL render
+ * state, and its wallpaper config. Runs on the event-loop thread, which owns the
+ * EGL context, so the GL bring-up is safe inline. Caller must NOT hold
+ * output_list_lock. Returns true on success. */
+static bool x11_bring_output_online(struct neowall_state *state, struct output_state *out) {
+    if (!x11_attach_surface(state, out)) {
+        log_error("Hotplug: failed to create surface for %s", out->connector_name);
+        return false;
+    }
+    if (out->width <= 0 || out->height <= 0) {
+        log_error("Hotplug: %s has no dimensions", out->connector_name);
+        return false;
+    }
+    if (!output_create_egl_surface(out) || !egl_core_make_current(state, out) ||
+        !output_init_render(out)) {
+        log_error("Hotplug: GL bring-up failed for %s", out->connector_name);
+        return false;
+    }
+    if (config_apply_to_output(state, out)) {
+        atomic_store_explicit(&out->needs_redraw, true, memory_order_release);
+    }
+    log_info("Hotplug: output %s online (%dx%d at +%d+%d)",
+             out->connector_name, out->width, out->height, out->x_offset, out->y_offset);
+    return true;
+}
+
+/* Reconcile the output list against the current monitor layout after an
+ * RRScreenChangeNotify. Removes outputs whose monitor vanished or changed
+ * geometry, and adds outputs for newly-appeared monitors. Idempotent: a
+ * spurious notify with an unchanged layout is a no-op. Runs on the event-loop
+ * thread. */
+static void x11_reconcile_outputs(x11_backend_data_t *backend) {
+    struct neowall_state *state = backend->state;
+    if (!state) return;
+
+    x11_monitor_t mons[MAX_OUTPUTS];
+    int n = x11_enumerate_monitors(backend, mons, MAX_OUTPUTS);
+
+    /* Pass 1: collect outputs whose monitor no longer matches (removed or
+     * geometry-changed). Take a transient ref so the unlink+teardown below is
+     * safe even if another thread also holds the output. */
+    struct output_state *stale[MAX_OUTPUTS];
+    int n_stale = 0;
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o && n_stale < MAX_OUTPUTS; o = o->next) {
+        bool found = false;
+        for (int i = 0; i < n; i++) {
+            if (x11_mon_matches(o, &mons[i])) { found = true; break; }
+        }
+        if (!found) {
+            output_ref(o);
+            stale[n_stale++] = o;
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+
+    /* Unlink + drop each stale output. output_unref frees it (surface + EGL +
+     * render state) once the list's reference and our transient ref are gone. */
+    for (int i = 0; i < n_stale; i++) {
+        struct output_state *o = stale[i];
+        log_info("Hotplug: removing output %s (%dx%d at +%d+%d)",
+                 o->connector_name, o->width, o->height, o->x_offset, o->y_offset);
+        pthread_rwlock_wrlock(&state->output_list_lock);
+        struct output_state **pp = &state->outputs;
+        while (*pp && *pp != o) pp = &(*pp)->next;
+        bool unlinked = false;
+        if (*pp == o) {
+            *pp = o->next;
+            if (state->output_count > 0) state->output_count--;
+            unlinked = true;
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
+        if (unlinked) output_unref(o);  /* drop the list's reference */
+        output_unref(o);                /* drop our transient ref */
+    }
+
+    /* Pass 2: add outputs for monitors that have no matching output yet. */
+    for (int i = 0; i < n; i++) {
+        bool present = false;
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        for (struct output_state *o = state->outputs; o; o = o->next) {
+            if (x11_mon_matches(o, &mons[i])) { present = true; break; }
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
+        if (present) continue;
+
+        log_info("Hotplug: adding monitor %s: %dx%d at +%d+%d",
+                 mons[i].name, mons[i].width, mons[i].height, mons[i].x, mons[i].y);
+        struct output_state *out = x11_make_output(state, &mons[i]);
+        if (!out) continue;
+
+        pthread_rwlock_wrlock(&state->output_list_lock);
+        out->next = state->outputs;
+        state->outputs = out;
+        state->output_count++;
+        pthread_rwlock_unlock(&state->output_list_lock);
+
+        if (!x11_bring_output_online(state, out)) {
+            pthread_rwlock_wrlock(&state->output_list_lock);
+            struct output_state **pp = &state->outputs;
+            while (*pp && *pp != out) pp = &(*pp)->next;
+            if (*pp == out) {
+                *pp = out->next;
+                if (state->output_count > 0) state->output_count--;
+            }
+            pthread_rwlock_unlock(&state->output_list_lock);
+            output_unref(out);
+        }
+    }
+}
+
 
 /* ============================================================================
  * EVENT HANDLING OPERATIONS
@@ -1185,14 +1312,50 @@ static bool x11_dispatch_events(void *backend_data) {
         return false;
     }
 
-    /* Process all pending X11 events */
+    bool layout_changed = false;
+    bool mouse_on = backend->state &&
+        atomic_load_explicit(&backend->state->mouse_interaction, memory_order_acquire);
+
+    /* Process all pending X11 events. This runs on the event-loop thread, so it
+     * is safe to mutate the output list / EGL state from here. */
     while (XPending(backend->x_display) > 0) {
         XEvent event;
         XNextEvent(backend->x_display, &event);
-        /* Events are handled by the surface's event processing */
+
+        switch (event.type) {
+            case ButtonPress:
+            case ButtonRelease:
+                if (mouse_on) {
+                    x11_distribute_mouse(backend, event.xbutton.x_root, event.xbutton.y_root);
+                }
+                break;
+
+            case MotionNotify:
+                if (mouse_on) {
+                    x11_distribute_mouse(backend, event.xmotion.x_root, event.xmotion.y_root);
+                }
+                break;
+
+            default:
+                /* RRScreenChangeNotify: monitor layout changed. Coalesce a burst
+                 * of notifies (mode set fires several) into one reconcile after
+                 * the queue drains. */
+                if (backend->has_xrandr &&
+                    event.type == backend->xrandr_event_base + RRScreenChangeNotify) {
+                    XRRUpdateConfiguration(&event);
+                    layout_changed = true;
+                }
+                break;
+        }
+    }
+
+    if (layout_changed) {
+        log_info("X11: monitor layout changed, reconciling outputs");
+        x11_reconcile_outputs(backend);
     }
     return true;
 }
+
 
 static bool x11_flush(void *backend_data) {
     x11_backend_data_t *backend = backend_data;

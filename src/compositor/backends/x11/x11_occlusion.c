@@ -20,6 +20,7 @@
 #include <X11/extensions/Xrandr.h>
 #include "neowall/neowall.h"
 #include "x11_occlusion.h"
+#include "x11_geometry.h"
 
 static Display *x_display = NULL;
 static Window root_window;
@@ -35,13 +36,10 @@ static Atom atom_net_wm_state_fullscreen;
 static int check_counter = 0;
 #define CHECK_INTERVAL 10
 
-/* Coverage threshold: a fullscreen window must cover at least this fraction
- * of an output's rect for that output to count as "occluded". 9/10 = 90%. */
-#define MONITOR_COVERAGE_NUM 9
-#define MONITOR_COVERAGE_DEN 10
+/* Coverage threshold lives in x11_geometry.h (X11_COVERAGE_NUM/DEN). */
 
 /* Geometry of a fullscreen-marked window. */
-typedef struct { int x, y, w, h; } rect_t;
+typedef x11_rect_t rect_t;
 
 static bool window_has_state(Display *dpy, Window win, Atom target) {
     Atom type;
@@ -82,29 +80,6 @@ static bool get_window_geometry(Display *dpy, Window win,
     *w = (int)ww;
     *h = (int)wh;
     return true;
-}
-
-/* Is the rect (mx,my,mw,mh) covered by any of the fullscreen rects? */
-static bool rect_is_covered(int mx, int my, int mw, int mh,
-                            const rect_t *fs, int fs_count) {
-    if (mw <= 0 || mh <= 0) {
-        return false;
-    }
-    for (int i = 0; i < fs_count; i++) {
-        int ox = fs[i].x > mx ? fs[i].x : mx;
-        int oy = fs[i].y > my ? fs[i].y : my;
-        int or_ = (fs[i].x + fs[i].w) < (mx + mw)
-                 ? (fs[i].x + fs[i].w) : (mx + mw);
-        int ob = (fs[i].y + fs[i].h) < (my + mh)
-                 ? (fs[i].y + fs[i].h) : (my + mh);
-        int ow = or_ - ox, oh = ob - oy;
-        if (ow > 0 && oh > 0 &&
-            (long)ow * oh * MONITOR_COVERAGE_DEN >=
-            (long)mw * mh * MONITOR_COVERAGE_NUM) {
-            return true;
-        }
-    }
-    return false;
 }
 
 static void check_fullscreen_state(void) {
@@ -165,8 +140,8 @@ static void check_fullscreen_state(void) {
         }
 
         bool was = atomic_load_explicit(&o->occluded, memory_order_acquire);
-        bool now = rect_is_covered(o->x_offset, o->y_offset,
-                                   o->width, o->height, fs, fs_count);
+        x11_rect_t orect = { o->x_offset, o->y_offset, o->width, o->height };
+        bool now = x11_rect_is_covered(orect, fs, fs_count);
 
         atomic_store_explicit(&o->occluded, now, memory_order_release);
 

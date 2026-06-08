@@ -296,6 +296,7 @@ x11_sources = []
 if has_x11
   x11_sources = files(
     'src/compositor/backends/x11/x11_core.c',
+    'src/compositor/backends/x11/x11_geometry.c',
   )
   occlusion_sources += files('src/compositor/backends/x11/x11_occlusion.c')
 endif
@@ -470,6 +471,38 @@ test_refcount_exe = executable('test_output_refcount',
 )
 
 test('output_refcount', test_refcount_exe)
+
+# X11 multi-monitor geometry — occlusion coverage + per-output mouse mapping.
+# Pure integer math, no Xlib/display needed (see x11_geometry.c).
+test_x11_geometry_exe = executable('test_x11_geometry',
+  files('tests/test_x11_geometry.c',
+        'src/compositor/backends/x11/x11_geometry.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('x11_geometry', test_x11_geometry_exe)
+
+# =============================================================================
+# Fuzzers (opt-in: -Dfuzz=true, clang only)
+# =============================================================================
+
+# libFuzzer harness over the VIBE config parser — untrusted user input, so it
+# must not crash/leak on garbage. Not part of the default test set; build and
+# run it manually under ASan/UBSan. See tests/fuzz_vibe.c for invocation.
+if get_option('fuzz')
+  if cc.get_id() != 'clang'
+    error('Fuzzing requires clang (set CC=clang or use a native file)')
+  endif
+  fuzz_args = ['-fsanitize=fuzzer']
+  executable('fuzz_vibe',
+    files('tests/fuzz_vibe.c', 'src/config/vibe.c'),
+    include_directories: [inc_dirs, inc_dirs_build],
+    c_args: fuzz_args,
+    link_args: fuzz_args,
+    build_by_default: true,
+  )
+endif
 
 # =============================================================================
 # Summary

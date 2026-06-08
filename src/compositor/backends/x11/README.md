@@ -197,6 +197,15 @@ whole screen). Each window is:
 The root-window background pixmap (Conky-style pseudo-transparency) is a single
 screen-wide concept, so only the monitor anchored at the origin (0,0) drives it.
 
+**Hotplug.** The backend selects `RRScreenChangeNotifyMask` and reconciles the
+output list on every `RRScreenChangeNotify` (plug/unplug, mode change, layout
+edit). It re-enumerates monitors and diffs them against the live outputs by
+connector name + geometry: vanished or moved monitors are torn down (surface +
+EGL + GL state) and unref'd, new monitors are created and brought fully online
+(surface → EGL → render → per-output config) in place. The reconcile runs on the
+event-loop thread, which owns the EGL context, and is idempotent — a spurious
+notify with an unchanged layout is a no-op.
+
 ---
 
 ## 🐛 Troubleshooting
