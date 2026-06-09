@@ -1,7 +1,7 @@
 #ifndef TEXTURES_H
 #define TEXTURES_H
 
-#include <GL/gl.h>
+#include "neowall/platform/gl_compat.h"
 
 /* Procedural texture generators for iChannel inputs
  * These are the most commonly used textures in Shadertoy shaders

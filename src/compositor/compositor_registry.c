@@ -400,6 +400,7 @@ typedef enum {
     DISPLAY_SERVER_UNKNOWN = 0,
     DISPLAY_SERVER_WAYLAND,
     DISPLAY_SERVER_X11,
+    DISPLAY_SERVER_MACOS,
 } display_server_t;
 
 /**
@@ -407,6 +408,10 @@ typedef enum {
  * Returns the display server type based on environment
  */
 static display_server_t detect_display_server(void) {
+#ifdef HAVE_MACOS_BACKEND
+    /* On macOS the WindowServer is always there for GUI sessions. */
+    return DISPLAY_SERVER_MACOS;
+#endif
 #ifdef HAVE_WAYLAND_BACKEND
     /* Check for Wayland first */
     const char *wayland_display = getenv("WAYLAND_DISPLAY");
@@ -518,6 +523,33 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         }
     }
 #endif /* HAVE_X11_BACKEND */
+
+#ifdef HAVE_MACOS_BACKEND
+    if (display_server == DISPLAY_SERVER_MACOS) {
+        log_info("Detected macOS WindowServer");
+
+        extern struct compositor_backend *compositor_backend_macos_init(struct neowall_state *state);
+        struct compositor_backend *mac_backend = compositor_backend_macos_init(state);
+        if (!mac_backend) {
+            log_error("Failed to initialize macOS backend");
+            return NULL;
+        }
+        log_info("macOS backend initialized successfully");
+
+        /* Like X11: no output-announcement events; enumerate screens now. */
+        state->compositor_backend = mac_backend;
+        if (mac_backend->ops && mac_backend->ops->init_outputs) {
+            if (!mac_backend->ops->init_outputs(mac_backend->data, state)) {
+                log_error("Failed to initialize macOS outputs");
+                state->compositor_backend = NULL;
+                compositor_backend_cleanup(mac_backend);
+                return NULL;
+            }
+            log_info("macOS outputs initialized");
+        }
+        return mac_backend;
+    }
+#endif /* HAVE_MACOS_BACKEND */
 
 #ifdef HAVE_WAYLAND_BACKEND
     /* Wayland path continues here */

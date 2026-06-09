@@ -11,7 +11,7 @@
 
 #include <stddef.h>
 #include <string.h>
-#include <GL/gl.h>
+#include "neowall/platform/gl_compat.h"
 #include "neowall/neowall.h"
 #include "neowall/constants.h"
 #include "neowall/transitions.h"

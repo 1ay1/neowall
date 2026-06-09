@@ -3,8 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
+#include "neowall/platform/egl_compat.h"
 
 /*
  * ============================================================================

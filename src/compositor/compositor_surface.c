@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <EGL/egl.h>
+#include "neowall/platform/egl_compat.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/neowall.h"
 

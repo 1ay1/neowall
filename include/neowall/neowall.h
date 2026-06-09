@@ -6,8 +6,8 @@
 #include <time.h>
 #include <pthread.h>
 #include <stdatomic.h>
-#include <EGL/egl.h>
-#include <GL/gl.h>
+#include "neowall/platform/egl_compat.h"
+#include "neowall/platform/gl_compat.h"
 #include "version.h"
 #include "neowall/output/output.h"
 #include "neowall/config/config.h"

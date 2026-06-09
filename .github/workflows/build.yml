@@ -7,6 +7,27 @@ on:
     branches: [main]
 
 jobs:
+  build-macos:
+    name: macOS (AppKit + CGL)
+    runs-on: macos-14
+    steps:
+      - name: Install dependencies
+        run: brew install meson ninja libpng jpeg-turbo
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup build
+        run: meson setup build
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Smoke test (version + help)
+        run: |
+          ./build/neowall --version
+          ./build/neowall --help
+
   build-arch-full:
     name: Arch Linux (Wayland + X11)
     runs-on: ubuntu-latest

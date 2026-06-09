@@ -4,8 +4,8 @@
 #include <math.h>
 #include <time.h>
 #include <sys/time.h>
-#include <GL/gl.h>
-#include <EGL/egl.h>
+#include "neowall/platform/gl_compat.h"
+#include "neowall/platform/egl_compat.h"
 
 /* GPU timeout detection threshold in milliseconds.
  * If a frame takes longer than this, the shader is likely causing GPU hangs. */

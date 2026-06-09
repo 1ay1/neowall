@@ -16,6 +16,12 @@ project('neowall', 'c',
 
 cc = meson.get_compiler('c')
 
+is_macos = host_machine.system() == 'darwin'
+
+if is_macos
+  add_languages('objc', native: false)
+endif
+
 # =============================================================================
 # Session Detection (for helpful error messages)
 # =============================================================================
@@ -27,13 +33,21 @@ message('Detected session type: ' + (session_type != '' ? session_type : 'unknow
 # Required Dependencies
 # =============================================================================
 
-# EGL is always required
-egl_dep = dependency('egl', required: true)
-message('EGL detected: ' + egl_dep.version())
+if is_macos
+  # macOS: OpenGL.framework via CGL; no EGL (shimmed over NSOpenGLContext).
+  egl_dep = dependency('appleframeworks', modules: ['OpenGL'], required: true)
+  gl_dep = dependency('appleframeworks',
+                      modules: ['Cocoa', 'QuartzCore'], required: true)
+  message('macOS: using OpenGL.framework + Cocoa (CGL-backed EGL shim)')
+else
+  # EGL is always required
+  egl_dep = dependency('egl', required: true)
+  message('EGL detected: ' + egl_dep.version())
 
-# Desktop OpenGL for Shadertoy compatibility (uses #version 330 core)
-gl_dep = dependency('gl', required: true)
-message('Desktop OpenGL detected')
+  # Desktop OpenGL for Shadertoy compatibility (uses #version 330 core)
+  gl_dep = dependency('gl', required: true)
+  message('Desktop OpenGL detected')
+endif
 
 # Image loading libraries
 libpng_dep = dependency('libpng', required: false)
@@ -48,7 +62,7 @@ m_dep = cc.find_library('m', required: true)
 thread_dep = dependency('threads', required: true)
 
 # Check for OpenGL 3.3 support (required for Shadertoy shaders)
-has_gl33 = cc.has_header('GL/gl.h')
+has_gl33 = is_macos ? true : cc.has_header('GL/gl.h')
 if has_gl33
   message('Desktop OpenGL 3.3+ available (full Shadertoy support)')
 endif
@@ -71,7 +85,9 @@ wayland_protocols_dep = dependency('wayland-protocols', required: false)
 has_wayland_deps = wayland_client_dep.found() and wayland_egl_dep.found() and wayland_cursor_dep.found() and wayland_protocols_dep.found()
 
 # Determine if Wayland backend should be enabled
-if wayland_backend_option.disabled()
+if is_macos
+  has_wayland = false
+elif wayland_backend_option.disabled()
   has_wayland = false
   message('Wayland backend disabled by user')
 elif has_wayland_deps
@@ -89,7 +105,9 @@ xrandr_dep = dependency('xrandr', required: false)
 has_x11_deps = x11_dep.found() and xrandr_dep.found()
 
 # Determine if X11 backend should be enabled
-if x11_backend_option.disabled()
+if is_macos
+  has_x11 = false
+elif x11_backend_option.disabled()
   has_x11 = false
   message('X11 backend disabled by user')
 elif has_x11_deps
@@ -105,7 +123,7 @@ endif
 # =============================================================================
 
 # Error if no backends available
-if not has_wayland and not has_x11
+if not has_wayland and not has_x11 and not is_macos
   error('No display server backend available. Install wayland-client/wayland-egl or libx11-dev')
 endif
 
@@ -153,13 +171,29 @@ version_h = configure_file(
 # =============================================================================
 
 # Common definitions
-add_project_arguments('-D_POSIX_C_SOURCE=200809L', language: 'c')
+if is_macos
+  # _DARWIN_C_SOURCE exposes BSD APIs (kqueue, pipes) alongside POSIX.
+  add_project_arguments('-D_DARWIN_C_SOURCE', language: ['c', 'objc'])
+  add_project_arguments('-DNEOWALL_VERSION="' + meson.project_version() + '"', language: 'objc')
+  add_project_arguments('-DHAVE_MACOS_BACKEND', language: ['c', 'objc'])
+  add_project_arguments('-fobjc-arc', language: 'objc')
+  # NSOpenGLContext is deprecated-but-functional; with werror=true the
+  # deprecation notes would otherwise break the build.
+  add_project_arguments('-Wno-deprecated-declarations', language: 'objc')
+  # Cocoa framework headers are not -Wpedantic-clean; keep werror for our C
+  # code but don't let system headers break the ObjC TUs.
+  add_project_arguments('-Wno-pedantic', '-Wno-unused-parameter', language: 'objc')
+else
+  add_project_arguments('-D_POSIX_C_SOURCE=200809L', language: 'c')
+endif
 add_project_arguments('-DNEOWALL_VERSION="' + meson.project_version() + '"', language: 'c')
 
 # EGL and Desktop OpenGL flags
 add_project_arguments('-DHAVE_EGL', language: 'c')
 add_project_arguments('-DHAVE_GL33', language: 'c')
-add_project_arguments('-DGL_GLEXT_PROTOTYPES', language: 'c')
+if not is_macos
+  add_project_arguments('-DGL_GLEXT_PROTOTYPES', language: 'c')
+endif
 
 # Backend flags
 if has_wayland
@@ -197,10 +231,21 @@ core_sources = files(
   'src/utils.c',
 )
 
-# EGL sources (desktop OpenGL 3.3)
+# EGL sources (desktop OpenGL 3.3). On macOS the EGL API is provided by the
+# CGL shim instead of a system libEGL.
 egl_sources = files(
   'src/egl/egl_core.c',
 )
+
+# macOS platform sources (AppKit backend, CGL-backed EGL, kqueue fd shims)
+macos_sources = []
+if is_macos
+  macos_sources = files(
+    'src/platform/macos/macos_appkit.m',
+    'src/platform/macos/egl_cgl.m',
+    'src/platform/macos/fd_compat_macos.c',
+  )
+endif
 
 # Shader engine sources
 shader_sources = files(
@@ -351,7 +396,8 @@ all_sources = (
   occlusion_sources +
   wayland_protocol_sources +
   wayland_sources +
-  x11_sources
+  x11_sources +
+  macos_sources
 )
 
 # =============================================================================

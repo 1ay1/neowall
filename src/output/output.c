@@ -3,7 +3,7 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
-#include <sys/timerfd.h>
+#include "neowall/platform/fd_compat.h"
 #include <unistd.h>
 #include "neowall/neowall.h"
 #include "neowall/output/output.h"
@@ -78,7 +78,7 @@ static bool output_configure_frame_timer(struct output_state *output) {
     /* If vsync is enabled, we don't need a frame timer - eglSwapBuffers handles pacing */
     if (output->config->vsync) {
         if (output->frame_timer_fd >= 0) {
-            close(output->frame_timer_fd);
+            nw_timerfd_close(output->frame_timer_fd);
             output->frame_timer_fd = -1;
             log_debug("Closed frame timer for output %s (vsync enabled)", output_get_identifier(output));
         }
@@ -88,7 +88,7 @@ static bool output_configure_frame_timer(struct output_state *output) {
     /* For shaders with vsync disabled, set up precise frame timer */
     if (output->config->type != WALLPAPER_SHADER) {
         if (output->frame_timer_fd >= 0) {
-            close(output->frame_timer_fd);
+            nw_timerfd_close(output->frame_timer_fd);
             output->frame_timer_fd = -1;
         }
         return true;
@@ -96,7 +96,7 @@ static bool output_configure_frame_timer(struct output_state *output) {
 
     /* Create timerfd if not already created */
     if (output->frame_timer_fd < 0) {
-        output->frame_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+        output->frame_timer_fd = nw_timerfd_create();
         if (output->frame_timer_fd < 0) {
             log_error("Failed to create frame timer for output %s: %s",
                      output_get_identifier(output), strerror(errno));
@@ -131,12 +131,12 @@ static bool output_configure_frame_timer(struct output_state *output) {
         interval_ns = 0;
     }
 
-    struct itimerspec timer_spec = {
+    struct nw_itimerspec timer_spec = {
         .it_interval = { .tv_sec = interval_sec, .tv_nsec = interval_ns },  /* Recurring */
         .it_value = { .tv_sec = interval_sec, .tv_nsec = interval_ns }      /* Initial expiration */
     };
 
-    if (timerfd_settime(output->frame_timer_fd, 0, &timer_spec, NULL) < 0) {
+    if (nw_timerfd_settime(output->frame_timer_fd, &timer_spec) < 0) {
         log_error("Failed to set frame timer for output %s: %s",
                  output_get_identifier(output), strerror(errno));
         return false;
@@ -309,7 +309,7 @@ void output_destroy(struct output_state *output) {
      * of output_destroy must hold the output_list_lock as writer, which
      * serializes against the poll loop's fd-building rdlocked traversal. */
     if (output->frame_timer_fd >= 0) {
-        close(output->frame_timer_fd);
+        nw_timerfd_close(output->frame_timer_fd);
         output->frame_timer_fd = -1;
     }
 
@@ -1275,9 +1275,9 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
     bool should_cycle = elapsed_ms >= duration_ms;
 
     if (should_cycle) {
-        log_debug("Output %s should cycle: elapsed=%lums >= duration=%lums (current_index=%zu/%zu)",
+        log_debug("Output %s should cycle: elapsed=%llums >= duration=%llums (current_index=%zu/%zu)",
                   output->model[0] ? output->model : "unknown",
-                  elapsed_ms, duration_ms,
+                  (unsigned long long)elapsed_ms, (unsigned long long)duration_ms,
                   output->config->current_cycle_index,
                   output->config->cycle_count);
     }

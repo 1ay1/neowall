@@ -2,8 +2,7 @@
 #define EGL_CORE_H
 
 #include <stdbool.h>
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
+#include "neowall/platform/egl_compat.h"
 
 /* Forward declarations */
 struct neowall_state;

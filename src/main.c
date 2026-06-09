@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <time.h>
-#include <sys/signalfd.h>
+#include "neowall/platform/fd_compat.h"
 #include <ctype.h>
 #include "neowall/neowall.h"
 #include "neowall/config/config_access.h"
@@ -95,6 +95,21 @@ int read_set_index_file(void) {
 }
 
 static struct neowall_state *global_state = NULL;
+
+#ifdef __APPLE__
+/* Implemented in src/platform/macos/macos_appkit.m. AppKit owns the main
+ * thread; the engine loop runs on a worker (see end of main()). */
+extern void macos_platform_init(void);
+extern void macos_platform_run(void);
+extern void macos_platform_stop(void);
+
+static void *engine_thread_main(void *arg) {
+    struct neowall_state *st = arg;
+    event_loop_run(st);
+    macos_platform_stop();
+    return NULL;
+}
+#endif
 
 /* Forward declarations */
 static void handle_crash(int signum);
@@ -561,22 +576,22 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
             break;
 
         default:
-            /* Real-time signals (SIGRTMIN+N) aren't compile-time constants, so
-             * they can't sit in the switch above — dispatch them here. */
-            if (signum == SIGRTMIN) {
+            /* Command signals (SIGRTMIN+N on Linux; repurposed BSD signals on
+             * macOS) aren't compile-time constants on Linux, so dispatch here. */
+            if (signum == NW_SIG_SETINDEX) {
                 /* Read the requested index from file */
                 int index = read_set_index_file();
                 if (index >= 0) {
-                    log_info("Received SIGRTMIN, setting wallpaper to index %d", index);
+                    log_info("Received set-index signal, setting wallpaper to index %d", index);
                     atomic_store_explicit(&state->set_index_requested, index, memory_order_release);
                 } else {
-                    log_error("Received SIGRTMIN but no valid index file found");
+                    log_error("Received set-index signal but no valid index file found");
                 }
-            } else if (signum == SIGRTMIN + 1) {
-                log_info("Received SIGRTMIN+1, freezing shader animation...");
+            } else if (signum == NW_SIG_PAUSE_SHADER) {
+                log_info("Received pause-shader signal, freezing shader animation...");
                 atomic_store_explicit(&state->shader_paused, true, memory_order_release);
-            } else if (signum == SIGRTMIN + 2) {
-                log_info("Received SIGRTMIN+2, resuming shader animation...");
+            } else if (signum == NW_SIG_RESUME_SHADER) {
+                log_info("Received resume-shader signal, resuming shader animation...");
                 atomic_store_explicit(&state->shader_paused, false, memory_order_release);
             } else {
                 log_debug("Received signal: %d", signum);
@@ -632,9 +647,9 @@ static int setup_signalfd(void) {
     sigaddset(&mask, SIGUSR2);
     sigaddset(&mask, SIGCONT);
     sigaddset(&mask, SIGHUP);        /* reload config */
-    sigaddset(&mask, SIGRTMIN);      /* For set-index command */
-    sigaddset(&mask, SIGRTMIN + 1);  /* For pause-shader command */
-    sigaddset(&mask, SIGRTMIN + 2);  /* For resume-shader command */
+    sigaddset(&mask, NW_SIG_SETINDEX);      /* For set-index command */
+    sigaddset(&mask, NW_SIG_PAUSE_SHADER);  /* For pause-shader command */
+    sigaddset(&mask, NW_SIG_RESUME_SHADER); /* For resume-shader command */
 
     /* Block these signals for all threads */
     if (pthread_sigmask(SIG_BLOCK, &mask, NULL) != 0) {
@@ -642,14 +657,15 @@ static int setup_signalfd(void) {
         return -1;
     }
 
-    /* Create signalfd to receive signals as file descriptor events */
-    int sfd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+    /* Create signalfd (Linux) or kqueue EVFILT_SIGNAL fd (macOS) to receive
+     * signals as file descriptor events */
+    int sfd = nw_signalfd_create(&mask);
     if (sfd < 0) {
-        log_error("Failed to create signalfd: %s", strerror(errno));
+        log_error("Failed to create signal fd: %s", strerror(errno));
         return -1;
     }
 
-    log_info("Signal handling configured with signalfd (race-free)");
+    log_info("Signal handling configured with signal fd (race-free)");
     return sfd;
 }
 
@@ -810,11 +826,11 @@ int main(int argc, char *argv[]) {
          * real-time signals (SIGRTMIN+N), which aren't compile-time constants
          * and so can't live in the daemon_commands table. */
         if (strcmp(cmd, "pause-shader") == 0) {
-            return send_daemon_signal(SIGRTMIN + 1, "Freezing shader animation...", false)
+            return send_daemon_signal(NW_SIG_PAUSE_SHADER, "Freezing shader animation...", false)
                    ? EXIT_SUCCESS : EXIT_FAILURE;
         }
         if (strcmp(cmd, "resume-shader") == 0) {
-            return send_daemon_signal(SIGRTMIN + 2, "Resuming shader animation...", false)
+            return send_daemon_signal(NW_SIG_RESUME_SHADER, "Resuming shader animation...", false)
                    ? EXIT_SUCCESS : EXIT_FAILURE;
         }
 
@@ -871,8 +887,8 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
             }
 
-            /* Send SIGRTMIN to notify daemon */
-            if (kill(pid, SIGRTMIN) == -1) {
+            /* Send set-index signal to notify daemon */
+            if (kill(pid, NW_SIG_SETINDEX) == -1) {
                 fprintf(stderr, "Failed to send signal to daemon: %s\n", strerror(errno));
                 unlink(get_set_index_file_path());
                 return EXIT_FAILURE;
@@ -994,6 +1010,13 @@ int main(int argc, char *argv[]) {
         }
     }
 
+#ifdef __APPLE__
+    /* AppKit requires the main thread. Bootstrap NSApplication as an
+     * accessory app BEFORE any backend/window work. */
+    extern void macos_platform_init(void);
+    macos_platform_init();
+#endif
+
     /* Set up crash handlers first */
     setup_crash_handlers();
     global_state = &state;
@@ -1055,8 +1078,23 @@ int main(int argc, char *argv[]) {
 
     log_info("Initialization complete, entering main loop...");
 
+#ifdef __APPLE__
+    /* On macOS the MAIN thread must run the Cocoa event loop (occlusion
+     * notifications, display reconfig, window server chatter). The engine's
+     * poll() loop moves to a worker thread; when it exits it stops NSApp. */
+    {
+        pthread_t engine_thread;
+        if (pthread_create(&engine_thread, NULL, engine_thread_main, &state) != 0) {
+            log_error("Failed to start engine thread");
+            return EXIT_FAILURE;
+        }
+        macos_platform_run();          /* blocks until macos_platform_stop() */
+        pthread_join(engine_thread, NULL);
+    }
+#else
     /* Run main event loop */
     event_loop_run(&state);
+#endif
 
     /* Cleanup */
     log_info("Shutting down...");

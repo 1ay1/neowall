@@ -5,9 +5,7 @@
 #include <poll.h>
 #include <unistd.h>
 #include <time.h>
-#include <sys/timerfd.h>
-#include <sys/eventfd.h>
-#include <sys/signalfd.h>
+#include "neowall/platform/fd_compat.h"
 #include "neowall/neowall.h"
 #include "neowall/shader/shader_multipass.h"
 #include "neowall/config/config_access.h"
@@ -78,7 +76,7 @@ static void update_cycle_timer_locked(struct neowall_state *state) {
     }
 
     /* Set the timer */
-    struct itimerspec timer_spec;
+    struct nw_itimerspec timer_spec;
     memset(&timer_spec, 0, sizeof(timer_spec));
 
     if (next_wake_ms == UINT64_MAX) {
@@ -99,10 +97,10 @@ static void update_cycle_timer_locked(struct neowall_state *state) {
     timer_spec.it_interval.tv_sec = 0;
     timer_spec.it_interval.tv_nsec = 0;
 
-    if (timerfd_settime(state->timer_fd, 0, &timer_spec, NULL) < 0) {
+    if (nw_timerfd_settime(state->timer_fd, &timer_spec) < 0) {
         log_error("Failed to set timerfd: %s", strerror(errno));
     } else if (next_wake_ms != UINT64_MAX) {
-        log_debug("Cycle timer set to wake in %lums", next_wake_ms);
+        log_debug("Cycle timer set to wake in %llums", (unsigned long long)next_wake_ms);
     }
 }
 
@@ -368,11 +366,11 @@ static void render_outputs(struct neowall_state *state) {
                 uint64_t frame_time = frame_end - frame_start;
                 int target_fps = shader_fps_resolve(output->config->shader_fps);
                 if (output->config->vsync) {
-                    log_info("FPS [%s]: %.1f FPS (vsync: monitor sync, frame_time: %lums)",
-                             output->model, actual_fps, frame_time);
+                    log_info("FPS [%s]: %.1f FPS (vsync: monitor sync, frame_time: %llums)",
+                             output->model, actual_fps, (unsigned long long)frame_time);
                 } else {
-                    log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums)",
-                             output->model, actual_fps, target_fps, frame_time);
+                    log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %llums)",
+                             output->model, actual_fps, target_fps, (unsigned long long)frame_time);
                 }
                 output->fps_frame_count = 0;
                 output->fps_last_log_time = frame_end;
@@ -441,7 +439,8 @@ static void render_outputs(struct neowall_state *state) {
         static uint64_t swap_counter = 0;
         swap_counter++;
         if (swap_counter % 600 == 0) {
-            log_debug("Buffer swap #%lu successful for output %s", swap_counter, output->model);
+            log_debug("Buffer swap #%llu successful for output %s",
+                      (unsigned long long)swap_counter, output->model);
         }
 
         compositor_surface_commit(output->compositor_surface);
@@ -610,19 +609,19 @@ void event_loop_run(struct neowall_state *state) {
 
     log_info("Starting event loop");
 
-    /* Create timerfd for event-driven wallpaper cycling */
-    state->timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    /* Create timer fd for event-driven wallpaper cycling */
+    state->timer_fd = nw_timerfd_create();
     if (state->timer_fd < 0) {
         log_error("Failed to create timerfd: %s", strerror(errno));
         return;
     }
     log_info("Created timerfd for event-driven cycling");
 
-    /* Create eventfd for waking poll on internal events (config reload, etc) */
-    state->wakeup_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    /* Create wakeup fd for waking poll on internal events (config reload, etc) */
+    state->wakeup_fd = nw_eventfd_create();
     if (state->wakeup_fd < 0) {
         log_error("Failed to create eventfd: %s", strerror(errno));
-        close(state->timer_fd);
+        nw_timerfd_close(state->timer_fd);
         return;
     }
     log_info("Created eventfd for internal event notifications");
@@ -927,10 +926,10 @@ void event_loop_run(struct neowall_state *state) {
 
             /* Check timerfd - time to cycle wallpaper */
             if (fds[1].revents & POLLIN) {
-                uint64_t expirations;
-                ssize_t s = read(state->timer_fd, &expirations, sizeof(expirations));
-                if (s == sizeof(expirations)) {
-                    log_debug("Cycle timer expired (%lu expirations), checking outputs", expirations);
+                int64_t expirations = nw_timerfd_read(state->timer_fd);
+                if (expirations > 0) {
+                    log_debug("Cycle timer expired (%lld expirations), checking outputs",
+                              (long long)expirations);
                     /* Mark all outputs for redraw so render_outputs() is called */
                     pthread_rwlock_rdlock(&state->output_list_lock);
                     for (struct output_state *timer_output = state->outputs;
@@ -943,29 +942,26 @@ void event_loop_run(struct neowall_state *state) {
 
             /* Check wakeup fd - internal events (config reload, etc) */
             if (fds[2].revents & POLLIN) {
-                uint64_t value;
-                ssize_t s = read(state->wakeup_fd, &value, sizeof(value));
-                (void)s; /* Silence unused variable warning */
+                nw_eventfd_drain(state->wakeup_fd);
             }
 
             /* Check signal fd - signals delivered as file descriptor events (race-free) */
             if (fds[3].revents & POLLIN) {
-                struct signalfd_siginfo fdsi;
-                ssize_t s = read(state->signal_fd, &fdsi, sizeof(fdsi));
-                if (s == sizeof(fdsi)) {
-                    log_debug("Received signal %d via signalfd", fdsi.ssi_signo);
-                    handle_signal_from_fd(state, fdsi.ssi_signo);
+                struct nw_signalfd_info fdsi;
+                while (nw_signalfd_read(state->signal_fd, &fdsi)) {
+                    log_debug("Received signal %d via signal fd", fdsi.ssi_signo);
+                    handle_signal_from_fd(state, (int)fdsi.ssi_signo);
                 }
             }
 
             /* Check frame timer fds - high-precision frame pacing for vsync-off shaders */
             for (int i = BASE_FD_COUNT; i < num_fds; i++) {
                 if (fds[i].revents & POLLIN) {
-                    uint64_t expirations;
-                    ssize_t s = read(fds[i].fd, &expirations, sizeof(expirations));
-                    if (s == sizeof(expirations)) {
+                    int64_t expirations = nw_timerfd_read(fds[i].fd);
+                    if (expirations > 0) {
                         if (expirations > 1) {
-                            log_debug("Frame timer expired %lu times (frame overrun)", expirations);
+                            log_debug("Frame timer expired %lld times (frame overrun)",
+                                      (long long)expirations);
                         }
                         /* Mark the specific output for redraw */
                         if (frame_timer_outputs[i]) {
@@ -1037,8 +1033,9 @@ void event_loop_run(struct neowall_state *state) {
             double elapsed_sec = (current_time - last_stats_time) / (double)MS_PER_SECOND;
             double fps = frame_count / elapsed_sec;
 
-            log_debug("Stats: %.1f FPS, %lu frames rendered, %lu errors",
-                     fps, state->frames_rendered, state->errors_count);
+            log_debug("Stats: %.1f FPS, %llu frames rendered, %llu errors",
+                     fps, (unsigned long long)state->frames_rendered,
+                     (unsigned long long)state->errors_count);
 
             last_stats_time = current_time;
             frame_count = 0;
@@ -1095,11 +1092,11 @@ void event_loop_run(struct neowall_state *state) {
 
     /* Clean up file descriptors */
     if (state->timer_fd >= 0) {
-        close(state->timer_fd);
+        nw_timerfd_close(state->timer_fd);
         state->timer_fd = -1;
     }
     if (state->wakeup_fd >= 0) {
-        close(state->wakeup_fd);
+        nw_eventfd_close(state->wakeup_fd);
         state->wakeup_fd = -1;
     }
 

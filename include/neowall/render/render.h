@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <GL/gl.h>
+#include "neowall/platform/gl_compat.h"
 
 /* Forward declarations */
 struct output_state;

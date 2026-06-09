@@ -2,9 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-#include <GL/gl.h>
+#include "neowall/platform/egl_compat.h"
+#include "neowall/platform/gl_compat.h"
 #include "neowall/neowall.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/egl/egl_core.h"

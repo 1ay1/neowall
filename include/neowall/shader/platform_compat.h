@@ -20,8 +20,14 @@
 /* Use desktop OpenGL for full Shadertoy shader compatibility.
  * Desktop OpenGL 3.3 Core supports #version 330 core shaders
  * which is what Shadertoy uses. */
+#ifdef __APPLE__
+#define GL_SILENCE_DEPRECATION 1
+#include <OpenGL/gl3.h>
+#include <OpenGL/gl3ext.h>
+#else
 #include <GL/gl.h>
 #include <GL/glext.h>
+#endif
 
 /* Platform detection */
 #ifdef _WIN32

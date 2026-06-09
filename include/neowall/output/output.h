@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <pthread.h>
 #include <stdatomic.h>
-#include <GL/gl.h>
+#include "neowall/platform/gl_compat.h"
 #include "neowall/image/image.h"   /* For struct image_data and enum image_format */
 #include "neowall/shader/shader_multipass.h"  /* For multipass_shader_t */
 
