@@ -36,7 +36,11 @@ gl_dep = dependency('gl', required: true)
 message('Desktop OpenGL detected')
 
 # Image loading libraries
-libpng_dep = dependency('libpng', required: true)
+libpng_dep = dependency('libpng', required: false)
+if not libpng_dep.found()
+  # openSUSE Leap and a few others only ship the versioned .pc file.
+  libpng_dep = dependency('libpng16', required: true)
+endif
 libjpeg_dep = dependency('libjpeg', required: true)
 
 # Math and threading (always needed)
