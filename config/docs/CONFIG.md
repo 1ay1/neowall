@@ -175,13 +175,13 @@ Only applies to image cycling, not shaders.
 
 #### `transition_duration` - Transition Speed
 
-Transition length in milliseconds:
+Transition length in seconds:
 
 ```vibe
-transition_duration 300   # Default
-transition_duration 100   # Fast
-transition_duration 500   # Smooth
-transition_duration 1000  # Slow
+transition_duration 0.3   # Default
+transition_duration 0.1   # Fast
+transition_duration 5     # Smooth
+transition_duration 10    # Slow
 ```
 
 ## Global Options
