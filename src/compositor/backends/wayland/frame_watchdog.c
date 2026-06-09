@@ -12,11 +12,21 @@
 
 #define OCCLUSION_TIMEOUT_MS 500
 
+/* If a swap's frame callback hasn't come back after this long, render anyway.
+ * Safety valve: some compositors withhold callbacks for hidden surfaces (the
+ * occlusion watchdog handles that case separately) and we never want a lost
+ * callback to freeze the wallpaper. */
+#define THROTTLE_TIMEOUT_MS 200
+
 typedef struct watched_output {
     struct output_state *output;
     struct wl_callback *callback;
     uint64_t last_done_ms;
     bool armed;
+    /* Per-frame render throttle: armed with the swap commit, cleared when the
+     * compositor says "good time to draw the next frame". */
+    struct wl_callback *throttle_cb;
+    uint64_t throttle_request_ms;
     struct watched_output *next;
 } watched_output_t;
 
@@ -42,6 +52,25 @@ static void on_frame_done(void *data, struct wl_callback *cb, uint32_t time) {
 
 static const struct wl_callback_listener frame_listener = {
     .done = on_frame_done,
+};
+
+/* --- per-frame render throttle ------------------------------------------ */
+
+static void on_throttle_done(void *data, struct wl_callback *cb, uint32_t time) {
+    (void)time;
+    watched_output_t *w = data;
+    pthread_mutex_lock(&lock);
+    if (cb) {
+        wl_callback_destroy(cb);
+    }
+    if (w->throttle_cb == cb) {
+        w->throttle_cb = NULL;
+    }
+    pthread_mutex_unlock(&lock);
+}
+
+static const struct wl_callback_listener throttle_listener = {
+    .done = on_throttle_done,
 };
 
 static void arm_locked(watched_output_t *w) {
@@ -122,6 +151,10 @@ void frame_watchdog_remove(struct output_state *o) {
                 wl_callback_destroy(cur->callback);
                 cur->callback = NULL;
             }
+            if (cur->throttle_cb) {
+                wl_callback_destroy(cur->throttle_cb);
+                cur->throttle_cb = NULL;
+            }
             free(cur);
             break;
         }
@@ -154,6 +187,52 @@ void frame_watchdog_update(struct neowall_state *state) {
         }
     }
     pthread_rwlock_unlock(&state->output_list_lock);
+}
+
+/* Arm the render throttle: request a frame callback on this output's surface.
+ * Call IMMEDIATELY BEFORE the eglSwapBuffers+commit that publishes a frame —
+ * the request rides the same commit. Until the compositor answers,
+ * frame_watchdog_render_allowed() returns false. */
+void frame_watchdog_throttle_arm(struct output_state *o) {
+    if (!o || !o->compositor_surface) return;
+    struct wl_surface *surf =
+        (struct wl_surface *)o->compositor_surface->native_surface;
+    if (!surf) return;
+
+    pthread_mutex_lock(&lock);
+    watched_output_t *w = find_locked(o);
+    if (!w) {
+        w = add_locked(o);
+    }
+    if (w && !w->throttle_cb) {
+        w->throttle_cb = wl_surface_frame(surf);
+        if (w->throttle_cb) {
+            wl_callback_add_listener(w->throttle_cb, &throttle_listener, w);
+            w->throttle_request_ms = get_time_ms();
+            /* No commit here: the caller's swap/commit publishes the request. */
+        }
+    }
+    pthread_mutex_unlock(&lock);
+}
+
+/* True when the compositor has signalled it wants the next frame (or the
+ * safety timeout passed, or no throttle was ever armed). */
+bool frame_watchdog_render_allowed(struct output_state *o) {
+    if (!o) return true;
+    pthread_mutex_lock(&lock);
+    watched_output_t *w = find_locked(o);
+    bool allowed = true;
+    if (w && w->throttle_cb) {
+        allowed = (get_time_ms() - w->throttle_request_ms) > THROTTLE_TIMEOUT_MS;
+        if (allowed) {
+            /* Timed out: drop the stale callback so the next swap re-arms
+             * cleanly instead of permanently riding the timeout path. */
+            wl_callback_destroy(w->throttle_cb);
+            w->throttle_cb = NULL;
+        }
+    }
+    pthread_mutex_unlock(&lock);
+    return allowed;
 }
 
 void frame_watchdog_cleanup(void) {

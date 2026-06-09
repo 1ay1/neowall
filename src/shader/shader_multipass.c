@@ -16,6 +16,7 @@
 #include "neowall/shader/platform_compat.h"
 #include "neowall/shader/shader_stdlib.h"
 #include "neowall/shader/reactive.h"
+#include "neowall/shader/program_cache.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -135,6 +136,9 @@ static bool shader_create_program_from_sources(const char *vertex_src,
     
     glAttachShader(prog, vertex_shader);
     glAttachShader(prog, fragment_shader);
+    /* Allow snapshotting the linked binary (program_cache). Per spec the hint
+     * must be set BEFORE glLinkProgram to guarantee a non-zero binary length. */
+    glProgramParameteri(prog, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE);
     glLinkProgram(prog);
     
     GLint linked;
@@ -1314,9 +1318,17 @@ bool multipass_compile_pass(multipass_shader_t *shader, int pass_index) {
         return false;
     }
 
-    /* Compile shaders */
-    GLuint program;
-    bool success = shader_create_program_from_sources(fullscreen_vertex_shader, wrapped, &program);
+    /* Compile shaders — binary cache first. A cache hit skips the driver's
+     * GLSL frontend entirely (50-300ms for big raymarchers -> ~1ms). */
+    GLuint program = 0;
+    uint64_t cache_key = program_cache_key(fullscreen_vertex_shader, wrapped);
+    bool success = program_cache_load(cache_key, &program);
+    if (!success) {
+        success = shader_create_program_from_sources(fullscreen_vertex_shader, wrapped, &program);
+        if (success) {
+            program_cache_store(cache_key, program);
+        }
+    }
 
     free(wrapped);
 

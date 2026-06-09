@@ -203,6 +203,7 @@ shader_sources = files(
   'src/shader/shader_core.c',
   'src/shader/shader_error_log.c',
   'src/shader/shader_multipass.c',
+  'src/shader/program_cache.c',
   'src/shader/multipass_parse.c',
   'src/shader/shadertoy_compat.c',
   'src/shader/adaptive_scale.c',

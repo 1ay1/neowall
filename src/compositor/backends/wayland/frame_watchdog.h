@@ -37,6 +37,14 @@ void frame_watchdog_arm(struct output_state *o);
  * dereference. The output's pending wl_callback (if any) is destroyed here. */
 void frame_watchdog_remove(struct output_state *o);
 
+/* --- per-frame render throttle (compositor-paced rendering) ---
+ * Arm with each swap; render_allowed() gates the next frame on the
+ * compositor's frame callback. Prevents rendering frames the compositor
+ * will never present (output off / throttled / overlapped). A 200ms safety
+ * timeout guarantees forward progress if a callback is withheld. */
+void frame_watchdog_throttle_arm(struct output_state *o);
+bool frame_watchdog_render_allowed(struct output_state *o);
+
 void frame_watchdog_cleanup(void);
 
 #endif /* WAYLAND_FRAME_WATCHDOG_H */

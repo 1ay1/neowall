@@ -302,6 +302,13 @@ static void render_outputs(struct neowall_state *state) {
             continue;
         }
 
+        /* NOTE: per-frame wl_surface_frame gating was tried here and REVERTED:
+         * pairing it with the 60Hz timerfd pacing creates two independent
+         * gates that beat against each other (~23 FPS observed instead of 60).
+         * neowall deliberately uses tearing-control for immediate presentation;
+         * compositor-paced rendering belongs to the vsync=true path, and the
+         * occlusion watchdog already stops rendering for hidden surfaces. */
+
         /* Make EGL context current for this output. Note: eglMakeCurrent can
          * synchronize with the GPU — we are NOT holding output_list_lock here. */
         if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
