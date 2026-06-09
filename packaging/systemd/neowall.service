@@ -7,7 +7,7 @@ ConditionEnvironment=WAYLAND_DISPLAY
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/neowall
+ExecStart=/usr/bin/neowall
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5
@@ -15,7 +15,6 @@ RestartSec=5
 # Security hardening
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=read-only
 NoNewPrivileges=true
 RestrictRealtime=true
 

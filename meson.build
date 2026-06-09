@@ -382,6 +382,16 @@ install_subdir('examples/shaders',
 install_data('README.md', install_dir: get_option('datadir') / 'doc' / 'neowall')
 install_data('LICENSE', install_dir: get_option('datadir') / 'doc' / 'neowall')
 
+# Desktop integration
+install_data('packaging/neowall.desktop',
+  install_dir: get_option('datadir') / 'applications')
+install_data('packaging/neowall.svg',
+  install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps')
+
+# systemd user unit (started by the user's graphical session)
+install_data('packaging/systemd/neowall.service',
+  install_dir: get_option('prefix') / 'lib' / 'systemd' / 'user')
+
 # =============================================================================
 # Custom Targets (matching Makefile's development targets)
 # =============================================================================

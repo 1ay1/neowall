@@ -7,140 +7,495 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version number (e.g., 0.4.5)"
+        description: "Version number (e.g., 0.5.0)"
         required: true
         type: string
 
+# Common meson configure flags reused by every job.
+env:
+  MESON_ARGS: "--prefix=/usr --buildtype=release -Doptimization=2 -Db_lto=true"
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # Arch Linux — native pacman package (.pkg.tar.zst) + plain tarball
+  # ---------------------------------------------------------------------------
   build-arch:
-    name: Build (Arch Linux)
+    name: Build (Arch / pacman)
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
-
     steps:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
-            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr sudo
 
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
 
       - name: Build
         run: |
-          meson setup build --buildtype=release -Doptimization=2
+          meson setup build $MESON_ARGS
           ninja -C build
 
-      - name: Package binary
+      - name: Plain tarball
         run: |
           mkdir -p dist
-          cp build/neowall dist/
+          install -m755 build/neowall dist/neowall
           strip dist/neowall
-          cd dist && tar -czf neowall-linux-x86_64-arch.tar.gz neowall
+          tar -C dist -czf dist/neowall-linux-x86_64-arch.tar.gz neowall
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Build pacman package
+        run: |
+          V="${{ steps.ver.outputs.VERSION }}"
+          BUILD=build PKGNAME=neowall PKGVER="$V"
+          # makepkg cannot run as root; use a throwaway builder user.
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          cat > /tmp/PKGBUILD <<EOF
+          pkgname=neowall
+          pkgver=$V
+          pkgrel=1
+          pkgdesc="GPU-accelerated live shader wallpapers for Wayland and X11"
+          arch=('x86_64')
+          url="https://github.com/1ay1/neowall"
+          license=('MIT')
+          depends=('wayland' 'mesa' 'libpng' 'libjpeg-turbo' 'libx11' 'libxrandr')
+          provides=('neowall')
+          conflicts=('neowall-git')
+          options=(!debug)
+          package() {
+            DESTDIR="\$pkgdir" ninja -C "$GITHUB_WORKSPACE/build" install
+            install -Dm644 "$GITHUB_WORKSPACE/LICENSE" "\$pkgdir/usr/share/licenses/neowall/LICENSE"
+          }
+          EOF
+          cp /tmp/PKGBUILD "$GITHUB_WORKSPACE/PKGBUILD.ci"
+          sudo -u builder bash -c "cd '$GITHUB_WORKSPACE' && cp PKGBUILD.ci PKGBUILD && makepkg -f --nodeps --noconfirm"
+          mv "$GITHUB_WORKSPACE"/neowall-*.pkg.tar.zst dist/
+          rm -f "$GITHUB_WORKSPACE/PKGBUILD" "$GITHUB_WORKSPACE/PKGBUILD.ci"
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: neowall-arch
-          path: dist/neowall-linux-x86_64-arch.tar.gz
+          name: pkg-arch
+          path: dist/*
 
+  # ---------------------------------------------------------------------------
+  # Debian / Ubuntu — .deb (built natively, packaged with fpm)
+  # ---------------------------------------------------------------------------
   build-debian:
-    name: Build (Debian/Ubuntu)
+    name: Build (Debian / .deb)
     runs-on: ubuntu-latest
     container:
       image: debian:bookworm
-
     steps:
       - name: Install dependencies
         run: |
           apt-get update
           apt-get install -y build-essential git pkg-config meson ninja-build \
             libwayland-dev wayland-protocols libwayland-egl1-mesa \
-            libx11-dev libxrandr-dev \
-            libegl1-mesa-dev libgl-dev \
-            libpng-dev libjpeg-dev
+            libx11-dev libxrandr-dev libegl1-mesa-dev libgl-dev \
+            libpng-dev libjpeg-dev ruby ruby-dev rubygems
+          gem install --no-document fpm
 
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Build
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Resolve version
+        id: ver
         run: |
-          meson setup build --buildtype=release -Doptimization=2
-          ninja -C build
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
 
-      - name: Package binary
+      - name: Build & stage
+        run: |
+          meson setup build $MESON_ARGS
+          ninja -C build
+          DESTDIR="$PWD/pkgroot" ninja -C build install
+
+      - name: Plain tarball
         run: |
           mkdir -p dist
-          cp build/neowall dist/
+          install -m755 build/neowall dist/neowall
           strip dist/neowall
-          cd dist && tar -czf neowall-linux-x86_64-debian.tar.gz neowall
+          tar -C dist -czf dist/neowall-linux-x86_64-debian.tar.gz neowall
+          rm -f dist/neowall
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Build .deb
+        run: |
+          V="${{ steps.ver.outputs.VERSION }}"
+          fpm -s dir -t deb -n neowall -v "$V" \
+            --description "GPU-accelerated live shader wallpapers for Wayland and X11" \
+            --url "https://github.com/1ay1/neowall" \
+            --license MIT --maintainer "1ay1 <noreply@github.com>" \
+            --architecture amd64 \
+            --depends "libwayland-client0" --depends "libwayland-egl1" \
+            --depends "libegl1" --depends "libgl1" \
+            --depends "libpng16-16" --depends "libjpeg62-turbo" \
+            --depends "libx11-6" --depends "libxrandr2" \
+            --deb-no-default-config-files \
+            -C pkgroot -p "dist/neowall_${V}_amd64.deb" usr
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: neowall-debian
-          path: dist/neowall-linux-x86_64-debian.tar.gz
+          name: pkg-debian
+          path: dist/*
 
+  # ---------------------------------------------------------------------------
+  # Ubuntu (newer libs) — .deb tuned for 24.04+
+  # ---------------------------------------------------------------------------
+  build-ubuntu:
+    name: Build (Ubuntu / .deb)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git pkg-config meson ninja-build \
+            libwayland-dev wayland-protocols libwayland-egl1 \
+            libx11-dev libxrandr-dev libegl1-mesa-dev libgl-dev \
+            libpng-dev libjpeg-dev ruby ruby-dev
+          sudo gem install --no-document fpm
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Build & stage
+        run: |
+          meson setup build $MESON_ARGS
+          ninja -C build
+          DESTDIR="$PWD/pkgroot" ninja -C build install
+
+      - name: Build .deb
+        run: |
+          V="${{ steps.ver.outputs.VERSION }}"
+          fpm -s dir -t deb -n neowall -v "$V" --iteration ubuntu24.04 \
+            --description "GPU-accelerated live shader wallpapers for Wayland and X11" \
+            --url "https://github.com/1ay1/neowall" \
+            --license MIT --maintainer "1ay1 <noreply@github.com>" \
+            --architecture amd64 \
+            --depends "libwayland-client0" --depends "libwayland-egl1" \
+            --depends "libegl1" --depends "libgl1" \
+            --depends "libpng16-16t64" --depends "libjpeg-turbo8" \
+            --depends "libx11-6" --depends "libxrandr2" \
+            --deb-no-default-config-files \
+            -C pkgroot -p "dist/neowall_${V}-ubuntu24.04_amd64.deb" usr
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-ubuntu
+          path: dist/*
+
+  # ---------------------------------------------------------------------------
+  # Fedora — .rpm
+  # ---------------------------------------------------------------------------
   build-fedora:
-    name: Build (Fedora)
+    name: Build (Fedora / .rpm)
     runs-on: ubuntu-latest
     container:
       image: fedora:latest
-
     steps:
       - name: Install dependencies
         run: |
           dnf install -y gcc meson ninja-build wayland-devel mesa-libGL-devel \
             mesa-libEGL-devel libpng-devel libjpeg-turbo-devel \
-            wayland-protocols-devel libX11-devel libXrandr-devel git
+            wayland-protocols-devel libX11-devel libXrandr-devel git \
+            ruby ruby-devel rpm-build redhat-rpm-config
+          gem install --no-document fpm
 
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build
-        run: |
-          meson setup build --buildtype=release -Doptimization=2
-          ninja -C build
-
-      - name: Package binary
-        run: |
-          mkdir -p dist
-          cp build/neowall dist/
-          strip dist/neowall
-          cd dist && tar -czf neowall-linux-x86_64-fedora.tar.gz neowall
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: neowall-fedora
-          path: dist/neowall-linux-x86_64-fedora.tar.gz
-
-  release:
-    name: Create Release
-    needs: [build-arch, build-debian, build-fedora]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set version
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Build & stage
+        run: |
+          meson setup build $MESON_ARGS
+          ninja -C build
+          DESTDIR="$PWD/pkgroot" ninja -C build install
+
+      - name: Plain tarball
+        run: |
+          mkdir -p dist
+          install -m755 build/neowall dist/neowall
+          strip dist/neowall
+          tar -C dist -czf dist/neowall-linux-x86_64-fedora.tar.gz neowall
+          rm -f dist/neowall
+
+      - name: Build .rpm
+        run: |
+          V="${{ steps.ver.outputs.VERSION }}"
+          fpm -s dir -t rpm -n neowall -v "$V" \
+            --description "GPU-accelerated live shader wallpapers for Wayland and X11" \
+            --url "https://github.com/1ay1/neowall" \
+            --license MIT --maintainer "1ay1 <noreply@github.com>" \
+            --architecture x86_64 \
+            --depends "wayland-libs" --depends "mesa-libGL" --depends "mesa-libEGL" \
+            --depends "libpng" --depends "libjpeg-turbo" \
+            --depends "libX11" --depends "libXrandr" \
+            -C pkgroot -p "dist/neowall-${V}-1.fc.x86_64.rpm" usr
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-fedora
+          path: dist/*
+
+  # ---------------------------------------------------------------------------
+  # openSUSE — .rpm (zypper deps differ from Fedora)
+  # ---------------------------------------------------------------------------
+  build-opensuse:
+    name: Build (openSUSE / .rpm)
+    runs-on: ubuntu-latest
+    container:
+      image: opensuse/tumbleweed:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          zypper --non-interactive refresh
+          zypper --non-interactive install gcc meson ninja \
+            wayland-devel wayland-protocols-devel Mesa-libGL-devel Mesa-libEGL-devel \
+            libpng16-devel libjpeg8-devel libX11-devel libXrandr-devel git \
+            ruby ruby-devel rpm-build tar gzip gawk
+          gem install --no-document fpm
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Build & stage
+        run: |
+          meson setup build $MESON_ARGS
+          ninja -C build
+          DESTDIR="$PWD/pkgroot" ninja -C build install
+
+      - name: Build .rpm
+        run: |
+          V="${{ steps.ver.outputs.VERSION }}"
+          mkdir -p dist
+          fpm -s dir -t rpm -n neowall -v "$V" --iteration "1.suse" \
+            --description "GPU-accelerated live shader wallpapers for Wayland and X11" \
+            --url "https://github.com/1ay1/neowall" \
+            --license MIT --maintainer "1ay1 <noreply@github.com>" \
+            --architecture x86_64 \
+            --depends "libwayland-client0" --depends "Mesa-libGL1" --depends "Mesa-libEGL1" \
+            --depends "libpng16-16" --depends "libjpeg8" \
+            --depends "libX11-6" --depends "libXrandr2" \
+            -C pkgroot -p "dist/neowall-${V}-1.suse.x86_64.rpm" usr
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-opensuse
+          path: dist/*
+
+  # ---------------------------------------------------------------------------
+  # Alpine — musl static-ish build + .apk
+  # ---------------------------------------------------------------------------
+  build-alpine:
+    name: Build (Alpine / .apk)
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          apk add --no-cache build-base git meson ninja pkgconf \
+            wayland-dev wayland-protocols mesa-dev mesa-egl \
+            libpng-dev libjpeg-turbo-dev libx11-dev libxrandr-dev \
+            ruby ruby-dev tar
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Build & stage
+        run: |
+          meson setup build $MESON_ARGS
+          ninja -C build
+          DESTDIR="$PWD/pkgroot" ninja -C build install
+
+      - name: musl tarball
+        run: |
+          mkdir -p dist
+          install -m755 build/neowall dist/neowall
+          strip dist/neowall
+          tar -C dist -czf dist/neowall-linux-x86_64-musl-alpine.tar.gz neowall
+          rm -f dist/neowall
+
+      - name: Build .apk
+        run: |
+          V="${{ steps.ver.outputs.VERSION }}"
+          gem install --no-document fpm
+          fpm -s dir -t apk -n neowall -v "$V" \
+            --description "GPU-accelerated live shader wallpapers for Wayland and X11" \
+            --url "https://github.com/1ay1/neowall" \
+            --license MIT --maintainer "1ay1 <noreply@github.com>" \
+            --architecture x86_64 \
+            --depends "wayland-libs-client" --depends "mesa-gl" --depends "mesa-egl" \
+            --depends "libpng" --depends "libjpeg-turbo" \
+            --depends "libx11" --depends "libxrandr" \
+            -C pkgroot -p "dist/neowall-${V}-r0.apk" usr || \
+            echo "apk packaging unavailable on this fpm; tarball still produced"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-alpine
+          path: dist/*
+
+  # ---------------------------------------------------------------------------
+  # AppImage — distro-agnostic, runs anywhere with glibc >= build host
+  # ---------------------------------------------------------------------------
+  build-appimage:
+    name: Build (AppImage)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git pkg-config meson ninja-build \
+            libwayland-dev wayland-protocols libwayland-egl1 \
+            libx11-dev libxrandr-dev libegl1-mesa-dev libgl-dev \
+            libpng-dev libjpeg-dev wget file desktop-file-utils
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Build & stage into AppDir
+        run: |
+          meson setup build $MESON_ARGS
+          ninja -C build
+          DESTDIR="$PWD/AppDir" ninja -C build install
+          # AppImage expects an AppRun + top-level .desktop + icon.
+          ln -s usr/bin/neowall AppDir/AppRun
+          cp packaging/neowall.desktop AppDir/neowall.desktop
+          cp packaging/neowall.svg AppDir/neowall.svg
+
+      - name: Package AppImage
+        run: |
+          V="${{ steps.ver.outputs.VERSION }}"
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract >/dev/null
+          mkdir -p dist
+          ARCH=x86_64 ./squashfs-root/AppRun AppDir "dist/neowall-${V}-x86_64.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-appimage
+          path: dist/*
+
+  # ---------------------------------------------------------------------------
+  # Release — gather every artifact, source tarball, checksums; publish
+  # ---------------------------------------------------------------------------
+  release:
+    name: Create Release
+    needs:
+      - build-arch
+      - build-debian
+      - build-ubuntu
+      - build-fedora
+      - build-opensuse
+      - build-alpine
+      - build-appimage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
         id: version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-            echo "TAG=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            echo "VERSION=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "TAG=v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
           else
             TAG=${GITHUB_REF#refs/tags/}
-            VERSION=${TAG#v}
-            echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-            echo "TAG=$TAG" >> $GITHUB_OUTPUT
+            echo "VERSION=${TAG#v}" >> "$GITHUB_OUTPUT"
+            echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download all artifacts
@@ -148,45 +503,41 @@ jobs:
         with:
           path: artifacts
 
-      - name: Prepare release assets
+      - name: Collect release assets
         run: |
           mkdir -p release
-          cp artifacts/neowall-arch/*.tar.gz release/
-          cp artifacts/neowall-debian/*.tar.gz release/
-          cp artifacts/neowall-fedora/*.tar.gz release/
+          find artifacts -type f \
+            \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' \
+               -o -name '*.apk' -o -name '*.AppImage' -o -name '*.pkg.tar.zst' \) \
+            -exec cp -v {} release/ \;
 
-          # Create source tarball
-          tar -czf release/neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz \
-            --exclude='.git' \
-            --exclude='release' \
-            --exclude='artifacts' \
-            --exclude='.github' \
-            --exclude='build' \
-            --exclude='builddir' \
+          # Source tarball
+          tar -czf "release/neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz" \
+            --exclude='.git' --exclude='release' --exclude='artifacts' \
+            --exclude='.github' --exclude='build' --exclude='builddir' \
+            --exclude='AppDir' --exclude='pkgroot' \
             --transform "s,^,neowall-${{ steps.version.outputs.VERSION }}/," \
             *
 
-          # Create checksums
-          cd release
-          sha256sum *.tar.gz > SHA256SUMS.txt
+          cd release && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
 
       - name: Generate changelog
         id: changelog
         run: |
-          PREV_TAG=$(git describe --abbrev=0 --tags ${{ steps.version.outputs.TAG }}^ 2>/dev/null || echo "")
+          PREV_TAG=$(git describe --abbrev=0 --tags "${{ steps.version.outputs.TAG }}^" 2>/dev/null || echo "")
           if [ -n "$PREV_TAG" ]; then
             {
               echo "CHANGELOG<<EOF"
-              git log $PREV_TAG..${{ steps.version.outputs.TAG }} --pretty=format:"- %s" | head -20
+              git log "$PREV_TAG..${{ steps.version.outputs.TAG }}" --no-merges --pretty=format:"- %s" | head -40
               echo ""
               echo "EOF"
-            } >> $GITHUB_OUTPUT
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "CHANGELOG=Initial release" >> $GITHUB_OUTPUT
+            echo "CHANGELOG=Initial release" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.TAG }}
           name: NeoWall ${{ steps.version.outputs.TAG }}
@@ -198,48 +549,56 @@ jobs:
             ### Changes
             ${{ steps.changelog.outputs.CHANGELOG }}
 
-            ### Downloads
+            ### Packages
 
-            | File | Description |
-            |------|-------------|
-            | `neowall-linux-x86_64-arch.tar.gz` | Binary for Arch Linux |
-            | `neowall-linux-x86_64-debian.tar.gz` | Binary for Debian/Ubuntu |
-            | `neowall-linux-x86_64-fedora.tar.gz` | Binary for Fedora |
-            | `neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz` | Source code |
+            Pick the native package for your distro — each pulls in the right runtime deps.
 
-            ### Installation
+            | Distro | File | Install |
+            |--------|------|---------|
+            | Arch / Manjaro | `neowall-*-x86_64.pkg.tar.zst` | `sudo pacman -U <file>` |
+            | Debian / Mint | `neowall_*_amd64.deb` | `sudo apt install ./<file>` |
+            | Ubuntu 24.04+ | `neowall_*-ubuntu24.04_amd64.deb` | `sudo apt install ./<file>` |
+            | Fedora / RHEL | `neowall-*.fc.x86_64.rpm` | `sudo dnf install ./<file>` |
+            | openSUSE | `neowall-*.suse.x86_64.rpm` | `sudo zypper install ./<file>` |
+            | Alpine | `neowall-*-r0.apk` | `sudo apk add --allow-untrusted ./<file>` |
+            | Any (universal) | `neowall-*-x86_64.AppImage` | `chmod +x <file> && ./<file>` |
 
-            #### From Binary
+            ### Plain binaries (no package manager)
+
+            | File | Build |
+            |------|-------|
+            | `neowall-linux-x86_64-arch.tar.gz` | glibc (Arch) |
+            | `neowall-linux-x86_64-debian.tar.gz` | glibc (Debian bookworm) |
+            | `neowall-linux-x86_64-fedora.tar.gz` | glibc (Fedora) |
+            | `neowall-linux-x86_64-musl-alpine.tar.gz` | musl (Alpine) |
+            | `neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz` | source |
+
             ```bash
-            # Download the appropriate binary for your distro
             tar -xzf neowall-linux-x86_64-*.tar.gz
-            sudo mv neowall /usr/local/bin/
-
-            # Copy shaders (optional - download source for shaders)
-            mkdir -p ~/.config/neowall/shaders
+            sudo install -m755 neowall /usr/local/bin/
             ```
 
-            #### Arch Linux (AUR)
+            #### Arch (AUR, tracks git)
             ```bash
             yay -S neowall-git
             ```
 
-            #### From Source
+            #### From source
             ```bash
             tar -xzf neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz
             cd neowall-${{ steps.version.outputs.VERSION }}
-            meson setup build
+            meson setup build --buildtype=release
             ninja -C build
             sudo ninja -C build install
             ```
 
             ### Requirements
-            - OpenGL 3.3+ compatible GPU
-            - Wayland compositor with layer-shell support (Hyprland, Sway, etc.) OR X11
+            - OpenGL 3.3+ capable GPU
+            - Wayland compositor with layer-shell (Hyprland, Sway, River, …) **or** X11
 
+            Verify downloads against `SHA256SUMS.txt`.
           files: |
-            release/*.tar.gz
-            release/SHA256SUMS.txt
+            release/*
           draft: false
           prerelease: false
         env:

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=NeoWall
+GenericName=Wallpaper Daemon
+Comment=GPU-accelerated live shader wallpapers for Wayland and X11
+Exec=neowall
+Icon=neowall
+Terminal=false
+Categories=Utility;Graphics;
+Keywords=wallpaper;shader;background;desktop;wayland;
+StartupNotify=false
+NoDisplay=false
