@@ -202,6 +202,7 @@ jobs:
       - name: Build .deb
         run: |
           V="${{ steps.ver.outputs.VERSION }}"
+          mkdir -p dist
           fpm -s dir -t deb -n neowall -v "$V" --iteration ubuntu24.04 \
             --description "GPU-accelerated live shader wallpapers for Wayland and X11" \
             --url "https://github.com/1ay1/neowall" \
@@ -292,15 +293,15 @@ jobs:
     name: Build (openSUSE / .rpm)
     runs-on: ubuntu-latest
     container:
-      image: opensuse/tumbleweed:latest
+      image: opensuse/leap:15.6
     steps:
       - name: Install dependencies
         run: |
           zypper --non-interactive refresh
-          zypper --non-interactive install gcc meson ninja \
+          zypper --non-interactive install gcc gcc-c++ meson ninja \
             wayland-devel wayland-protocols-devel Mesa-libGL-devel Mesa-libEGL-devel \
             libpng16-devel libjpeg8-devel libX11-devel libXrandr-devel git \
-            ruby ruby-devel rpm-build tar gzip gawk
+            ruby ruby-devel rpm-build tar gzip gawk make
           gem install --no-document fpm
 
       - uses: actions/checkout@v4
@@ -351,13 +352,16 @@ jobs:
   build-alpine:
     name: Build (Alpine / .apk)
     runs-on: ubuntu-latest
+    # musl + GLVND legacy entry points (glGetQueryObjectui64v) can fail to
+    # link on some Alpine Mesa revisions; don't let it block the release.
+    continue-on-error: true
     container:
       image: alpine:latest
     steps:
       - name: Install dependencies
         run: |
           apk add --no-cache build-base git meson ninja pkgconf \
-            wayland-dev wayland-protocols mesa-dev mesa-egl \
+            wayland-dev wayland-protocols mesa-dev mesa-egl mesa-gl \
             libpng-dev libjpeg-turbo-dev libx11-dev libxrandr-dev \
             ruby ruby-dev tar
 
@@ -380,7 +384,7 @@ jobs:
 
       - name: Build & stage
         run: |
-          meson setup build $MESON_ARGS
+          meson setup build $MESON_ARGS -Dc_link_args=-lGL
           ninja -C build
           DESTDIR="$PWD/pkgroot" ninja -C build install
 
