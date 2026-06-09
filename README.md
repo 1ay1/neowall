@@ -19,7 +19,7 @@
 
 ---
 
-Paste a [Shadertoy](https://www.shadertoy.com/) shader into a file, point neowall at it, get an animated desktop. Wayland + X11, multi-monitor, single static binary, no daemon-in-Python anywhere.
+Paste a [Shadertoy](https://www.shadertoy.com/) shader into a file, point neowall at it, get an animated desktop. Wayland + X11 + macOS, multi-monitor, single static binary, no daemon-in-Python anywhere.
 
 ```bash
 neowall
@@ -61,6 +61,9 @@ sudo pacman -S base-devel meson ninja wayland mesa libpng libjpeg-turbo \
 sudo dnf install gcc meson ninja-build wayland-devel mesa-libGLES-devel \
     libpng-devel libjpeg-turbo-devel wayland-protocols-devel \
     libX11-devel libXrandr-devel
+
+# macOS
+brew install meson ninja libpng jpeg-turbo
 ```
 </details>
 
@@ -162,13 +165,15 @@ Single C binary. The event loop is built on `timerfd` + `signalfd` — there is 
 ```
 config.vibe → event loop ─┬─→ EGL / OpenGL 3.3
                           ├─→ Wayland (layer-shell)
-                          └─→ X11 (root window + EWMH)
+                          ├─→ X11 (root window + EWMH)
+                          └─→ macOS (AppKit desktop-level windows + CGL)
 ```
 
 Smart pause is the main thing that separates neowall from the obvious one-evening hack:
 
 - Wayland: `wl_surface.frame` watchdog + `wlr-foreign-toplevel` state bits, plus a Hyprland-specific IPC path that handles the awkward "tiled mosaic of small windows covers the wallpaper" case
 - X11: EWMH `_NET_WM_STATE_FULLSCREEN` on every output
+- macOS: `NSWindowOcclusionState` — the OS tells us directly when the wallpaper window is covered
 
 Result: while a fullscreen game, a maximized browser, or a wall of tiled terminals is covering the screen, neowall draws zero frames. The moment you switch workspaces, it picks back up.
 
@@ -182,6 +187,7 @@ Result: while a fullscreen game, a maximized browser, or a wall of tiled termina
 | Video | – | gifs only | ✓ | – |
 | Wayland | ✓ | ✓ | ✓ | ✓ |
 | X11 | ✓ | – | – | – |
+| macOS | ✓ | – | – | – |
 | Pauses when occluded | ✓ | – | – | – |
 
 If you want video wallpapers, use mpvpaper — neowall is deliberately not that.
@@ -190,6 +196,7 @@ If you want video wallpapers, use mpvpaper — neowall is deliberately not that.
 
 - **KDE Plasma**: native desktop icons may hide while neowall owns the background layer. Use a dock or `plasma-desktop`'s widgets.
 - **GNOME**: works through the fallback path; Mutter doesn't expose layer-shell, so z-order behavior is less guaranteed than on wlroots compositors.
+- **macOS**: new — builds and runs natively (AppKit windows at desktop level, per-screen, HiDPI, occlusion pause), but audio-reactive uniforms and CPU/RAM stats aren't wired up yet on this platform. Run with `-f` (foreground).
 - **No video**: by design.
 
 ## Hacking
