@@ -306,7 +306,9 @@ jobs:
             Mesa-libGLESv2-devel Mesa-libGLESv3-devel \
             libpng16-devel libjpeg8-devel libX11-devel libXrandr-devel git \
             ruby ruby-devel rpm-build tar gzip gawk make
-          gem install --no-document fpm
+          # Leap 15.6 ships Ruby 2.5; fpm >=1.15 needs Ruby >=2.7. Pin a
+          # version whose syntax Ruby 2.5 can still parse.
+          gem install --no-document fpm -v 1.14.2
 
       - uses: actions/checkout@v4
         with:
