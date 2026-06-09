@@ -169,13 +169,14 @@ static inline void nw_vec_free(nw_vec *v, void (*dtor)(void *)) {
 
 /* Self-contained header-only typed vector: emits the struct AND static-inline
  * bodies in one shot. Do NOT precede this with NW_VEC_DECLARE (that would
- * redeclare the functions with external linkage). */
+ * redeclare the functions with external linkage). __attribute__((unused))
+ * because clang warns on unused static-inline fns defined in a .c file. */
 #define NW_VEC_DEFINE_STATIC(Name, T)                                         \
     typedef struct Name {                                                     \
         T     *data;                                                          \
         size_t len;                                                           \
         size_t cap;                                                           \
     } Name;                                                                   \
-    NW_VEC__BODY(Name, T, static inline)
+    NW_VEC__BODY(Name, T, static inline __attribute__((unused)))
 
 #endif /* NEOWALL_VEC_H */
