@@ -307,8 +307,6 @@ jobs:
             libpng16-devel libjpeg8-devel libX11-devel libXrandr-devel git \
             ruby ruby-devel rpm-build tar gzip gawk make
           gem install --no-document fpm
-          # Leap installs gem binaries outside the default PATH.
-          echo "$(ruby -e 'print Gem.bindir')" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@v4
         with:
@@ -337,7 +335,11 @@ jobs:
         run: |
           V="${{ steps.ver.outputs.VERSION }}"
           mkdir -p dist
-          fpm -s dir -t rpm -n neowall -v "$V" --iteration "1.suse" \
+          FPM="$(command -v fpm || true)"
+          [ -z "$FPM" ] && FPM="$(ruby -e 'print Gem.bindir')/fpm"
+          [ -x "$FPM" ] || FPM="$(find / -name fpm -type f -perm -u+x 2>/dev/null | head -1)"
+          echo "using fpm: $FPM"
+          "$FPM" -s dir -t rpm -n neowall -v "$V" --iteration "1.suse" \
             --description "GPU-accelerated live shader wallpapers for Wayland and X11" \
             --url "https://github.com/1ay1/neowall" \
             --license MIT --maintainer "1ay1 <noreply@github.com>" \
