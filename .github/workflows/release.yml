@@ -417,6 +417,95 @@ jobs:
           path: dist/*
 
   # ---------------------------------------------------------------------------
+  # macOS — native AppKit/CGL build, plain tarball (arm64 + x86_64)
+  # ---------------------------------------------------------------------------
+  build-macos-arm64:
+    name: Build (macOS / arm64)
+    runs-on: macos-14
+    steps:
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install meson ninja libpng jpeg-turbo
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          meson setup build --buildtype=release -Doptimization=2
+          ninja -C build
+          ./build/neowall --version
+
+      - name: Plain tarball
+        run: |
+          mkdir -p dist
+          install -m755 build/neowall dist/neowall
+          strip -x dist/neowall || true
+          tar -C dist -czf dist/neowall-macos-arm64.tar.gz neowall
+          rm -f dist/neowall
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-macos-arm64
+          path: dist/*
+
+  build-macos-x86_64:
+    name: Build (macOS / x86_64)
+    runs-on: macos-15-intel
+    # Intel runners are on their way out; don't let this block a release.
+    continue-on-error: true
+    steps:
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install meson ninja libpng jpeg-turbo
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          meson setup build --buildtype=release -Doptimization=2
+          ninja -C build
+          ./build/neowall --version
+
+      - name: Plain tarball
+        run: |
+          mkdir -p dist
+          install -m755 build/neowall dist/neowall
+          strip -x dist/neowall || true
+          tar -C dist -czf dist/neowall-macos-x86_64.tar.gz neowall
+          rm -f dist/neowall
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-macos-x86_64
+          path: dist/*
+
+  # ---------------------------------------------------------------------------
   # Release — gather every artifact, source tarball, checksums; publish
   # ---------------------------------------------------------------------------
   release:
@@ -428,6 +517,8 @@ jobs:
       - build-fedora
       - build-opensuse
       - build-appimage
+      - build-macos-arm64
+      - build-macos-x86_64
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -494,7 +585,7 @@ jobs:
           body: |
             ## NeoWall ${{ steps.version.outputs.VERSION }}
 
-            GPU-accelerated live shader wallpapers for Wayland & X11.
+            GPU-accelerated live shader wallpapers for Wayland, X11 & macOS.
 
             ### Changes
             ${{ steps.changelog.outputs.CHANGELOG }}
@@ -519,10 +610,12 @@ jobs:
             | `neowall-linux-x86_64-arch.tar.gz` | glibc (Arch) |
             | `neowall-linux-x86_64-debian.tar.gz` | glibc (Debian bookworm) |
             | `neowall-linux-x86_64-fedora.tar.gz` | glibc (Fedora) |
+            | `neowall-macos-arm64.tar.gz` | macOS (Apple Silicon) |
+            | `neowall-macos-x86_64.tar.gz` | macOS (Intel) |
             | `neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz` | source |
 
             ```bash
-            tar -xzf neowall-linux-x86_64-*.tar.gz
+            tar -xzf neowall-linux-x86_64-*.tar.gz   # or neowall-macos-*.tar.gz
             sudo install -m755 neowall /usr/local/bin/
             ```
 
@@ -542,7 +635,7 @@ jobs:
 
             ### Requirements
             - OpenGL 3.3+ capable GPU
-            - Wayland compositor with layer-shell (Hyprland, Sway, River, …) **or** X11
+            - Wayland compositor with layer-shell (Hyprland, Sway, River, …), X11, **or** macOS 11+
 
             Verify downloads against `SHA256SUMS.txt`.
           files: |
