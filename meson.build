@@ -238,6 +238,7 @@ output_sources = files(
 # Config sources
 config_sources = files(
   'src/config/config.c',
+  'src/config/shuffle.c',
   'src/config/vibe.c',
 )
 
@@ -249,6 +250,7 @@ render_sources = files(
 # Image sources
 image_sources = files(
   'src/image/image.c',
+  'src/image/exif.c',
 )
 
 # Compositor abstraction layer sources
@@ -494,6 +496,26 @@ test_fft_exe = executable('test_reactive_fft',
 )
 
 test('reactive_fft', test_fft_exe)
+
+# EXIF Orientation parser + RGBA transform (issue #48). Header-light: links
+# only src/image/exif.c; no libjpeg/libpng or display server needed.
+test_exif_exe = executable('test_image_exif',
+  files('tests/test_image_exif.c', 'src/image/exif.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('image_exif', test_exif_exe)
+
+# Fisher-Yates shuffle for cycle paths (issue #47). Pure data; links
+# src/config/shuffle.c only.
+test_shuffle_exe = executable('test_shuffle',
+  files('tests/test_shuffle.c', 'src/config/shuffle.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('shuffle', test_shuffle_exe)
 
 # =============================================================================
 # Fuzzers (opt-in: -Dfuzz=true, clang only)
