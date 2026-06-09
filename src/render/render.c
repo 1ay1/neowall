@@ -36,6 +36,24 @@ static inline const char *output_get_identifier(const struct output_state *outpu
 /* Forward declarations */
 static bool render_frame_transition(struct output_state *output, float progress);
 
+/* Make the output's EGL context/surface current, skipping the call when it
+ * already is. eglMakeCurrent is NOT free even when a no-op: Mesa performs an
+ * implicit flush of the outgoing context, which serializes the GPU pipeline.
+ * The per-frame path hits make-current up to 3x per output (render_frame ->
+ * render_frame_shader -> swap phase); this collapses the redundant ones. */
+static bool ensure_egl_current(struct output_state *output) {
+    EGLDisplay dpy = output->state->egl_display;
+    EGLSurface surf = output->compositor_surface->egl_surface;
+    EGLContext ctx = output->state->egl_context;
+
+    if (eglGetCurrentContext() == ctx &&
+        eglGetCurrentSurface(EGL_DRAW) == surf &&
+        eglGetCurrentDisplay() == dpy) {
+        return true;
+    }
+    return eglMakeCurrent(dpy, surf, surf, ctx);
+}
+
 /* Note: Each transition manages its own shader sources in src/transitions/ */
 
 /* Simple color shader for overlay effects */
@@ -897,9 +915,8 @@ bool render_frame_shader(struct output_state *output) {
         return false;
     }
 
-    /* Ensure EGL context is current */
-    if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
-                       output->compositor_surface->egl_surface, output->state->egl_context)) {
+    /* Ensure EGL context is current (no-op if it already is) */
+    if (!ensure_egl_current(output)) {
         log_error("Failed to make EGL context current for shader rendering");
         return false;
     }
@@ -910,14 +927,19 @@ bool render_frame_shader(struct output_state *output) {
     /* Resize multipass buffers if needed */
     multipass_resize(output->multipass_shader, width, height);
 
-    /* Calculate shader time */
-    uint64_t current_time_ms = get_time_ms();
-    uint64_t start_time = output->shader_start_time > 0 ? output->shader_start_time : current_time_ms;
+    /* Calculate shader time at MICROSECOND precision. shader_start_time is
+     * stored in ms (shared with pause/resume bookkeeping); ms*1000 == µs on
+     * the same monotonic epoch. Millisecond-quantized time visibly stutters:
+     * at 60 FPS the 16.67ms interval alternates 16/17ms steps (~6% jitter). */
+    uint64_t current_time_us = get_time_us();
+    uint64_t start_time_us = output->shader_start_time > 0
+        ? output->shader_start_time * 1000ull
+        : current_time_us;
     /* Guard against start_time being (transiently) in the future — subtracting
      * unsigned would wrap to an enormous elapsed value. Can happen around a
      * shader-pause resume that races a shader reload; clamp to 0 instead. */
-    double current_time = current_time_ms > start_time
-        ? (current_time_ms - start_time) / 1000.0
+    double current_time = current_time_us > start_time_us
+        ? (double)(current_time_us - start_time_us) / 1e6
         : 0.0;
     
     /* Apply shader speed multiplier */
@@ -934,11 +956,11 @@ bool render_frame_shader(struct output_state *output) {
                      mouse_x, mouse_y,
                      false);  /* mouse_click */
 
-    /* Log every 60 frames to confirm rendering is happening */
+    /* Log every 600 frames to confirm rendering is happening */
     static int frame_count = 0;
     frame_count++;
-    if (frame_count % 60 == 0) {
-        log_info("Multipass shader render frame %d (time=%.2f, passes=%d)", 
+    if (frame_count % 600 == 0) {
+        log_debug("Multipass shader render frame %d (time=%.2f, passes=%d)", 
                  frame_count, (float)current_time, output->multipass_shader->pass_count);
     }
 
@@ -984,20 +1006,23 @@ bool render_frame(struct output_state *output) {
     /* CRITICAL: Ensure EGL context is current before any GL operations */
     if (output->state && output->state->egl_display != EGL_NO_DISPLAY &&
         output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-        if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
-                           output->compositor_surface->egl_surface, output->state->egl_context)) {
+        bool was_current = eglGetCurrentContext() == output->state->egl_context &&
+                           eglGetCurrentSurface(EGL_DRAW) == output->compositor_surface->egl_surface;
+        if (!ensure_egl_current(output)) {
             log_error("Failed to make EGL context current for rendering");
             return false;
         }
 
-        /* CRITICAL: Invalidate GL state cache when switching contexts
-         * All outputs share the same EGL context but have different surfaces.
-         * When we switch surfaces, the GL state (bound textures, programs, etc.)
-         * persists from the previous surface, but our cache is per-output.
-         * We must invalidate the cache to force rebinding. */
-        output->gl_state.bound_texture = 0;
-        output->gl_state.active_program = 0;
-        output->gl_state.blend_enabled = false;
+        /* Invalidate GL state cache only when the draw surface actually
+         * changed. All outputs share one EGL context but have different
+         * surfaces; cached bindings (textures, programs) are per-output and
+         * go stale across a surface switch. On the common single-output
+         * path the surface never changes, so the cache stays warm. */
+        if (!was_current) {
+            output->gl_state.bound_texture = 0;
+            output->gl_state.active_program = 0;
+            output->gl_state.blend_enabled = false;
+        }
     }
 
     /* Handle shader wallpapers */

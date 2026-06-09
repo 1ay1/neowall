@@ -35,6 +35,15 @@ uint64_t get_time_ms(void) {
     return (uint64_t)ts.tv_sec * MS_PER_SECOND + (uint64_t)ts.tv_nsec / MS_PER_NANOSECOND;
 }
 
+/* Microsecond-precision monotonic clock. Same epoch as get_time_ms() so the
+ * two can be mixed (ms*1000 == us). Used for shader animation time, where
+ * millisecond quantization causes visible micro-stutter at 60+ FPS. */
+uint64_t get_time_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
+}
+
 /* Get formatted timestamp */
 static void get_timestamp(char *buf, size_t size) {
     time_t now = time(NULL);

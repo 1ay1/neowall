@@ -47,10 +47,8 @@ static void manifest_path_for(const char *shader_path, char *out, size_t cap) {
     }
 }
 
-/* Map a channelN key index to its pass type's image channel.
- * Manifests target the Image pass by default; buffer-pass channel binding is
- * expressed as "bufA.channel0" style keys handled below. */
-
+/* Apply a per-pass channel block: each entry is "chN source" (e.g. ch0 audio).
+ * The key's leading non-digits are skipped, so ch0 / channel0 / 0 all work. */
 static void apply_channel_block(multipass_shader_t *shader, VibeObject *chans,
                                 multipass_type_t pass_type) {
     if (!chans) return;

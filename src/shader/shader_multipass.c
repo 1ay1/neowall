@@ -724,6 +724,39 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
     /* Initialize multipass optimizer for smart per-buffer resolution and half-rate updates */
     multipass_optimizer_init(&shader->multipass_opt);
 
+    /* Detect whether this shader is ANIMATED. A shader that references no
+     * frame-varying input renders the same image every frame — the engine can
+     * paint it once and stop the redraw loop entirely (0% GPU at idle).
+     * Conservative: any time/frame/interactive/buffer reference counts as
+     * animated; buffers imply feedback which can evolve without iTime. */
+    shader->is_animated = (parse_result->pass_count > 1);
+    {
+        const char *animate_tokens[] = {
+            "iTime", "iGlobalTime", "iFrame", "iDate", "iMouse",
+            "iChannel", "iAudio", "iKeyEnergy", "iMouseEnergy",
+            "iCpu", "iRam", "iNet", "iLoad", "iGpu", "iDisk", "iSwap",
+            "iBattery", "iCharging", "iTimeOfDay", "iSun", "iDayFraction",
+            "iProcs", "iUptime", "iTemp"
+        };
+        for (int i = 0; !shader->is_animated && i < parse_result->pass_count; i++) {
+            const char *src = parse_result->pass_sources[i];
+            if (!src) continue;
+            for (size_t t = 0; t < sizeof(animate_tokens)/sizeof(animate_tokens[0]); t++) {
+                if (strstr(src, animate_tokens[t])) { shader->is_animated = true; break; }
+            }
+        }
+        if (!shader->is_animated && parse_result->common_source) {
+            for (size_t t = 0; t < sizeof(animate_tokens)/sizeof(animate_tokens[0]); t++) {
+                if (strstr(parse_result->common_source, animate_tokens[t])) {
+                    shader->is_animated = true; break;
+                }
+            }
+        }
+        if (!shader->is_animated) {
+            log_info("Static shader detected (no time/interactive inputs) - will render once and idle");
+        }
+    }
+
     for (int i = 0; i < parse_result->pass_count; i++) {
         multipass_pass_t *pass = &shader->passes[i];
 
@@ -999,39 +1032,59 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
     glBindBuffer(GL_ARRAY_BUFFER, shader->vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-    /* Generate high-quality noise texture (1024x1024 for Shadertoy compatibility)
-     * Many shaders expect texture(iChannel0, p/1024.0) to sample noise */
+    /* Bake the fullscreen-quad vertex layout into the VAO ONCE. Every pass
+     * uses the same quad; binding the VAO at render time restores the whole
+     * attribute state with a single call instead of re-specifying
+     * pointer/enable per frame. */
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+
+    /* Generate a Shadertoy-compatible 256x256 RGBA noise texture.
+     * Shadertoy's noise channels have two properties shaders depend on:
+     *   1. Bilinear filtering (iq-style value noise samples BETWEEN texels)
+     *   2. green(x,y) == red(x+37, y+17)  (and alpha == blue offset the same
+     *      way) so one fetch of .yx yields two correlated z-slices:
+     *      mix(rg.x, rg.y, f.z) in the classic noise() function.
+     * Size must be 256: shaders index with (uv+0.5)/256.0 and
+     * iChannelResolution reports 256. */
     glGenTextures(1, &shader->noise_texture);
     glBindTexture(GL_TEXTURE_2D, shader->noise_texture);
 
-    #define NOISE_SIZE 1024
+    #define NOISE_SIZE 256
     unsigned char *noise_data = malloc(NOISE_SIZE * NOISE_SIZE * 4);
     if (noise_data) {
-        /* Use a simple but decent PRNG for reproducible noise */
+        /* Pass 1: fill red + blue with reproducible LCG noise */
         unsigned int seed = 12345;
+        for (int i = 0; i < NOISE_SIZE * NOISE_SIZE; i++) {
+            seed = seed * 1664525u + 1013904223u;
+            noise_data[i * 4 + 0] = (seed >> 24) & 0xFF;  /* red */
+            seed = seed * 1664525u + 1013904223u;
+            noise_data[i * 4 + 2] = (seed >> 24) & 0xFF;  /* blue */
+        }
+        /* Pass 2: green = red shifted by (37,17), alpha = blue shifted */
         for (int y = 0; y < NOISE_SIZE; y++) {
+            int sy = (y + 17) & (NOISE_SIZE - 1);
             for (int x = 0; x < NOISE_SIZE; x++) {
-                int idx = (y * NOISE_SIZE + x) * 4;
-                /* LCG-based pseudo-random with mixing for each channel */
-                seed = seed * 1664525u + 1013904223u;
-                noise_data[idx + 0] = (seed >> 24) & 0xFF;
-                seed = seed * 1664525u + 1013904223u;
-                noise_data[idx + 1] = (seed >> 24) & 0xFF;
-                seed = seed * 1664525u + 1013904223u;
-                noise_data[idx + 2] = (seed >> 24) & 0xFF;
-                seed = seed * 1664525u + 1013904223u;
-                noise_data[idx + 3] = (seed >> 24) & 0xFF;
+                int sx = (x + 37) & (NOISE_SIZE - 1);
+                int dst = (y * NOISE_SIZE + x) * 4;
+                int src = (sy * NOISE_SIZE + sx) * 4;
+                noise_data[dst + 1] = noise_data[src + 0];  /* green */
+                noise_data[dst + 3] = noise_data[src + 2];  /* alpha */
             }
         }
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, NOISE_SIZE, NOISE_SIZE, 0, GL_RGBA, GL_UNSIGNED_BYTE, noise_data);
         free(noise_data);
     }
     #undef NOISE_SIZE
-    /* Use NEAREST for crisp noise values, LINEAR can cause blurring */
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    /* LINEAR + REPEAT + mipmaps to match Shadertoy noise channel sampling.
+     * Shadertoy channels default to 'mipmap' filtering; shaders that need
+     * raw mip-0 texels pass an explicit LOD bias (the classic ', -100.').
+     * Without mips, minified noise lookups alias and shimmer in motion. */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glGenerateMipmap(GL_TEXTURE_2D);
 
     /* Live audio texture: width REACTIVE_AUDIO_BINS, 2 rows.
      * Row 0 = FFT spectrum, row 1 = waveform. Single red channel, float.
@@ -1473,10 +1526,13 @@ void multipass_set_uniforms(multipass_shader_t *shader,
     /* Use cached uniform locations for performance */
     const uniform_locations_t *u = &pass->uniforms;
 
-    /* Time uniforms - these change every frame, use direct GL calls */
+    /* Time uniforms - these change every frame, use direct GL calls.
+     * iTimeDelta/iFrameRate carry REAL measured frame timing (computed once
+     * per frame in multipass_render) so time-step-integrating shaders
+     * (physics, flow fields) advance at the correct rate at any FPS. */
     if (u->iTime >= 0) glUniform1f(u->iTime, shader_time);
-    if (u->iTimeDelta >= 0) glUniform1f(u->iTimeDelta, 1.0f / 60.0f);
-    if (u->iFrameRate >= 0) glUniform1f(u->iFrameRate, 60.0f);
+    if (u->iTimeDelta >= 0) glUniform1f(u->iTimeDelta, shader->frame_dt);
+    if (u->iFrameRate >= 0) glUniform1f(u->iFrameRate, shader->frame_fps);
     if (u->iFrame >= 0) glUniform1i(u->iFrame, shader->frame_count);
 
     /* Resolution - changes per pass */
@@ -1493,21 +1549,25 @@ void multipass_set_uniforms(multipass_shader_t *shader,
         glUniform4f(u->iMouse, mouse_x, mouse_y, click_x, click_y);
     }
 
-    /* Date - only update if uniform is used (avoid syscall overhead) */
+    /* Date - cached per wall-clock second (localtime() is surprisingly
+     * expensive: TZ lookup + conversion). Only rebuilt when the second
+     * ticks; multiple passes in the same frame always hit the cache. */
     if (u->iDate >= 0) {
-        /* Cache date info - only update once per second would be even better,
-         * but for now just use the cached location */
         time_t t = time(NULL);
-        struct tm *tm_info = localtime(&t);
-        if (tm_info) {
-            float year = (float)(tm_info->tm_year + 1900);
-            float month = (float)(tm_info->tm_mon + 1);
-            float day = (float)tm_info->tm_mday;
-            float seconds = (float)(tm_info->tm_hour * 3600 +
-                                    tm_info->tm_min * 60 +
-                                    tm_info->tm_sec);
-            glUniform4f(u->iDate, year, month, day, seconds);
+        if ((long long)t != shader->date_cached_sec) {
+            struct tm tm_buf;
+            if (localtime_r(&t, &tm_buf)) {
+                shader->date_cached[0] = (float)(tm_buf.tm_year + 1900);
+                shader->date_cached[1] = (float)(tm_buf.tm_mon + 1);
+                shader->date_cached[2] = (float)tm_buf.tm_mday;
+                shader->date_cached[3] = (float)(tm_buf.tm_hour * 3600 +
+                                                 tm_buf.tm_min * 60 +
+                                                 tm_buf.tm_sec);
+            }
+            shader->date_cached_sec = (long long)t;
         }
+        glUniform4f(u->iDate, shader->date_cached[0], shader->date_cached[1],
+                    shader->date_cached[2], shader->date_cached[3]);
     }
 
     if (u->iSampleRate >= 0) glUniform1f(u->iSampleRate, 44100.0f);
@@ -1524,10 +1584,11 @@ void multipass_set_uniforms(multipass_shader_t *shader,
     }
 
     /* --- neowall reactive uniforms (live system + audio) ---
-     * One snapshot per pass; cheap (a struct copy). Each glUniform is skipped
+     * Snapshot taken ONCE per frame in multipass_render (mutex-guarded copy);
+     * all passes read the same coherent values. Each glUniform is skipped
      * if the shader didn't reference that uniform (location < 0). */
-    reactive_snapshot_t r;
-    reactive_get(&r);
+    const reactive_snapshot_t *rp = &shader->frame_reactive;
+    #define r (*rp)
     if (u->iCpu >= 0)         glUniform1f(u->iCpu, r.cpu);
     if (u->iCpuCoreCount >= 0) glUniform1i(u->iCpuCoreCount, r.cpu_cores);
     if (u->iCpuCores >= 0)    glUniform1fv(u->iCpuCores, 8, r.cpu_per);
@@ -1597,6 +1658,7 @@ void multipass_set_uniforms(multipass_shader_t *shader,
         }
         glUniform1f(loc, v);
     }
+    #undef r
 }
 
 void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
@@ -1780,6 +1842,43 @@ void multipass_render(multipass_shader_t *shader,
                       bool mouse_click) {
     if (!shader || !shader->is_initialized) return;
 
+    /* ---- Per-frame cache (consumed by every pass via set_uniforms) ----
+     * Monotonic wall clock: measure real dt for iTimeDelta/iFrameRate and
+     * feed the same timestamp to the adaptive-resolution system below. */
+    double wall_time;
+#ifdef _WIN32
+    LARGE_INTEGER freq, counter;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&counter);
+    wall_time = (double)counter.QuadPart / (double)freq.QuadPart;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    wall_time = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+#endif
+    if (shader->last_frame_wall > 0.0) {
+        float dt = (float)(wall_time - shader->last_frame_wall);
+        /* Clamp: a paused/occluded wallpaper can sit idle for minutes; feeding
+         * a 60s dt into a physics shader explodes it. Cap at 1/4s, floor at
+         * 0.1ms to avoid div-by-zero in shaders that do 1.0/iTimeDelta. */
+        if (dt > 0.25f) dt = 0.25f;
+        if (dt < 0.0001f) dt = 0.0001f;
+        shader->frame_dt = dt;
+        /* EMA-smoothed FPS so iFrameRate doesn't jitter frame to frame */
+        float inst = 1.0f / dt;
+        shader->frame_fps = shader->frame_fps > 0.0f
+            ? shader->frame_fps * 0.9f + inst * 0.1f
+            : inst;
+    } else {
+        shader->frame_dt = 1.0f / 60.0f;
+        shader->frame_fps = 60.0f;
+    }
+    shader->last_frame_wall = wall_time;
+
+    /* One reactive snapshot per FRAME (mutex-guarded ~2.2KB copy), shared by
+     * all passes and the audio texture upload below. */
+    reactive_get(&shader->frame_reactive);
+
     /* Start GPU timing for this frame (if enabled) */
     adaptive_begin_frame(&shader->adaptive);
     
@@ -1843,19 +1942,8 @@ void multipass_render(multipass_shader_t *shader,
         }
     }
 
-    /* Update adaptive resolution using wall-clock time (not shader time)
-     * This ensures proper FPS measurement even when shader time is paused/scaled */
-    double wall_time;
-#ifdef _WIN32
-    LARGE_INTEGER freq, counter;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&counter);
-    wall_time = (double)counter.QuadPart / (double)freq.QuadPart;
-#else
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    wall_time = (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
-#endif
+    /* Update adaptive resolution using the wall-clock time sampled at the
+     * top of this frame (not shader time, which can be paused/scaled) */
     adaptive_update(&shader->adaptive, wall_time);
     
     /* Sync resolution scale from adaptive system */
@@ -1869,16 +1957,15 @@ void multipass_render(multipass_shader_t *shader,
 
     log_debug_frame(shader->frame_count, "=== Frame %d ===", shader->frame_count);
 
-    /* Refresh the live audio texture once per frame from the reactive snapshot.
-     * Row 0 = spectrum, row 1 = waveform. Skipped cheaply if no audio is live
-     * (the texture just stays zero). */
+    /* Refresh the live audio texture once per frame from this frame's
+     * reactive snapshot. Skipped cheaply if no audio is live (the texture
+     * just stays zero). */
     if (shader->audio_texture) {
-        reactive_snapshot_t ra;
-        reactive_get(&ra);
-        if (ra.audio_active) {
+        const reactive_snapshot_t *ra = &shader->frame_reactive;
+        if (ra->audio_active) {
             float rows[REACTIVE_AUDIO_BINS * 2];
-            memcpy(&rows[0], ra.audio_spectrum, sizeof(ra.audio_spectrum));
-            memcpy(&rows[REACTIVE_AUDIO_BINS], ra.audio_waveform, sizeof(ra.audio_waveform));
+            memcpy(&rows[0], ra->audio_spectrum, sizeof(ra->audio_spectrum));
+            memcpy(&rows[REACTIVE_AUDIO_BINS], ra->audio_waveform, sizeof(ra->audio_waveform));
             glBindTexture(GL_TEXTURE_2D, shader->audio_texture);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, REACTIVE_AUDIO_BINS, 2,
@@ -1896,14 +1983,10 @@ void multipass_render(multipass_shader_t *shader,
     opt_color_mask(&shader->optimizer, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     /*
-     * Setup vertex state ONCE for all passes (major performance optimization)
-     * All passes use the same fullscreen quad
+     * Setup vertex state ONCE for all passes: the quad layout was baked into
+     * the VAO at init, so a single bind restores everything.
      */
-    /* Bind VAO - required for desktop OpenGL 3.3 Core */
     glBindVertexArray(shader->vao);
-    glBindBuffer(GL_ARRAY_BUFFER, shader->vbo);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
 
     /*
      * Shadertoy rendering order:
@@ -1964,8 +2047,8 @@ void multipass_render(multipass_shader_t *shader,
                   shader->image_pass_index, shader->pass_count);
     }
 
-    /* Cleanup vertex state */
-    glDisableVertexAttribArray(0);
+    /* Cleanup vertex state (attribute state lives in the VAO; just unbind) */
+    glBindVertexArray(0);
 
     /* End GPU timing for this frame */
     adaptive_end_frame(&shader->adaptive);

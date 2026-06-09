@@ -17,6 +17,7 @@
 #include "neowall/shader/adaptive_scale.h"
 #include "neowall/shader/render_optimizer.h"
 #include "neowall/shader/multipass_optimizer.h"
+#include "neowall/shader/reactive.h"
 
 /* Maximum number of passes supported (BufferA-D + Image) */
 #define MULTIPASS_MAX_BUFFERS 4
@@ -181,6 +182,17 @@ typedef struct {
     bool use_smart_buffer_sizing;            /* Auto-detect optimal buffer resolutions */
     
     bool is_initialized;                     /* OpenGL resources initialized */
+    bool is_animated;                        /* False = no time/mouse/audio refs: render once, then sleep */
+
+    /* Per-frame cache: computed ONCE in multipass_render, consumed by
+     * multipass_set_uniforms for every pass. Avoids redundant mutex-guarded
+     * reactive snapshots and time()/localtime() syscalls per pass. */
+    double last_frame_wall;                  /* monotonic seconds at previous frame (0 = first) */
+    float frame_dt;                          /* real seconds between frames, clamped sane */
+    float frame_fps;                         /* smoothed instantaneous FPS for iFrameRate */
+    float date_cached[4];                    /* iDate vec4, refreshed when the second ticks */
+    long long date_cached_sec;               /* time() value date_cached was built for */
+    reactive_snapshot_t frame_reactive;      /* one reactive snapshot per frame */
 
     /* User uniforms declared by a .neowall manifest (Tier 2/3). Declared into
      * the wrapper at compile time and set each frame in multipass_set_uniforms. */

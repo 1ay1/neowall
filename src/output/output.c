@@ -941,6 +941,10 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     log_info("Adaptive resolution targeting %d FPS for shader: %s", target_fps, shader_path);
 
     output->shader_start_time = get_time_ms();
+    /* Fresh shader = fresh frame count. The static-shader idle path keys off
+     * frames_rendered>0; without this reset a newly loaded static shader
+     * would inherit the old count and never paint. */
+    output->frames_rendered = 0;
     /* A freshly loaded shader starts from a clean timeline; clear any frozen
      * baseline so a pending resume doesn't shift start_time into the future
      * (which would underflow the elapsed-time calculation in render.c). */

@@ -9,6 +9,7 @@
 #include <sys/eventfd.h>
 #include <sys/signalfd.h>
 #include "neowall/neowall.h"
+#include "neowall/shader/shader_multipass.h"
 #include "neowall/config/config_access.h"
 #include "neowall/config/config.h"
 #include "neowall/egl/egl_core.h"
@@ -405,11 +406,17 @@ static void render_outputs(struct neowall_state *state) {
             continue;
         }
 
-        if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
-                           output->compositor_surface->egl_surface, state->egl_context)) {
-            log_error("Failed to make context current before swap for output %s: 0x%x",
-                     output->model, eglGetError());
-            continue;
+        /* Make current before swap. On the common single-output path the
+         * render phase already left this context/surface current; skipping
+         * the redundant eglMakeCurrent avoids Mesa's implicit flush. */
+        if (eglGetCurrentContext() != state->egl_context ||
+            eglGetCurrentSurface(EGL_DRAW) != output->compositor_surface->egl_surface) {
+            if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
+                               output->compositor_surface->egl_surface, state->egl_context)) {
+                log_error("Failed to make context current before swap for output %s: 0x%x",
+                         output->model, eglGetError());
+                continue;
+            }
         }
 
         /* Damage BEFORE swap+commit — wl_surface damage must be queued before
@@ -426,8 +433,8 @@ static void render_outputs(struct neowall_state *state) {
 
         static uint64_t swap_counter = 0;
         swap_counter++;
-        if (swap_counter % 60 == 0) {
-            log_info("Buffer swap #%lu successful for output %s", swap_counter, output->model);
+        if (swap_counter % 600 == 0) {
+            log_debug("Buffer swap #%lu successful for output %s", swap_counter, output->model);
         }
 
         compositor_surface_commit(output->compositor_surface);
@@ -782,6 +789,17 @@ void event_loop_run(struct neowall_state *state) {
                 continue;
             }
 
+            /* Skip frame timer for STATIC shaders — they painted their one
+             * frame; waking poll() at 60Hz to re-render an identical image
+             * wastes CPU+GPU. (needs_redraw still works for resize/reload.) */
+            if (output->config->type == WALLPAPER_SHADER &&
+                output->multipass_shader &&
+                !output->multipass_shader->is_animated &&
+                output->frames_rendered > 0) {
+                output = output->next;
+                continue;
+            }
+
             /* Check for active frame timer (vsync disabled shaders) */
             int frame_fd = output_get_frame_timer_fd(output);
             if (frame_fd >= 0) {
@@ -1040,7 +1058,12 @@ void event_loop_run(struct neowall_state *state) {
                 !o->shader_load_failed &&
                 (o->live_shader_program != 0 || o->multipass_shader != NULL) &&
                 !atomic_load_explicit(&state->shader_paused, memory_order_acquire)) {
-                if (o->config->vsync || output_get_frame_timer_fd(o) < 0) {
+                /* Static shaders idle after their first frame */
+                bool is_static = o->multipass_shader &&
+                                 !o->multipass_shader->is_animated &&
+                                 o->frames_rendered > 0;
+                if (!is_static &&
+                    (o->config->vsync || output_get_frame_timer_fd(o) < 0)) {
                     atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
                 }
             }

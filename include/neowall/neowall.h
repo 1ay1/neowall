@@ -112,6 +112,7 @@ void event_loop_stop(struct neowall_state *state);
 
 /* Utility functions */
 uint64_t get_time_ms(void);
+uint64_t get_time_us(void);
 const char *wallpaper_mode_to_string(enum wallpaper_mode mode);
 enum wallpaper_mode wallpaper_mode_from_string(const char *str);
 const char *transition_type_to_string(enum transition_type type);
