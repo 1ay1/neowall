@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <strings.h>
 #include <dirent.h>
+#include <time.h>
 #include "neowall/config/config.h"
 #include "neowall/config/vibe.h"
 #include "neowall/neowall.h"
@@ -199,6 +200,43 @@ static int compare_strings(const void *a, const void *b) {
     const char *str_a = *(const char **)a;
     const char *str_b = *(const char **)b;
     return strcmp(str_a, str_b);
+}
+
+/* Fisher-Yates shuffle on an array of cycle path pointers (issue #47).
+ *
+ * Uses random() (POSIX, ~31-bit period — fine for picking a wallpaper order),
+ * seeded once per process from CLOCK_MONOTONIC + getpid() so two daemons started
+ * in the same second don't pick the same sequence. The seed is intentionally
+ * lazy: a shader/image cycle that's never built never touches the RNG.
+ *
+ * `keep_first_at_zero` is the "re-shuffle on wrap" mode: it shuffles only
+ * indices [1, n) so the wallpaper that was just shown stays at position 0,
+ * preventing the same image appearing twice in a row across a wrap. */
+void config_shuffle_cycle_paths(char **paths, size_t n, bool keep_first_at_zero) {
+    if (!paths || n < 2) return;
+
+    static bool seeded = false;
+    if (!seeded) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        unsigned int seed = (unsigned int)ts.tv_nsec
+                          ^ (unsigned int)(ts.tv_sec << 16)
+                          ^ (unsigned int)getpid();
+        srandom(seed);
+        seeded = true;
+    }
+
+    size_t start = keep_first_at_zero ? 1 : 0;
+    if (n - start < 2) return;
+
+    /* Standard Fisher-Yates: walk from the end down, swap with a random
+     * earlier (or same) slot. Uniform if random() is uniform on [0, RAND_MAX]. */
+    for (size_t i = n - 1; i > start; i--) {
+        size_t j = start + (size_t)(random() % (long)(i - start + 1));
+        char *tmp = paths[i];
+        paths[i] = paths[j];
+        paths[j] = tmp;
+    }
 }
 
 /* ============================================================================
@@ -484,6 +522,7 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->pause_on_fullscreen = true;  /* Default: pause rendering when occluded */
     config->pause_coverage_threshold = 0.8f;  /* Default: 80% tiled coverage = occluded */
     config->cycle = false;
+    config->shuffle = false;
     config->cycle_paths = NULL;
     config->cycle_count = 0;
     config->current_cycle_index = 0;
@@ -501,6 +540,18 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
 
     /* Initialize with safe defaults */
     init_wallpaper_config_defaults(config);
+
+    /* Parse 'shuffle' EARLY — needs to be in scope before the directory
+     * branches below so we can apply it the moment cycle_paths is built. */
+    VibeValue *shuffle_val = vibe_object_get(obj->as_object, "shuffle");
+    if (shuffle_val) {
+        if (shuffle_val->type != VIBE_TYPE_BOOLEAN) {
+            log_error("[%s] 'shuffle' must be a boolean (true or false), got type: %d",
+                     context_name, shuffle_val->type);
+            return false;
+        }
+        config->shuffle = shuffle_val->as_boolean;
+    }
 
     /* Check for 'path' and 'shader' - these are MUTUALLY EXCLUSIVE */
     VibeValue *path_val = vibe_object_get(obj->as_object, "path");
@@ -554,6 +605,16 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             config->cycle_paths = image_paths;
             config->current_cycle_index = 0;  /* Will be restored per-output in output_apply_config */
 
+            /* Randomise order if requested (issue #47). Done here so every
+             * downstream consumer — per-output deep copy, write_cycle_list for
+             * `neowall list`, multi-monitor sync — sees the SAME shuffled
+             * order. Two monitors sharing this default block stay in sync. */
+            if (config->shuffle) {
+                config_shuffle_cycle_paths(config->cycle_paths, config->cycle_count, false);
+                log_info("[%s] IMAGE MODE: shuffle=true, randomised %zu-entry cycle order",
+                        context_name, image_count);
+            }
+
             /* Use first image as initial path (will be updated per-output) */
             snprintf(config->path, sizeof(config->path), "%s", image_paths[0]);
 
@@ -601,6 +662,15 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             config->cycle_count = shader_count;
             config->cycle_paths = shader_paths;
             config->current_cycle_index = 0;  /* Will be restored per-output in output_apply_config */
+
+            /* Randomise order if requested (issue #47). Same reasoning as the
+             * image branch above — shuffle before the per-output deep copy so
+             * everyone sees the same order. */
+            if (config->shuffle) {
+                config_shuffle_cycle_paths(config->cycle_paths, config->cycle_count, false);
+                log_info("[%s] SHADER MODE: shuffle=true, randomised %zu-entry cycle order",
+                        context_name, shader_count);
+            }
 
             /* Use first shader as initial shader_path (will be updated per-output) */
             snprintf(config->shader_path, sizeof(config->shader_path), "%s", shader_paths[0]);
@@ -927,7 +997,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     const char *known_keys[] = {
         "path", "shader", "mode", "duration", "transition",
         "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps",
-        "pause_on_fullscreen", "pause_coverage_threshold"
+        "pause_on_fullscreen", "pause_coverage_threshold", "shuffle"
     };
     size_t known_key_count = sizeof(known_keys) / sizeof(known_keys[0]);
 

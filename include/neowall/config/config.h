@@ -23,4 +23,9 @@ const char *config_get_default_path(void);
 char **load_images_from_directory(const char *dir_path, size_t *count);
 char **load_shaders_from_directory(const char *dir_path, size_t *count);
 
+/* Fisher-Yates shuffle of an array of cycle path pointers (issue #47).
+ * keep_first_at_zero=true preserves paths[0] (used on wrap so the just-shown
+ * item doesn't repeat). The RNG is seeded lazily on first call. */
+void config_shuffle_cycle_paths(char **paths, size_t n, bool keep_first_at_zero);
+
 #endif /* CONFIG_H */

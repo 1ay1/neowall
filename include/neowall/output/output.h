@@ -61,6 +61,8 @@ struct wallpaper_config {
     bool pause_on_fullscreen;           /* Pause rendering when output is occluded by fullscreen window */
     float pause_coverage_threshold;     /* Fraction (0.0-1.0) of wallpaper region that must be covered by tiled windows to count as occluded. Default 0.8 */
     bool cycle;                         /* Enable wallpaper cycling */
+    bool shuffle;                       /* Randomise cycle order on load + on every wrap (issue #47).
+                                         * Applies to both image and shader directory cycles. */
     char **cycle_paths;                 /* Array of paths for cycling */
     size_t cycle_count;                 /* Number of wallpapers to cycle */
     size_t current_cycle_index;         /* Current index in cycle */
