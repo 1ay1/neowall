@@ -296,19 +296,26 @@ jobs:
     # release — rpm users are also served by the Fedora package and AppImage.
     continue-on-error: true
     container:
-      image: opensuse/leap:15.6
+      image: opensuse/tumbleweed:latest
     steps:
       - name: Install dependencies
         run: |
-          zypper --non-interactive refresh
-          zypper --non-interactive install gcc gcc-c++ meson ninja \
-            wayland-devel wayland-protocols-devel Mesa-libGL-devel Mesa-libEGL-devel \
-            Mesa-libGLESv2-devel Mesa-libGLESv3-devel \
-            libpng16-devel libjpeg8-devel libX11-devel libXrandr-devel git \
-            ruby ruby-devel rpm-build tar gzip gawk make
-          # Leap 15.6 ships Ruby 2.5; fpm >=1.15 needs Ruby >=2.7. Pin a
-          # version whose syntax Ruby 2.5 can still parse.
-          gem install --no-document fpm -v 1.14.2
+          # Tumbleweed ships modern Ruby (needed by current fpm). Retry to
+          # ride out occasional mirror 404s during package preload.
+          for i in 1 2 3; do
+            zypper --non-interactive --gpg-auto-import-keys refresh && break
+            sleep 5
+          done
+          for i in 1 2 3; do
+            zypper --non-interactive install --no-recommends \
+              gcc gcc-c++ meson ninja \
+              wayland-devel wayland-protocols-devel Mesa-libGL-devel Mesa-libEGL-devel \
+              Mesa-libGLESv3-devel \
+              libpng16-devel libjpeg8-devel libX11-devel libXrandr-devel git \
+              ruby ruby-devel rpm-build tar gzip gawk make && break
+            sleep 5
+          done
+          gem install --no-document fpm
 
       - uses: actions/checkout@v4
         with:
