@@ -41,6 +41,12 @@ typedef struct wayland {
     struct wl_shm *shm;
     struct zxdg_output_manager_v1 *xdg_output_manager;
     struct wp_tearing_control_manager_v1 *tearing_control_manager;
+    /* wp_cursor_shape_manager_v1: lets the COMPOSITOR draw its own themed
+     * cursor (hyprcursor on Hyprland) instead of us rendering an XCursor
+     * buffer. Fixes cursor-style mismatch over the wallpaper. May be NULL. */
+    struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
+    /* Per-pointer shape device, created lazily on first pointer enter. */
+    struct wp_cursor_shape_device_v1 *cursor_shape_device;
     
     /* Back-pointer to main neowall state */
     struct neowall_state *state;

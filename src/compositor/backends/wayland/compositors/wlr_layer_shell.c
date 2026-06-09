@@ -12,6 +12,7 @@
 #include "neowall/shader/reactive.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
+#include "cursor-shape-v1-client-protocol.h"
 #include "wayland_occlusion.h"
 
 /*
@@ -118,6 +119,21 @@ static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
  * POINTER EVENT HANDLERS
  * ============================================================================ */
 
+/* Destroy the wl_pointer together with its cursor-shape device. The shape
+ * device wraps this specific pointer object; keeping it across a pointer
+ * rebind would reference a dead proxy. */
+static void destroy_pointer(wlr_backend_data_t *backend) {
+    wayland_t *wl = wayland_get();
+    if (wl && wl->cursor_shape_device) {
+        wp_cursor_shape_device_v1_destroy(wl->cursor_shape_device);
+        wl->cursor_shape_device = NULL;
+    }
+    if (backend->pointer) {
+        wl_pointer_destroy(backend->pointer);
+        backend->pointer = NULL;
+    }
+}
+
 static void pointer_handle_enter(void *data, struct wl_pointer *pointer,
                                  uint32_t serial, struct wl_surface *surface,
                                  wl_fixed_t surface_x, wl_fixed_t surface_y) {
@@ -137,7 +153,30 @@ static void pointer_handle_enter(void *data, struct wl_pointer *pointer,
      * losing the user's theme over the wallpaper).
      */
     wayland_t *wl = wayland_get();
-    if (!wl || !wl->cursor_surface || !wl->shm) {
+    if (!wl) {
+        return;
+    }
+
+    /* Preferred path: wp_cursor_shape_manager_v1. We just name the shape
+     * ("default") and the COMPOSITOR draws its own cursor — same theme,
+     * size and fractional scaling as over every other window (Hyprland
+     * renders hyprcursor themes server-side; an XCursor buffer we attach
+     * ourselves can never match that). */
+    if (wl->cursor_shape_manager) {
+        if (!wl->cursor_shape_device) {
+            wl->cursor_shape_device = wp_cursor_shape_manager_v1_get_pointer(
+                wl->cursor_shape_manager, pointer);
+        }
+        if (wl->cursor_shape_device) {
+            wp_cursor_shape_device_v1_set_shape(
+                wl->cursor_shape_device, serial,
+                WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT);
+            return;
+        }
+    }
+
+    /* Fallback: client-side XCursor buffer honoring XCURSOR_THEME/SIZE. */
+    if (!wl->cursor_surface || !wl->shm) {
         return;
     }
 
@@ -358,14 +397,12 @@ static void seat_handle_capabilities(void *data, struct wl_seat *seat,
         } else if (!want_pointer && backend->pointer) {
             /* Capability re-advertise after a config that disabled pointer:
              * drop our binding so events stop flowing. */
-            wl_pointer_destroy(backend->pointer);
-            backend->pointer = NULL;
+            destroy_pointer(backend);
             log_info("Wayland pointer released (mouse_interaction=false)");
         }
     } else {
         if (backend->pointer) {
-            wl_pointer_destroy(backend->pointer);
-            backend->pointer = NULL;
+            destroy_pointer(backend);
             log_info("Wayland pointer capability disabled");
         }
     }
@@ -474,8 +511,7 @@ static void wlr_cleanup(void *data) {
     wlr_backend_data_t *backend_data = data;
 
     if (backend_data->pointer) {
-        wl_pointer_destroy(backend_data->pointer);
-        backend_data->pointer = NULL;
+        destroy_pointer(backend_data);
     }
 
     if (backend_data->seat) {
@@ -868,8 +904,7 @@ static void wlr_apply_input_config(void *data, struct neowall_state *state) {
     bool want_pointer = atomic_load_explicit(&state->mouse_interaction, memory_order_acquire);
 
     if (!want_pointer && b->pointer) {
-        wl_pointer_destroy(b->pointer);
-        b->pointer = NULL;
+        destroy_pointer(b);
         log_info("Wayland pointer released after config load (mouse_interaction=false)");
         return;
     }

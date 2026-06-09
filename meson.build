@@ -275,6 +275,8 @@ if has_wayland
     'protocols/xdg-output-unstable-v1-client-protocol.c',
     'protocols/plasma-shell-client-protocol.c',
     'protocols/tearing-control-v1-client-protocol.c',
+    'protocols/cursor-shape-v1-client-protocol.c',
+    'protocols/tablet-v2-client-protocol.c',
     'protocols/wlr-foreign-toplevel-management-unstable-v1-client-protocol.c',
   )
   occlusion_sources += files(

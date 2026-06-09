@@ -10,6 +10,7 @@
 #include "frame_watchdog.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
+#include "cursor-shape-v1-client-protocol.h"
 
 /* Maximum retries and delay when waiting for compositor to be ready */
 #define COMPOSITOR_READY_MAX_RETRIES 5
@@ -401,6 +402,10 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
         wl->tearing_control_manager = wl_registry_bind(registry, name,
                                                            &wp_tearing_control_manager_v1_interface, 1);
         log_info("Bound to tearing control manager (immediate presentation support)");
+    } else if (strcmp(interface, wp_cursor_shape_manager_v1_interface.name) == 0) {
+        wl->cursor_shape_manager = wl_registry_bind(registry, name,
+                                                    &wp_cursor_shape_manager_v1_interface, 1);
+        log_info("Bound to cursor shape manager (compositor-drawn cursor)");
     } else if (strcmp(interface, zxdg_output_manager_v1_interface.name) == 0) {
         wl->xdg_output_manager = wl_registry_bind(registry, name,
                                                       &zxdg_output_manager_v1_interface, 2);
@@ -672,6 +677,14 @@ void wayland_cleanup(void) {
     free(wl->cursor_theme_name);
     wl->cursor_theme_name = NULL;
     wl->cursor_loaded_scale = 0;
+
+    /* Shape device is destroyed with its wl_pointer by the backend; only
+     * the manager global remains ours to release here. */
+    if (wl->cursor_shape_manager) {
+        wp_cursor_shape_manager_v1_destroy(wl->cursor_shape_manager);
+        wl->cursor_shape_manager = NULL;
+    }
+    wl->cursor_shape_device = NULL;
 
     /* Destroy Wayland objects */
     if (wl->shm) {
