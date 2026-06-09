@@ -307,6 +307,8 @@ jobs:
             libpng16-devel libjpeg8-devel libX11-devel libXrandr-devel git \
             ruby ruby-devel rpm-build tar gzip gawk make
           gem install --no-document fpm
+          # Leap installs gem binaries outside the default PATH.
+          echo "$(ruby -e 'print Gem.bindir')" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@v4
         with:
@@ -348,76 +350,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: pkg-opensuse
-          path: dist/*
-
-  # ---------------------------------------------------------------------------
-  # Alpine — musl static-ish build + .apk
-  # ---------------------------------------------------------------------------
-  build-alpine:
-    name: Build (Alpine / .apk)
-    runs-on: ubuntu-latest
-    # musl + GLVND legacy entry points (glGetQueryObjectui64v) can fail to
-    # link on some Alpine Mesa revisions; don't let it block the release.
-    continue-on-error: true
-    container:
-      image: alpine:latest
-    steps:
-      - name: Install dependencies
-        run: |
-          apk add --no-cache build-base git meson ninja pkgconf \
-            wayland-dev wayland-protocols mesa-dev mesa-egl mesa-gl \
-            libpng-dev libjpeg-turbo-dev libx11-dev libxrandr-dev \
-            ruby ruby-dev tar
-
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Mark workspace safe for git
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Resolve version
-        id: ver
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            V="${{ github.event.inputs.version }}"
-          else
-            V="${GITHUB_REF#refs/tags/v}"
-          fi
-          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
-
-      - name: Build & stage
-        run: |
-          meson setup build $MESON_ARGS -Dc_link_args=-lGL
-          ninja -C build
-          DESTDIR="$PWD/pkgroot" ninja -C build install
-
-      - name: musl tarball
-        run: |
-          mkdir -p dist
-          install -m755 build/neowall dist/neowall
-          strip dist/neowall
-          tar -C dist -czf dist/neowall-linux-x86_64-musl-alpine.tar.gz neowall
-          rm -f dist/neowall
-
-      - name: Build .apk
-        run: |
-          V="${{ steps.ver.outputs.VERSION }}"
-          gem install --no-document fpm
-          fpm -s dir -t apk -n neowall -v "$V" \
-            --description "GPU-accelerated live shader wallpapers for Wayland and X11" \
-            --url "https://github.com/1ay1/neowall" \
-            --license MIT --maintainer "1ay1 <noreply@github.com>" \
-            --architecture x86_64 \
-            --depends "wayland-libs-client" --depends "mesa-gl" --depends "mesa-egl" \
-            --depends "libpng" --depends "libjpeg-turbo" \
-            --depends "libx11" --depends "libxrandr" \
-            -C pkgroot -p "dist/neowall-${V}-r0.apk" usr || \
-            echo "apk packaging unavailable on this fpm; tarball still produced"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pkg-alpine
           path: dist/*
 
   # ---------------------------------------------------------------------------
@@ -484,7 +416,6 @@ jobs:
       - build-ubuntu
       - build-fedora
       - build-opensuse
-      - build-alpine
       - build-appimage
     runs-on: ubuntu-latest
     permissions:
@@ -516,7 +447,7 @@ jobs:
           mkdir -p release
           find artifacts -type f \
             \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' \
-               -o -name '*.apk' -o -name '*.AppImage' -o -name '*.pkg.tar.zst' \) \
+               -o -name '*.AppImage' -o -name '*.pkg.tar.zst' \) \
             -exec cp -v {} release/ \;
 
           # Source tarball
@@ -568,7 +499,6 @@ jobs:
             | Ubuntu 24.04+ | `neowall_*-ubuntu24.04_amd64.deb` | `sudo apt install ./<file>` |
             | Fedora / RHEL | `neowall-*.fc.x86_64.rpm` | `sudo dnf install ./<file>` |
             | openSUSE | `neowall-*.suse.x86_64.rpm` | `sudo zypper install ./<file>` |
-            | Alpine | `neowall-*-r0.apk` | `sudo apk add --allow-untrusted ./<file>` |
             | Any (universal) | `neowall-*-x86_64.AppImage` | `chmod +x <file> && ./<file>` |
 
             ### Plain binaries (no package manager)
@@ -578,7 +508,6 @@ jobs:
             | `neowall-linux-x86_64-arch.tar.gz` | glibc (Arch) |
             | `neowall-linux-x86_64-debian.tar.gz` | glibc (Debian bookworm) |
             | `neowall-linux-x86_64-fedora.tar.gz` | glibc (Fedora) |
-            | `neowall-linux-x86_64-musl-alpine.tar.gz` | musl (Alpine) |
             | `neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz` | source |
 
             ```bash
