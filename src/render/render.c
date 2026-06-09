@@ -23,16 +23,6 @@
 #include "neowall/textures.h"
 #include "neowall/compositor/compositor.h"
 
-/* Helper function to get the preferred output identifier
- * Prefers connector_name (e.g., "HDMI-A-2", "DP-1") over model name
- * for consistent identification across reboots/reconnections */
-static inline const char *output_get_identifier(const struct output_state *output) {
-    if (output->connector_name[0] != '\0') {
-        return output->connector_name;
-    }
-    return output->model;
-}
-
 /* Forward declarations */
 static bool render_frame_transition(struct output_state *output, float progress);
 

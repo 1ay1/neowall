@@ -210,7 +210,9 @@ static int compare_strings(const void *a, const void *b) {
  * ============================================================================ */
 
 #pragma GCC diagnostic push
+#ifndef __clang__
 #pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
 char **load_shaders_from_directory(const char *dir_path, size_t *count) {
     if (!dir_path || !count) return NULL;
 
@@ -296,7 +298,9 @@ char **load_shaders_from_directory(const char *dir_path, size_t *count) {
 #pragma GCC diagnostic pop
 
 #pragma GCC diagnostic push
+#ifndef __clang__
 #pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
 char **load_images_from_directory(const char *dir_path, size_t *count) {
     if (!dir_path || !count) return NULL;
 
@@ -1018,7 +1022,9 @@ void config_free_wallpaper(struct wallpaper_config *config) {
  * ============================================================================ */
 
 #pragma GCC diagnostic push
+#ifndef __clang__
 #pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
 static bool config_create_default(const char *config_path) {
     if (!config_path) {
         return false;
