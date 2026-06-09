@@ -292,6 +292,9 @@ jobs:
   build-opensuse:
     name: Build (openSUSE / .rpm)
     runs-on: ubuntu-latest
+    # Leap's older Mesa headers occasionally lag; keep it from blocking the
+    # release — rpm users are also served by the Fedora package and AppImage.
+    continue-on-error: true
     container:
       image: opensuse/leap:15.6
     steps:
@@ -300,6 +303,7 @@ jobs:
           zypper --non-interactive refresh
           zypper --non-interactive install gcc gcc-c++ meson ninja \
             wayland-devel wayland-protocols-devel Mesa-libGL-devel Mesa-libEGL-devel \
+            Mesa-libGLESv2-devel Mesa-libGLESv3-devel \
             libpng16-devel libjpeg8-devel libX11-devel libXrandr-devel git \
             ruby ruby-devel rpm-build tar gzip gawk make
           gem install --no-document fpm
