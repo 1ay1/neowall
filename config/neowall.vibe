@@ -90,6 +90,13 @@ default {
   # Examples: 100 (fast), 300 (default), 500 (smooth), 1000 (slow)
   transition_duration 300
 
+  # Randomise the cycle order for directory cycling (optional, default: false).
+  # Works for both image directories and shader directories. The list is
+  # re-shuffled every time it wraps so a long-running daemon doesn't settle
+  # into a fixed loop. The just-shown wallpaper is held back from position 0
+  # on the new pass so the same item never repeats back-to-back.
+  # shuffle true
+
   # Pause rendering when a fullscreen window covers this output (default: true)
   # Saves GPU/CPU when the wallpaper isn't visible (fullscreen, maximized, etc.)
   # Requires compositor support: wlr-foreign-toplevel on Wayland, EWMH on X11

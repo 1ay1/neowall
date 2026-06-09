@@ -10,6 +10,7 @@
 #include "neowall/image/image.h"    /* For struct image_data definition */
 #include "neowall/compositor/compositor.h"
 #include "neowall/config/config_access.h"
+#include "neowall/config/config.h"  /* config_shuffle_cycle_paths() */
 #include "neowall/constants.h"
 #include "neowall/shader/shader.h"
 #include "neowall/shader/shader_multipass.h"
@@ -211,6 +212,7 @@ struct output_state *output_create(struct neowall_state *state,
     out->config->transition = TRANSITION_NONE;
     out->config->transition_duration = 300;
     out->config->cycle = false;
+    out->config->shuffle = false;
     out->config->cycle_paths = NULL;
     out->config->cycle_count = 0;
     out->config->current_cycle_index = 0;
@@ -1055,8 +1057,33 @@ void output_cycle_wallpaper(struct output_state *output) {
     /* Move to next wallpaper/shader - protect cycle_paths access with mutex */
     pthread_mutex_lock(&output->state->state_mutex);
     size_t old_index = output->config->current_cycle_index;
-    output->config->current_cycle_index =
+    size_t next_index =
         (output->config->current_cycle_index + 1) % output->config->cycle_count;
+
+    /* End of the sequence — if shuffle is on, re-randomise so the next pass
+     * is a fresh order (issue #47). keep_first_at_zero=true pins the
+     * just-shown item at slot 0 so we don't immediately repeat it; we then
+     * advance past it by leaving next_index at the wrap (0) and bumping it. */
+    if (next_index == 0 && output->config->shuffle &&
+        output->config->cycle_paths && output->config->cycle_count > 1) {
+        /* Pin the currently-displayed item at index 0 so the shuffle keeps
+         * it there — swap it in, then shuffle [1, n). After the shuffle we
+         * step to index 1 (the first item of the freshly-randomised tail). */
+        size_t cur = output->config->current_cycle_index;
+        if (cur != 0) {
+            char *tmp = output->config->cycle_paths[0];
+            output->config->cycle_paths[0] = output->config->cycle_paths[cur];
+            output->config->cycle_paths[cur] = tmp;
+        }
+        config_shuffle_cycle_paths(output->config->cycle_paths,
+                                   output->config->cycle_count, true);
+        next_index = 1;
+        log_debug("Cycle wrap on output %s: re-shuffled %zu-entry list",
+                 output->model[0] ? output->model : "unknown",
+                 output->config->cycle_count);
+    }
+
+    output->config->current_cycle_index = next_index;
 
     /* Copy path before releasing lock to avoid use-after-free if config reloads */
     char next_path_copy[MAX_PATH_LENGTH];
@@ -1343,23 +1370,28 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
             }
         }
 
-        /* Restore cycle index from state file for this specific output */
-        const char *output_id = output_get_identifier(output);
-        int saved_index = restore_cycle_index_from_state(output_id);
-        if (saved_index >= 0 && saved_index < (int)output->config->cycle_count) {
-            output->config->current_cycle_index = saved_index;
-            log_info("Restored cycle position for %s: %d/%zu",
-                    output_id, saved_index, output->config->cycle_count);
+        /* Restore cycle index from state file for this specific output.
+         * Skipped under shuffle: the saved index refers to a different
+         * (previous) random permutation of the directory, so resuming at
+         * that slot would just point to an arbitrary file (issue #47). */
+        if (!output->config->shuffle) {
+            const char *output_id = output_get_identifier(output);
+            int saved_index = restore_cycle_index_from_state(output_id);
+            if (saved_index >= 0 && saved_index < (int)output->config->cycle_count) {
+                output->config->current_cycle_index = saved_index;
+                log_info("Restored cycle position for %s: %d/%zu",
+                        output_id, saved_index, output->config->cycle_count);
 
-            /* Update the initial path to use the restored index */
-            if (output->config->type == WALLPAPER_SHADER) {
-                snprintf(output->config->shader_path,
-                         sizeof(output->config->shader_path), "%s",
-                         output->config->cycle_paths[saved_index]);
-            } else {
-                snprintf(output->config->path,
-                         sizeof(output->config->path), "%s",
-                         output->config->cycle_paths[saved_index]);
+                /* Update the initial path to use the restored index */
+                if (output->config->type == WALLPAPER_SHADER) {
+                    snprintf(output->config->shader_path,
+                             sizeof(output->config->shader_path), "%s",
+                             output->config->cycle_paths[saved_index]);
+                } else {
+                    snprintf(output->config->path,
+                             sizeof(output->config->path), "%s",
+                             output->config->cycle_paths[saved_index]);
+                }
             }
         }
 

@@ -184,6 +184,27 @@ transition_duration 5     # Smooth
 transition_duration 10    # Slow
 ```
 
+#### `shuffle` - Randomise Cycle Order
+
+Randomise the order of a directory cycle. Works for both image directories
+and shader directories.
+
+```vibe
+shuffle true    # Random order, fresh permutation every wrap
+shuffle false   # Alphabetical order (default)
+```
+
+- Applied at startup so each launch is a different sequence.
+- Re-applied every time the cycle wraps, so a long-running daemon doesn't
+  settle into a fixed loop. The just-shown wallpaper is held back from
+  position 0 on the new pass so the same item never appears twice in a row.
+- All monitors that share a config block see the **same** shuffled order,
+  so multi-monitor synchronised cycling keeps working.
+- Saved cycle position (the bookmark used to resume where you left off after
+  a daemon restart) is disabled under `shuffle true` — the saved index
+  refers to a different random permutation than the one you'd get on the
+  next launch, so resuming at it is meaningless.
+
 ## Global Options
 
 These sit at the top level of `config.vibe`, **outside** any `default {}` or
@@ -283,6 +304,18 @@ default {
 default {
   path ~/Pictures/Wallpapers/
   duration 300
+  transition fade
+  mode fill
+}
+```
+
+### Shuffled Cycle
+
+```vibe
+default {
+  path ~/Pictures/Wallpapers/
+  duration 300
+  shuffle true
   transition fade
   mode fill
 }

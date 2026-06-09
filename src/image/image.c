@@ -250,6 +250,135 @@ static void jpeg_error_exit(j_common_ptr cinfo) {
     longjmp(err->setjmp_buffer, 1);
 }
 
+/* EXIF orientation values per TIFF/EP. 1 = identity. */
+enum exif_orientation {
+    EXIF_ORIENT_TOP_LEFT       = 1, /* identity */
+    EXIF_ORIENT_TOP_RIGHT      = 2, /* mirror horizontal */
+    EXIF_ORIENT_BOTTOM_RIGHT   = 3, /* rotate 180 */
+    EXIF_ORIENT_BOTTOM_LEFT    = 4, /* mirror vertical */
+    EXIF_ORIENT_LEFT_TOP       = 5, /* mirror horizontal + rotate 270 CW */
+    EXIF_ORIENT_RIGHT_TOP      = 6, /* rotate 90 CW */
+    EXIF_ORIENT_RIGHT_BOTTOM   = 7, /* mirror horizontal + rotate 90 CW */
+    EXIF_ORIENT_LEFT_BOTTOM    = 8, /* rotate 270 CW (== 90 CCW) */
+};
+
+/* Little helper: read u16/u32 honoring TIFF byte order. */
+static uint16_t exif_u16(const uint8_t *p, bool be) {
+    return be ? (uint16_t)((p[0] << 8) | p[1])
+              : (uint16_t)((p[1] << 8) | p[0]);
+}
+static uint32_t exif_u32(const uint8_t *p, bool be) {
+    return be ? ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]
+              : ((uint32_t)p[3] << 24) | ((uint32_t)p[2] << 16) | ((uint32_t)p[1] << 8) | p[0];
+}
+
+/* Parse an APP1 (EXIF) marker payload and return the Orientation tag value.
+ * `data` is the bytes AFTER the marker length field (i.e. starting with the
+ * "Exif\0\0" signature). Returns 1 (identity) if anything looks off — we treat
+ * malformed EXIF as "no rotation" rather than failing the whole decode. */
+static int exif_parse_orientation(const uint8_t *data, size_t len) {
+    /* APP1 EXIF signature: "Exif\0\0" (6 bytes) followed by the TIFF header. */
+    if (len < 6 + 8) return EXIF_ORIENT_TOP_LEFT;
+    if (memcmp(data, "Exif\0\0", 6) != 0) return EXIF_ORIENT_TOP_LEFT;
+
+    const uint8_t *tiff = data + 6;
+    size_t tiff_len = len - 6;
+
+    bool be;
+    if (tiff[0] == 'M' && tiff[1] == 'M') be = true;
+    else if (tiff[0] == 'I' && tiff[1] == 'I') be = false;
+    else return EXIF_ORIENT_TOP_LEFT;
+
+    if (exif_u16(tiff + 2, be) != 0x002A) return EXIF_ORIENT_TOP_LEFT;
+
+    uint32_t ifd0_off = exif_u32(tiff + 4, be);
+    if (ifd0_off + 2 > tiff_len) return EXIF_ORIENT_TOP_LEFT;
+
+    uint16_t n_entries = exif_u16(tiff + ifd0_off, be);
+    /* Each IFD entry is 12 bytes. Cap at a sane bound to avoid pathological files. */
+    if (n_entries > 1024) return EXIF_ORIENT_TOP_LEFT;
+    if ((size_t)ifd0_off + 2 + (size_t)n_entries * 12 > tiff_len) return EXIF_ORIENT_TOP_LEFT;
+
+    for (uint16_t i = 0; i < n_entries; i++) {
+        const uint8_t *e = tiff + ifd0_off + 2 + (size_t)i * 12;
+        uint16_t tag  = exif_u16(e, be);
+        uint16_t type = exif_u16(e + 2, be);
+        uint32_t cnt  = exif_u32(e + 4, be);
+        if (tag == 0x0112 /* Orientation */ && type == 3 /* SHORT */ && cnt >= 1) {
+            /* SHORT inline value sits in the first 2 bytes of the value field;
+             * for big-endian that's e+8, little-endian also e+8 (low byte first). */
+            uint16_t v = exif_u16(e + 8, be);
+            if (v >= 1 && v <= 8) return (int)v;
+            return EXIF_ORIENT_TOP_LEFT;
+        }
+    }
+    return EXIF_ORIENT_TOP_LEFT;
+}
+
+/* Apply an EXIF orientation to an RGBA pixel buffer in place (new buffer
+ * allocated, old one freed). Width/height in `img` are updated when the
+ * orientation transposes the axes. No-op for orientation 1. */
+static void image_apply_exif_orientation(struct image_data *img, int orientation) {
+    if (!img || !img->pixels || orientation == EXIF_ORIENT_TOP_LEFT) {
+        return;
+    }
+    if (orientation < 1 || orientation > 8) {
+        return;
+    }
+
+    const uint32_t w = img->width;
+    const uint32_t h = img->height;
+    const bool transpose = (orientation >= 5);
+    const uint32_t nw = transpose ? h : w;
+    const uint32_t nh = transpose ? w : h;
+
+    /* Overflow guard. The product nw*nh*4 must fit in size_t (already validated
+     * pre-rotation in the loader, but transpose changes which axis is the long
+     * one, so re-check). On 64-bit (size_t == uint64_t) `nw > SIZE_MAX/4` is
+     * tautologically false for uint32_t — only the nh-multiplied bound matters. */
+    if (nh != 0 && (size_t)nw * 4 > SIZE_MAX / nh) {
+        return;
+    }
+    uint8_t *dst = malloc((size_t)nw * nh * 4);
+    if (!dst) {
+        log_warn("EXIF orient: alloc failed, leaving image as-is");
+        return;
+    }
+
+    const uint8_t *src = img->pixels;
+    /* For each (sx,sy) source pixel, compute its destination (dx,dy) per the
+     * EXIF transform, then copy the 4 RGBA bytes. Walking the source linearly
+     * keeps cache behaviour predictable on the hot read side. */
+    for (uint32_t sy = 0; sy < h; sy++) {
+        for (uint32_t sx = 0; sx < w; sx++) {
+            uint32_t dx = 0, dy = 0;
+            switch (orientation) {
+                case EXIF_ORIENT_TOP_RIGHT:    dx = w - 1 - sx; dy = sy;            break;
+                case EXIF_ORIENT_BOTTOM_RIGHT: dx = w - 1 - sx; dy = h - 1 - sy;    break;
+                case EXIF_ORIENT_BOTTOM_LEFT:  dx = sx;         dy = h - 1 - sy;    break;
+                case EXIF_ORIENT_LEFT_TOP:     dx = sy;         dy = sx;            break;
+                case EXIF_ORIENT_RIGHT_TOP:    dx = h - 1 - sy; dy = sx;            break;
+                case EXIF_ORIENT_RIGHT_BOTTOM: dx = h - 1 - sy; dy = w - 1 - sx;    break;
+                case EXIF_ORIENT_LEFT_BOTTOM:  dx = sy;         dy = w - 1 - sx;    break;
+                default:                       dx = sx;         dy = sy;            break;
+            }
+            size_t s = ((size_t)sy * w + sx) * 4;
+            size_t d = ((size_t)dy * nw + dx) * 4;
+            dst[d + 0] = src[s + 0];
+            dst[d + 1] = src[s + 1];
+            dst[d + 2] = src[s + 2];
+            dst[d + 3] = src[s + 3];
+        }
+    }
+
+    free(img->pixels);
+    img->pixels = dst;
+    img->width  = nw;
+    img->height = nh;
+    log_debug("Applied EXIF orientation %d (%ux%u -> %ux%u)",
+              orientation, w, h, nw, nh);
+}
+
 /* Load JPEG image */
 struct image_data *image_load_jpeg(const char *path) {
     if (!path) {
@@ -286,11 +415,25 @@ struct image_data *image_load_jpeg(const char *path) {
     /* Create decompression struct */
     jpeg_create_decompress(&cinfo);
 
+    /* Ask libjpeg to keep APP1 markers around so we can read EXIF orientation
+     * after the header is parsed. Must be called BEFORE jpeg_read_header. */
+    jpeg_save_markers(&cinfo, JPEG_APP0 + 1, 0xFFFF);
+
     /* Specify data source */
     jpeg_stdio_src(&cinfo, fp);
 
     /* Read JPEG header */
     jpeg_read_header(&cinfo, TRUE);
+
+    /* Walk saved markers for an APP1 EXIF payload (issue #48). */
+    int exif_orientation = EXIF_ORIENT_TOP_LEFT;
+    for (jpeg_saved_marker_ptr m = cinfo.marker_list; m != NULL; m = m->next) {
+        if (m->marker == JPEG_APP0 + 1 && m->data_length >= 6 &&
+            memcmp(m->data, "Exif\0\0", 6) == 0) {
+            exif_orientation = exif_parse_orientation(m->data, m->data_length);
+            break;
+        }
+    }
 
     /* Force RGB output */
     cinfo.out_color_space = JCS_RGB;
@@ -384,7 +527,15 @@ struct image_data *image_load_jpeg(const char *path) {
     jpeg_destroy_decompress(&cinfo);
     fclose(fp);
 
-    log_debug("Loaded JPEG image: %s (%ux%u)", expanded_path, width, height);
+    /* Honor EXIF Orientation tag BEFORE display-aware scaling so the scaler
+     * sees the final visual dimensions (e.g. a portrait phone photo with
+     * orientation=6 reports 4032x3024 in the file but is actually 3024x4032
+     * once rotated). */
+    if (exif_orientation != EXIF_ORIENT_TOP_LEFT) {
+        image_apply_exif_orientation(img, exif_orientation);
+    }
+
+    log_debug("Loaded JPEG image: %s (%ux%u)", expanded_path, img->width, img->height);
 
     return img;
 }
