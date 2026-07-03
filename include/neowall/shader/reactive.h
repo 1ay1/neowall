@@ -30,10 +30,16 @@ typedef struct {
     float cpu;          /* total CPU utilisation */
     float cpu_per[8];   /* up to 8 per-core utilisations (0 if absent) */
     int   cpu_cores;    /* number of valid entries in cpu_per */
+    float cpu_max;      /* hottest single core 0..1 (spots one pegged thread) */
+    float cpu_spread;   /* core-load imbalance 0..1 (0 even, 1 one core pegged) */
     float ram;          /* used / total physical memory */
+    float ram_gb;       /* used physical memory in GiB (absolute) */
+    float ram_total_gb; /* total physical memory in GiB */
     float swap;         /* used / total swap (0 if no swap) */
     float net_down;     /* normalised download rate (0..1, log-scaled) */
     float net_up;       /* normalised upload rate   (0..1, log-scaled) */
+    float net_down_mbs; /* raw download rate in MB/s (absolute) */
+    float net_up_mbs;   /* raw upload rate in MB/s (absolute) */
     float disk_read;    /* normalised disk read rate  (0..1, log-scaled) */
     float disk_write;   /* normalised disk write rate (0..1, log-scaled) */
     float load_avg;     /* 1-min load average / nproc, clamped 0..1 (raw can exceed) */
@@ -45,6 +51,17 @@ typedef struct {
     float gpu;          /* GPU utilisation 0..1 (amdgpu/nvidia/i915 best-effort) */
     float gpu_temp;     /* GPU temp normalised 0..1 over 30..95 C */
     float gpu_temp_c;   /* GPU temp in degrees C (0 if unknown) */
+    /* NVIDIA proprietary (via nvidia-smi worker; 0 if unavailable) */
+    float nv_gpu;       /* NVIDIA GPU utilisation 0..1 */
+    float nv_vram;      /* NVIDIA VRAM used / total 0..1 */
+    float nv_temp_c;    /* NVIDIA GPU temp in degrees C */
+    float nv_power;     /* NVIDIA board power draw / limit 0..1 */
+    bool  nv_active;    /* true if nvidia-smi is producing data */
+
+    /* --- fused / derived shaping signals (0..1) --- */
+    float thermal;      /* hottest of CPU/GPU normalised 0..1 (30..95 C) */
+    float activity;     /* overall machine busyness (cpu/io/net fused) */
+    float pulse;        /* stress heartbeat: rhythmic beat scaled by load */
 
     /* --- uptime + processes --- */
     float uptime_hours; /* system uptime in hours */

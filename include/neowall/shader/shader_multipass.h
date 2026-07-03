@@ -112,8 +112,11 @@ typedef struct {
     GLint iChannel[MULTIPASS_MAX_CHANNELS];
     /* neowall reactive uniforms (see shader_stdlib.h). -1 if shader unused. */
     GLint iCpu, iCpuCores, iCpuCoreCount, iRam, iNetDown, iNetUp;
+    GLint iCpuMax, iCpuSpread, iRamGB, iRamTotalGB, iNetDownRaw, iNetUpRaw;
     GLint iSwap, iDiskRead, iDiskWrite, iLoad, iLoadRaw;
     GLint iCpuTemp, iCpuTempC, iGpu, iGpuTemp, iGpuTempC;
+    GLint iNvGpu, iNvVram, iNvGpuTempC, iNvPower, iNvActive;
+    GLint iThermal, iActivity, iPulse;
     GLint iUptimeHours, iProcs, iProcCount;
     GLint iBattery, iCharging, iTimeOfDay, iSun, iDayFraction;
     GLint iKeyEnergy, iMouseEnergy;

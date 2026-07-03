@@ -51,6 +51,14 @@ static atomic_bool g_audio_run = false;
 static atomic_bool g_audio_live = false;
 static pid_t g_parec_pid = -1;
 
+/* nvidia-smi worker thread — polls NVIDIA proprietary GPU stats that sysfs
+ * doesn't expose (utilisation, VRAM, temp, power). Published into g_snap under
+ * g_lock. Absent driver / no nvidia-smi → g_nv_live stays false, fields zero. */
+static pthread_t g_nv_thread;
+static atomic_bool g_nv_run = false;
+static atomic_bool g_nv_live = false;
+static pid_t g_nv_pid = -1;
+
 /* input energy accumulators (written from input handlers, decayed in sample) */
 static atomic_int g_key_hits = 0;
 static _Atomic float g_mouse_accum = 0.0f;
@@ -139,6 +147,20 @@ static void sample_cpu(reactive_snapshot_t *s) {
         line = nl ? nl + 1 : NULL;
     }
     s->cpu_cores = core;
+
+    /* derived: hottest core + load imbalance across cores */
+    if (core > 0) {
+        float mx = 0.0f, mean = 0.0f;
+        for (int i = 0; i < core; i++) { mx = fmaxf(mx, s->cpu_per[i]); mean += s->cpu_per[i]; }
+        mean /= (float)core;
+        float var = 0.0f;
+        for (int i = 0; i < core; i++) { float d = s->cpu_per[i] - mean; var += d * d; }
+        var /= (float)core;
+        s->cpu_max = mx;
+        /* spread: normalised std-dev, ~1.0 when a single core is pegged and
+         * the rest idle. sqrt(var) maxes near 0.5 in that case, so scale x2. */
+        s->cpu_spread = clampf(sqrtf(var) * 2.0f, 0.0f, 1.0f);
+    }
 }
 
 static void sample_ram(reactive_snapshot_t *s) {
@@ -150,7 +172,12 @@ static void sample_ram(reactive_snapshot_t *s) {
     if ((p = strstr(buf, "MemAvailable:"))) sscanf(p, "MemAvailable: %llu", &avail);
     if ((p = strstr(buf, "SwapTotal:"))) sscanf(p, "SwapTotal: %llu", &swtotal);
     if ((p = strstr(buf, "SwapFree:"))) sscanf(p, "SwapFree: %llu", &swfree);
-    if (total > 0) s->ram = clampf(1.0f - (float)avail / (float)total, 0.0f, 1.0f);
+    if (total > 0) {
+        s->ram = clampf(1.0f - (float)avail / (float)total, 0.0f, 1.0f);
+        /* meminfo values are in kiB */
+        s->ram_total_gb = (float)total / (1024.0f * 1024.0f);
+        s->ram_gb = (float)(total - avail) / (1024.0f * 1024.0f);
+    }
     if (swtotal > 0) s->swap = clampf(1.0f - (float)swfree / (float)swtotal, 0.0f, 1.0f);
     else s->swap = 0.0f;
 }
@@ -181,6 +208,9 @@ static void sample_net(reactive_snapshot_t *s, double dt_sec) {
         /* log-scale to 0..1: ~30 MB/s saturates */
         s->net_down = clampf((float)(log10(1.0 + dn) / log10(3.0e7)), 0.0f, 1.0f);
         s->net_up   = clampf((float)(log10(1.0 + up) / log10(3.0e7)), 0.0f, 1.0f);
+        /* raw MB/s for shaders that want honest absolute numbers */
+        s->net_down_mbs = (float)(dn / 1.0e6);
+        s->net_up_mbs   = (float)(up / 1.0e6);
     }
     prev_rx = rx; prev_tx = tx;
 }
@@ -512,6 +542,103 @@ static void *audio_thread_fn(void *arg) {
 }
 
 /* ============================================================================
+ * NVIDIA GPU capture (nvidia-smi worker)
+ * ============================================================================
+ *
+ * sysfs exposes gpu_busy_percent only for amdgpu/i915; the NVIDIA proprietary
+ * driver does not. nvidia-smi is the only zero-dependency way to read util,
+ * VRAM, temp and power on NVIDIA. We spawn it once in loop mode (`-lms 500`)
+ * and parse its CSV stream, mirroring the parec pattern (spawn once, read a
+ * stream, reap on exit). If nvidia-smi is absent the thread exits immediately
+ * and every nv_* field stays zero. */
+static int spawn_nvsmi(pid_t *out_pid) {
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return -1;
+
+    /* query: util.gpu, mem.used, mem.total, temp, power.draw, power.limit
+     * -lms 500 = emit a fresh CSV row every 500 ms; nounits keeps it numeric. */
+    char *argv[] = {
+        "nvidia-smi",
+        "--query-gpu=utilization.gpu,memory.used,memory.total,"
+        "temperature.gpu,power.draw,power.limit",
+        "--format=csv,noheader,nounits",
+        "-lms", "500", NULL
+    };
+
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, pipefd[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&fa, pipefd[0]);
+    posix_spawn_file_actions_addclose(&fa, pipefd[1]);
+
+    pid_t pid;
+    int rc = posix_spawnp(&pid, "nvidia-smi", &fa, NULL, argv, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    close(pipefd[1]);
+    if (rc != 0) {
+        close(pipefd[0]);
+        return -1;
+    }
+    *out_pid = pid;
+    return pipefd[0];
+}
+
+static void *nv_thread_fn(void *arg) {
+    (void)arg;
+    signal(SIGPIPE, SIG_IGN);
+
+    pid_t pid = -1;
+    int fd = spawn_nvsmi(&pid);
+    if (fd < 0) {
+        log_info("Reactive: NVIDIA capture unavailable (nvidia-smi not found) — "
+                 "nv_* uniforms will read zero");
+        atomic_store(&g_nv_live, false);
+        return NULL;
+    }
+    g_nv_pid = pid;
+    log_info("Reactive: NVIDIA GPU capture active (nvidia-smi)");
+
+    FILE *fp = fdopen(fd, "r");
+    if (!fp) {
+        close(fd);
+        atomic_store(&g_nv_live, false);
+        return NULL;
+    }
+
+    char line[256];
+    while (atomic_load(&g_nv_run) && fgets(line, sizeof(line), fp)) {
+        float util = 0, mem_used = 0, mem_total = 0, temp = 0, pdraw = 0, plimit = 0;
+        int got = sscanf(line, "%f , %f , %f , %f , %f , %f",
+                         &util, &mem_used, &mem_total, &temp, &pdraw, &plimit);
+        if (got < 4) continue;  /* malformed / [N/A] row */
+
+        float u   = clampf(util / 100.0f, 0.0f, 1.0f);
+        float vr  = mem_total > 0.0f ? clampf(mem_used / mem_total, 0.0f, 1.0f) : 0.0f;
+        float pw  = plimit > 0.0f ? clampf(pdraw / plimit, 0.0f, 1.0f) : 0.0f;
+
+        pthread_mutex_lock(&g_lock);
+        atomic_store(&g_nv_live, true);
+        /* light smoothing so beams don't jitter between polls */
+        float sm = 0.5f;
+        g_snap.nv_gpu    = g_snap.nv_gpu    * sm + u  * (1 - sm);
+        g_snap.nv_vram   = g_snap.nv_vram   * sm + vr * (1 - sm);
+        g_snap.nv_temp_c = temp;
+        g_snap.nv_power  = g_snap.nv_power  * sm + pw * (1 - sm);
+        g_snap.nv_active = true;
+        pthread_mutex_unlock(&g_lock);
+    }
+
+    fclose(fp);  /* closes fd */
+    if (g_nv_pid > 0) {
+        kill(g_nv_pid, SIGTERM);
+        waitpid(g_nv_pid, NULL, 0);
+        g_nv_pid = -1;
+    }
+    atomic_store(&g_nv_live, false);
+    return NULL;
+}
+
+/* ============================================================================
  * Public API
  * ============================================================================ */
 
@@ -527,6 +654,12 @@ bool reactive_init(void) {
         atomic_store(&g_audio_run, false);
     }
 
+    atomic_store(&g_nv_run, true);
+    if (pthread_create(&g_nv_thread, NULL, nv_thread_fn, NULL) != 0) {
+        log_info("Reactive: could not start NVIDIA thread");
+        atomic_store(&g_nv_run, false);
+    }
+
     atomic_store(&g_inited, true);
     log_info("Reactive subsystem initialised");
     return true;
@@ -538,6 +671,11 @@ void reactive_shutdown(void) {
         atomic_store(&g_audio_run, false);
         if (g_parec_pid > 0) kill(g_parec_pid, SIGTERM);
         pthread_join(g_audio_thread, NULL);
+    }
+    if (atomic_load(&g_nv_run)) {
+        atomic_store(&g_nv_run, false);
+        if (g_nv_pid > 0) kill(g_nv_pid, SIGTERM);
+        pthread_join(g_nv_thread, NULL);
     }
     atomic_store(&g_inited, false);
 }
@@ -580,6 +718,41 @@ void reactive_sample(void) {
 
     if (!atomic_load(&g_audio_live)) {
         g_snap.audio_active = false;
+    }
+    if (!atomic_load(&g_nv_live)) {
+        g_snap.nv_active = false;
+    }
+
+    /* ---- fused / derived shaping signals ----
+     * These give shaders one honest "how hard is this machine working" knob
+     * without every shader re-deriving it. Computed here so they ride the
+     * same 4 Hz snapshot everything else does. */
+    {
+        /* thermal: hottest of CPU/GPU (prefer NVIDIA reading if live), 30..95C */
+        float gtc = g_snap.nv_active ? g_snap.nv_temp_c : g_snap.gpu_temp_c;
+        float hot = fmaxf(g_snap.cpu_temp_c, gtc);
+        g_snap.thermal = clampf((hot - 30.0f) / 65.0f, 0.0f, 1.0f);
+
+        /* activity: weighted fusion of the things that make a machine feel busy.
+         * GPU term prefers the live NVIDIA util when present. */
+        float gpu_u = g_snap.nv_active ? g_snap.nv_gpu : g_snap.gpu;
+        float io = fmaxf(fmaxf(g_snap.disk_read, g_snap.disk_write),
+                         fmaxf(g_snap.net_down, g_snap.net_up));
+        float act = 0.42f * g_snap.cpu + 0.24f * gpu_u + 0.18f * io
+                  + 0.10f * g_snap.ram + 0.06f * g_snap.load_avg;
+        /* smooth so it eases rather than steps between 4 Hz samples */
+        g_snap.activity = g_snap.activity * 0.5f + clampf(act, 0.0f, 1.0f) * 0.5f;
+
+        /* pulse: a heartbeat whose rate rises with activity. Free-running phase
+         * accumulator (independent of frame rate); output is a sharp 0..1 beat.
+         * Idle ~0.6 Hz, maxed-out ~2.6 Hz. */
+        static double phase = 0.0;
+        double rate = 0.6 + 2.0 * (double)g_snap.activity;   /* Hz */
+        if (prev != 0.0) phase += rate * dt;
+        phase = fmod(phase, 1.0);
+        float b = (float)sin(phase * 2.0 * M_PI);
+        b = powf(clampf(b, 0.0f, 1.0f), 3.0f);   /* sharpen into a systolic spike */
+        g_snap.pulse = b;
     }
     pthread_mutex_unlock(&g_lock);
 }

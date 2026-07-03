@@ -740,7 +740,8 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
             "iChannel", "iAudio", "iKeyEnergy", "iMouseEnergy",
             "iCpu", "iRam", "iNet", "iLoad", "iGpu", "iDisk", "iSwap",
             "iBattery", "iCharging", "iTimeOfDay", "iSun", "iDayFraction",
-            "iProcs", "iUptime", "iTemp"
+            "iProcs", "iUptime", "iTemp", "iNv", "iThermal", "iActivity",
+            "iPulse", "iCpuMax", "iCpuSpread", "iActivity"
         };
         for (int i = 0; !shader->is_animated && i < parse_result->pass_count; i++) {
             const char *src = parse_result->pass_sources[i];
@@ -1207,9 +1208,15 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iCpu          = glGetUniformLocation(prog, "iCpu");
     u->iCpuCores     = glGetUniformLocation(prog, "iCpuCores");
     u->iCpuCoreCount = glGetUniformLocation(prog, "iCpuCoreCount");
+    u->iCpuMax       = glGetUniformLocation(prog, "iCpuMax");
+    u->iCpuSpread    = glGetUniformLocation(prog, "iCpuSpread");
     u->iRam          = glGetUniformLocation(prog, "iRam");
+    u->iRamGB        = glGetUniformLocation(prog, "iRamGB");
+    u->iRamTotalGB   = glGetUniformLocation(prog, "iRamTotalGB");
     u->iNetDown      = glGetUniformLocation(prog, "iNetDown");
     u->iNetUp        = glGetUniformLocation(prog, "iNetUp");
+    u->iNetDownRaw   = glGetUniformLocation(prog, "iNetDownRaw");
+    u->iNetUpRaw     = glGetUniformLocation(prog, "iNetUpRaw");
     u->iSwap         = glGetUniformLocation(prog, "iSwap");
     u->iDiskRead     = glGetUniformLocation(prog, "iDiskRead");
     u->iDiskWrite    = glGetUniformLocation(prog, "iDiskWrite");
@@ -1220,6 +1227,14 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iGpu          = glGetUniformLocation(prog, "iGpu");
     u->iGpuTemp      = glGetUniformLocation(prog, "iGpuTemp");
     u->iGpuTempC     = glGetUniformLocation(prog, "iGpuTempC");
+    u->iNvGpu        = glGetUniformLocation(prog, "iNvGpu");
+    u->iNvVram       = glGetUniformLocation(prog, "iNvVram");
+    u->iNvGpuTempC   = glGetUniformLocation(prog, "iNvGpuTempC");
+    u->iNvPower      = glGetUniformLocation(prog, "iNvPower");
+    u->iNvActive     = glGetUniformLocation(prog, "iNvActive");
+    u->iThermal      = glGetUniformLocation(prog, "iThermal");
+    u->iActivity     = glGetUniformLocation(prog, "iActivity");
+    u->iPulse        = glGetUniformLocation(prog, "iPulse");
     u->iUptimeHours  = glGetUniformLocation(prog, "iUptimeHours");
     u->iProcs        = glGetUniformLocation(prog, "iProcs");
     u->iProcCount    = glGetUniformLocation(prog, "iProcCount");
@@ -1604,9 +1619,15 @@ void multipass_set_uniforms(multipass_shader_t *shader,
     if (u->iCpu >= 0)         glUniform1f(u->iCpu, r.cpu);
     if (u->iCpuCoreCount >= 0) glUniform1i(u->iCpuCoreCount, r.cpu_cores);
     if (u->iCpuCores >= 0)    glUniform1fv(u->iCpuCores, 8, r.cpu_per);
+    if (u->iCpuMax >= 0)      glUniform1f(u->iCpuMax, r.cpu_max);
+    if (u->iCpuSpread >= 0)   glUniform1f(u->iCpuSpread, r.cpu_spread);
     if (u->iRam >= 0)         glUniform1f(u->iRam, r.ram);
+    if (u->iRamGB >= 0)       glUniform1f(u->iRamGB, r.ram_gb);
+    if (u->iRamTotalGB >= 0)  glUniform1f(u->iRamTotalGB, r.ram_total_gb);
     if (u->iNetDown >= 0)     glUniform1f(u->iNetDown, r.net_down);
     if (u->iNetUp >= 0)       glUniform1f(u->iNetUp, r.net_up);
+    if (u->iNetDownRaw >= 0)  glUniform1f(u->iNetDownRaw, r.net_down_mbs);
+    if (u->iNetUpRaw >= 0)    glUniform1f(u->iNetUpRaw, r.net_up_mbs);
     if (u->iSwap >= 0)        glUniform1f(u->iSwap, r.swap);
     if (u->iDiskRead >= 0)    glUniform1f(u->iDiskRead, r.disk_read);
     if (u->iDiskWrite >= 0)   glUniform1f(u->iDiskWrite, r.disk_write);
@@ -1617,6 +1638,14 @@ void multipass_set_uniforms(multipass_shader_t *shader,
     if (u->iGpu >= 0)         glUniform1f(u->iGpu, r.gpu);
     if (u->iGpuTemp >= 0)     glUniform1f(u->iGpuTemp, r.gpu_temp);
     if (u->iGpuTempC >= 0)    glUniform1f(u->iGpuTempC, r.gpu_temp_c);
+    if (u->iNvGpu >= 0)       glUniform1f(u->iNvGpu, r.nv_gpu);
+    if (u->iNvVram >= 0)      glUniform1f(u->iNvVram, r.nv_vram);
+    if (u->iNvGpuTempC >= 0)  glUniform1f(u->iNvGpuTempC, r.nv_temp_c);
+    if (u->iNvPower >= 0)     glUniform1f(u->iNvPower, r.nv_power);
+    if (u->iNvActive >= 0)    glUniform1f(u->iNvActive, r.nv_active ? 1.0f : 0.0f);
+    if (u->iThermal >= 0)     glUniform1f(u->iThermal, r.thermal);
+    if (u->iActivity >= 0)    glUniform1f(u->iActivity, r.activity);
+    if (u->iPulse >= 0)       glUniform1f(u->iPulse, r.pulse);
     if (u->iUptimeHours >= 0) glUniform1f(u->iUptimeHours, r.uptime_hours);
     if (u->iProcs >= 0)       glUniform1f(u->iProcs, r.procs);
     if (u->iProcCount >= 0)   glUniform1i(u->iProcCount, r.proc_count);
