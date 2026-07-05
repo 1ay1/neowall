@@ -196,4 +196,39 @@ static const char *neowall_glsl_stdlib2 =
     "// ============================================================\n"
     "\n";
 
+/* Font-atlas helpers (split again for the C99 string-literal limit).
+ * Requires a channel bound to the "font" texture (128x72, 16x6 grid of
+ * 8x12 ASCII cells, codes 32..127), sampled NEAREST. Pass the sampler in.
+ *
+ *   nwGlyph(fontTex, ascii, p) : p in [0,1)^2 across one glyph cell,
+ *                                returns 1.0 on ink, 0.0 on paper.
+ *   nwHexDigit(v) : 0..15 -> ascii of '0'..'9','A'..'F'.
+ * Typical use, drawing char C at pixel `pos` with cell size `s`:
+ *   vec2 gp=(fragCoord-pos)/vec2(s*0.6,s); ink += nwGlyph(iChannelN, C, gp);
+ */
+static const char *neowall_glsl_stdlib3 =
+    "// ---- bitmap font atlas (bind a channel to the \"font\" texture) ----\n"
+    "// atlas: 16 cols x 6 rows of 8x12 cells; ascii 32..127.\n"
+    "float nwGlyph(sampler2D fontTex, float ascii, vec2 p){\n"
+    "    if (p.x < 0.0 || p.x >= 1.0 || p.y < 0.0 || p.y >= 1.0) return 0.0;\n"
+    "    float idx = clamp(floor(ascii) - 32.0, 0.0, 95.0);\n"
+    "    float col = mod(idx, 16.0);\n"
+    "    float row = floor(idx / 16.0);\n"
+    "    // Caller passes p with x left->right, y top->down across the cell.\n"
+    "    // Atlas is stored top-row-first; GL v=0 is the bottom, so flip p.y.\n"
+    "    vec2 cell = vec2(p.x, 1.0 - p.y);\n"
+    "    vec2 uv = (vec2(col, row) + cell) / vec2(16.0, 6.0);\n"
+    "    return step(0.5, texture(fontTex, uv).r);\n"
+    "}\n"
+    "// convenience: draw glyph at pixel `pos`, cell height `s` (width ~0.6*s).\n"
+    "float nwChar(sampler2D fontTex, float ascii, vec2 fragPx, vec2 pos, float s){\n"
+    "    vec2 p = (fragPx - pos) / vec2(s * 0.6, s);\n"
+    "    return nwGlyph(fontTex, ascii, p);\n"
+    "}\n"
+    "// 0..15 -> ascii of hex digit 0-9 A-F.\n"
+    "float nwHexDigit(float v){ v = clamp(floor(v + 0.5), 0.0, 15.0); return v < 10.0 ? 48.0 + v : 55.0 + v; }\n"
+    "// 0..9 -> ascii of that decimal digit.\n"
+    "float nwDigit(float v){ return 48.0 + clamp(floor(v + 0.5), 0.0, 9.0); }\n"
+    "\n";
+
 #endif /* NEOWALL_SHADER_STDLIB_H */

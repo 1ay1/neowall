@@ -17,6 +17,7 @@
 #include "neowall/shader/shader_stdlib.h"
 #include "neowall/shader/reactive.h"
 #include "neowall/shader/program_cache.h"
+#include "neowall/textures.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -238,6 +239,7 @@ const char *multipass_channel_source_name(channel_source_t source) {
         case CHANNEL_SOURCE_NOISE:    return "Noise";
         case CHANNEL_SOURCE_SELF:     return "Self";
         case CHANNEL_SOURCE_AUDIO:    return "Audio";
+        case CHANNEL_SOURCE_FONT:     return "Font";
         default:                      return "None";
     }
 }
@@ -247,6 +249,7 @@ const char *multipass_channel_source_name(channel_source_t source) {
 channel_source_t multipass_channel_source_from_name(const char *name) {
     if (!name) return CHANNEL_SOURCE_NONE;
     if (!strcasecmp(name, "audio"))    return CHANNEL_SOURCE_AUDIO;
+    if (!strcasecmp(name, "font"))     return CHANNEL_SOURCE_FONT;
     if (!strcasecmp(name, "noise"))    return CHANNEL_SOURCE_NOISE;
     if (!strcasecmp(name, "self"))     return CHANNEL_SOURCE_SELF;
     if (!strcasecmp(name, "keyboard")) return CHANNEL_SOURCE_KEYBOARD;
@@ -626,7 +629,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
                               const char *user_uniform_decls) {
     size_t prefix_len = strlen(multipass_wrapper_prefix);
     size_t react_len  = strlen(neowall_reactive_uniforms);
-    size_t lib_len    = strlen(neowall_glsl_stdlib) + strlen(neowall_glsl_stdlib2);
+    size_t lib_len    = strlen(neowall_glsl_stdlib) + strlen(neowall_glsl_stdlib2) + strlen(neowall_glsl_stdlib3);
     size_t udecl_len  = user_uniform_decls ? strlen(user_uniform_decls) : 0;
     size_t common_len = common ? strlen(common) : 0;
     size_t pass_len = pass_source ? strlen(pass_source) : 0;
@@ -643,6 +646,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
     strcat(wrapped, neowall_reactive_uniforms);
     strcat(wrapped, neowall_glsl_stdlib);
     strcat(wrapped, neowall_glsl_stdlib2);
+    strcat(wrapped, neowall_glsl_stdlib3);
     if (user_uniform_decls) {
         strcat(wrapped, user_uniform_decls);
     }
@@ -1107,7 +1111,16 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    /* Calculate base scaled resolution for buffer passes */
+    /* Bitmap font atlas: a crisp 8x12 monospace face baked into a 128x72
+     * texture (16x6 ASCII grid). Bound to any channel set to CHANNEL_SOURCE_FONT
+     * so shaders can render legible text via the nwGlyph/nwChar stdlib helpers. */
+    shader->font_texture = texture_create_font_atlas(0, 0);
+    if (shader->font_texture) {
+        log_info("Created font atlas texture (id=%u)", shader->font_texture);
+    } else {
+        log_error("Failed to create font atlas texture");
+    }
+
     int base_scaled_w = (int)(width * shader->resolution_scale);
     int base_scaled_h = (int)(height * shader->resolution_scale);
     if (base_scaled_w < 1) base_scaled_w = 1;
@@ -1522,6 +1535,7 @@ void multipass_destroy(multipass_shader_t *shader) {
     if (shader->noise_texture) glDeleteTextures(1, &shader->noise_texture);
     if (shader->keyboard_texture) glDeleteTextures(1, &shader->keyboard_texture);
     if (shader->audio_texture) glDeleteTextures(1, &shader->audio_texture);
+    if (shader->font_texture) glDeleteTextures(1, &shader->font_texture);
     
     /* Cleanup adaptive resolution system */
     adaptive_destroy(&shader->adaptive);
@@ -1764,6 +1778,11 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
             case CHANNEL_SOURCE_AUDIO:
                 tex = shader->audio_texture;
                 source_name = "audio";
+                break;
+
+            case CHANNEL_SOURCE_FONT:
+                tex = shader->font_texture ? shader->font_texture : shader->noise_texture;
+                source_name = "font";
                 break;
         }
 

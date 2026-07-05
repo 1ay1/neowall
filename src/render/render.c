@@ -743,6 +743,8 @@ bool render_load_channel_textures(struct output_state *output, struct wallpaper_
                 texture = texture_create_wood(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
             } else if (strcmp(path, TEXTURE_NAME_ABSTRACT) == 0) {
                 texture = texture_create_abstract(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+            } else if (strcmp(path, TEXTURE_NAME_FONT) == 0) {
+                texture = texture_create_font_atlas(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
             } else {
                 /* Try to load as image file */
                 struct image_data *img = image_load(path, 0, 0, MODE_FILL);

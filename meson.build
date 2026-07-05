@@ -230,6 +230,7 @@ transition_sources = files(
 texture_sources = files(
   'src/textures/abstract.c',
   'src/textures/blue_noise.c',
+  'src/textures/font_atlas.c',
   'src/textures/gray_noise.c',
   'src/textures/rgba_noise.c',
   'src/textures/wood.c',

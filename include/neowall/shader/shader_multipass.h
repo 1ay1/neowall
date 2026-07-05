@@ -47,7 +47,8 @@ typedef enum {
     CHANNEL_SOURCE_KEYBOARD,   /* Keyboard input texture */
     CHANNEL_SOURCE_NOISE,      /* Procedural noise */
     CHANNEL_SOURCE_SELF,       /* Self-reference (previous frame) */
-    CHANNEL_SOURCE_AUDIO       /* Live audio: row0 spectrum, row1 waveform */
+    CHANNEL_SOURCE_AUDIO,      /* Live audio: row0 spectrum, row1 waveform */
+    CHANNEL_SOURCE_FONT        /* Bitmap font atlas (128x72, 16x6 ASCII grid) */
 } channel_source_t;
 
 /* Channel configuration */
@@ -162,6 +163,7 @@ typedef struct {
     GLuint noise_texture;                    /* Default noise texture */
     GLuint keyboard_texture;                 /* Keyboard state texture */
     GLuint audio_texture;                    /* Live audio (512x2) for iAudio / CHANNEL_SOURCE_AUDIO */
+    GLuint font_texture;                     /* Bitmap font atlas for CHANNEL_SOURCE_FONT */
     GLint default_framebuffer;               /* Default framebuffer ID (may not be 0 in GTK) */
     
     /* Resolution scaling */
