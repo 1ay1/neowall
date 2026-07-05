@@ -279,7 +279,8 @@ image { ch1 bufferA  ch2 font }   # font atlas now on iChannel2
 
 The atlas is a **128x72** texture: a **16-col x 6-row** grid of **8x12** px cells,
 printable ASCII codes **32..127** laid out row-major (`cell = ascii - 32`), sampled
-`GL_NEAREST` for hard pixel edges. The std-lib provides the helpers:
+bilinearly (`GL_LINEAR`) so `nwGlyph` can anti-alias the ink edge with a fwidth
+smoothstep. The std-lib provides the helpers:
 
 | Helper | Purpose |
 |--------|---------|

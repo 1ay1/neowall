@@ -118,8 +118,9 @@ for bare `.glsl`). Bind any `iChannelN` to: `audio`, `noise`, `self`,
 `keyboard`, `bufferA`..`bufferD`, `texture`, `font`.
 
 The `font` source is a baked bitmap ASCII atlas (128x72, 16x6 grid of 8x12
-cells, codes 32..127, `GL_NEAREST`) for rendering crisp text in-shader via the
-std-lib helpers `nwGlyph` / `nwChar` / `nwHexDigit` / `nwDigit`. See
+cells, codes 32..127, `GL_LINEAR` so glyph edges can be anti-aliased) for
+rendering crisp text in-shader via the std-lib helpers `nwGlyph` / `nwChar` /
+`nwHexDigit` / `nwDigit`. See
 [`SHADER_NOTES.md`](./SHADER_NOTES.md) → "Rendering text: the bitmap font atlas".
 
 **Custom reactive uniforms** — declare `float` uniforms bound to a live signal

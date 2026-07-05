@@ -174,9 +174,12 @@ GLuint texture_create_font_atlas(int width, int height) {
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FA_W, FA_H, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, data);
-    /* NEAREST + clamp: crisp pixel edges, no bleeding between adjacent cells. */
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    /* LINEAR: bilinear ramp at glyph edges so the shader can anti-alias them
+     * with a smoothstep threshold (nwGlyph). CLAMP stops cells bleeding into
+     * neighbours. A 1px transparent gutter around each glyph in the bitmap
+     * keeps the ramp from pulling in the adjacent cell. */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
