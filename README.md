@@ -151,8 +151,9 @@ custom reactive uniforms (e.g. `uniform uGlow audio_bass`). Audio capture uses
 `parec` (PipeWire/PulseAudio) and degrades to silence if it's not installed.
 
 **Changing what feeds `iChannel0..3`** (audio, noise, self-feedback, another
-buffer, a texture): a bare `.glsl` guesses via a heuristic; a `.neowall` sidecar
-lets you bind each channel explicitly — `channel0 audio`, `channel1 self`, etc.
+buffer, a texture, a bitmap font atlas): a bare `.glsl` guesses via a heuristic;
+a `.neowall` sidecar lets you bind each channel explicitly — `channel0 audio`,
+`channel1 self`, `channel2 font`, etc.
 See [`docs/REACTIVE_SHADERS.md`](docs/REACTIVE_SHADERS.md#3-neowall-manifests).
 
 ## How it works

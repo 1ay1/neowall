@@ -254,8 +254,8 @@ yourself; the bind keyword tells the daemon what live value to feed them each fr
 - **Keys cannot be bare numbers.** The VIBE parser rejects `bufferA { 0 self }`.
   Use a non-numeric prefix: `bufferA { ch0 self }`. The parser strips the non-digit
   prefix and reads the trailing integer.
-- **Channel sources:** `audio`, `noise`, `self`, `keyboard`, `texture`, and the
-  buffer names `bufferA` through `bufferD`.
+- **Channel sources:** `audio`, `noise`, `self`, `keyboard`, `texture`, `font`,
+  and the buffer names `bufferA` through `bufferD`.
 - **Uniform bind keywords:** `cpu`, `ram`, `swap`, `net_down`, `net_up`,
   `disk_read`, `disk_write`, `load`, `cpu_temp`, `gpu`, `gpu_temp`, `uptime`,
   `procs`, `battery`, `time_of_day`, `sun`, `audio`, `bass`, `mid`, `treble`,
@@ -265,6 +265,46 @@ yourself; the bind keyword tells the daemon what live value to feed them each fr
 - **Channel numbering.** `iChannel0`..`iChannel3` are your manifest-bound channels.
   The reactive audio texture is bound separately on unit 4 and is always reachable as
   `iAudio` — you never spend a user channel on it.
+
+### Rendering text: the bitmap font atlas
+
+Bind a channel to the `font` source to get a crisp monospace ASCII atlas you can
+sample in-shader, instead of hand-rolling a cramped 3x5 bit table.
+
+Manifest:
+
+```
+image { ch1 bufferA  ch2 font }   # font atlas now on iChannel2
+```
+
+The atlas is a **128x72** texture: a **16-col x 6-row** grid of **8x12** px cells,
+printable ASCII codes **32..127** laid out row-major (`cell = ascii - 32`), sampled
+`GL_NEAREST` for hard pixel edges. The std-lib provides the helpers:
+
+| Helper | Purpose |
+|--------|---------|
+| `nwGlyph(fontTex, ascii, p)` | 1.0 on ink / 0.0 on paper; `p` in `[0,1)^2` across one cell (x left→right, y up; it flips v internally) |
+| `nwChar(fontTex, ascii, fragPx, pos, s)` | draw one glyph at pixel `pos`, cell height `s` (advance ≈ `0.6*s`) — the everyday call |
+| `nwHexDigit(v)` | `0..15` → ASCII of `0`-`9`,`A`-`F` |
+| `nwDigit(v)` | `0..9` → ASCII of that decimal digit |
+
+Draw a left-to-right string by stepping `pos.x` per glyph:
+
+```glsl
+// "CPU" at pixel (px,py), cell height 14, using iChannel2
+float cw = 14.0 * 0.62;                                   // monospace advance
+float ink = 0.0;
+ink += nwChar(iChannel2, 67.0, fragCoord, vec2(px,        py), 14.0); // 'C'
+ink += nwChar(iChannel2, 80.0, fragCoord, vec2(px+cw,     py), 14.0); // 'P'
+ink += nwChar(iChannel2, 85.0, fragCoord, vec2(px+cw*2.0, py), 14.0); // 'U'
+col += tint * ink;
+```
+
+`nwChar` returns 0 for pixels outside the glyph cell, so it is safe to sum many calls.
+Because each call still executes for *every* pixel, wrap a block of text in a
+screen-space bounding-box `if (fragCoord in rect)` so warps away from the text skip
+the samples — text is a tiny fraction of the screen and this is a large win (see the
+Performance section).
 
 ---
 
@@ -338,6 +378,10 @@ target that the next pass can sample.
 - Keep the per-pixel branch count low; divergent branches stall warps.
 - Texture taps are cheaper than recomputing noise; cache into a buffer when a value
   is reused across passes.
+- **Gate text in a bounding box.** Every `nwChar`/`nwGlyph` call runs for all pixels
+  even though a glyph covers a tiny rect. Wrap each block of text in an
+  `if (fragCoord within its screen-space rect)` so warps outside skip the samples —
+  a HUD with dozens of glyphs drops from "per-pixel everywhere" to nearly free.
 - If the daemon stutters, drop resolution scale before optimizing math — it is the
   single biggest lever.
 
@@ -468,6 +512,16 @@ col = max(col, prev * 0.96);              // fade the previous frame, keep brigh
 **Keypress sparks**
 ```glsl
 col += iKeyEnergy * nwHash21(floor(uv * 40.0)) * 0.3;
+```
+
+**Crisp text via the font atlas (needs `ch2 font` in the manifest)**
+```glsl
+// two-digit CPU % readout at pixel (px,py), cell height 16, on iChannel2
+float v  = clamp(iCpu, 0.0, 0.99) * 100.0;
+float cw = 16.0 * 0.62;
+float ink = nwChar(iChannel2, nwDigit(floor(v/10.0)), fragCoord, vec2(px,    py), 16.0)
+          + nwChar(iChannel2, nwDigit(mod(v,10.0)),   fragCoord, vec2(px+cw, py), 16.0);
+col += vec3(0.35, 0.85, 0.48) * ink;     // gate in a bounding box if drawing lots
 ```
 
 ---
