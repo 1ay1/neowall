@@ -45,10 +45,18 @@ static bool wait_for_outputs_configured(struct neowall_state *state);
 static void xdg_output_handle_logical_position(void *data,
                                                  struct zxdg_output_v1 *xdg_output,
                                                  int32_t x, int32_t y) {
-    (void)data;
+    struct output_state *output = data;
     (void)xdg_output;
-    (void)x;
-    (void)y;
+
+    /* Where this output sits in the layout. A layer-shell surface is bound to a
+     * single wl_output and so always draws at its own origin, but the position
+     * is what tells the shader which slice of a spanned scene this output is
+     * (see span.h). It is a LOGICAL position: it matches the pixel geometry the
+     * span box is built from only where the output's scale is 1. */
+    if (output) {
+        output->x_offset = x;
+        output->y_offset = y;
+    }
 }
 
 static void xdg_output_handle_logical_size(void *data,
@@ -190,12 +198,9 @@ static inline const char *output_readable_name(const struct output_state *output
            (output->model[0] ? output->model : "unknown");
 }
 
-static inline int32_t output_normalized_scale(const struct output_state *output) {
-    if (!output || output->scale <= 0) {
-        return 1;
-    }
-    return output->scale;
-}
+/* output_normalized_scale() lives in neowall/output/output.h: the span code
+ * needs the same normalisation to turn a physical size back into the logical
+ * one the compositor lays out with. */
 
 static bool output_apply_render_size(struct output_state *output,
                                      const char *reason,

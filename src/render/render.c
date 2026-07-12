@@ -926,6 +926,17 @@ bool render_frame_shader(struct output_state *output) {
     int width = output->width;
     int height = output->height;
 
+    /* Hand the shader this output's slice of the scene its span group shares.
+     * Cleared to zero for an output that spans nothing, which is every
+     * single-monitor setup and leaves the sizing and uniforms below untouched. */
+    if (output->spanned) {
+        multipass_set_span(output->multipass_shader,
+                           output->span.virt_w, output->span.virt_h,
+                           output->span.off_x, output->span.off_y);
+    } else {
+        multipass_set_span(output->multipass_shader, 0, 0, 0, 0);
+    }
+
     /* Resize multipass buffers if needed */
     multipass_resize(output->multipass_shader, width, height);
 
@@ -933,9 +944,16 @@ bool render_frame_shader(struct output_state *output) {
      * stored in ms (shared with pause/resume bookkeeping); ms*1000 == µs on
      * the same monotonic epoch. Millisecond-quantized time visibly stutters:
      * at 60 FPS the 16.67ms interval alternates 16/17ms steps (~6% jitter). */
+    /* Spanned outputs run off the span group's shared start, not their own: two
+     * halves of one scene that started animating even a frame apart are visibly
+     * out of phase across the bezel. */
+    uint64_t epoch_ms = (output->spanned && output->span_start_time > 0)
+        ? output->span_start_time
+        : output->shader_start_time;
+
     uint64_t current_time_us = get_time_us();
-    uint64_t start_time_us = output->shader_start_time > 0
-        ? output->shader_start_time * 1000ull
+    uint64_t start_time_us = epoch_ms > 0
+        ? epoch_ms * 1000ull
         : current_time_us;
     /* Guard against start_time being (transiently) in the future — subtracting
      * unsigned would wrap to an enormous elapsed value. Can happen around a

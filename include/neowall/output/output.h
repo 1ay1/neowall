@@ -9,6 +9,7 @@
 #include "neowall/result.h"        /* For nw_result */
 #include "neowall/image/image.h"   /* For struct image_data and enum image_format */
 #include "neowall/shader/shader_multipass.h"  /* For multipass_shader_t */
+#include "neowall/output/span.h"   /* For struct span_view */
 
 /* Constants */
 #define OUTPUT_MAX_PATH_LENGTH 4096
@@ -91,13 +92,38 @@ struct output_state {
     int32_t scale;
     int32_t transform;
 
-    /* Position of this output's top-left within the global screen layout, in
-     * pixels. Zero for single-output / per-output compositors (Wayland binds a
-     * surface per wl_output, so the origin is always 0,0). Set by the X11
-     * backend from the RandR monitor geometry so the wallpaper window lands on
-     * the right monitor and pointer coordinates can be made output-relative. */
+    /* Position of this output's top-left within the global screen layout.
+     * Set by the X11 backend from the RandR monitor geometry (device pixels) so
+     * the wallpaper window lands on the right monitor and pointer coordinates
+     * can be made output-relative, and by the Wayland backend from xdg-output's
+     * logical position, which is in LOGICAL pixels and so agrees with the fields
+     * above only where scale is 1. Also the origin of this output's slice of a
+     * spanned wallpaper (see span.h). */
     int32_t x_offset;
     int32_t y_offset;
+
+    /* This output's slice of the wallpaper it shares with its span group: the
+     * outputs whose config names the same wallpaper (or the same cycle list).
+     * The group renders ONE continuous scene rather than a copy each, so the
+     * shader is handed the group's bounding box as iResolution and this slice's
+     * origin as a gl_FragCoord offset. Refreshed each main-loop pass from the
+     * output snapshot (outputs_update_spans); read by the render path.
+     *
+     * `spanned` is false whenever the group is just this output, in which case
+     * `span` is not read at all and rendering is exactly as it was. */
+    struct span_view span;
+    bool spanned;
+
+    /* shader_start_time shared by the whole span group, so both halves of a
+     * spanned scene animate on the same clock. 0 until the group has a shader. */
+    uint64_t span_start_time;
+
+    /* Last shader this output adopted to match its span group. Slicing a scene
+     * across monitors is meaningless unless they run the SAME shader, and the
+     * per-output cycle indices can start out disagreeing (a restored index, a
+     * hotplug mid-cycle). Recording the path we last converged on stops a
+     * shader that fails to compile here from being retried every frame. */
+    char span_synced_path[OUTPUT_MAX_PATH_LENGTH];
 
     char make[64];
     char model[64];
@@ -214,6 +240,17 @@ struct output_state {
     struct output_state *next;
 };
 
+/* Device pixels per logical pixel, never zero. An output carries scale 0 until
+ * the compositor has told it otherwise, and X11 outputs carry 1 forever; both
+ * mean device == logical. Divide a physical width by this to get the logical
+ * width the compositor lays the output out with, multiply to go back. */
+static inline int32_t output_normalized_scale(const struct output_state *output) {
+    if (!output || output->scale <= 0) {
+        return 1;
+    }
+    return output->scale;
+}
+
 /* Output management */
 struct output_state *output_create(struct neowall_state *state,
                                    void *native_output, uint32_t name);
@@ -248,6 +285,30 @@ void output_cycle_wallpaper(struct output_state *output);
 void output_set_cycle_index(struct output_state *output, size_t index);
 bool output_should_cycle(struct output_state *output, uint64_t current_time);
 void output_preload_next_wallpaper(struct output_state *output);
+
+/* True if `a` and `b` draw the same wallpaper and so form one spanned scene:
+ * same type, and either the same cycle list or, when not cycling, the same
+ * source path. Membership deliberately ignores where in the cycle each output
+ * currently is — two outputs on one directory belong together even if a
+ * restored index left them showing different entries; outputs_sync_span_group()
+ * is what brings them back together. */
+bool output_same_span_group(const struct output_state *a, const struct output_state *b);
+
+/* Recompute every output's slice of its span group from the current layout.
+ * Call from the main loop with the output snapshot; sets output->span,
+ * output->spanned and output->span_start_time. */
+void outputs_update_spans(struct output_state **outs, size_t count);
+
+/* Bring `output` onto the same shader as the rest of its span group, if it has
+ * drifted. No-op for an output that is alone in its group or already in step. */
+void outputs_sync_span_group(struct output_state **outs, size_t count, size_t index);
+
+/* Advance `leader` to the next wallpaper and take its whole span group with it,
+ * so a spanned scene never ends up half one shader and half another. Members are
+ * pushed the leader's resulting wallpaper rather than cycling themselves, which
+ * would re-shuffle and re-skip broken entries independently and drift apart.
+ * Returns how many outputs were cycled, the leader included. */
+size_t output_cycle_group(struct output_state **outs, size_t count, struct output_state *leader);
 
 /* Rendering wrappers - hide render module from eventloop */
 bool output_render_frame(struct output_state *output);

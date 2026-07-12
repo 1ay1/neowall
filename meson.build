@@ -239,6 +239,7 @@ texture_sources = files(
 # Output sources
 output_sources = files(
   'src/output/output.c',
+  'src/output/span.c',
 )
 
 # Config sources
@@ -547,6 +548,16 @@ test_shuffle_exe = executable('test_shuffle',
 )
 
 test('shuffle', test_shuffle_exe)
+
+# Virtual-screen geometry: the bounding box a spanned shader draws into and the
+# per-output gl_FragCoord offset (whose Y half is flipped). Pure integer math.
+test_span_exe = executable('test_span',
+  files('tests/test_span.c', 'src/output/span.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('span', test_span_exe)
 
 # =============================================================================
 # Fuzzers (opt-in: -Dfuzz=true, clang only)

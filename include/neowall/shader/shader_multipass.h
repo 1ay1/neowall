@@ -106,6 +106,7 @@ typedef struct {
     GLint iFrameRate;
     GLint iFrame;
     GLint iResolution;
+    GLint iSpanOffset;
     GLint iMouse;
     GLint iDate;
     GLint iSampleRate;
@@ -156,6 +157,15 @@ typedef struct {
     bool has_buffers;                        /* True if any buffer passes exist */
     int frame_count;                         /* Frame counter for iFrame uniform */
     double start_time;                       /* Start time for iTime uniform */
+
+    /* Multi-monitor spanning: this context draws one slice of a scene whose
+     * full extent is span_width x span_height. Zero when the output is alone in
+     * its span group, which restores the unspanned sizing and uniforms exactly.
+     * See multipass_set_span(). */
+    int span_width;
+    int span_height;
+    int span_off_x;
+    int span_off_y;
     
     /* Shared resources */
     GLuint vao;                              /* Vertex array object */
@@ -325,6 +335,32 @@ bool multipass_compile_all(multipass_shader_t *shader);
  * @param height New height
  */
 void multipass_resize(multipass_shader_t *shader, int width, int height);
+
+/**
+ * Place this output's window inside a larger virtual screen, so the shader draws
+ * one slice of a scene continuous across every monitor rather than a whole copy
+ * of it. The Image pass reports iResolution as the virtual size and shifts
+ * gl_FragCoord by (off_x, off_y); off_y is measured from the virtual screen's
+ * BOTTOM, since gl_FragCoord's origin is the bottom-left (see span.h).
+ *
+ * Buffer passes are sized to the virtual screen instead of the window: a
+ * Shadertoy buffer is read back as texture(iChannelN, fragCoord/iResolution.xy),
+ * and with a spanned fragCoord those coordinates only address the right texel if
+ * the buffer covers the whole virtual screen. That costs each output the full
+ * virtual-screen buffer work; the Image pass still only fills its own window.
+ *
+ * Pass zeros to clear spanning, which restores the original sizing and uniforms
+ * exactly. Callers do this when the output is alone in its span group, rather
+ * than passing the window's own size, so the lone-output path stays untouched.
+ *
+ * @param shader Multipass shader
+ * @param virt_width Virtual screen width, or 0 for no spanning
+ * @param virt_height Virtual screen height, or 0 for no spanning
+ * @param off_x This window's left edge within the virtual screen
+ * @param off_y This window's bottom edge above the virtual screen's bottom
+ */
+void multipass_set_span(multipass_shader_t *shader, int virt_width, int virt_height,
+                        int off_x, int off_y);
 
 /**
  * Destroy multipass shader and free all resources

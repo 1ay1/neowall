@@ -571,6 +571,9 @@ static const char *multipass_wrapper_prefix =
     "uniform float iTime;\n"
     "uniform vec3 iResolution;\n"
     "uniform vec4 iMouse;\n"
+    "// Shift from this window's gl_FragCoord to the virtual screen's. Zero\n"
+    "// unless the wallpaper is spanned across several monitors.\n"
+    "uniform vec2 iSpanOffset;\n"
     "uniform int iFrame;\n"
     "uniform float iTimeDelta;\n"
     "uniform float iFrameRate;\n"
@@ -605,7 +608,7 @@ static const char *multipass_wrapper_prefix =
 static const char *multipass_wrapper_suffix =
     "\n"
     "void main() {\n"
-    "    mainImage(fragColor, gl_FragCoord.xy);\n"
+    "    mainImage(fragColor, gl_FragCoord.xy + iSpanOffset);\n"
     "}\n";
 
 /**
@@ -1207,6 +1210,7 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iFrameRate = glGetUniformLocation(prog, "iFrameRate");
     u->iFrame = glGetUniformLocation(prog, "iFrame");
     u->iResolution = glGetUniformLocation(prog, "iResolution");
+    u->iSpanOffset = glGetUniformLocation(prog, "iSpanOffset");
     u->iMouse = glGetUniformLocation(prog, "iMouse");
     u->iDate = glGetUniformLocation(prog, "iDate");
     u->iSampleRate = glGetUniformLocation(prog, "iSampleRate");
@@ -1444,12 +1448,32 @@ bool multipass_compile_all(multipass_shader_t *shader) {
     return all_success;
 }
 
+void multipass_set_span(multipass_shader_t *shader, int virt_width, int virt_height,
+                        int off_x, int off_y) {
+    if (!shader) return;
+
+    bool spans = virt_width > 0 && virt_height > 0;
+
+    shader->span_width = spans ? virt_width : 0;
+    shader->span_height = spans ? virt_height : 0;
+    shader->span_off_x = spans ? off_x : 0;
+    shader->span_off_y = spans ? off_y : 0;
+}
+
 void multipass_resize(multipass_shader_t *shader, int width, int height) {
     if (!shader || !shader->is_initialized) return;
 
+    /* Buffer passes are sized to the virtual screen when spanning, not to this
+     * window: they are sampled at fragCoord/iResolution.xy in virtual
+     * coordinates, so a window-sized buffer would be read off its own end. The
+     * Image pass keeps the window's size — it still only fills the window.
+     * Equal to width/height whenever the output is not spanned. */
+    int buffer_w = shader->span_width > 0 ? shader->span_width : width;
+    int buffer_h = shader->span_height > 0 ? shader->span_height : height;
+
     /* Calculate base scaled resolution (from adaptive resolution system) */
-    int base_scaled_w = (int)(width * shader->resolution_scale);
-    int base_scaled_h = (int)(height * shader->resolution_scale);
+    int base_scaled_w = (int)(buffer_w * shader->resolution_scale);
+    int base_scaled_h = (int)(buffer_h * shader->resolution_scale);
     if (base_scaled_w < 1) base_scaled_w = 1;
     if (base_scaled_h < 1) base_scaled_h = 1;
 
@@ -1576,11 +1600,26 @@ void multipass_set_uniforms(multipass_shader_t *shader,
     if (u->iFrameRate >= 0) glUniform1f(u->iFrameRate, shader->frame_fps);
     if (u->iFrame >= 0) glUniform1i(u->iFrame, shader->frame_count);
 
-    /* Resolution - changes per pass */
+    /* Resolution - changes per pass.
+     *
+     * When spanning, the Image pass fills only this monitor's window but must
+     * think in virtual-screen coordinates, so it reports the virtual size and
+     * shifts gl_FragCoord onto its slice. Buffer passes need neither: they are
+     * already sized to the virtual screen (multipass_resize), so pass->width IS
+     * the virtual width and their slice offset is zero. */
+    bool spanned = shader->span_width > 0 && shader->span_height > 0;
+    bool is_image = (pass->type == PASS_TYPE_IMAGE);
+
     if (u->iResolution >= 0) {
-        float w = (float)pass->width;
-        float h = (float)pass->height;
+        float w = (spanned && is_image) ? (float)shader->span_width : (float)pass->width;
+        float h = (spanned && is_image) ? (float)shader->span_height : (float)pass->height;
         glUniform3f(u->iResolution, w, h, w / h);
+    }
+
+    if (u->iSpanOffset >= 0) {
+        float ox = (spanned && is_image) ? (float)shader->span_off_x : 0.0f;
+        float oy = (spanned && is_image) ? (float)shader->span_off_y : 0.0f;
+        glUniform2f(u->iSpanOffset, ox, oy);
     }
 
     /* Mouse */

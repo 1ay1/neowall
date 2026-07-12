@@ -207,8 +207,17 @@ static void render_outputs(struct neowall_state *state) {
     struct swap_vec swaps;
     swap_vec_init(&swaps);
 
+    /* Refresh each output's slice of the scene it shares with its span group.
+     * Cheap, and the layout can change under us at any time (hotplug, RandR). */
+    outputs_update_spans(outputs_snapshot, output_n);
+
     for (size_t idx = 0; idx < output_n; idx++) {
         struct output_state *output = outputs_snapshot[idx];
+
+        /* A spanned scene only reads as one scene if every monitor is drawing
+         * the SAME shader. Outputs can start out disagreeing — a restored cycle
+         * index, a hotplug part-way through a cycle — so converge them here. */
+        outputs_sync_span_group(outputs_snapshot, output_n, idx);
 
         /* Handle set-index request - set ALL outputs with same config to the specified index */
         if (set_index >= 0 && !processed_set_index && output->config->cycle && output->config->cycle_count > 0) {
@@ -246,28 +255,10 @@ static void render_outputs(struct neowall_state *state) {
 
         /* Handle next wallpaper request - cycle ALL outputs with same config for synchronization */
         if (next_count > 0 && !processed_next && output->config->cycle && output->config->cycle_count > 0) {
-            int cycled_count = 0;
-            for (size_t j = idx; j < output_n; j++) {
-                struct output_state *sync_output = outputs_snapshot[j];
-                bool same_config = (sync_output->config->cycle &&
-                                   sync_output->config->cycle_count == output->config->cycle_count);
-                if (same_config && sync_output->config->cycle_paths && output->config->cycle_paths) {
-                    for (size_t i = 0; i < output->config->cycle_count && same_config; i++) {
-                        if (strcmp(sync_output->config->cycle_paths[i], output->config->cycle_paths[i]) != 0) {
-                            same_config = false;
-                        }
-                    }
-                }
-                if (same_config) {
-                    log_debug("Cycling to next wallpaper for output %s (synchronized)",
-                             sync_output->model[0] ? sync_output->model : "unknown");
-                    output_cycle_wallpaper(sync_output);
-                    cycled_count++;
-                }
-            }
+            size_t cycled_count = output_cycle_group(outputs_snapshot, output_n, output);
             current_time = get_time_ms();
             processed_next = true;
-            log_info("Cycled %d output(s) with matching configuration (%d requests remaining)",
+            log_info("Cycled %zu output(s) with matching configuration (%d requests remaining)",
                      cycled_count, next_count - 1);
             atomic_fetch_sub_explicit(&state->next_requested, 1, memory_order_acq_rel);
         }
@@ -276,7 +267,10 @@ static void render_outputs(struct neowall_state *state) {
         if (!atomic_load_explicit(&state->paused, memory_order_acquire) &&
             output->config->cycle && output->config->duration > 0.0f) {
             if (output_should_cycle(output, current_time)) {
-                output_cycle_wallpaper(output);
+                /* Take the whole span group across together: half a scene
+                 * advancing to the next shader on its own is worse than either
+                 * shader on its own. */
+                output_cycle_group(outputs_snapshot, output_n, output);
                 current_time = get_time_ms();
             }
         }
