@@ -491,6 +491,26 @@ bool wayland_init_registry(struct neowall_state *state) {
 
     wayland_t *wl = &g_wayland;
 
+    /* Guard re-entry: the memset below would zero a live wayland_t, dropping the
+     * open wl_display and every bound global without destroying them, while
+     * state->outputs kept pointing at them. wayland_cleanup() clears this flag,
+     * so a genuine re-init after teardown still proceeds.
+     *
+     * Returning true here is only sound because wl->initialized is now set at
+     * the single success exit below: every failure path returns false with the
+     * flag still clear, so "initialized" means "fully built". */
+    if (wl->initialized) {
+        return true;
+    }
+
+    /* An earlier attempt can fail after the display is connected (the failure
+     * paths below return without disconnecting), leaving wl->display open with
+     * wl->initialized still false. Release it before the memset drops the last
+     * reference to that connection. */
+    if (wl->display) {
+        wayland_cleanup();
+    }
+
     /* Initialize the wayland structure */
     memset(wl, 0, sizeof(wayland_t));
     wl->state = state;
@@ -531,9 +551,6 @@ bool wayland_init_registry(struct neowall_state *state) {
         log_error("Compositor not available");
         return false;
     }
-
-    /* Mark as initialized */
-    wl->initialized = true;
 
     /* Shared memory buffers not available */
     if (!wl->shm) {
@@ -576,6 +593,13 @@ bool wayland_init_registry(struct neowall_state *state) {
         free(wl->cursor_theme_name);
         wl->cursor_theme_name = NULL;
     }
+
+    /* Mark as initialized at the single success exit, not before the wl_shm
+     * check: setting it earlier left the flag true on a registry that had no
+     * shm and had returned false, so wayland_available() reported a usable
+     * Wayland and the re-entry guard above would have reported success on a
+     * half-built registry. */
+    wl->initialized = true;
 
     return true;
 }
