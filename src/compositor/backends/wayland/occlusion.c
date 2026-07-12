@@ -24,27 +24,32 @@
 #include "wayland_occlusion.h"
 #include "frame_watchdog.h"
 #include "hyprland_coverage.h"
+#include "occlusion_set.h"
 
 /* ---------- per-toplevel state tracking ---------- */
 
 typedef struct tracked_toplevel {
     struct zwlr_foreign_toplevel_handle_v1 *handle;
     uint32_t state;
-    struct wl_output *output;
-    bool has_output;
+    output_set outputs;   /* every wl_output this toplevel is currently on */
     struct tracked_toplevel *next;
 } tracked_toplevel_t;
 
 static struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager = NULL;
 static tracked_toplevel_t *toplevels = NULL;
 
+static void free_toplevel(tracked_toplevel_t *tl) {
+    output_set_free(&tl->outputs);
+    zwlr_foreign_toplevel_handle_v1_destroy(tl->handle);
+    free(tl);
+}
+
 static void remove_toplevel(tracked_toplevel_t *tl) {
     tracked_toplevel_t **pp = &toplevels;
     while (*pp) {
         if (*pp == tl) {
             *pp = tl->next;
-            zwlr_foreign_toplevel_handle_v1_destroy(tl->handle);
-            free(tl);
+            free_toplevel(tl);
             return;
         }
         pp = &(*pp)->next;
@@ -60,16 +65,14 @@ static void tl_app_id(void *d, struct zwlr_foreign_toplevel_handle_v1 *h, const 
 static void tl_output_enter(void *d, struct zwlr_foreign_toplevel_handle_v1 *h,
                             struct wl_output *output) {
     tracked_toplevel_t *tl = d; (void)h;
-    tl->output = output;
-    tl->has_output = true;
+    /* A toplevel may be visible on several outputs at once, so accumulate
+     * rather than overwrite. */
+    output_set_add(&tl->outputs, output);
 }
 static void tl_output_leave(void *d, struct zwlr_foreign_toplevel_handle_v1 *h,
                             struct wl_output *output) {
     tracked_toplevel_t *tl = d; (void)h;
-    if (tl->output == output) {
-        tl->output = NULL;
-        tl->has_output = false;
-    }
+    output_set_remove(&tl->outputs, output);
 }
 static void tl_state(void *d, struct zwlr_foreign_toplevel_handle_v1 *h,
                      struct wl_array *state) {
@@ -111,6 +114,7 @@ static void mgr_toplevel(void *d, struct zwlr_foreign_toplevel_manager_v1 *m,
         return;
     }
     tl->handle = handle;
+    output_set_init(&tl->outputs);
     tl->next = toplevels;
     toplevels = tl;
     zwlr_foreign_toplevel_handle_v1_add_listener(handle, &tl_listener, tl);
@@ -166,7 +170,7 @@ static bool any_covering_toplevel_on(struct wl_output *output) {
     const uint32_t mn = 1u << ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MINIMIZED;
     const uint32_t ac = 1u << ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_ACTIVATED;
     for (tracked_toplevel_t *tl = toplevels; tl; tl = tl->next) {
-        if (!tl->has_output || tl->output != output) {
+        if (!output_set_contains(&tl->outputs, output)) {
             continue;
         }
         if (tl->state & mn) {
@@ -262,8 +266,7 @@ void wayland_occlusion_cleanup(void) {
     frame_watchdog_cleanup();
     while (toplevels) {
         tracked_toplevel_t *next = toplevels->next;
-        zwlr_foreign_toplevel_handle_v1_destroy(toplevels->handle);
-        free(toplevels);
+        free_toplevel(toplevels);
         toplevels = next;
     }
     if (toplevel_manager) {

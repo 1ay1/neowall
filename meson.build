@@ -286,6 +286,7 @@ if has_wayland
   )
   occlusion_sources += files(
     'src/compositor/backends/wayland/occlusion.c',
+    'src/compositor/backends/wayland/occlusion_set.c',
     'src/compositor/backends/wayland/frame_watchdog.c',
     'src/compositor/backends/wayland/hyprland_coverage.c',
   )
@@ -504,6 +505,18 @@ test_x11_geometry_exe = executable('test_x11_geometry',
 )
 
 test('x11_geometry', test_x11_geometry_exe)
+
+# Wayland toplevel output set — a toplevel can occupy several outputs at once.
+# Pure pointer-set logic, no Wayland headers or display needed.
+test_occlusion_set_exe = executable('test_occlusion_set',
+  files('tests/test_occlusion_set.c',
+        'src/compositor/backends/wayland/occlusion_set.c'),
+  include_directories: [inc_dirs, inc_dirs_build,
+                        include_directories('src/compositor/backends/wayland')],
+  build_by_default: false,
+)
+
+test('occlusion_set', test_occlusion_set_exe)
 
 # Reactive audio FFT — pure math, no audio thread / parec needed.
 test_fft_exe = executable('test_reactive_fft',
