@@ -131,6 +131,12 @@ void log_debug(const char *format, ...);
 void log_set_level(int level);
 float ease_in_out_cubic(float t);
 
+/* Parse a non-negative decimal index (wallpaper index, cycle_total, ...) from a
+ * string that came from the user or from disk. Rejects the empty string, any
+ * non-digit character, and values that overflow long, none of which atoi() can
+ * report. Returns true and writes *out on success. */
+bool neowall_parse_index(const char *s, long *out);
+
 /* State file functions */
 const char *get_state_file_path(void);
 const char *get_cycle_list_file_path(void);

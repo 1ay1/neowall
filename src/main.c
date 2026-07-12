@@ -10,7 +10,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <sys/signalfd.h>
-#include <ctype.h>
+#include <limits.h>
 #include "neowall/neowall.h"
 #include "neowall/config/config_access.h"
 #include "neowall/constants.h"
@@ -322,8 +322,10 @@ static bool kill_daemon(void) {
 }
 
 /* Send signal to running daemon */
-/* Check if cycling is possible by reading state file */
-static bool can_cycle_wallpaper(void) {
+/* Largest cycle_total across all outputs in the state file, or 0 if the state
+ * file is absent or carries no usable cycle_total. This is the number of
+ * wallpapers `set <index>` can address. */
+static int state_max_cycle_total(void) {
     /* Use file-level locking (flock/fcntl) for cross-process synchronization.
      * We can't use the state_file_lock mutex here because this runs in a
      * separate process from the daemon; only file locks coordinate across
@@ -332,7 +334,7 @@ static bool can_cycle_wallpaper(void) {
     FILE *fp = fopen(state_path, "r");
 
     if (!fp) {
-        return false;  /* No state file = unknown, let daemon handle it */
+        return 0;  /* No state file = unknown, let daemon handle it */
     }
 
     /* Acquire read lock on the file */
@@ -359,9 +361,17 @@ static bool can_cycle_wallpaper(void) {
     while (fgets(line, sizeof(line), fp)) {
         line[strcspn(line, "\n")] = 0;
         if (strncmp(line, "cycle_total=", 12) == 0) {
-            int cycle_total = atoi(line + 12);
-            if (cycle_total > max_cycle_total) {
-                max_cycle_total = cycle_total;
+            /* The state file is on disk and can be truncated or hand-edited, so
+             * its contents are untrusted input: parse defensively rather than
+             * feeding an arbitrary digit string to atoi(). */
+            const char *value = line + 12;
+            long cycle_total = 0;
+            if (!neowall_parse_index(value, &cycle_total) || cycle_total > INT_MAX) {
+                log_debug("Ignoring malformed cycle_total in state file: '%s'", value);
+                continue;
+            }
+            if ((int)cycle_total > max_cycle_total) {
+                max_cycle_total = (int)cycle_total;
             }
             /* Don't break - continue checking all outputs */
         }
@@ -372,7 +382,12 @@ static bool can_cycle_wallpaper(void) {
     fcntl(fd, F_SETLK, &lock);
 
     fclose(fp);
-    return max_cycle_total > 1;  /* Can cycle if ANY output has more than 1 wallpaper */
+    return max_cycle_total;
+}
+
+/* Check if cycling is possible: ANY output has more than one wallpaper. */
+static bool can_cycle_wallpaper(void) {
+    return state_max_cycle_total() > 1;
 }
 
 static bool send_daemon_signal(int signal, const char *action, bool check_cycle) {
@@ -826,16 +841,16 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "\nUse '%s current' to see available wallpapers and their indices.\n", argv[0]);
                 return EXIT_FAILURE;
             }
-            /* Validate index is a number */
+            /* Validate index is a number. atoi() cannot report failure and is
+             * undefined on overflow, so parse with a checked helper: "9999999999"
+             * is all digits but does not fit in an int. */
             const char *index_str = argv[2];
-            for (const char *p = index_str; *p; p++) {
-                if (!isdigit((unsigned char)*p)) {
-                    fprintf(stderr, "Error: Index must be a non-negative integer, got '%s'\n", index_str);
-                    return EXIT_FAILURE;
-                }
+            long parsed = 0;
+            if (!neowall_parse_index(index_str, &parsed) || parsed > INT_MAX) {
+                fprintf(stderr, "Error: Index must be a non-negative integer, got '%s'\n", index_str);
+                return EXIT_FAILURE;
             }
-            int index = atoi(index_str);
-            
+
             /* Send set-index command to daemon */
             const char *pid_path = get_pid_file_path();
             FILE *fp = fopen(pid_path, "r");
@@ -861,10 +876,20 @@ int main(int argc, char *argv[]) {
             }
 
             /* Check if cycling is possible */
-            if (!can_cycle_wallpaper()) {
+            int cycle_total = state_max_cycle_total();
+            if (cycle_total <= 1) {
                 printf("Cannot set wallpaper index: Only one wallpaper/shader configured.\n");
                 return EXIT_FAILURE;
             }
+
+            /* Bound the index against what the daemon actually has. Without this
+             * the CLI reports success for an index no output can honour, and the
+             * daemon silently drops the request. */
+            if (parsed >= cycle_total) {
+                fprintf(stderr, "Error: Index %ld is out of range (0-%d)\n", parsed, cycle_total - 1);
+                return EXIT_FAILURE;
+            }
+            int index = (int)parsed;
 
             /* Write the index to a file for the daemon to read */
             if (!write_set_index_file(index)) {

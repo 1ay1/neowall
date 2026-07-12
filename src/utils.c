@@ -131,6 +131,39 @@ void log_set_colors(bool enabled) {
  * locale-ignorant duplicate here that shadowed the libc symbol. Removed in
  * audit fix #28. */
 
+/* Parse a non-negative decimal index out of `s`.
+ *
+ * atoi(3) has no way to report failure, and C11 7.22.1p1 makes it undefined
+ * behaviour when the value cannot be represented as an int - so a digit string
+ * that overflows int cannot be handled safely by the caller. Values that come
+ * from the command line or from the on-disk state file go through this instead.
+ *
+ * Accepts only a non-empty run of decimal digits: no sign, no leading or
+ * trailing whitespace, no trailing garbage. Overflow (ERANGE) is rejected
+ * rather than clamped. On success stores the value in *out and returns true;
+ * *out is untouched on failure. */
+bool neowall_parse_index(const char *s, long *out) {
+    if (!s || !out || *s == '\0') {
+        return false;
+    }
+
+    for (const char *p = s; *p; p++) {
+        if (*p < '0' || *p > '9') {
+            return false;
+        }
+    }
+
+    errno = 0;
+    char *end = NULL;
+    long value = strtol(s, &end, 10);
+    if (end == s || *end != '\0' || errno == ERANGE || value < 0) {
+        return false;
+    }
+
+    *out = value;
+    return true;
+}
+
 /* Path expansion (tilde expansion) */
 bool expand_path(const char *path, char *expanded, size_t size) {
     if (!path || !expanded || size == 0) {

@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <limits.h>
 #include <time.h>
 
 /* Prototypes from src/utils.c (kept in sync with include/neowall.h). */
@@ -28,6 +29,7 @@ float ease_in_out_cubic(float t);
 void format_bytes(uint64_t bytes, char *buf, size_t size);
 bool expand_path(const char *path, char *expanded, size_t size);
 const char *neowall_secure_runtime_dir(void);
+bool neowall_parse_index(const char *s, long *out);
 
 static int failures = 0;
 static int checks = 0;
@@ -113,6 +115,56 @@ static void test_expand_path(void) {
     CHECK(!expand_path("/x", out, 0));
 }
 
+/* neowall_parse_index(): the checked replacement for atoi() on user- and
+ * disk-supplied index strings. The case that atoi() gets wrong is the one at
+ * the bottom: an all-digit string too large for an int. */
+static void test_parse_index(void) {
+    long v;
+
+    /* Plain non-negative decimals. */
+    v = -1;
+    CHECK(neowall_parse_index("0", &v) && v == 0);
+    v = -1;
+    CHECK(neowall_parse_index("7", &v) && v == 7);
+    v = -1;
+    CHECK(neowall_parse_index("0042", &v) && v == 42);
+
+    /* Not a number, or not entirely a number. */
+    v = -1;
+    CHECK(!neowall_parse_index("", &v));
+    CHECK(!neowall_parse_index("abc", &v));
+    CHECK(!neowall_parse_index("3x", &v));
+    CHECK(!neowall_parse_index("3 ", &v));
+    CHECK(!neowall_parse_index(" 3", &v));
+    CHECK(!neowall_parse_index("+3", &v));
+    CHECK(!neowall_parse_index("-1", &v));
+    CHECK(!neowall_parse_index("0x10", &v));
+    CHECK(!neowall_parse_index(NULL, &v));
+    CHECK(v == -1);   /* nothing written on failure */
+
+    /* Overflow: all digits, but far past what an int (or a long) can hold.
+     * atoi("99999999999999999999") is undefined behaviour; in practice glibc
+     * saturates and truncates, handing the caller a bogus index. */
+    CHECK(!neowall_parse_index("99999999999999999999", &v));
+
+    /* LONG_MAX itself parses; LONG_MAX + 1 does not. */
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", LONG_MAX);
+    v = -1;
+    CHECK(neowall_parse_index(buf, &v) && v == LONG_MAX);
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long)LONG_MAX + 1UL);
+    CHECK(!neowall_parse_index(buf, &v));
+
+#if LONG_MAX > INT_MAX
+    /* INT_MAX + 1: fits in a long, so the parse succeeds and the caller is the
+     * one that must reject it - which is exactly why the value is reported
+     * rather than silently squeezed into an int, as atoi() would. */
+    snprintf(buf, sizeof(buf), "%ld", (long)INT_MAX + 1);
+    v = -1;
+    CHECK(neowall_parse_index(buf, &v) && v == (long)INT_MAX + 1);
+#endif
+}
+
 /* neowall_secure_runtime_dir(): must create a private 0700 directory we own
  * under XDG_RUNTIME_DIR, and must REFUSE a name already taken by a symlink
  * (the /tmp squat attack the hardening closes). */
@@ -163,6 +215,7 @@ int main(void) {
     test_ease();
     test_format_bytes();
     test_expand_path();
+    test_parse_index();
     test_secure_runtime_dir();
 
     if (failures == 0) {
