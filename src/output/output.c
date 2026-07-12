@@ -772,10 +772,10 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
 }
 
 /* Set live shader wallpaper */
-void output_set_shader(struct output_state *output, const char *shader_path) {
+nw_result output_set_shader(struct output_state *output, const char *shader_path) {
     if (!output || !shader_path) {
         log_error("Invalid parameters for output_set_shader");
-        return;
+        return nw_err(NW_ERR_INVALID_ARG, "NULL output or shader path");
     }
 
     /* If asked to load a .neowall manifest directly, resolve the .glsl it names
@@ -806,24 +806,24 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     /* Defensive checks before any EGL/GL operations */
     if (!output->state) {
         log_error("Output state is NULL, cannot set shader");
-        return;
+        return nw_err(NW_ERR_STATE, "output has no state");
     }
 
     if (output->state->egl_display == EGL_NO_DISPLAY) {
         log_error("EGL display not initialized, cannot set shader");
-        return;
+        return nw_err(NW_ERR_GL, "EGL display not initialized");
     }
 
     /* CRITICAL: Ensure EGL context is current before any GL operations */
     if (!output->compositor_surface || !eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
                        output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for shader set");
-        return;
+        return nw_err(NW_ERR_GL, "eglMakeCurrent failed for shader set");
     }
 
     if (output->state->egl_context == EGL_NO_CONTEXT) {
         log_error("EGL context not initialized, cannot set shader");
-        return;
+        return nw_err(NW_ERR_GL, "EGL context not initialized");
     }
 
     if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
@@ -832,28 +832,30 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         /* Store shader path in config for later application when surface is ready */
         snprintf(output->config->shader_path, sizeof(output->config->shader_path), "%s", shader_path);
         output->config->type = WALLPAPER_SHADER;
-        return;
+        /* Deferred, not failed: the render loop applies this path once the
+         * surface comes up, so callers must not treat it as a load failure. */
+        return nw_ok();
     }
 
     /* X11 backend uses backend_data instead of egl_window */
-    if (!output->compositor_surface || 
+    if (!output->compositor_surface ||
         (!output->compositor_surface->egl_window && !output->compositor_surface->backend_data)) {
         log_error("EGL window not created for output %s, cannot set shader",
                   output->model[0] ? output->model : "unknown");
-        return;
+        return nw_err(NW_ERR_GL, "EGL window not created");
     }
 
     /* Validate EGL display and surface before operations */
     if (!output->state || output->state->egl_display == EGL_NO_DISPLAY) {
         log_error("EGL display not available for output %s (display may be disconnected)",
                   output->model[0] ? output->model : "unknown");
-        return;
+        return nw_err(NW_ERR_GL, "EGL display unavailable");
     }
 
     if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         log_error("EGL surface not available for output %s (display may be disconnected)",
                   output->model[0] ? output->model : "unknown");
-        return;
+        return nw_err(NW_ERR_GL, "EGL surface unavailable");
     }
 
     /* Make EGL context current before creating shader program */
@@ -862,7 +864,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         EGLint egl_error = eglGetError();
         log_error("Failed to make EGL context current for output %s: 0x%x (display may be disconnected)",
                   output->model[0] ? output->model : "unknown", egl_error);
-        return;
+        return nw_err(NW_ERR_GL, "eglMakeCurrent failed");
     }
 
     log_debug("EGL context made current for output %s",
@@ -873,7 +875,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         /* Prevent re-entrant shader changes */
         if (output->shader_fade_start_time > 0 && output->pending_shader_path[0] != '\0') {
             log_debug("Shader change already in progress, ignoring new request for: %s", shader_path);
-            return;
+            return nw_err(NW_ERR_AGAIN, "shader change already in progress");
         }
 
         log_debug("Destroying existing multipass shader before loading: %s", shader_path);
@@ -891,7 +893,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     char *shader_source = shader_load_file(shader_path);
     if (!shader_source) {
         log_error("Failed to load shader source from: %s", shader_path);
-        return;
+        return nw_err(NW_ERR_IO, "cannot read shader source");
     }
 
     log_info("Loaded shader source: %zu bytes from %s", strlen(shader_source), shader_path);
@@ -902,7 +904,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
 
     if (!output->multipass_shader) {
         log_error("Failed to create multipass shader from: %s", shader_path);
-        return;
+        return nw_err(NW_ERR_PARSE, "multipass_create failed");
     }
 
     /* Apply a .neowall manifest if present: explicit channel bindings + custom
@@ -915,7 +917,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         log_error("Failed to initialize multipass GL resources for: %s", shader_path);
         multipass_destroy(output->multipass_shader);
         output->multipass_shader = NULL;
-        return;
+        return nw_err(NW_ERR_GL, "multipass_init_gl failed");
     }
 
     /* Compile all passes */
@@ -928,7 +930,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
         }
         multipass_destroy(output->multipass_shader);
         output->multipass_shader = NULL;
-        return;
+        return nw_err(NW_ERR_PARSE, "shader failed to compile");
     }
 
     /* Configure adaptive resolution scaling to target the config's FPS */
@@ -1010,6 +1012,7 @@ void output_set_shader(struct output_state *output, const char *shader_path) {
     }
 
     log_debug("Multipass shader wallpaper loaded successfully");
+    return nw_ok();
 }
 
 /* Cycle to next wallpaper in the cycle list */
@@ -1155,7 +1158,46 @@ void output_cycle_wallpaper(struct output_state *output) {
 
         /* Apply the next item based on type */
         if (output->config->type == WALLPAPER_SHADER) {
-            output_set_shader(output, next_path);
+            /* A shader that fails to load leaves the output with no program
+             * bound, so skip past it to the next entry that does load. Only
+             * content errors (unreadable file, bad GLSL) are worth retrying:
+             * a GL/state error means this output cannot load any shader right
+             * now, and every remaining candidate would fail the same way.
+             * Bounded by cycle_count so an all-broken list terminates. */
+            nw_result r = output_set_shader(output, next_path);
+
+            for (size_t tried = 1;
+                 tried < output->config->cycle_count &&
+                 (r.status == NW_ERR_IO || r.status == NW_ERR_PARSE);
+                 tried++) {
+                log_warn("Shader '%s' failed to load on output %s (%s: %s); "
+                         "skipping to next entry in the cycle",
+                         next_path, output->model[0] ? output->model : "unknown",
+                         nw_status_str(r.status), r.context ? r.context : "");
+
+                pthread_mutex_lock(&output->state->state_mutex);
+                output->config->current_cycle_index =
+                    (output->config->current_cycle_index + 1) % output->config->cycle_count;
+                snprintf(next_path_copy, sizeof(next_path_copy), "%s",
+                         output->config->cycle_paths[output->config->current_cycle_index]);
+                pthread_mutex_unlock(&output->state->state_mutex);
+                next_path = next_path_copy;
+
+                log_info("Cycling shader for output %s: index %zu (%zu/%zu): %s",
+                         output->model[0] ? output->model : "unknown",
+                         output->config->current_cycle_index,
+                         output->config->current_cycle_index + 1,
+                         output->config->cycle_count,
+                         next_path);
+
+                r = output_set_shader(output, next_path);
+            }
+
+            if (nw_is_err(r)) {
+                log_error("No shader in the cycle list loaded on output %s (last error: %s: %s)",
+                          output->model[0] ? output->model : "unknown",
+                          nw_status_str(r.status), r.context ? r.context : "");
+            }
         } else {
             output_set_wallpaper(output, next_path);
         }

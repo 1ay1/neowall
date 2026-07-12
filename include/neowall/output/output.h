@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <GL/gl.h>
+#include "neowall/result.h"        /* For nw_result */
 #include "neowall/image/image.h"   /* For struct image_data and enum image_format */
 #include "neowall/shader/shader_multipass.h"  /* For multipass_shader_t */
 
@@ -233,7 +234,14 @@ void output_unref(struct output_state *output);
 bool output_configure_compositor_surface(struct output_state *output);
 bool output_create_egl_surface(struct output_state *output);
 void output_set_wallpaper(struct output_state *output, const char *path);
-void output_set_shader(struct output_state *output, const char *shader_path);
+/* Load `shader_path` and make it this output's live wallpaper.
+ *
+ * Returns NW_OK once the shader is running, or when the load was deferred
+ * because the EGL surface is not up yet (the path is stored on the config and
+ * applied when the surface arrives). Any error status means no shader is bound
+ * on this output: the previous program has already been torn down and
+ * config->shader_path still names it. */
+nw_result output_set_shader(struct output_state *output, const char *shader_path);
 bool output_apply_config(struct output_state *output, struct wallpaper_config *config);
 void output_apply_deferred_config(struct output_state *output);
 void output_cycle_wallpaper(struct output_state *output);
