@@ -41,6 +41,50 @@ static int check_counter = 0;
 /* Geometry of a fullscreen-marked window. */
 typedef x11_rect_t rect_t;
 
+/* A window named by _NET_CLIENT_LIST_STACKING can already be gone by the time we
+ * query it: the list is a snapshot, and windows are destroyed asynchronously.
+ * XGetWindowProperty/XGetGeometry on a window that no longer exists raises
+ * BadWindow, and Xlib's default error handler terminates the process.
+ *
+ * This is not hypothetical, and the window is not always someone else's. A window
+ * manager killed outright leaves _NET_CLIENT_LIST_STACKING behind on the root,
+ * still naming the wallpaper window it was managing; x11_core then rebuilds that
+ * window on the override-redirect path, destroying the old one. The next poll
+ * reads the dead WM's stale list and queries a window that is gone. Observed on
+ * Xvfb with metacity: kill -9 the WM and neowall exits with "BadWindow (invalid
+ * Window parameter)" about a second later, naming the destroyed wallpaper window.
+ *
+ * Only the "that window is gone" errors are tolerated silently: BadWindow from
+ * the property/translate requests, BadDrawable from XGetGeometry (its argument is
+ * a DRAWABLE, so a dead XID comes back as BadDrawable, not BadWindow). Any other
+ * error means something we did not predict — a wrong property type, a bad atom, a
+ * protocol bug — and reading it as "that window died, skip it" would hide it
+ * forever. Those are logged. The window is still skipped either way: whatever the
+ * error was, the reply we needed did not arrive, so the window cannot be counted
+ * as occluding anything.
+ *
+ * THREADING CONSTRAINT: XSetErrorHandler is process-global, not per-Display. The
+ * save/install/restore below is safe only because the occlusion poll runs on the
+ * event-loop thread, which is the only thread making X requests on this Display.
+ * This is the same invariant the WM probe in x11_core.c relies on; if either ever
+ * stops holding, both need their own Display connection instead. */
+static unsigned char occ_x_error;  /* Last X error code seen, 0 = none. */
+
+static int occ_error_handler(Display *dpy, XErrorEvent *err) {
+    occ_x_error = err->error_code;
+
+    if (err->error_code != BadWindow && err->error_code != BadDrawable) {
+        char text[128] = "";
+        XGetErrorText(dpy, err->error_code, text, sizeof(text));
+        log_error("x11_occlusion: unexpected X error while walking "
+                  "_NET_CLIENT_LIST_STACKING: %s (code %u, request %u.%u, "
+                  "resource 0x%lx) - skipping that window",
+                  text, err->error_code, err->request_code, err->minor_code,
+                  err->resourceid);
+    }
+    return 0;
+}
+
 static bool window_has_state(Display *dpy, Window win, Atom target) {
     Atom type;
     int format;
@@ -107,13 +151,29 @@ static void check_fullscreen_state(void) {
     int fs_count = 0;
     int fs_cap = 0;
 
+    /* Scoped to the per-window queries below, and only to those: the root property
+     * fetch above ran under the default handler, so a failure there is still fatal
+     * and visible rather than being read as "a window died". Every query below
+     * touches a window we do not own and cannot keep alive. */
+    XErrorHandler prev_handler = XSetErrorHandler(occ_error_handler);
+
     for (unsigned long i = 0; i < n; i++) {
-        if (!window_has_state(x_display, windows[i], atom_net_wm_state_fullscreen)) {
+        occ_x_error = 0;
+
+        bool is_fullscreen =
+            window_has_state(x_display, windows[i], atom_net_wm_state_fullscreen);
+        if (occ_x_error) {
+            continue;  /* Window died (silent), or something else went wrong and the
+                        * handler logged it. Either way there is no answer to use. */
+        }
+        if (!is_fullscreen) {
             continue;
         }
+
         int wx, wy, ww, wh;
-        if (!get_window_geometry(x_display, windows[i], &wx, &wy, &ww, &wh)) {
-            continue;
+        if (!get_window_geometry(x_display, windows[i], &wx, &wy, &ww, &wh) ||
+            occ_x_error) {
+            continue;  /* Window died under us — it cannot be occluding anything. */
         }
         if (fs_count == fs_cap) {
             int new_cap = fs_cap ? fs_cap * 2 : 8;
@@ -128,6 +188,10 @@ static void check_fullscreen_state(void) {
         }
         fs[fs_count++] = (rect_t){ wx, wy, ww, wh };
     }
+
+    XSync(x_display, False);  /* Deliver any straggling error before we un-install. */
+    XSetErrorHandler(prev_handler);
+
     XFree(data);
 
     /* Decide occlusion per output: each output is occluded when a fullscreen

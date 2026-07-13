@@ -853,6 +853,19 @@ void event_loop_run(struct neowall_state *state) {
             timeout_ms = 0;
         }
 
+        /* Don't sleep on work we already have. A backend can hold events in a
+         * userspace queue that poll() cannot see (Xlib does: any XSync/XFlush
+         * drains the socket into it), in which case the fd looks quiet and we
+         * would block for the whole timeout with events already in hand.
+         *
+         * Measured on Xvfb before this check: when the wallpaper window's contents
+         * were discarded, the Expose saying so reached Xlib's queue at once but was
+         * not dispatched for a further 1.000 s — exactly the timeout above — and a
+         * static wallpaper stayed black for that second. */
+        if (ops && ops->has_pending_events && ops->has_pending_events(backend_data)) {
+            timeout_ms = 0;
+        }
+
         /* Poll for events */
         int ret = poll(fds, num_fds, timeout_ms);
 
