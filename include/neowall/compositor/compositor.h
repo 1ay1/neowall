@@ -152,6 +152,15 @@ struct compositor_surface {
     struct compositor_backend *backend; /* Back-pointer to backend */
     
     void *tearing_control;              /* Tearing control handle (protocol-specific) */
+
+    /* Fractional-scale + viewport (Wayland wlr backend only; NULL elsewhere).
+     * Opaque here to keep this header free of wl protocol types. The
+     * fractional_scale object delivers preferred_scale (120ths) to size the
+     * buffer at the output's TRUE density; the viewport sets the surface's
+     * logical destination so the compositor presents it 1:1 instead of
+     * rescaling an integer-rounded oversized buffer. */
+    void *fractional_scale;             /* struct wp_fractional_scale_v1 * */
+    void *viewport;                     /* struct wp_viewport * */
     
     /* Callbacks */
     void (*on_configure)(struct compositor_surface *surface, 

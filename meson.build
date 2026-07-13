@@ -239,6 +239,7 @@ texture_sources = files(
 # Output sources
 output_sources = files(
   'src/output/output.c',
+  'src/output/span.c',
 )
 
 # Config sources
@@ -277,6 +278,7 @@ if has_wayland
     'protocols/wlr-layer-shell-unstable-v1-client-protocol.c',
     'protocols/xdg-shell-client-protocol.c',
     'protocols/viewporter-client-protocol.c',
+    'protocols/fractional-scale-v1-client-protocol.c',
     'protocols/xdg-output-unstable-v1-client-protocol.c',
     'protocols/plasma-shell-client-protocol.c',
     'protocols/tearing-control-v1-client-protocol.c',
@@ -547,6 +549,22 @@ test_shuffle_exe = executable('test_shuffle',
 )
 
 test('shuffle', test_shuffle_exe)
+
+# Virtual-screen geometry: the bounding box a spanned shader draws into and the
+# per-output gl_FragCoord offset (whose Y half is flipped). Pure integer math.
+test_span_exe = executable('test_span',
+  files('tests/test_span.c', 'src/output/span.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  # The span_rect literals initialise through .scale and leave device_w/device_h
+  # zero on purpose: zero is the documented "device size unknown" fallback
+  # (logical*scale), which is exactly what the scale-1 and integer-scale cases
+  # must exercise. C guarantees the omitted fields are zeroed, so the
+  # missing-field-initializers diagnostic is a false positive here.
+  c_args: cc.get_supported_arguments('-Wno-missing-field-initializers'),
+  build_by_default: false,
+)
+
+test('span', test_span_exe)
 
 # =============================================================================
 # Fuzzers (opt-in: -Dfuzz=true, clang only)

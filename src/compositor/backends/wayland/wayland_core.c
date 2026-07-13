@@ -45,19 +45,33 @@ static bool wait_for_outputs_configured(struct neowall_state *state);
 static void xdg_output_handle_logical_position(void *data,
                                                  struct zxdg_output_v1 *xdg_output,
                                                  int32_t x, int32_t y) {
-    (void)data;
+    struct output_state *output = data;
     (void)xdg_output;
-    (void)x;
-    (void)y;
+
+    /* Where this output sits in the layout. A layer-shell surface is bound to a
+     * single wl_output and so always draws at its own origin, but the position
+     * is what tells the shader which slice of a spanned scene this output is
+     * (see span.h). It is a LOGICAL position: it matches the pixel geometry the
+     * span box is built from only where the output's scale is 1. */
+    if (output) {
+        output->x_offset = x;
+        output->y_offset = y;
+    }
 }
 
 static void xdg_output_handle_logical_size(void *data,
                                             struct zxdg_output_v1 *xdg_output,
                                             int32_t width, int32_t height) {
-    (void)data;
+    struct output_state *output = data;
     (void)xdg_output;
-    (void)width;
-    (void)height;
+
+    /* The exact logical size the compositor laid this output out with. The span
+     * seam prefers it over reconstructing logical from device/scale, which is a
+     * pixel off under fractional scaling (see output_state::xdg_logical_width). */
+    if (output && width > 0 && height > 0) {
+        output->xdg_logical_width = width;
+        output->xdg_logical_height = height;
+    }
 }
 
 static void xdg_output_handle_done(void *data, struct zxdg_output_v1 *xdg_output) {
@@ -190,12 +204,9 @@ static inline const char *output_readable_name(const struct output_state *output
            (output->model[0] ? output->model : "unknown");
 }
 
-static inline int32_t output_normalized_scale(const struct output_state *output) {
-    if (!output || output->scale <= 0) {
-        return 1;
-    }
-    return output->scale;
-}
+/* output_normalized_scale() lives in neowall/output/output.h: the span code
+ * needs the same normalisation to turn a physical size back into the logical
+ * one the compositor lays out with. */
 
 static bool output_apply_render_size(struct output_state *output,
                                      const char *reason,
@@ -263,6 +274,74 @@ static bool output_apply_render_size(struct output_state *output,
     return true;
 }
 
+/* Round a logical dimension to device pixels at a fractional scale (120ths). */
+static int32_t frac_dev(int32_t logical, int32_t scale_120) {
+    if (logical <= 0 || scale_120 <= 0) {
+        return 0;
+    }
+    return (int32_t)(((int64_t)logical * scale_120 + 60) / 120);
+}
+
+void wayland_apply_fractional_scale(struct output_state *output) {
+    if (!output || output->fractional_scale_120 <= 0) {
+        return;
+    }
+    struct compositor_surface *cs = output->compositor_surface;
+    if (!cs || !cs->viewport) {
+        /* No viewport: compositor lacks the protocol, or surface not built yet.
+         * The integer wl_output.scale path in output_apply_render_size stands. */
+        return;
+    }
+
+    /* Logical size the compositor laid this output out with. Prefer xdg-output's
+     * exact logical_size; fall back to the layer-configure logical size. */
+    int32_t logical_w = output->xdg_logical_width > 0 ? output->xdg_logical_width
+                                                      : output->logical_width;
+    int32_t logical_h = output->xdg_logical_height > 0 ? output->xdg_logical_height
+                                                       : output->logical_height;
+    if (logical_w <= 0 || logical_h <= 0) {
+        return;
+    }
+
+    int32_t dev_w = frac_dev(logical_w, output->fractional_scale_120);
+    int32_t dev_h = frac_dev(logical_h, output->fractional_scale_120);
+    if (dev_w <= 0 || dev_h <= 0) {
+        return;
+    }
+
+    if (output->width == dev_w && output->height == dev_h) {
+        return;  /* already at the fractional buffer size */
+    }
+
+    output->width = dev_w;
+    output->height = dev_h;
+
+    struct wl_surface *wl_surface = (struct wl_surface *)cs->native_surface;
+
+    /* With a viewport driving presentation the buffer is raw device pixels, so
+     * the buffer_scale must be 1 (it would otherwise multiply on top). */
+    if (wl_surface) {
+        wl_surface_set_buffer_scale(wl_surface, 1);
+    }
+
+    /* Resize the EGL buffer to the true device size and tell the viewport to
+     * present it at the logical destination, so the compositor shows it 1:1
+     * instead of rescaling an integer-rounded buffer. */
+    if (cs->egl_window) {
+        compositor_surface_resize_egl(cs, dev_w, dev_h);
+    }
+    wp_viewport_set_destination((struct wp_viewport *)cs->viewport, logical_w, logical_h);
+    if (wl_surface) {
+        wl_surface_commit(wl_surface);
+    }
+
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
+
+    log_info("Output %s: fractional render buffer %dx%d (logical %dx%d @ %.3fx via viewport)",
+             output_readable_name(output), dev_w, dev_h, logical_w, logical_h,
+             output->fractional_scale_120 / 120.0);
+}
+
 /* Wait for compositor outputs to be available with minimal retries
  * This is compositor-agnostic and works with any Wayland compositor */
 static bool wait_for_outputs_configured(struct neowall_state *state) {
@@ -318,6 +397,15 @@ static void output_on_configure_callback(struct compositor_surface *surface,
 
     bool dimensions_changed = false;
     output_apply_render_size(output, "layer configure", &dimensions_changed);
+
+    /* output_apply_render_size just sized the buffer from the INTEGER
+     * wl_output.scale. If a fractional scale is known for this output, override
+     * that with the true fractional buffer size + viewport now that the logical
+     * size and (usually) the egl_window exist — the preferred_scale event that
+     * delivered it can arrive before the surface is configured, when it no-ops. */
+    if (output->fractional_scale_120 > 0) {
+        wayland_apply_fractional_scale(output);
+    }
 
     /* Apply deferred configuration if surface just became ready */
     if (dimensions_changed && output->compositor_surface &&
@@ -410,6 +498,13 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
         wl->xdg_output_manager = wl_registry_bind(registry, name,
                                                       &zxdg_output_manager_v1_interface, 2);
         log_debug("Bound to xdg_output_manager");
+    } else if (strcmp(interface, wp_fractional_scale_manager_v1_interface.name) == 0) {
+        wl->fractional_scale_manager = wl_registry_bind(registry, name,
+                                                        &wp_fractional_scale_manager_v1_interface, 1);
+        log_info("Bound to fractional scale manager (exact HiDPI scaling)");
+    } else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
+        wl->viewporter = wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
+        log_info("Bound to viewporter (fractional-scale destination sizing)");
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
         struct wl_output *output_obj = wl_registry_bind(registry, name,
                                                          &wl_output_interface, 3);
@@ -709,6 +804,17 @@ void wayland_cleanup(void) {
         wl->cursor_shape_manager = NULL;
     }
     wl->cursor_shape_device = NULL;
+
+    /* Per-surface wp_fractional_scale_v1 / wp_viewport objects are destroyed
+     * with their surface by the backend; only the manager globals are ours. */
+    if (wl->fractional_scale_manager) {
+        wp_fractional_scale_manager_v1_destroy(wl->fractional_scale_manager);
+        wl->fractional_scale_manager = NULL;
+    }
+    if (wl->viewporter) {
+        wp_viewporter_destroy(wl->viewporter);
+        wl->viewporter = NULL;
+    }
 
     /* Destroy Wayland objects */
     if (wl->shm) {
