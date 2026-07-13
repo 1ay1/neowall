@@ -528,6 +528,48 @@ static void wlr_cleanup(void *data) {
     log_debug("wlr-layer-shell backend cleanup complete");
 }
 
+/* ---- fractional scale (wp_fractional_scale_v1) ----
+ *
+ * preferred_scale carries the compositor's chosen scale as a fixed-point value
+ * in 120ths (180 == 1.5x). We record it on the output whose surface this is and
+ * ask wayland_core to re-derive the buffer size at the true density; the render
+ * path then draws a correctly-sized buffer and the viewport (set below) presents
+ * it 1:1. Without this we would only ever see the integer wl_output.scale, which
+ * the compositor rounds (1.5 -> 2), forcing an oversized buffer it must rescale. */
+static void fractional_scale_handle_preferred(void *data,
+                                              struct wp_fractional_scale_v1 *fs,
+                                              uint32_t scale_120) {
+    struct compositor_surface *surface = data;
+    (void)fs;
+    if (!surface || !surface->backend) {
+        return;
+    }
+    wlr_backend_data_t *backend = surface->backend->data;
+    if (!backend || !backend->state || scale_120 == 0) {
+        return;
+    }
+
+    struct neowall_state *state = backend->state;
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (o->compositor_surface == surface) {
+            if (o->fractional_scale_120 != (int32_t)scale_120) {
+                log_info("Output %s: fractional scale %u/120 (%.3fx)",
+                         o->model[0] ? o->model : "unknown",
+                         scale_120, scale_120 / 120.0);
+                o->fractional_scale_120 = (int32_t)scale_120;
+                wayland_apply_fractional_scale(o);
+            }
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+}
+
+static const struct wp_fractional_scale_v1_listener fractional_scale_listener = {
+    .preferred_scale = fractional_scale_handle_preferred,
+};
+
 static struct compositor_surface *wlr_create_surface(void *data,
                                                      const compositor_surface_config_t *config) {
     if (!data || !config) {
@@ -679,6 +721,24 @@ static struct compositor_surface *wlr_create_surface(void *data,
         log_debug("Tearing control manager not available - FPS may be limited by compositor");
     }
 
+    /* Create fractional-scale + viewport objects so this surface can render at
+     * the output's TRUE fractional density. Both globals are optional; when
+     * absent the surface falls back to the integer wl_output.scale path and
+     * nothing here runs. The preferred_scale event that follows drives buffer
+     * sizing via wayland_apply_fractional_scale(). */
+    if (wl && wl->fractional_scale_manager) {
+        struct wp_fractional_scale_v1 *fs =
+            wp_fractional_scale_manager_v1_get_fractional_scale(
+                wl->fractional_scale_manager, wl_surface);
+        surface->fractional_scale = fs;
+        if (fs) {
+            wp_fractional_scale_v1_add_listener(fs, &fractional_scale_listener, surface);
+        }
+    }
+    if (wl && wl->viewporter) {
+        surface->viewport = wp_viewporter_get_viewport(wl->viewporter, wl_surface);
+    }
+
     log_debug("wlr layer surface created and configured successfully");
 
     return surface;
@@ -695,6 +755,16 @@ static void wlr_destroy_surface(struct compositor_surface *surface) {
     if (surface->tearing_control) {
         wp_tearing_control_v1_destroy(surface->tearing_control);
         surface->tearing_control = NULL;
+    }
+
+    /* Destroy fractional-scale + viewport objects if they exist */
+    if (surface->fractional_scale) {
+        wp_fractional_scale_v1_destroy((struct wp_fractional_scale_v1 *)surface->fractional_scale);
+        surface->fractional_scale = NULL;
+    }
+    if (surface->viewport) {
+        wp_viewport_destroy((struct wp_viewport *)surface->viewport);
+        surface->viewport = NULL;
     }
 
     /* Destroy EGL window if it exists */

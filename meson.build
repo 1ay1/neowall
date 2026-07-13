@@ -278,6 +278,7 @@ if has_wayland
     'protocols/wlr-layer-shell-unstable-v1-client-protocol.c',
     'protocols/xdg-shell-client-protocol.c',
     'protocols/viewporter-client-protocol.c',
+    'protocols/fractional-scale-v1-client-protocol.c',
     'protocols/xdg-output-unstable-v1-client-protocol.c',
     'protocols/plasma-shell-client-protocol.c',
     'protocols/tearing-control-v1-client-protocol.c',

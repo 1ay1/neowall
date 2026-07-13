@@ -91,6 +91,13 @@ struct output_state {
     int32_t pixel_height;
     int32_t scale;
     int32_t transform;
+    /* Exact fractional scale in 120ths, from wp_fractional_scale_v1's
+     * preferred_scale event (e.g. 180 == 1.5x), or 0 if the compositor lacks
+     * fractional-scale support or has not sent it yet. When set, the buffer is
+     * sized to round(logical * fractional_scale_120 / 120) and a wp_viewport
+     * sets the logical destination, so the output renders at its TRUE density
+     * instead of the integer-rounded wl_output.scale. */
+    int32_t fractional_scale_120;
 
     /* Position of this output's top-left within the global screen layout.
      * Set by the X11 backend from the RandR monitor geometry (device pixels) so
