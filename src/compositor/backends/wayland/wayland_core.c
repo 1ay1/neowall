@@ -62,10 +62,16 @@ static void xdg_output_handle_logical_position(void *data,
 static void xdg_output_handle_logical_size(void *data,
                                             struct zxdg_output_v1 *xdg_output,
                                             int32_t width, int32_t height) {
-    (void)data;
+    struct output_state *output = data;
     (void)xdg_output;
-    (void)width;
-    (void)height;
+
+    /* The exact logical size the compositor laid this output out with. The span
+     * seam prefers it over reconstructing logical from device/scale, which is a
+     * pixel off under fractional scaling (see output_state::xdg_logical_width). */
+    if (output && width > 0 && height > 0) {
+        output->xdg_logical_width = width;
+        output->xdg_logical_height = height;
+    }
 }
 
 static void xdg_output_handle_done(void *data, struct zxdg_output_v1 *xdg_output) {

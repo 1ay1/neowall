@@ -389,6 +389,61 @@ static void test_rejects_bad_input(void) {
     CHECK(!span_compute(rects, 0, 0, &v));
 }
 
+/* FRACTIONAL SCALE. A wlroots compositor at scale 1.5 hands a 2560x1440 panel a
+ * LOGICAL box that is not a whole multiple of its framebuffer: 2560/1.5 rounds
+ * to 1707x960, while the framebuffer stays 2560x1440. The old code scaled the
+ * shared logical box by an INTEGER scale, which cannot represent 1.5 and would
+ * seam the two heads; the fix scales by the real device/logical ratio, so each
+ * head's own logical extent maps exactly onto its own framebuffer.
+ *
+ * Two such panels side by side. Logical box = 1707 + 1707 = 3414 wide, 960 tall.
+ *   left  (device 2560x1440): its logical extent 1707 must map to 2560 device,
+ *         so virt = round(3414 * 2560/1707) = 5120, off_x 0.
+ *   right (device 2560x1440): off_x = round(1707 * 2560/1707) = 2560, and
+ *         off_x + device_w (2560) = 5120 = virt, i.e. it abuts the left head
+ *         with NO gap and NO overlap. That exact-abut is the whole point. */
+static void test_fractional_scale_abuts_without_seam(void) {
+    struct span_rect rects[] = {
+        /* logical_x, logical_y, logical_w, logical_h, scale, device_w, device_h */
+        {0,    0, 1707, 960, 2, 2560, 1440},  /* left  @ 1.5x */
+        {1707, 0, 1707, 960, 2, 2560, 1440},  /* right @ 1.5x */
+    };
+    struct span_view v;
+
+    CHECK(span_compute(rects, 2, 0, &v));
+    CHECK_VIEW(v, 5120, 1440, 0, 0);
+    /* The invariant that no integer scale could satisfy here: this head's slice
+     * ends exactly where the virtual screen does. */
+    CHECK(span_compute(rects, 2, 1, &v));
+    CHECK(v.off_x + rects[1].device_w == v.virt_w);
+    CHECK_VIEW(v, 5120, 1440, 2560, 0);
+}
+
+/* Mixed density that is genuinely fractional on one side: a 1.5x panel beside a
+ * 1x panel. The logical box is built from each output's real logical size, and
+ * each is mapped into its own framebuffer by its own ratio, so the scale-1 head
+ * is untouched while the fractional head still abuts it exactly.
+ *   left  @1.5x: logical 1707x960, device 2560x1440
+ *   right @1x:   logical 1920x1080, device 1920x1080, at logical x 1707
+ *   box: 1707 + 1920 = 3627 wide, max height 1080
+ *   left:  virt_w round(3627 * 2560/1707) = 5439, off_x 0
+ *   right: virt_w round(3627 * 1920/1920) = 3627, off_x round(1707*1920/1920)=1707,
+ *          and off_x + 1920 = 3627 = virt_w: exact abut on the scale-1 side too. */
+static void test_fractional_beside_integer(void) {
+    struct span_rect rects[] = {
+        {0,    0, 1707, 960,  2, 2560, 1440},  /* @1.5x */
+        {1707, 0, 1920, 1080, 1, 1920, 1080},  /* @1x   */
+    };
+    struct span_view v;
+
+    CHECK(span_compute(rects, 2, 0, &v));
+    CHECK(v.virt_w == 5439);
+    CHECK(v.off_x == 0);
+    CHECK(span_compute(rects, 2, 1, &v));
+    CHECK(v.virt_w == 3627);
+    CHECK(v.off_x + rects[1].device_w == v.virt_w);  /* the scale-1 head abuts exactly */
+}
+
 int main(void) {
     test_single_monitor_is_identity();
     test_single_monitor_at_offset_is_identity();
@@ -407,6 +462,8 @@ int main(void) {
     test_nested_clone_gets_the_matching_crop();
     test_nested_clone_does_not_disable_the_group();
     test_rejects_bad_input();
+    test_fractional_scale_abuts_without_seam();
+    test_fractional_beside_integer();
 
     if (failures == 0) {
         printf("ok - %d checks passed\n", checks);

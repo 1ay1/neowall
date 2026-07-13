@@ -41,8 +41,18 @@ struct span_rect {
     int32_t logical_h;
     /* Device pixels per logical pixel on THIS output (wl_output scale; 1 on
      * X11). Non-positive is read as 1, which is what an output that has not
-     * heard a scale event yet carries. */
+     * heard a scale event yet carries. Kept for the degenerate-group log and as
+     * the fallback when device_w/h below are unset. */
     int32_t scale;
+    /* This output's REAL framebuffer size, in device pixels. Under integer scale
+     * this is exactly logical_w/h * scale, but a fractional-scale compositor
+     * rounds the framebuffer independently, so it is NOT logical*scale in
+     * general. span_compute scales the shared logical box into THIS output's
+     * device space by the exact ratio device_w/logical_w, so off_x + device_w
+     * lands precisely at the window's virtual end — an integer scale multiply
+     * would drift by the rounding. Zero falls back to logical*scale. */
+    int32_t device_w;
+    int32_t device_h;
 };
 
 /* What one output must feed its shader to draw its slice of the virtual scene.

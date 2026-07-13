@@ -1095,17 +1095,33 @@ void outputs_update_spans(struct output_state **outs, size_t count) {
             /* THE UNIT SEAM. x_offset/y_offset are LOGICAL on Wayland (they come
              * from xdg-output's logical_position) while width/height are the
              * PHYSICAL framebuffer (logical * scale). span_rect wants all four
-             * logical, so divide the size by the same scale — exact, because the
-             * Wayland backend produced width as logical*scale in the first place.
-             * On X11 scale is 1 and every quantity here is already device pixels,
-             * so this is arithmetically the identity. */
+             * logical.
+             *
+             * Prefer the compositor's own logical_size when we have it: that is
+             * the exact box it laid the output out in. Reconstructing it as
+             * width/scale is exact only under INTEGER scale, where the physical
+             * size is a whole multiple of the logical one. Under fractional
+             * scale the compositor rounds the framebuffer independently, so
+             * width/scale is off by up to a pixel — enough to make two heads'
+             * logical boxes disagree and seam the shared scene. Fall back to
+             * width/scale when logical_size has not arrived (or the compositor
+             * lacks zxdg_output_manager_v1). On X11 scale is 1, there is no
+             * xdg logical size, and width/scale is the identity. */
             int32_t scale = output_normalized_scale(o);
+            int32_t logical_w =
+                o->xdg_logical_width > 0 ? o->xdg_logical_width : o->width / scale;
+            int32_t logical_h =
+                o->xdg_logical_height > 0 ? o->xdg_logical_height : o->height / scale;
             rects[n++] = (struct span_rect){
                 .logical_x = o->x_offset,
                 .logical_y = o->y_offset,
-                .logical_w = o->width / scale,
-                .logical_h = o->height / scale,
+                .logical_w = logical_w,
+                .logical_h = logical_h,
                 .scale     = scale,
+                /* The real framebuffer, so span_compute maps the logical box
+                 * into exactly these pixels under fractional scale. */
+                .device_w  = o->width,
+                .device_h  = o->height,
             };
 
             /* Earliest start in the group, so every member's iTime agrees. A

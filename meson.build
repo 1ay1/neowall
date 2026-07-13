@@ -554,6 +554,12 @@ test('shuffle', test_shuffle_exe)
 test_span_exe = executable('test_span',
   files('tests/test_span.c', 'src/output/span.c'),
   include_directories: [inc_dirs, inc_dirs_build],
+  # The span_rect literals initialise through .scale and leave device_w/device_h
+  # zero on purpose: zero is the documented "device size unknown" fallback
+  # (logical*scale), which is exactly what the scale-1 and integer-scale cases
+  # must exercise. C guarantees the omitted fields are zeroed, so the
+  # missing-field-initializers diagnostic is a false positive here.
+  c_args: cc.get_supported_arguments('-Wno-missing-field-initializers'),
   build_by_default: false,
 )
 

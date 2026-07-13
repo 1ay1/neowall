@@ -101,6 +101,15 @@ struct output_state {
      * spanned wallpaper (see span.h). */
     int32_t x_offset;
     int32_t y_offset;
+    /* Exact logical size from xdg-output's logical_size, or 0 until it arrives
+     * (or if the compositor lacks zxdg_output_manager_v1). The span seam prefers
+     * this over width/scale: dividing the device size by an integer scale is
+     * exact only when the compositor rounded the logical size to a whole pixel,
+     * which a fractional-scale layout does not, so the reconstructed size drifts
+     * a pixel from the neighbour's and the shared box seams. This is the value
+     * the compositor actually laid the output out with. */
+    int32_t xdg_logical_width;
+    int32_t xdg_logical_height;
 
     /* This output's slice of the wallpaper it shares with its span group: the
      * outputs whose config names the same wallpaper (or the same cycle list).

@@ -11,6 +11,25 @@ static int32_t rect_scale(const struct span_rect *r) {
     return r->scale > 0 ? r->scale : 1;
 }
 
+/* Integer scale of a rect, never below 1. Used only for the logical*scale
+ * fallback when the real device size is unknown. */
+static int32_t s_or_1(const struct span_rect *r) {
+    return rect_scale(r);
+}
+
+/* Map `v` logical pixels into device pixels at the ratio device/logical,
+ * rounded to nearest. 64-bit intermediate: v and device are display-sized
+ * (< 2^20), so v*device fits comfortably and never overflows. logical is
+ * guaranteed > 0 by the rect_valid() gate before this is reached. */
+static int32_t scale_ratio(int32_t v, int32_t device, int32_t logical) {
+    if (logical <= 0) {
+        return v;
+    }
+    int64_t num = (int64_t)v * (int64_t)device;
+    /* Round to nearest, halves away from zero. v and off are >= 0 here. */
+    return (int32_t)((num + logical / 2) / logical);
+}
+
 bool span_compute(const struct span_rect *rects, size_t count, size_t index,
                   struct span_view *out) {
     if (!rects || !out || index >= count) {
@@ -48,13 +67,24 @@ bool span_compute(const struct span_rect *rects, size_t count, size_t index,
     int32_t off_y = box_h - ((me->logical_y - min_y) + me->logical_h);
 
     /* Into MY framebuffer. Everything above is logical, everything below is
-     * device, and my scale is the only scale that may appear here: gl_FragCoord
-     * on this output knows no other. */
-    const int32_t s = rect_scale(me);
-    out->virt_w = box_w * s;
-    out->virt_h = box_h * s;
-    out->off_x = off_x * s;
-    out->off_y = off_y * s;
+     * device. Scale by THIS output's real device-per-logical ratio, not a bare
+     * integer scale: under fractional scaling the framebuffer is rounded
+     * independently of logical*scale, and using the real device size keeps
+     * off + my_device_size == virt exact, so my slice abuts my neighbour's with
+     * no seam. When device_w/h are unset (X11, or before configure) fall back to
+     * logical*scale, which is the identity on X11 and exact under integer scale.
+     *
+     * The ratio is applied so that my own logical extent maps EXACTLY onto my
+     * framebuffer: virt = round(box * device / logical), off = round(offset *
+     * device / logical). Because box >= logical and offset < box, both stay
+     * within int32 for any real display. */
+    int32_t dev_w = me->device_w > 0 ? me->device_w : me->logical_w * s_or_1(me);
+    int32_t dev_h = me->device_h > 0 ? me->device_h : me->logical_h * s_or_1(me);
+
+    out->virt_w = scale_ratio(box_w, dev_w, me->logical_w);
+    out->virt_h = scale_ratio(box_h, dev_h, me->logical_h);
+    out->off_x = scale_ratio(off_x, dev_w, me->logical_w);
+    out->off_y = scale_ratio(off_y, dev_h, me->logical_h);
     return true;
 }
 
