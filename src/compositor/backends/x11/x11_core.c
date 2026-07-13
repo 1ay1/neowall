@@ -119,6 +119,37 @@ static bool x11_init_atoms(x11_backend_data_t *backend) {
     return true;
 }
 
+/* Declare a wallpaper window as the desktop, before it is mapped.
+ *
+ * EWMH requires _NET_WM_WINDOW_TYPE to be set before the window is mapped, and a
+ * client may only set _NET_WM_STATE directly while the window is unmapped; once
+ * mapped, state changes must go through the window manager via a _NET_WM_STATE
+ * client message.
+ *
+ * The wallpaper windows are override-redirect, so no window manager reads these
+ * properties today and setting them changes nothing about how the window is
+ * stacked or drawn. They are set because they are the properties the window is
+ * meant to carry: the atoms are already interned for exactly this purpose, and
+ * anything that does inspect the window (a pager, a screenshot tool, a future
+ * managed-window path) then finds the correct hints rather than none at all. */
+static void x11_set_wallpaper_properties(x11_backend_data_t *backend, Window window) {
+    Display *dpy = backend->x_display;
+
+    XChangeProperty(dpy, window, backend->atom_net_wm_window_type, XA_ATOM, 32,
+                    PropModeReplace,
+                    (unsigned char *)&backend->atom_net_wm_window_type_desktop, 1);
+
+    Atom states[] = {
+        backend->atom_net_wm_state_below,
+        backend->atom_net_wm_state_sticky,
+        backend->atom_net_wm_state_skip_taskbar,
+        backend->atom_net_wm_state_skip_pager,
+    };
+    XChangeProperty(dpy, window, backend->atom_net_wm_state, XA_ATOM, 32,
+                    PropModeReplace, (unsigned char *)states,
+                    (int)(sizeof(states) / sizeof(states[0])));
+}
+
 /* ============================================================================
  * XRANDR DETECTION
  * ============================================================================ */
@@ -350,6 +381,9 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
         free(surface);
         return NULL;
     }
+
+    /* Must precede XMapWindow: EWMH hints are read at map time. */
+    x11_set_wallpaper_properties(backend, surf_data->x_window);
 
     /* Map and lower the window to bottom of stack */
     XMapWindow(backend->x_display, surf_data->x_window);
