@@ -634,7 +634,7 @@ if has_terminal
   # Glyph atlas: real font rasterization (stb_truetype). Links the relaxed-
   # warning glyph lib. SKIPs (exit 77) if no system monospace font is present.
   test_glyph_exe = executable('test_glyph_atlas',
-    files('tests/test_glyph_atlas.c'),
+    files('tests/test_glyph_atlas.c', 'src/terminal/glyph_synth.c'),
     include_directories: [inc_dirs, inc_dirs_build,
                           include_directories('src/terminal')],
     link_with: [terminal_glyph_lib],
@@ -642,6 +642,16 @@ if has_terminal
     build_by_default: false,
   )
   test('glyph_atlas', test_glyph_exe)
+
+  # Procedural box/block/braille synth: pure CPU coverage bitmap, no font/GPU.
+  test_glyph_synth_exe = executable('test_glyph_synth',
+    files('tests/test_glyph_synth.c', 'src/terminal/glyph_synth.c'),
+    include_directories: [inc_dirs, inc_dirs_build,
+                          include_directories('src/terminal')],
+    dependencies: [m_dep],
+    build_by_default: false,
+  )
+  test('glyph_synth', test_glyph_synth_exe)
 endif
 
 # =============================================================================

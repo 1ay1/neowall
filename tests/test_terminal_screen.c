@@ -104,6 +104,51 @@ int main(void) {
     }
     term_screen_destroy(s);
 
+    /* --- DEC special-graphics charset (ESC(0 + SI/SO) --- */
+    s = term_screen_create(12, 1);
+    feed(s, "\x1b(0qqxl\x1b(BAB");   /* q q ->─ ─, x ->│, l ->┌, then ASCII AB */
+    {
+        const term_cell *r = term_screen_row(s, 0);
+        expect(r[0].cp == 0x2500, "DEC 'q' -> U+2500 horizontal");
+        expect(r[1].cp == 0x2500, "DEC 'q' -> U+2500 horizontal (2)");
+        expect(r[2].cp == 0x2502, "DEC 'x' -> U+2502 vertical");
+        expect(r[3].cp == 0x250C, "DEC 'l' -> U+250C corner");
+        expect(r[4].cp == 'A', "ESC(B restores ASCII 'A'");
+        expect(r[5].cp == 'B', "ESC(B restores ASCII 'B'");
+    }
+    term_screen_destroy(s);
+
+    /* --- SI/SO shift between G0(ASCII) and G1(DEC graphics) --- */
+    s = term_screen_create(8, 1);
+    feed(s, "\x1b)0"        /* designate G1 = DEC graphics */
+            "A"            /* GL=G0=ASCII -> 'A' */
+            "\x0e" "q"     /* SO -> GL=G1, 'q' -> U+2500 */
+            "\x0f" "B");   /* SI -> GL=G0, 'B' */
+    {
+        const term_cell *r = term_screen_row(s, 0);
+        expect(r[0].cp == 'A', "SI/SO: G0 'A'");
+        expect(r[1].cp == 0x2500, "SI/SO: SO switches to G1 line-drawing");
+        expect(r[2].cp == 'B', "SI/SO: SI switches back to G0");
+    }
+    term_screen_destroy(s);
+
+    /* --- cursor visibility (DECTCEM) --- */
+    s = term_screen_create(4, 1);
+    expect(term_screen_cursor_visible(s), "cursor visible by default");
+    feed(s, "\x1b[?25l");
+    expect(!term_screen_cursor_visible(s), "DECTCEM ?25l hides cursor");
+    feed(s, "\x1b[?25h");
+    expect(term_screen_cursor_visible(s), "DECTCEM ?25h shows cursor");
+    term_screen_destroy(s);
+
+    /* --- OSC 0/2 window title --- */
+    s = term_screen_create(8, 1);
+    feed(s, "\x1b]0;My Title\x07");   /* OSC 0 ; text BEL */
+    expect(strcmp(term_screen_title(s), "My Title") == 0, "OSC 0 sets title");
+    feed(s, "\x1b]2;Second\x1b\\");   /* OSC 2 ; text ST */
+    expect(strcmp(term_screen_title(s), "Second") == 0, "OSC 2 sets title (ST-terminated)");
+    term_screen_destroy(s);
+
     printf("terminal_screen: %d checks, %d failures\n", g_checks, g_fails);
     return g_fails ? 1 : 0;
 }
