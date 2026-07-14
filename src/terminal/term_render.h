@@ -99,6 +99,13 @@ void           term_render_clear_color_atlas_dirty(term_render *tr);
 /* Cursor (in cell coords) for the shader to draw a block/underline. */
 void           term_render_cursor(const term_render *tr, int *x, int *y, bool *visible);
 
+/* Idle gate for the render loop: true while the child recently changed the grid
+ * or the cursor recently moved (within fx_settle_ms — the window over which the
+ * change-fade and cursor slide/trail animations decay). When it returns false
+ * the terminal is visually quiescent and the caller may stop re-arming vsync
+ * redraws until the child produces new output. */
+bool           term_render_animating(const term_render *tr, unsigned fx_settle_ms);
+
 /* Resize the grid (and PTY). Rebuilds the cell buffer. */
 nw_result      term_render_resize(term_render *tr, int cols, int rows);
 

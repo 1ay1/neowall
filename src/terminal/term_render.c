@@ -76,6 +76,9 @@ struct term_render {
     int          dirty_y0;    /* [dirty_y0, dirty_y1) rows changed this update */
     int          dirty_y1;    /* dirty_y1<=dirty_y0 means nothing changed */
     uint64_t     last_epoch;
+    double       last_change_secs; /* mono time the grid last actually changed */
+    int          last_cursor_x, last_cursor_y; /* cursor pos at last change */
+    double       last_cursor_move_secs; /* mono time the cursor last moved */
     bool         have_frame;  /* cells populated at least once */
     bool         have_frame_once; /* prev_cells valid for per-cell change stamps */
     int          cursor_x, cursor_y;
@@ -285,6 +288,15 @@ bool term_render_update(term_render *tr) {
     tr->cursor_y = f->cursor_y;
     tr->cursor_vis = f->cursor_visible;
 
+    /* Cursor motion is its own animation trigger (physical slide/overshoot in
+     * the shader): remember when the cursor cell last moved so the idle gate
+     * keeps painting through the slide even if no glyph cell changed. */
+    if (f->cursor_x != tr->last_cursor_x || f->cursor_y != tr->last_cursor_y) {
+        tr->last_cursor_x = f->cursor_x;
+        tr->last_cursor_y = f->cursor_y;
+        tr->last_cursor_move_secs = mono_secs();
+    }
+
     /* Grid resized underneath us (child SIGWINCH echo, etc.) — resync. */
     if (f->cols != tr->cols || f->rows != tr->rows) {
         tr->cols = f->cols;
@@ -410,6 +422,7 @@ bool term_render_update(term_render *tr) {
          * upload entirely (the shader keeps the current texture). */
         if (y1 <= y0) return false;
     }
+    tr->last_change_secs = mono_secs();
     return true;
 }
 
@@ -472,6 +485,42 @@ void term_render_cursor(const term_render *tr, int *x, int *y, bool *visible) {
     if (x) *x = tr->cursor_x;
     if (y) *y = tr->cursor_y;
     if (visible) *visible = tr->cursor_vis;
+}
+
+/* Idle gate: is there still visual work in flight that requires more frames?
+ *
+ * The render loop paints a terminal wallpaper at full vsync only while this is
+ * true; when it goes false the loop stops re-arming redraw and blocks until the
+ * child produces new bytes (the reader thread advances the epoch, which the
+ * next update() picks up). "In flight" means the child changed the grid, OR the
+ * cursor moved, within the shader's animation-settle window (change-fade +
+ * cursor slide/overshoot/trail all decay within ~fx_settle_ms). We add a small
+ * margin so the last fade frame is never clipped. Returns true when nothing has
+ * a terminal attached (caller decides), false only for a genuinely quiescent
+ * terminal. */
+bool term_render_animating(const term_render *tr, unsigned fx_settle_ms) {
+    if (!tr) return false;
+    /* A child that is dead/restarting is intentionally idle (auto-restart runs
+     * off wall time via the caller's periodic timer, not the vsync loop). */
+    if (tr->exit_at != 0.0) return true; /* keep painting through the backoff */
+
+    /* Pending output: the reader thread bumped the dirty epoch past what we
+     * last snapshotted, so the child drew something we haven't rendered yet.
+     * This is the lock-free wake path — it fires the frame BEFORE update()
+     * consumes the epoch, so an idle-gated terminal never sleeps through fresh
+     * bytes. */
+    if (tr->term && term_dirty_epoch(tr->term) != tr->last_epoch)
+        return true;
+
+    double now = mono_secs();
+    double window = (double)fx_settle_ms / 1000.0;
+    if (window < 0.05) window = 0.05;
+    if (tr->last_change_secs > 0.0 && now - tr->last_change_secs < window)
+        return true;
+    if (tr->last_cursor_move_secs > 0.0 &&
+        now - tr->last_cursor_move_secs < window)
+        return true;
+    return false;
 }
 
 nw_result term_render_resize(term_render *tr, int cols, int rows) {

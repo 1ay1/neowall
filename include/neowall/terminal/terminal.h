@@ -157,6 +157,13 @@ typedef struct term_frame {
  * The returned cells pointer is valid until the next term_snapshot() call. */
 const term_frame *term_snapshot(terminal *t);
 
+/* Lock-free monotonically-increasing counter, bumped by the reader thread each
+ * time the child changes the grid (and on resize). Lets the render loop cheaply
+ * detect "did the child produce output since the last frame I rendered?" without
+ * taking the snapshot mutex or copying the grid — used to wake an idle-gated
+ * terminal wallpaper the instant new bytes arrive. */
+unsigned long long term_dirty_epoch(const terminal *t);
+
 /* ------------------------------------------------------------------------ */
 /* Screen model (headless, no PTY) — for tests and direct feeding           */
 /* ------------------------------------------------------------------------ */

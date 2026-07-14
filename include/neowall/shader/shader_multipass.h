@@ -736,6 +736,14 @@ bool multipass_terminal_mouse(multipass_shader_t *shader, int px, int py,
 /* True if an attached terminal has mouse reporting enabled. */
 bool multipass_terminal_wants_mouse(const multipass_shader_t *shader);
 
+/* True while an attached terminal is visually animating: the child changed the
+ * grid or the cursor moved within the last fx_settle_ms (the window over which
+ * the change-fade and cursor slide/trail effects decay). When false the
+ * terminal is quiescent and the render loop may stop re-arming vsync redraws
+ * until new child output arrives. False if no terminal is attached. */
+bool multipass_terminal_animating(const multipass_shader_t *shader,
+                                  unsigned fx_settle_ms);
+
 /* Write raw (already-encoded) key bytes to the attached terminal's child. */
 bool multipass_terminal_write(multipass_shader_t *shader, const void *bytes, size_t len);
 

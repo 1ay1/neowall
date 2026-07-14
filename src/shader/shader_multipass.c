@@ -402,6 +402,17 @@ bool multipass_terminal_wants_mouse(const multipass_shader_t *shader) {
 #endif
 }
 
+bool multipass_terminal_animating(const multipass_shader_t *shader,
+                                  unsigned fx_settle_ms) {
+#ifdef NEOWALL_HAVE_TERMINAL
+    if (!shader || !shader->term) return false;
+    return term_render_animating(shader->term, fx_settle_ms);
+#else
+    (void)shader; (void)fx_settle_ms;
+    return false;
+#endif
+}
+
 bool multipass_terminal_write(multipass_shader_t *shader, const void *bytes, size_t len) {
 #ifdef NEOWALL_HAVE_TERMINAL
     if (!shader || !shader->term) return false;

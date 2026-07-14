@@ -1051,9 +1051,25 @@ void event_loop_run(struct neowall_state *state) {
                         if (expirations > 1) {
                             log_debug("Frame timer expired %lu times (frame overrun)", expirations);
                         }
-                        /* Mark the specific output for redraw */
-                        if (frame_timer_outputs[i]) {
-                            atomic_store_explicit(&frame_timer_outputs[i]->needs_redraw, true, memory_order_release);
+                        /* Mark the specific output for redraw. A terminal
+                         * wallpaper is idle-gated: the timer keeps waking us at
+                         * the frame rate so we observe fresh child output
+                         * promptly, but we only actually re-render (the costly
+                         * multipass render + swap) while the terminal is
+                         * animating. Otherwise the timer tick is a cheap no-op. */
+                        struct output_state *fto = frame_timer_outputs[i];
+                        if (fto) {
+                            bool skip = false;
+                            if (fto->config->type == WALLPAPER_TERMINAL &&
+                                fto->multipass_shader &&
+                                fto->frames_rendered > 0) {
+                                skip = !multipass_terminal_animating(
+                                    fto->multipass_shader, 700u);
+                            }
+                            if (!skip) {
+                                atomic_store_explicit(&fto->needs_redraw, true,
+                                                      memory_order_release);
+                            }
                         }
                     }
                 }
@@ -1145,19 +1161,39 @@ void event_loop_run(struct neowall_state *state) {
             }
             /* For animated wallpapers (shader / terminal) with vsync enabled,
              * always redraw (vsync paces us). With vsync disabled, only redraw
-             * when the frame timer fires (handled above). A terminal wallpaper
-             * must be re-armed here every iteration or it renders one frame and
-             * freezes. */
+             * when the frame timer fires (handled above).
+             *
+             * A terminal wallpaper used to be re-armed unconditionally here
+             * ("terminals never idle"), which pinned the GPU render + swap at a
+             * full 60 FPS forever even on a completely static screen. Now we
+             * gate it: keep painting only while the terminal is actually
+             * animating — the child changed the grid, or the cursor moved,
+             * within the FX settle window (change-fade + cursor slide/trail all
+             * decay inside it). When it goes quiescent we stop re-arming; the
+             * loop still wakes (frame timer / <=1s poll) and calls
+             * term_render_update every iteration, so the very next child byte
+             * re-arms redraw with no perceptible latency. */
             if (wallpaper_is_animated(o->config->type) &&
                 !o->shader_load_failed &&
                 (o->live_shader_program != 0 || o->multipass_shader != NULL) &&
                 !atomic_load_explicit(&state->shader_paused, memory_order_acquire)) {
-                /* Static shaders idle after their first frame; terminals never do. */
+                /* Static shaders idle after their first frame; a quiescent
+                 * terminal idles too (until its child produces output). */
                 bool is_static = o->config->type == WALLPAPER_SHADER &&
                                  o->multipass_shader &&
                                  !o->multipass_shader->is_animated &&
                                  o->frames_rendered > 0;
-                if (!is_static &&
+                /* FX settle window: covers the change-fade + cursor
+                 * slide/overshoot/trail decay, plus a small margin so the last
+                 * animated frame is never clipped. */
+                const unsigned kTermFxSettleMs = 700;
+                bool term_idle =
+                    o->config->type == WALLPAPER_TERMINAL &&
+                    o->multipass_shader &&
+                    o->frames_rendered > 0 &&
+                    !multipass_terminal_animating(o->multipass_shader,
+                                                  kTermFxSettleMs);
+                if (!is_static && !term_idle &&
                     (o->config->vsync || output_get_frame_timer_fd(o) < 0)) {
                     atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
                 }

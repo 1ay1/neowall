@@ -350,3 +350,9 @@ const term_frame *term_snapshot(terminal *t) {
     t->frame.epoch = de;
     return &t->frame;
 }
+
+unsigned long long term_dirty_epoch(const terminal *t) {
+    if (!t) return 0;
+    /* dirty_epoch is atomic; the const cast is safe (atomic_load reads only). */
+    return (unsigned long long)atomic_load(&((terminal *)t)->dirty_epoch);
+}
