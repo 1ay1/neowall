@@ -66,6 +66,11 @@ struct term_screen {
     bool cursor_visible;
     bool pending_wrap;   /* DEC "last column" deferred wrap latch */
 
+    /* Mouse reporting state, driven by DECSET/DECRST private modes. A wallpaper
+     * terminal forwards pointer events only when the app has asked for them. */
+    uint16_t mouse_proto;   /* 0=off, 1000=click, 1002=drag, 1003=any-motion */
+    bool    mouse_sgr;     /* 1006: SGR extended coordinates (\e[<b;x;yM/m) */
+
     bool *tabstops;      /* cols booleans */
 
     vtparser parser;
@@ -456,7 +461,13 @@ static void set_mode(term_screen *s, uint8_t marker, const int *p, int n, bool s
                     if (set) { s->saved_primary = s->cur; enter_alt(s, true); }
                     else     { leave_alt(s); s->cur = s->saved_primary; }
                     break;
-                default: break; /* bracketed paste, mouse modes, etc. — no-op for a wallpaper */
+                /* Mouse reporting protocols. We keep the highest-fidelity one
+                 * the app enabled; disabling any clears reporting. */
+                case 1000: s->mouse_proto = set ? 1000 : 0; break; /* click only */
+                case 1002: s->mouse_proto = set ? 1002 : 0; break; /* button-drag */
+                case 1003: s->mouse_proto = set ? 1003 : 0; break; /* any-motion */
+                case 1006: s->mouse_sgr = set; break;             /* SGR ext coords */
+                default: break; /* bracketed paste, etc. — no-op for a wallpaper */
             }
         } else {
             switch (m) {
@@ -582,6 +593,11 @@ const term_cell *term_screen_row(const term_screen *s, int y) {
 void term_screen_cursor(const term_screen *s, int *x, int *y) {
     if (x) *x = s->cur.x;
     if (y) *y = s->cur.y;
+}
+
+void term_screen_mouse_mode(const term_screen *s, int *proto, bool *sgr) {
+    if (proto) *proto = s ? s->mouse_proto : 0;
+    if (sgr)   *sgr   = s ? s->mouse_sgr : false;
 }
 
 /* Resize: reallocate grids, preserving the top-left overlap of the primary

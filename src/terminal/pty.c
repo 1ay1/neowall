@@ -21,6 +21,7 @@
 #include <pty.h>
 #include <signal.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -221,6 +222,81 @@ nw_result term_resize(terminal *t, int cols, int rows) {
     ioctl(t->master_fd, TIOCSWINSZ, &ws);   /* child receives SIGWINCH */
     atomic_fetch_add(&t->dirty_epoch, 1);
     return nw_ok();
+}
+
+/* ------------------------------------------------------------------------ */
+/* Input: host → child                                                      */
+/* ------------------------------------------------------------------------ */
+
+nw_result term_write(terminal *t, const void *bytes, size_t len) {
+    if (!t || t->master_fd < 0) return nw_err(NW_ERR_INVALID_ARG, "term_write: bad terminal");
+    if (!bytes || len == 0) return nw_ok();
+    if (atomic_load(&t->child_exited)) return nw_err(NW_ERR_STATE, "term_write: child gone");
+
+    const uint8_t *p = bytes;
+    size_t off = 0;
+    /* The master fd is non-blocking; retry short/EAGAIN writes briefly. TUIs
+     * consume input promptly, so a full pipe here is transient. */
+    for (int attempts = 0; off < len && attempts < 1000; ) {
+        ssize_t w = write(t->master_fd, p + off, len - off);
+        if (w > 0) { off += (size_t)w; attempts = 0; continue; }
+        if (w < 0 && (errno == EAGAIN || errno == EINTR)) { attempts++; usleep(200); continue; }
+        return nw_err(NW_ERR_IO, "term_write: write failed");
+    }
+    return off == len ? nw_ok() : nw_err(NW_ERR_IO, "term_write: short write");
+}
+
+bool term_wants_mouse(const terminal *t) {
+    if (!t) return false;
+    int proto = 0;
+    pthread_mutex_lock(&((terminal *)t)->lock);
+    term_screen_mouse_mode(t->screen, &proto, NULL);
+    pthread_mutex_unlock(&((terminal *)t)->lock);
+    return proto != 0;
+}
+
+bool term_mouse(terminal *t, int cell_x, int cell_y, int button, bool pressed, bool motion) {
+    if (!t || t->master_fd < 0) return false;
+
+    int proto = 0; bool sgr = false;
+    pthread_mutex_lock(&t->lock);
+    term_screen_mouse_mode(t->screen, &proto, &sgr);
+    int cols = t->cols, rows = t->rows;
+    pthread_mutex_unlock(&t->lock);
+
+    if (proto == 0) return false;               /* app doesn't want mouse */
+    if (motion && proto < 1002) return false;   /* click-only: ignore motion */
+
+    /* clamp to grid */
+    if (cell_x < 0) cell_x = 0;
+    if (cell_x >= cols) cell_x = cols - 1;
+    if (cell_y < 0) cell_y = 0;
+    if (cell_y >= rows) cell_y = rows - 1;
+
+    /* Assemble the button code. Bit 5 (0x20) marks a motion event; wheel codes
+     * (64/65) already carry their high bits. In legacy encoding a release is
+     * button 3; in SGR the true button rides with a trailing 'm'. */
+    int cb = button;
+    if (motion) cb |= 0x20;
+
+    char seq[32];
+    int  n;
+    if (sgr) {
+        /* CSI < b ; x ; y M   (press/motion)   or   ... m  (release) */
+        char final = pressed ? 'M' : 'm';
+        n = snprintf(seq, sizeof(seq), "\x1b[<%d;%d;%d%c", cb, cell_x + 1, cell_y + 1, final);
+    } else {
+        /* Legacy X10: CSI M  Cb Cx Cy, each offset by 32. On release the button
+         * bits become 3. Coordinates cap at 223 (255-32). */
+        int b = pressed ? cb : (cb & ~0x03) | 0x03;
+        int cx = cell_x + 1, cy = cell_y + 1;
+        if (cx > 223) cx = 223;
+        if (cy > 223) cy = 223;
+        n = snprintf(seq, sizeof(seq), "\x1b[M%c%c%c",
+                     (char)(b + 32), (char)(cx + 32), (char)(cy + 32));
+    }
+    if (n <= 0) return false;
+    return nw_is_ok(term_write(t, seq, (size_t)n));
 }
 
 bool term_child_exited(const terminal *t, int *exit_status_out) {

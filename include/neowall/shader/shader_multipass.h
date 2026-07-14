@@ -696,4 +696,16 @@ nw_result multipass_attach_terminal(multipass_shader_t *shader,
                                     const char *cmd, int cols, int rows,
                                     int cell_w, int cell_h, const char *font_path);
 
+/* Forward a pointer event (pixel coords relative to the wallpaper top-left) to
+ * the attached terminal, if any. See term_mouse() for button/pressed/motion.
+ * Returns true if a mouse report was actually sent (app had mouse enabled). */
+bool multipass_terminal_mouse(multipass_shader_t *shader, int px, int py,
+                              int button, bool pressed, bool motion);
+
+/* True if an attached terminal has mouse reporting enabled. */
+bool multipass_terminal_wants_mouse(const multipass_shader_t *shader);
+
+/* Write raw (already-encoded) key bytes to the attached terminal's child. */
+bool multipass_terminal_write(multipass_shader_t *shader, const void *bytes, size_t len);
+
 #endif /* SHADER_MULTIPASS_H */

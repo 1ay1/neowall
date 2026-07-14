@@ -115,6 +115,27 @@ void term_destroy(terminal *t);
 /* Resize the grid and the PTY window (TIOCSWINSZ → child gets SIGWINCH). */
 nw_result term_resize(terminal *t, int cols, int rows);
 
+/* ------------------------------------------------------------------------ */
+/* Input (host → child): write to the PTY master                            */
+/* ------------------------------------------------------------------------ */
+
+/* Write raw bytes to the PTY master (keystrokes, paste, mouse sequences).
+ * Thread-safe against the reader thread. Short writes are retried. */
+nw_result term_write(terminal *t, const void *bytes, size_t len);
+
+/* A pointer event to be translated into a mouse-report sequence and written to
+ * the child — but only if the app enabled mouse reporting (DECSET 1000/1002/
+ * 1003). Coordinates are 0-based CELL positions. `button`: 0=left,1=middle,
+ * 2=right, 3=release (X10), 64=wheel-up, 65=wheel-down. `pressed` is false for
+ * a button release, true for press/motion. Returns true if a sequence was sent
+ * (i.e. the app wanted it), false if mouse reporting is off or the event is not
+ * relevant to the active protocol (e.g. bare motion under click-only mode). */
+bool term_mouse(terminal *t, int cell_x, int cell_y, int button, bool pressed, bool motion);
+
+/* True when the child has any mouse reporting enabled — lets the host avoid the
+ * work of tracking/encoding motion when nobody is listening. */
+bool term_wants_mouse(const terminal *t);
+
 /* True once the child has exited (drives "restart the wallpaper command"). */
 bool term_child_exited(const terminal *t, int *exit_status_out);
 
@@ -152,6 +173,12 @@ int              term_screen_cols(const term_screen *s);
 int              term_screen_rows(const term_screen *s);
 const term_cell *term_screen_row(const term_screen *s, int y);   /* cols cells */
 void             term_screen_cursor(const term_screen *s, int *x, int *y);
+
+/* Current mouse-reporting state (set by the app via DECSET 1000/1002/1003 and
+ * 1006). *proto is 0 (off), 1000, 1002 or 1003; *sgr is true when SGR extended
+ * coordinates were requested. Used to decide whether/how to forward pointer
+ * events into the PTY. */
+void             term_screen_mouse_mode(const term_screen *s, int *proto, bool *sgr);
 
 /* Render the visible grid to a UTF-8 string (glyphs only, no colour), one line
  * per row, trailing blanks trimmed. Caller frees. For the headless harness so

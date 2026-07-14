@@ -374,6 +374,36 @@ nw_result multipass_attach_terminal(multipass_shader_t *shader,
 #endif
 }
 
+bool multipass_terminal_mouse(multipass_shader_t *shader, int px, int py,
+                              int button, bool pressed, bool motion) {
+#ifdef NEOWALL_HAVE_TERMINAL
+    if (!shader || !shader->term) return false;
+    return term_render_mouse(shader->term, px, py, button, pressed, motion);
+#else
+    (void)shader; (void)px; (void)py; (void)button; (void)pressed; (void)motion;
+    return false;
+#endif
+}
+
+bool multipass_terminal_wants_mouse(const multipass_shader_t *shader) {
+#ifdef NEOWALL_HAVE_TERMINAL
+    return shader && shader->term && term_render_wants_mouse(shader->term);
+#else
+    (void)shader;
+    return false;
+#endif
+}
+
+bool multipass_terminal_write(multipass_shader_t *shader, const void *bytes, size_t len) {
+#ifdef NEOWALL_HAVE_TERMINAL
+    if (!shader || !shader->term) return false;
+    return term_render_write(shader->term, bytes, len);
+#else
+    (void)shader; (void)bytes; (void)len;
+    return false;
+#endif
+}
+
 
 multipass_channel_t multipass_default_channel(channel_source_t source) {
     multipass_channel_t channel = {

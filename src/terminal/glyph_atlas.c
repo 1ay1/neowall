@@ -7,6 +7,7 @@
  * codepoint -> slot so each glyph is rasterized at most once.
  */
 #include "glyph_atlas.h"
+#include "glyph_synth.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -210,6 +211,41 @@ void glyph_atlas_destroy(glyph_atlas *a) {
 
 /* Rasterize + insert a codepoint; returns its slot index (or a blank slot). */
 static int rasterize(glyph_atlas *a, uint32_t cp) {
+    /* TUI drawing ranges (box/block/braille) are synthesized to fill the whole
+     * cell edge-to-edge, so meters and sparklines tile with no seams. This runs
+     * BEFORE the font path — the font's own versions are inset/bearing-placed
+     * and render as small misaligned marks (the exact sparkline breakage a data
+     * TUI shows otherwise). */
+    if (glyph_synth_has(cp)) {
+        int cw = a->cell_w, ch = a->cell_h;
+        uint8_t *tmp = malloc((size_t)cw * ch);
+        if (tmp && glyph_synth_render(cp, tmp, cw, ch)) {
+            uint16_t ox, oy;
+            if (!atlas_reserve(a, cw + 1, ch + 1, &ox, &oy)) { free(tmp); goto blank; }
+            for (int y = 0; y < ch; y++)
+                memcpy(a->bitmap + (size_t)(oy + y) * ATLAS_W + ox,
+                       tmp + (size_t)y * cw, (size_t)cw);
+            a->dirty = true;
+            free(tmp);
+            if (a->slot_count >= a->slot_cap) {
+                int ncap = a->slot_cap * 2;
+                glyph_slot *ns = realloc(a->slots, (size_t)ncap * sizeof(glyph_slot));
+                if (!ns) goto blank;
+                a->slots = ns;
+                a->slot_cap = ncap;
+            }
+            glyph_slot *s = &a->slots[a->slot_count];
+            s->x = ox; s->y = oy; s->w = (uint16_t)cw; s->h = (uint16_t)ch;
+            s->off_x = 0; s->off_y = 0;   /* fills the cell exactly */
+            s->valid = true;
+            map_insert(a, cp, (uint32_t)a->slot_count);
+            return a->slot_count++;
+        }
+        free(tmp);
+        /* synth declined (e.g. a box glyph outside our subset): fall through to
+         * the font. */
+    }
+
     int gi = stbtt_FindGlyphIndex(&a->font, (int)cp);
     if (gi == 0) {
         /* no glyph in font (e.g. .notdef) — cache a blank so we don't retry */

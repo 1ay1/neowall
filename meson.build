@@ -287,6 +287,7 @@ if not terminal_option.disabled()
       'src/terminal/screen.c',
       'src/terminal/pty.c',
       'src/terminal/term_render.c',
+      'src/terminal/glyph_synth.c',
     )
     # glyph_atlas.c is the sole TU that includes the vendored public-domain
     # stb_truetype.h, which is not -Wpedantic/-Werror clean. Compile it in its

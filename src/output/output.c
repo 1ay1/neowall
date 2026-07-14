@@ -2051,6 +2051,19 @@ bool output_render_frame(struct output_state *output) {
     return render_frame(output);
 }
 
+/* Forward a pointer event to this output's terminal wallpaper, if it has one.
+ * px/py are pixel coordinates relative to the output's top-left. Returns true
+ * if a mouse report was sent to the child (i.e. the app wanted mouse input). */
+bool output_terminal_mouse(struct output_state *output, int px, int py,
+                           int button, bool pressed, bool motion) {
+    if (!output || output->config->type != WALLPAPER_TERMINAL ||
+        !output->multipass_shader) {
+        return false;
+    }
+    return multipass_terminal_mouse(output->multipass_shader, px, py,
+                                    button, pressed, motion);
+}
+
 /* Upload preloaded image to GPU and return texture ID */
 GLuint output_upload_preload_texture(struct output_state *output) {
     if (!output || !output->preload_decoded_image) {

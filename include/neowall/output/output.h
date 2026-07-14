@@ -355,6 +355,11 @@ size_t output_cycle_group(struct output_state **outs, size_t count, struct outpu
 
 /* Rendering wrappers - hide render module from eventloop */
 bool output_render_frame(struct output_state *output);
+
+/* Forward a pointer event to this output's terminal wallpaper (pixel coords
+ * relative to the output top-left). No-op unless the output runs a terminal. */
+bool output_terminal_mouse(struct output_state *output, int px, int py,
+                           int button, bool pressed, bool motion);
 GLuint output_upload_preload_texture(struct output_state *output);
 void output_cleanup_transition(struct output_state *output);
 bool output_init_render(struct output_state *output);

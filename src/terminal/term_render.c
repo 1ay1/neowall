@@ -268,3 +268,22 @@ nw_result term_render_resize(term_render *tr, int cols, int rows) {
 bool term_render_child_exited(const term_render *tr) {
     return tr ? term_child_exited(tr->term, NULL) : true;
 }
+
+bool term_render_mouse(term_render *tr, int px, int py,
+                       int button, bool pressed, bool motion) {
+    if (!tr || !tr->term) return false;
+    int cw = tr->cell_w > 0 ? tr->cell_w : 9;
+    int ch = tr->cell_h > 0 ? tr->cell_h : 18;
+    int cx = px / cw;
+    int cy = py / ch;
+    return term_mouse(tr->term, cx, cy, button, pressed, motion);
+}
+
+bool term_render_wants_mouse(const term_render *tr) {
+    return tr ? term_wants_mouse(tr->term) : false;
+}
+
+bool term_render_write(term_render *tr, const void *bytes, size_t len) {
+    if (!tr || !tr->term) return false;
+    return nw_is_ok(term_write(tr->term, bytes, len));
+}

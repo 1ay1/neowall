@@ -76,6 +76,22 @@ nw_result      term_render_resize(term_render *tr, int cols, int rows);
 /* Has the child process exited? */
 bool           term_render_child_exited(const term_render *tr);
 
+/* --- input (host → child) ------------------------------------------------
+ * The host feeds raw pixel coordinates (relative to the wallpaper's top-left)
+ * and this maps them to cells via cell_w/cell_h before forwarding.
+ */
+
+/* Forward a pointer event at pixel (px,py). button/pressed/motion as in
+ * term_mouse(). Returns true if a report was sent (app had mouse enabled). */
+bool           term_render_mouse(term_render *tr, int px, int py,
+                                 int button, bool pressed, bool motion);
+
+/* True if the child enabled any mouse reporting mode. */
+bool           term_render_wants_mouse(const term_render *tr);
+
+/* Write raw key bytes to the child (already encoded by the caller). */
+bool           term_render_write(term_render *tr, const void *bytes, size_t len);
+
 /* --- cell-record packing helpers (shared with the GLSL decode) --- */
 /* r channel: atlas x (12 bits) | atlas y (12 bits) | flags(8): bit0 = has-glyph */
 #define TERM_PACK_R(ax, ay, has) \

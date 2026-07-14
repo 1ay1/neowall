@@ -56,6 +56,13 @@ typedef struct {
     struct wl_pointer *pointer;
     bool initialized;
     bool occlusion_active;
+
+    /* Pointer tracking for terminal-wallpaper input forwarding. The pointer
+     * `enter` binds these to the output under the cursor; motion updates the
+     * surface-local pixel position; button/axis forward mouse reports. */
+    struct output_state *ptr_output;  /* output the pointer is currently over */
+    int  ptr_x, ptr_y;                /* surface-local pixel position */
+    bool ptr_left_down;               /* left button currently held (for drag) */
 } wlr_backend_data_t;
 
 /* Surface backend data */
@@ -143,6 +150,22 @@ static void pointer_handle_enter(void *data, struct wl_pointer *pointer,
     double y = wl_fixed_to_double(surface_y);
 
     log_debug("Wayland pointer entered surface at (%.2f, %.2f)", x, y);
+
+    /* Record which output the pointer entered + its surface-local position, so
+     * motion/button/axis can forward mouse reports to a terminal wallpaper. */
+    if (backend && backend->state && surface) {
+        pthread_rwlock_rdlock(&backend->state->output_list_lock);
+        for (struct output_state *o = backend->state->outputs; o; o = o->next) {
+            if (o->compositor_surface &&
+                (struct wl_surface *)o->compositor_surface->native_surface == surface) {
+                backend->ptr_output = o;
+                break;
+            }
+        }
+        pthread_rwlock_unlock(&backend->state->output_list_lock);
+        backend->ptr_x = (int)x;
+        backend->ptr_y = (int)y;
+    }
 
     /* Set the cursor when pointer enters the wallpaper surface.
      *
@@ -245,12 +268,17 @@ static void pointer_handle_enter(void *data, struct wl_pointer *pointer,
 
 static void pointer_handle_leave(void *data, struct wl_pointer *pointer,
                                  uint32_t serial, struct wl_surface *surface) {
-    (void)data;
+    wlr_backend_data_t *backend = data;
     (void)pointer;
     (void)serial;
     (void)surface;
 
     log_debug("Wayland pointer left surface");
+
+    if (backend) {
+        backend->ptr_output = NULL;
+        backend->ptr_left_down = false;
+    }
 }
 
 static void pointer_handle_motion(void *data, struct wl_pointer *pointer,
@@ -292,6 +320,17 @@ static void pointer_handle_motion(void *data, struct wl_pointer *pointer,
         }
         pthread_rwlock_unlock(&backend->state->output_list_lock);
     }
+
+    /* Forward to a terminal wallpaper under the cursor. term_mouse() itself
+     * gates on the app's mouse mode: bare motion only reaches drag/any-motion
+     * apps; a held-button drag reports as button 0 with the motion bit. */
+    if (backend && backend->ptr_output) {
+        backend->ptr_x = (int)x;
+        backend->ptr_y = (int)y;
+        int button = backend->ptr_left_down ? 0 : 3; /* 3 = no button (any-motion) */
+        output_terminal_mouse(backend->ptr_output, (int)x, (int)y,
+                              button, true, /*motion=*/true);
+    }
 }
 
 static void pointer_handle_button(void *data, struct wl_pointer *pointer,
@@ -305,28 +344,46 @@ static void pointer_handle_button(void *data, struct wl_pointer *pointer,
     const char *state_str = (state == WL_POINTER_BUTTON_STATE_PRESSED) ? "pressed" : "released";
     log_debug("Wayland pointer button %s: button %u", state_str, button);
 
-    /* Update mouse position on button events */
-    if (backend && backend->state) {
-        pthread_rwlock_rdlock(&backend->state->output_list_lock);
-        struct output_state *output = backend->state->outputs;
-        while (output) {
-            /* Mouse position already updated by motion events */
-            output = output->next;
-        }
-        pthread_rwlock_unlock(&backend->state->output_list_lock);
+    /* Map Linux evdev button codes to terminal mouse buttons. */
+    bool pressed = (state == WL_POINTER_BUTTON_STATE_PRESSED);
+    int tbtn;
+    switch (button) {
+        case 0x110: tbtn = 0; break; /* BTN_LEFT   */
+        case 0x112: tbtn = 1; break; /* BTN_MIDDLE */
+        case 0x111: tbtn = 2; break; /* BTN_RIGHT  */
+        default:    tbtn = 0; break;
+    }
+    if (button == 0x110) backend->ptr_left_down = pressed;
+
+    /* Forward to the terminal under the cursor. On release, legacy encoding
+     * uses button 3; SGR keeps the real button with an 'm' final (handled in
+     * term_mouse via the pressed flag). */
+    if (backend && backend->ptr_output) {
+        int reported = pressed ? tbtn : 3;
+        output_terminal_mouse(backend->ptr_output, backend->ptr_x, backend->ptr_y,
+                              reported, pressed, /*motion=*/false);
     }
 }
 
 static void pointer_handle_axis(void *data, struct wl_pointer *pointer,
                                 uint32_t time, uint32_t axis,
                                 wl_fixed_t value) {
-    (void)data;
+    wlr_backend_data_t *backend = data;
     (void)pointer;
     (void)time;
 
     const char *axis_name = (axis == WL_POINTER_AXIS_VERTICAL_SCROLL) ? "vertical" : "horizontal";
     double val = wl_fixed_to_double(value);
     log_debug("Wayland pointer axis %s: %.2f", axis_name, val);
+
+    /* Forward vertical scroll to the terminal as wheel buttons 64 (up) / 65
+     * (down). A press-only report (no release) is the xterm convention. */
+    if (backend && backend->ptr_output &&
+        axis == WL_POINTER_AXIS_VERTICAL_SCROLL && val != 0.0) {
+        int wbtn = val < 0.0 ? 64 : 65;
+        output_terminal_mouse(backend->ptr_output, backend->ptr_x, backend->ptr_y,
+                              wbtn, true, /*motion=*/false);
+    }
 }
 
 static void pointer_handle_frame(void *data, struct wl_pointer *pointer) {
