@@ -13,6 +13,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include "neowall/result.h"
 #include "neowall/shader/platform_compat.h"
 #include "neowall/shader/adaptive_scale.h"
 #include "neowall/shader/render_optimizer.h"
@@ -48,7 +49,8 @@ typedef enum {
     CHANNEL_SOURCE_NOISE,      /* Procedural noise */
     CHANNEL_SOURCE_SELF,       /* Self-reference (previous frame) */
     CHANNEL_SOURCE_AUDIO,      /* Live audio: row0 spectrum, row1 waveform */
-    CHANNEL_SOURCE_FONT        /* Bitmap font atlas (128x72, 16x6 ASCII grid) */
+    CHANNEL_SOURCE_FONT,       /* Bitmap font atlas (128x72, 16x6 ASCII grid) */
+    CHANNEL_SOURCE_TERM        /* Live terminal: cell grid (RGBA32UI), atlas on iTermAtlas */
 } channel_source_t;
 
 /* Channel configuration */
@@ -124,6 +126,11 @@ typedef struct {
     GLint iKeyEnergy, iMouseEnergy;
     GLint iAudioLevel, iAudioBass, iAudioMid, iAudioTreble, iAudioBeat, iAudioActive;
     GLint iAudio;               /* audio spectrum/waveform sampler */
+    GLint iTermAtlas;           /* terminal glyph-atlas coverage sampler (R8) */
+    GLint iTermCells;           /* terminal cell-record integer sampler (RGBA32UI) */
+    GLint iTermInfo;            /* vec4: cols, rows, cellW, cellH */
+    GLint iTermAtlasSize;       /* vec2: atlas texel w,h */
+    GLint iTermCursor;          /* vec3: cursorX, cursorY, visible */
     bool cached;                /* True if locations have been cached */
 } uniform_locations_t;
 
@@ -174,6 +181,14 @@ typedef struct {
     GLuint keyboard_texture;                 /* Keyboard state texture */
     GLuint audio_texture;                    /* Live audio (512x2) for iAudio / CHANNEL_SOURCE_AUDIO */
     GLuint font_texture;                     /* Bitmap font atlas for CHANNEL_SOURCE_FONT */
+    /* Live terminal source (CHANNEL_SOURCE_TERM). term is the CPU bridge that
+     * owns the PTY + glyph atlas; cell_texture is an RGBA32UI per-cell record
+     * grid, atlas_texture is the R8 coverage bitmap. Uploaded per frame when
+     * the terminal drew. NULL/0 when no terminal source is attached. */
+    struct term_render *term;
+    GLuint term_cell_texture;                /* RGBA32UI cols x rows */
+    GLuint term_atlas_texture;               /* R8 glyph coverage atlas */
+    int    term_atlas_uploaded_w, term_atlas_uploaded_h; /* last atlas dims uploaded */
     GLint default_framebuffer;               /* Default framebuffer ID (may not be 0 in GTK) */
     
     /* Resolution scaling */
@@ -664,5 +679,21 @@ uniform_bind_t multipass_bind_from_name(const char *name);
  * Returns CHANNEL_SOURCE_NONE if unknown.
  */
 channel_source_t multipass_channel_source_from_name(const char *name);
+
+/**
+ * Attach a live terminal as the CHANNEL_SOURCE_TERM source. Spawns `cmd` under
+ * a PTY and rasterizes glyphs from `font_path` (NULL = system font search) at
+ * cell_w x cell_h. Call BEFORE multipass_init_gl. Returns nw_ok on success.
+ * The terminal is owned by the shader and freed in multipass_destroy.
+ *
+ * @param shader   Multipass shader
+ * @param cmd      Command to run (e.g. "htop"). Required.
+ * @param cols,rows Grid size.
+ * @param cell_w,cell_h Glyph cell pixel size (0 = sensible default).
+ * @param font_path Optional font file path (NULL = search system fonts).
+ */
+nw_result multipass_attach_terminal(multipass_shader_t *shader,
+                                    const char *cmd, int cols, int rows,
+                                    int cell_w, int cell_h, const char *font_path);
 
 #endif /* SHADER_MULTIPASS_H */

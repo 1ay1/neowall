@@ -45,6 +45,7 @@ enum transition_type {
 enum wallpaper_type {
     WALLPAPER_IMAGE,    /* Static image file */
     WALLPAPER_SHADER,   /* Live GLSL shader */
+    WALLPAPER_TERMINAL, /* Live terminal (a program rendered as the wallpaper) */
 };
 
 /* Wallpaper configuration for a specific output */
@@ -72,6 +73,15 @@ struct wallpaper_config {
     /* iChannel texture configuration */
     char **channel_paths;               /* Array of texture paths/names for iChannels */
     size_t channel_count;               /* Number of configured channels */
+
+    /* Terminal wallpaper (WALLPAPER_TERMINAL). The program named by term_cmd is
+     * spawned under a PTY and rendered as the background; term_shader (optional)
+     * is a GLSL file that samples it via nwTerm() for CRT/glow styling — empty
+     * means the built-in crisp pass-through. */
+    char term_cmd[OUTPUT_MAX_PATH_LENGTH];   /* command to run, e.g. "htop" */
+    char term_font[OUTPUT_MAX_PATH_LENGTH];  /* font file path ('' = system search) */
+    int  term_cols;                          /* grid width  (0 = auto from output) */
+    int  term_rows;                          /* grid height (0 = auto from output) */
 };
 
 /* Output (monitor) state */
@@ -295,6 +305,14 @@ void output_set_wallpaper(struct output_state *output, const char *path);
  * on this output: the previous program has already been torn down and
  * config->shader_path still names it. */
 nw_result output_set_shader(struct output_state *output, const char *shader_path);
+
+/* Spawn `cmd` under a PTY and make the live terminal this output's wallpaper.
+ * `shader_path` (may be NULL/"") is an optional GLSL file that samples the
+ * terminal via nwTerm() for CRT/glow styling; NULL uses a built-in crisp
+ * pass-through. cols/rows may be 0 to derive a grid from the output size. */
+nw_result output_set_terminal(struct output_state *output, const char *cmd,
+                              const char *shader_path, const char *font_path,
+                              int cols, int rows);
 bool output_apply_config(struct output_state *output, struct wallpaper_config *config);
 void output_apply_deferred_config(struct output_state *output);
 void output_cycle_wallpaper(struct output_state *output);

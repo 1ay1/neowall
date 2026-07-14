@@ -494,6 +494,10 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->current_cycle_index = 0;
     config->channel_paths = NULL;
     config->channel_count = 0;
+    config->term_cmd[0] = '\0';
+    config->term_font[0] = '\0';
+    config->term_cols = 0;
+    config->term_rows = 0;
 }
 
 /* Parse wallpaper configuration with strict validation */
@@ -522,22 +526,24 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     /* Check for 'path' and 'shader' - these are MUTUALLY EXCLUSIVE */
     VibeValue *path_val = vibe_object_get(obj->as_object, "path");
     VibeValue *shader_val = vibe_object_get(obj->as_object, "shader");
+    VibeValue *term_val = vibe_object_get(obj->as_object, "terminal");
 
     bool has_path = (path_val != NULL && path_val->type == VIBE_TYPE_STRING);
     bool has_shader = (shader_val != NULL && shader_val->type == VIBE_TYPE_STRING);
+    bool has_terminal = (term_val != NULL && term_val->type == VIBE_TYPE_STRING);
 
-    /* RULE: path and shader are mutually exclusive */
-    if (has_path && has_shader) {
-        log_error("[%s] INVALID CONFIG: Both 'path' and 'shader' specified. "
-                 "These are mutually exclusive. Use EITHER 'path' for images "
-                 "OR 'shader' for GLSL shaders, not both.", context_name);
+    /* RULE: path, shader and terminal are mutually exclusive */
+    if ((has_path && has_shader) || (has_path && has_terminal) ||
+        (has_shader && has_terminal)) {
+        log_error("[%s] INVALID CONFIG: 'path', 'shader' and 'terminal' are "
+                 "mutually exclusive; specify exactly one.", context_name);
         return false;
     }
 
     /* RULE: At least one must be specified */
-    if (!has_path && !has_shader) {
-        log_error("[%s] INVALID CONFIG: Neither 'path' nor 'shader' specified. "
-                 "You must specify exactly one.", context_name);
+    if (!has_path && !has_shader && !has_terminal) {
+        log_error("[%s] INVALID CONFIG: none of 'path', 'shader', 'terminal' "
+                 "specified. You must specify exactly one.", context_name);
         return false;
     }
 
@@ -653,6 +659,30 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             snprintf(config->shader_path, sizeof(config->shader_path), "%s", shader_str);
 
             log_info("[%s] SHADER MODE: Single shader '%s'", context_name, shader_str);
+        }
+    }
+
+    /* ========================================================================
+     * TERMINAL MODE: 'terminal' names the command to run as the wallpaper.
+     * Optional: term_font (path), term_cols/term_rows (grid), term_shader
+     * (a GLSL styling pass that samples nwTerm()).
+     * ======================================================================== */
+    if (has_terminal) {
+        config->type = WALLPAPER_TERMINAL;
+        snprintf(config->term_cmd, sizeof(config->term_cmd), "%s", term_val->as_string);
+        log_info("[%s] TERMINAL MODE: command '%s'", context_name, config->term_cmd);
+
+        VibeValue *tfont = vibe_object_get(obj->as_object, "term_font");
+        if (tfont && tfont->type == VIBE_TYPE_STRING) {
+            snprintf(config->term_font, sizeof(config->term_font), "%s", tfont->as_string);
+        }
+        VibeValue *tcols = vibe_object_get(obj->as_object, "term_cols");
+        if (tcols && tcols->type == VIBE_TYPE_INTEGER) config->term_cols = (int)tcols->as_integer;
+        VibeValue *trows = vibe_object_get(obj->as_object, "term_rows");
+        if (trows && trows->type == VIBE_TYPE_INTEGER) config->term_rows = (int)trows->as_integer;
+        VibeValue *tshader = vibe_object_get(obj->as_object, "term_shader");
+        if (tshader && tshader->type == VIBE_TYPE_STRING) {
+            snprintf(config->shader_path, sizeof(config->shader_path), "%s", tshader->as_string);
         }
     }
 
@@ -818,7 +848,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         config->shader_fps = fps;
         log_info("[%s] Shader FPS set to: %d", context_name, fps);
 
-        if (config->type != WALLPAPER_SHADER) {
+        if (config->type != WALLPAPER_SHADER && config->type != WALLPAPER_TERMINAL) {
             log_error("[%s] INVALID CONFIG: 'shader_fps' specified in IMAGE mode. "
                      "Shader FPS only applies to GLSL shaders. This setting is invalid for images.",
                      context_name);
@@ -842,7 +872,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             log_info("[%s] Vsync: disabled (using custom FPS with tearing control)", context_name);
         }
 
-        if (config->type != WALLPAPER_SHADER) {
+        if (config->type != WALLPAPER_SHADER && config->type != WALLPAPER_TERMINAL) {
             log_error("[%s] INVALID CONFIG: 'vsync' specified in IMAGE mode. "
                      "Vsync only applies to GLSL shaders. This setting is invalid for images.",
                      context_name);
@@ -961,7 +991,8 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
 
     /* Warn about unknown keys */
     const char *known_keys[] = {
-        "path", "shader", "mode", "duration", "transition",
+        "path", "shader", "terminal", "term_font", "term_cols", "term_rows",
+        "term_shader", "mode", "duration", "transition",
         "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps",
         "pause_on_fullscreen", "pause_coverage_threshold", "shuffle"
     };

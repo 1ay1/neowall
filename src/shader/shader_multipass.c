@@ -18,6 +18,9 @@
 #include "neowall/shader/reactive.h"
 #include "neowall/shader/program_cache.h"
 #include "neowall/textures.h"
+#ifdef NEOWALL_HAVE_TERMINAL
+#include "term_render.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -240,6 +243,7 @@ const char *multipass_channel_source_name(channel_source_t source) {
         case CHANNEL_SOURCE_SELF:     return "Self";
         case CHANNEL_SOURCE_AUDIO:    return "Audio";
         case CHANNEL_SOURCE_FONT:     return "Font";
+        case CHANNEL_SOURCE_TERM:     return "Terminal";
         default:                      return "None";
     }
 }
@@ -250,6 +254,8 @@ channel_source_t multipass_channel_source_from_name(const char *name) {
     if (!name) return CHANNEL_SOURCE_NONE;
     if (!strcasecmp(name, "audio"))    return CHANNEL_SOURCE_AUDIO;
     if (!strcasecmp(name, "font"))     return CHANNEL_SOURCE_FONT;
+    if (!strcasecmp(name, "term") || !strcasecmp(name, "terminal") ||
+        !strcasecmp(name, "text")) return CHANNEL_SOURCE_TERM;
     if (!strcasecmp(name, "noise"))    return CHANNEL_SOURCE_NOISE;
     if (!strcasecmp(name, "self"))     return CHANNEL_SOURCE_SELF;
     if (!strcasecmp(name, "keyboard")) return CHANNEL_SOURCE_KEYBOARD;
@@ -329,6 +335,43 @@ void multipass_add_user_uniform(multipass_shader_t *shader,
     uu->value = value;
     uu->location = -1;
     log_info("Manifest: user uniform '%s' (bind=%d, value=%.3f)", uu->name, bind, value);
+}
+
+nw_result multipass_attach_terminal(multipass_shader_t *shader,
+                                    const char *cmd, int cols, int rows,
+                                    int cell_w, int cell_h, const char *font_path) {
+    if (!shader || !cmd) return nw_err(NW_ERR_INVALID_ARG, "attach_terminal: null");
+#ifdef NEOWALL_HAVE_TERMINAL
+    if (shader->term) {
+        term_render_destroy(shader->term);
+        shader->term = NULL;
+    }
+    term_render_opts o = {
+        .cmd = cmd,
+        .cols = cols > 0 ? cols : 100,
+        .rows = rows > 0 ? rows : 30,
+        .cell_w = cell_w > 0 ? cell_w : 9,
+        .cell_h = cell_h > 0 ? cell_h : 18,
+        .font_data = NULL, .font_len = 0,
+        .font_path = font_path,
+    };
+    nw_result err = nw_ok();
+    shader->term = term_render_create(&o, &err);
+    if (!shader->term) {
+        log_error("attach_terminal: %s (%s)", nw_status_str(err.status),
+                  err.context ? err.context : "");
+        return err;
+    }
+    /* An image-only shader that samples the terminal is animated (it changes
+     * whenever the child draws), so keep the redraw loop alive. */
+    shader->is_animated = true;
+    log_info("Attached terminal '%s' (%dx%d cells, %dx%d px)",
+             cmd, o.cols, o.rows, o.cell_w, o.cell_h);
+    return nw_ok();
+#else
+    (void)cols; (void)rows; (void)cell_w; (void)cell_h; (void)font_path;
+    return nw_err(NW_ERR_UNSUPPORTED, "terminal source disabled at build time");
+#endif
 }
 
 
@@ -585,6 +628,17 @@ static const char *multipass_wrapper_prefix =
     "uniform sampler2D iChannel1;\n"
     "uniform sampler2D iChannel2;\n"
     "uniform sampler2D iChannel3;\n"
+    "\n"
+    "// Live-terminal source (CHANNEL_SOURCE_TERM). The cell record grid is an\n"
+    "// INTEGER texture; the shader reads it via nwTerm(). Bind the matching\n"
+    "// iChannelN to \"terminal\" so the engine points it at the cell texture,\n"
+    "// then sample with nwTerm(iChannelN_as_usampler...). To keep call sites\n"
+    "// simple we expose a dedicated integer sampler + the metadata uniforms.\n"
+    "uniform highp usampler2D iTermCells;\n"
+    "uniform sampler2D iTermAtlas;\n"
+    "uniform vec4 iTermInfo;       // cols, rows, cellW, cellH\n"
+    "uniform vec2 iTermAtlasSize;  // atlas texel w, h\n"
+    "uniform vec3 iTermCursor;     // cursorX, cursorY, visible\n"
     "\n"
     "// Channel resolutions\n"
     "uniform vec3 iChannelResolution[4];\n"
@@ -1124,6 +1178,43 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
         log_error("Failed to create font atlas texture");
     }
 
+#ifdef NEOWALL_HAVE_TERMINAL
+    /* Live terminal source: an integer cell-record texture (RGBA32UI, one texel
+     * per grid cell) plus an R8 glyph-coverage atlas. Both are (re)uploaded in
+     * multipass_render when the terminal drew. Created only when a terminal was
+     * attached (multipass_attach_terminal, before init). */
+    if (shader->term) {
+        int cols = term_render_cols(shader->term);
+        int rows = term_render_rows(shader->term);
+
+        glGenTextures(1, &shader->term_cell_texture);
+        glBindTexture(GL_TEXTURE_2D, shader->term_cell_texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32UI, cols, rows, 0,
+                     GL_RGBA_INTEGER, GL_UNSIGNED_INT, NULL);
+        /* Integer textures MUST use NEAREST (no filtering of uint samplers). */
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        int aw = term_render_atlas_w(shader->term);
+        int ah = term_render_atlas_h(shader->term);
+        glGenTextures(1, &shader->term_atlas_texture);
+        glBindTexture(GL_TEXTURE_2D, shader->term_atlas_texture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, aw, ah, 0,
+                     GL_RED, GL_UNSIGNED_BYTE, NULL);
+        /* LINEAR gives sub-pixel AA on the coverage bitmap (kitty-style). */
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        shader->term_atlas_uploaded_w = 0;
+        shader->term_atlas_uploaded_h = 0;
+        log_info("Created terminal textures: cells %dx%d, atlas %dx%d", cols, rows, aw, ah);
+    }
+#endif
+
     int base_scaled_w = (int)(width * shader->resolution_scale);
     int base_scaled_h = (int)(height * shader->resolution_scale);
     if (base_scaled_w < 1) base_scaled_w = 1;
@@ -1269,6 +1360,11 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iAudioBeat    = glGetUniformLocation(prog, "iAudioBeat");
     u->iAudioActive  = glGetUniformLocation(prog, "iAudioActive");
     u->iAudio        = glGetUniformLocation(prog, "iAudio");
+    u->iTermAtlas    = glGetUniformLocation(prog, "iTermAtlas");
+    u->iTermCells    = glGetUniformLocation(prog, "iTermCells");
+    u->iTermInfo     = glGetUniformLocation(prog, "iTermInfo");
+    u->iTermAtlasSize = glGetUniformLocation(prog, "iTermAtlasSize");
+    u->iTermCursor   = glGetUniformLocation(prog, "iTermCursor");
 
     u->cached = true;
     
@@ -1560,6 +1656,11 @@ void multipass_destroy(multipass_shader_t *shader) {
     if (shader->keyboard_texture) glDeleteTextures(1, &shader->keyboard_texture);
     if (shader->audio_texture) glDeleteTextures(1, &shader->audio_texture);
     if (shader->font_texture) glDeleteTextures(1, &shader->font_texture);
+#ifdef NEOWALL_HAVE_TERMINAL
+    if (shader->term_cell_texture) glDeleteTextures(1, &shader->term_cell_texture);
+    if (shader->term_atlas_texture) glDeleteTextures(1, &shader->term_atlas_texture);
+    if (shader->term) term_render_destroy(shader->term);
+#endif
     
     /* Cleanup adaptive resolution system */
     adaptive_destroy(&shader->adaptive);
@@ -1823,6 +1924,15 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
                 tex = shader->font_texture ? shader->font_texture : shader->noise_texture;
                 source_name = "font";
                 break;
+
+            case CHANNEL_SOURCE_TERM:
+                /* The cell-record texture is an INTEGER sampler (usampler2D) in
+                 * the shader; bind it here on the channel unit. The atlas +
+                 * metadata ride dedicated uniforms bound below. */
+                tex = shader->term_cell_texture ? shader->term_cell_texture
+                                                : shader->noise_texture;
+                source_name = "terminal";
+                break;
         }
 
         /* Direct GL calls - textures change every pass, no caching benefit */
@@ -1839,6 +1949,41 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
         glBindTexture(GL_TEXTURE_2D, shader->audio_texture);
         glUniform1i(u->iAudio, MULTIPASS_MAX_CHANNELS);
     }
+
+#ifdef NEOWALL_HAVE_TERMINAL
+    /* Terminal glyph-atlas sampler on unit 5, plus grid/atlas/cursor metadata.
+     * The cell texture itself is bound to whichever iChannelN the shader set to
+     * the "terminal" source above. */
+    if (u->iTermAtlas >= 0 && shader->term_atlas_texture) {
+        glActiveTexture(GL_TEXTURE0 + MULTIPASS_MAX_CHANNELS + 1);
+        glBindTexture(GL_TEXTURE_2D, shader->term_atlas_texture);
+        glUniform1i(u->iTermAtlas, MULTIPASS_MAX_CHANNELS + 1);
+    }
+    if (u->iTermCells >= 0 && shader->term_cell_texture) {
+        glActiveTexture(GL_TEXTURE0 + MULTIPASS_MAX_CHANNELS + 2);
+        glBindTexture(GL_TEXTURE_2D, shader->term_cell_texture);
+        glUniform1i(u->iTermCells, MULTIPASS_MAX_CHANNELS + 2);
+    }
+    if (shader->term) {
+        if (u->iTermInfo >= 0) {
+            glUniform4f(u->iTermInfo,
+                        (float)term_render_cols(shader->term),
+                        (float)term_render_rows(shader->term),
+                        (float)term_render_cell_w(shader->term),
+                        (float)term_render_cell_h(shader->term));
+        }
+        if (u->iTermAtlasSize >= 0) {
+            glUniform2f(u->iTermAtlasSize,
+                        (float)term_render_atlas_w(shader->term),
+                        (float)term_render_atlas_h(shader->term));
+        }
+        if (u->iTermCursor >= 0) {
+            int cx = 0, cy = 0; bool vis = false;
+            term_render_cursor(shader->term, &cx, &cy, &vis);
+            glUniform3f(u->iTermCursor, (float)cx, (float)cy, vis ? 1.0f : 0.0f);
+        }
+    }
+#endif
 }
 
 void multipass_swap_buffers(multipass_shader_t *shader, int pass_index) {
@@ -2071,6 +2216,38 @@ void multipass_render(multipass_shader_t *shader,
                             GL_RED, GL_FLOAT, rows);
         }
     }
+
+#ifdef NEOWALL_HAVE_TERMINAL
+    /* Refresh the terminal textures once per frame. term_render_update pulls a
+     * frame-coherent snapshot and returns true only when the grid changed, so
+     * the (potentially large) cell upload is skipped on idle frames. The atlas
+     * is re-uploaded only when new glyphs were rasterized. */
+    if (shader->term && shader->term_cell_texture) {
+        bool cells_changed = term_render_update(shader->term);
+
+        if (term_render_atlas_dirty(shader->term)) {
+            int aw = term_render_atlas_w(shader->term);
+            int ah = term_render_atlas_h(shader->term);
+            const uint8_t *bits = term_render_atlas(shader->term);
+            glBindTexture(GL_TEXTURE_2D, shader->term_atlas_texture);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            /* Atlas dimensions are fixed at create, so glTexSubImage suffices. */
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, aw, ah,
+                            GL_RED, GL_UNSIGNED_BYTE, bits);
+            term_render_clear_atlas_dirty(shader->term);
+        }
+
+        if (cells_changed) {
+            int cols = term_render_cols(shader->term);
+            int rows = term_render_rows(shader->term);
+            const uint32_t *cells = term_render_cells(shader->term);
+            glBindTexture(GL_TEXTURE_2D, shader->term_cell_texture);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows,
+                            GL_RGBA_INTEGER, GL_UNSIGNED_INT, cells);
+        }
+    }
+#endif
 
     /* Set optimal render state ONCE at start of frame
      * These are the ONLY things worth caching - they're set once and never change */

@@ -1015,6 +1015,138 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
     return nw_ok();
 }
 
+/* Built-in crisp terminal pass-through: sample the whole grid across the frame.
+ * Used when the terminal wallpaper names no styling shader. */
+static const char *kTermCrispShader =
+    "void mainImage(out vec4 fragColor, in vec2 fragCoord){\n"
+    "    vec2 uv = fragCoord / iResolution.xy;\n"
+    "    fragColor = vec4(nwTerm(uv), 1.0);\n"
+    "}\n";
+
+nw_result output_set_terminal(struct output_state *output, const char *cmd,
+                              const char *shader_path, const char *font_path,
+                              int cols, int rows) {
+    if (!output || !cmd || !cmd[0]) {
+        return nw_err(NW_ERR_INVALID_ARG, "output_set_terminal: null cmd");
+    }
+    if (!output->state || output->state->egl_display == EGL_NO_DISPLAY) {
+        return nw_err(NW_ERR_GL, "EGL display not initialized");
+    }
+    if (!output->compositor_surface ||
+        output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
+        /* Surface not up yet: stash it on the config and let the render loop
+         * re-apply once the surface arrives (mirrors output_set_shader). */
+        pthread_mutex_lock(&output->state->state_mutex);
+        output->config->type = WALLPAPER_TERMINAL;
+        snprintf(output->config->term_cmd, sizeof(output->config->term_cmd), "%s", cmd);
+        if (shader_path) snprintf(output->config->shader_path,
+                                  sizeof(output->config->shader_path), "%s", shader_path);
+        if (font_path) snprintf(output->config->term_font,
+                                sizeof(output->config->term_font), "%s", font_path);
+        output->config->term_cols = cols;
+        output->config->term_rows = rows;
+        pthread_mutex_unlock(&output->state->state_mutex);
+        return nw_ok();
+    }
+
+    if (!eglMakeCurrent(output->state->egl_display,
+                        output->compositor_surface->egl_surface,
+                        output->compositor_surface->egl_surface,
+                        output->state->egl_context)) {
+        return nw_err(NW_ERR_GL, "eglMakeCurrent failed for terminal set");
+    }
+
+    if (output->multipass_shader) {
+        multipass_destroy(output->multipass_shader);
+        output->multipass_shader = NULL;
+    }
+    if (output->live_shader_program != 0) {
+        shader_destroy_program(output->live_shader_program);
+        output->live_shader_program = 0;
+    }
+
+    /* Styling shader (optional) or the built-in crisp pass-through. */
+    char *shader_source = NULL;
+    if (shader_path && shader_path[0]) {
+        shader_source = shader_load_file(shader_path);
+        if (!shader_source) {
+            log_warn("Terminal styling shader '%s' unreadable; using crisp pass-through",
+                     shader_path);
+        }
+    }
+    const char *src = shader_source ? shader_source : kTermCrispShader;
+    output->multipass_shader = multipass_create(src);
+    free(shader_source);
+    if (!output->multipass_shader) {
+        return nw_err(NW_ERR_PARSE, "terminal multipass_create failed");
+    }
+
+    /* Derive a grid from the output size if not specified. Cell size is fixed at
+     * a legible 9x18; the grid is output_px / cell rounded down. */
+    int cell_w = 9, cell_h = 18;
+    int gc = cols > 0 ? cols : output->width / cell_w;
+    int gr = rows > 0 ? rows : output->height / cell_h;
+    if (gc < 1) gc = 80;
+    if (gr < 1) gr = 24;
+
+    /* Attach the terminal BEFORE init_gl (init creates the cell/atlas textures
+     * sized to the grid) and before compile (nwTerm uniforms must resolve). */
+    nw_result tr = multipass_attach_terminal(output->multipass_shader, cmd,
+                                             gc, gr, cell_w, cell_h,
+                                             (font_path && font_path[0]) ? font_path : NULL);
+    if (nw_is_err(tr)) {
+        multipass_destroy(output->multipass_shader);
+        output->multipass_shader = NULL;
+        return tr;
+    }
+
+    if (!multipass_init_gl(output->multipass_shader, output->width, output->height)) {
+        multipass_destroy(output->multipass_shader);
+        output->multipass_shader = NULL;
+        return nw_err(NW_ERR_GL, "multipass_init_gl failed (terminal)");
+    }
+    if (!multipass_compile_all(output->multipass_shader)) {
+        char *errors = multipass_get_all_errors(output->multipass_shader);
+        log_error("Terminal shader failed to compile:\n%s", errors ? errors : "(none)");
+        free(errors);
+        multipass_destroy(output->multipass_shader);
+        output->multipass_shader = NULL;
+        return nw_err(NW_ERR_PARSE, "terminal shader failed to compile");
+    }
+
+    int target_fps = shader_fps_resolve(output->config->shader_fps);
+    multipass_set_adaptive_resolution(output->multipass_shader, true,
+                                      (float)target_fps, 0.25f, 1.0f);
+
+    output->shader_start_time = get_time_ms();
+    output->frames_rendered = 0;
+    output->shader_paused_at = 0;
+
+    pthread_mutex_lock(&output->state->state_mutex);
+    output->config->type = WALLPAPER_TERMINAL;
+    snprintf(output->config->term_cmd, sizeof(output->config->term_cmd), "%s", cmd);
+    if (shader_path) snprintf(output->config->shader_path,
+                              sizeof(output->config->shader_path), "%s", shader_path);
+    else output->config->shader_path[0] = '\0';
+    output->config->term_cols = gc;
+    output->config->term_rows = gr;
+    pthread_mutex_unlock(&output->state->state_mutex);
+
+    /* Terminal wallpapers don't use images; free any lingering texture. */
+    if (output->current_image) { image_free(output->current_image); output->current_image = NULL; }
+    if (output->texture) { render_destroy_texture(output->texture); output->texture = 0; }
+
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
+    uint64_t now = get_time_ms();
+    output->last_frame_time = now;
+    output->last_cycle_time = now;
+    output_configure_vsync(output);
+    output_configure_frame_timer(output);
+
+    log_info("Terminal wallpaper running: '%s' (%dx%d cells)", cmd, gc, gr);
+    return nw_ok();
+}
+
 /* ============================================
  * Span groups — one scene across several monitors
  * ============================================ */
@@ -1780,6 +1912,18 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
             log_error("No shader configured for output %s", output->model);
             return false;
         }
+    } else if (output->config->type == WALLPAPER_TERMINAL) {
+        /* Terminal mode: spawn the configured command as the wallpaper. */
+        if (output->config->term_cmd[0] != '\0') {
+            log_info("Loading terminal wallpaper: %s", output->config->term_cmd);
+            output_set_terminal(output, output->config->term_cmd,
+                                output->config->shader_path[0] ? output->config->shader_path : NULL,
+                                output->config->term_font[0] ? output->config->term_font : NULL,
+                                output->config->term_cols, output->config->term_rows);
+        } else {
+            log_error("No terminal command configured for output %s", output->model);
+            return false;
+        }
     } else {
         /* Image mode */
         const char *initial_path = NULL;
@@ -1832,6 +1976,16 @@ void output_apply_deferred_config(struct output_state *output) {
                      output->model[0] ? output->model : "unknown",
                      output->config->shader_path);
             output_set_shader(output, output->config->shader_path);
+        }
+    } else if (output->config->type == WALLPAPER_TERMINAL && output->config->term_cmd[0] != '\0') {
+        if (output->multipass_shader == NULL && output->live_shader_program == 0) {
+            log_info("Applying deferred terminal config to output %s: %s",
+                     output->model[0] ? output->model : "unknown",
+                     output->config->term_cmd);
+            output_set_terminal(output, output->config->term_cmd,
+                                output->config->shader_path[0] ? output->config->shader_path : NULL,
+                                output->config->term_font[0] ? output->config->term_font : NULL,
+                                output->config->term_cols, output->config->term_rows);
         }
     } else if (output->config->type == WALLPAPER_IMAGE && output->config->path[0] != '\0') {
         /* Check if wallpaper is not yet loaded */

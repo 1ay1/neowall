@@ -286,6 +286,7 @@ if not terminal_option.disabled()
       'src/terminal/vtparse.c',
       'src/terminal/screen.c',
       'src/terminal/pty.c',
+      'src/terminal/term_render.c',
     )
     # glyph_atlas.c is the sole TU that includes the vendored public-domain
     # stb_truetype.h, which is not -Wpedantic/-Werror clean. Compile it in its
@@ -400,7 +401,9 @@ all_sources = (
 
 neowall_exe = executable('neowall',
   all_sources,
-  include_directories: [inc_dirs, inc_dirs_build],
+  include_directories: has_terminal
+    ? [inc_dirs, inc_dirs_build, include_directories('src/terminal')]
+    : [inc_dirs, inc_dirs_build],
   dependencies: deps,
   link_with: has_terminal ? [terminal_glyph_lib] : [],
   install: true,
