@@ -1030,12 +1030,14 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
     return nw_ok();
 }
 
-/* Built-in crisp terminal pass-through: sample the whole grid across the frame.
+/* Built-in enhanced terminal pass-through: sample the whole grid across the
+ * frame with the nwTermFX post effects (bloom/scanline/CRT). The effect
+ * intensities are fed via iTermFX from the config; all-zero => crisp nwTerm.
  * Used when the terminal wallpaper names no styling shader. */
 static const char *kTermCrispShader =
     "void mainImage(out vec4 fragColor, in vec2 fragCoord){\n"
     "    vec2 uv = fragCoord / iResolution.xy;\n"
-    "    fragColor = vec4(nwTerm(uv), 1.0);\n"
+    "    fragColor = vec4(nwTermFX(uv), 1.0);\n"
     "}\n";
 
 nw_result output_set_terminal(struct output_state *output, const char *cmd,
@@ -1127,6 +1129,18 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
         output->multipass_shader->term_bg = output->config->term_bg;
         output->multipass_shader->term_has_bg = true;
     }
+
+    /* nwTermFX intensities. A -1 config sentinel means "use the built-in
+     * default": a subtle bloom so bright/bold cells glow, and the retro CRT
+     * bits (scanline/curve/chroma) off unless the user opts in. */
+    output->multipass_shader->term_fx[0] =
+        output->config->term_bloom    >= 0.0f ? output->config->term_bloom    : 0.35f;
+    output->multipass_shader->term_fx[1] =
+        output->config->term_scanline >= 0.0f ? output->config->term_scanline : 0.0f;
+    output->multipass_shader->term_fx[2] =
+        output->config->term_crt      >= 0.0f ? output->config->term_crt      : 0.0f;
+    output->multipass_shader->term_fx[3] =
+        output->config->term_chroma   >= 0.0f ? output->config->term_chroma   : 0.0f;
 
     /* Attach the terminal BEFORE init_gl (init creates the cell/atlas textures
      * sized to the grid) and before compile (nwTerm uniforms must resolve). */

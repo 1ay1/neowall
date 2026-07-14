@@ -98,6 +98,10 @@ struct wallpaper_config {
     int  term_font_size;                     /* cell height in px (0 = default 18) */
     long term_fg;                            /* default fg 0xRRGGBB (-1 = built-in) */
     long term_bg;                            /* default bg 0xRRGGBB (-1 = built-in) */
+    float term_bloom;                        /* nwTermFX bloom    0..1 (-1 = default) */
+    float term_scanline;                     /* nwTermFX scanline 0..1 (-1 = default) */
+    float term_crt;                          /* nwTermFX CRT curve+vignette 0..1 (-1) */
+    float term_chroma;                       /* nwTermFX chromatic aberration 0..1 (-1) */
 };
 
 /* Output (monitor) state */

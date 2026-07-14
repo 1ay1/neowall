@@ -505,6 +505,10 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->term_font_size = 0;
     config->term_fg = -1;
     config->term_bg = -1;
+    config->term_bloom = -1.0f;
+    config->term_scanline = -1.0f;
+    config->term_crt = -1.0f;
+    config->term_chroma = -1.0f;
 }
 
 /* Parse a "#RRGGBB" or "RRGGBB" hex colour into 0xRRGGBB, or -1 if invalid. */
@@ -725,6 +729,28 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         if (tfg && tfg->type == VIBE_TYPE_STRING) config->term_fg = parse_hex_color(tfg->as_string);
         VibeValue *tbg = vibe_object_get(obj->as_object, "term_bg");
         if (tbg && tbg->type == VIBE_TYPE_STRING) config->term_bg = parse_hex_color(tbg->as_string);
+
+        /* nwTermFX post-effect intensities, each 0..1. Accept int or float;
+         * absent leaves the -1 sentinel, which output_set_terminal maps to the
+         * built-in default (a subtle bloom, everything else off). */
+        struct { const char *key; float *dst; } fxk[] = {
+            { "term_bloom",    &config->term_bloom },
+            { "term_scanline", &config->term_scanline },
+            { "term_crt",      &config->term_crt },
+            { "term_chroma",   &config->term_chroma },
+        };
+        for (size_t k = 0; k < sizeof(fxk)/sizeof(fxk[0]); k++) {
+            VibeValue *v = vibe_object_get(obj->as_object, fxk[k].key);
+            if (!v) continue;
+            double f;
+            if (v->type == VIBE_TYPE_FLOAT)        f = v->as_float;
+            else if (v->type == VIBE_TYPE_INTEGER) f = (double)v->as_integer;
+            else { log_error("[%s] '%s' must be a number 0..1", context_name, fxk[k].key); return false; }
+            if (f < 0.0) f = 0.0;
+            if (f > 1.0) f = 1.0;
+            *fxk[k].dst = (float)f;
+            log_info("[%s] %s = %.2f", context_name, fxk[k].key, *fxk[k].dst);
+        }
     }
 
     /* ========================================================================
@@ -1035,6 +1061,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         "path", "shader", "terminal", "term_font", "term_cols", "term_rows",
         "term_shader", "term_font_bold", "term_font_italic", "term_cwd",
         "term_env", "term_font_size", "term_fg", "term_bg",
+        "term_bloom", "term_scanline", "term_crt", "term_chroma",
         "mode", "duration", "transition",
         "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps",
         "pause_on_fullscreen", "pause_coverage_threshold", "shuffle"

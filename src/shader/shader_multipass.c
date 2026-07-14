@@ -678,6 +678,8 @@ static const char *multipass_wrapper_prefix =
     "uniform vec4 iTermInfo;       // cols, rows, cellW, cellH\n"
     "uniform vec2 iTermAtlasSize;  // atlas texel w, h\n"
     "uniform vec3 iTermCursor;     // cursorX, cursorY, visible\n"
+    "uniform vec4 iTermFX;         // bloom, scanline, crt-curve, chromatic\n"
+    "#define NW_HAS_ITERMFX 1\n"
     "\n"
     "// Channel resolutions\n"
     "uniform vec3 iChannelResolution[4];\n"
@@ -725,7 +727,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
                               const char *user_uniform_decls) {
     size_t prefix_len = strlen(multipass_wrapper_prefix);
     size_t react_len  = strlen(neowall_reactive_uniforms);
-    size_t lib_len    = strlen(neowall_glsl_stdlib) + strlen(neowall_glsl_stdlib2) + strlen(neowall_glsl_stdlib3) + strlen(neowall_glsl_stdlib4) + strlen(neowall_glsl_stdlib5);
+    size_t lib_len    = strlen(neowall_glsl_stdlib) + strlen(neowall_glsl_stdlib2) + strlen(neowall_glsl_stdlib3) + strlen(neowall_glsl_stdlib4) + strlen(neowall_glsl_stdlib5) + strlen(neowall_glsl_stdlib6);
     size_t udecl_len  = user_uniform_decls ? strlen(user_uniform_decls) : 0;
     size_t common_len = common ? strlen(common) : 0;
     size_t pass_len = pass_source ? strlen(pass_source) : 0;
@@ -745,6 +747,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
     strcat(wrapped, neowall_glsl_stdlib3);
     strcat(wrapped, neowall_glsl_stdlib4);
     strcat(wrapped, neowall_glsl_stdlib5);
+    strcat(wrapped, neowall_glsl_stdlib6);
     if (user_uniform_decls) {
         strcat(wrapped, user_uniform_decls);
     }
@@ -1423,6 +1426,7 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iTermInfo     = glGetUniformLocation(prog, "iTermInfo");
     u->iTermAtlasSize = glGetUniformLocation(prog, "iTermAtlasSize");
     u->iTermCursor   = glGetUniformLocation(prog, "iTermCursor");
+    u->iTermFX       = glGetUniformLocation(prog, "iTermFX");
 
     u->cached = true;
     
@@ -2056,6 +2060,10 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
             int cx = 0, cy = 0; bool vis = false;
             term_render_cursor(shader->term, &cx, &cy, &vis);
             glUniform3f(u->iTermCursor, (float)cx, (float)cy, vis ? 1.0f : 0.0f);
+        }
+        if (u->iTermFX >= 0) {
+            glUniform4f(u->iTermFX, shader->term_fx[0], shader->term_fx[1],
+                        shader->term_fx[2], shader->term_fx[3]);
         }
     }
 #endif
