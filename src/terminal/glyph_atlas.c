@@ -111,6 +111,7 @@ struct glyph_atlas {
 
     uint8_t *bitmap;     /* ATLAS_W * ATLAS_H, 8-bit coverage */
     bool     dirty;
+    int      dirty_y0, dirty_y1;  /* row range touched since last clear (half-open) */
 
     /* shelf packer cursor */
     int shelf_x, shelf_y, shelf_h;
@@ -200,6 +201,20 @@ static void face_free(face *fc) {
     if (fc && fc->ready && fc->owns && fc->data) free((void *)fc->data);
 }
 
+/* Extend the dirty row range to cover [y0, y1). The GL uploader then re-pushes
+ * only these rows instead of the whole 2048-row atlas. */
+static void mark_dirty_rows(glyph_atlas *a, int y0, int y1) {
+    if (y0 < 0) y0 = 0;
+    if (y1 > ATLAS_H) y1 = ATLAS_H;
+    if (y0 >= y1) return;
+    if (!a->dirty) { a->dirty_y0 = y0; a->dirty_y1 = y1; }
+    else {
+        if (y0 < a->dirty_y0) a->dirty_y0 = y0;
+        if (y1 > a->dirty_y1) a->dirty_y1 = y1;
+    }
+    a->dirty = true;
+}
+
 glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
                                    const char *bold_path, const char *italic_path,
                                    int cell_w, int cell_h) {
@@ -245,6 +260,7 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
 
     a->shelf_x = a->shelf_y = a->shelf_h = 0;
     a->dirty = true;
+    a->dirty_y0 = 0; a->dirty_y1 = ATLAS_H;   /* first upload covers all */
     return a;
 }
 
@@ -300,7 +316,7 @@ static int raster_face(glyph_atlas *a, face *fc, uint32_t cp) {
     stbtt_MakeGlyphBitmap(&fc->font,
                           a->bitmap + (size_t)oy * ATLAS_W + ox,
                           gw, gh, ATLAS_W, fc->scale, fc->scale, gi);
-    a->dirty = true;
+    mark_dirty_rows(a, oy, oy + gh);
 
     if (a->slot_count >= a->slot_cap) {
         int ncap = a->slot_cap * 2;
@@ -334,7 +350,7 @@ static int rasterize(glyph_atlas *a, uint32_t cp, uint32_t style) {
             for (int y = 0; y < ch; y++)
                 memcpy(a->bitmap + (size_t)(oy + y) * ATLAS_W + ox,
                        tmp + (size_t)y * cw, (size_t)cw);
-            a->dirty = true;
+            mark_dirty_rows(a, oy, oy + ch);
             free(tmp);
             if (a->slot_count >= a->slot_cap) {
                 int ncap = a->slot_cap * 2;
@@ -394,4 +410,9 @@ int  glyph_atlas_height(const glyph_atlas *a) { (void)a; return ATLAS_H; }
 int  glyph_atlas_cell_w(const glyph_atlas *a) { return a ? a->cell_w : 0; }
 int  glyph_atlas_cell_h(const glyph_atlas *a) { return a ? a->cell_h : 0; }
 bool glyph_atlas_dirty(const glyph_atlas *a)  { return a ? a->dirty : false; }
-void glyph_atlas_clear_dirty(glyph_atlas *a)  { if (a) a->dirty = false; }
+void glyph_atlas_clear_dirty(glyph_atlas *a)  { if (a) { a->dirty = false; a->dirty_y0 = a->dirty_y1 = 0; } }
+
+void glyph_atlas_dirty_rows(const glyph_atlas *a, int *y0, int *y1) {
+    if (y0) *y0 = a ? a->dirty_y0 : 0;
+    if (y1) *y1 = a ? a->dirty_y1 : 0;
+}

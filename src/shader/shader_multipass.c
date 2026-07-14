@@ -2272,11 +2272,21 @@ void multipass_render(multipass_shader_t *shader,
             int aw = term_render_atlas_w(shader->term);
             int ah = term_render_atlas_h(shader->term);
             const uint8_t *bits = term_render_atlas(shader->term);
-            glBindTexture(GL_TEXTURE_2D, shader->term_atlas_texture);
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-            /* Atlas dimensions are fixed at create, so glTexSubImage suffices. */
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, aw, ah,
-                            GL_RED, GL_UNSIGNED_BYTE, bits);
+            int y0 = 0, y1 = ah;
+            term_render_atlas_dirty_rows(shader->term, &y0, &y1);
+            if (y0 < 0) y0 = 0;
+            if (y1 > ah) y1 = ah;
+            if (y1 > y0) {
+                glBindTexture(GL_TEXTURE_2D, shader->term_atlas_texture);
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                /* Push only the rows that changed since the last upload. The
+                 * atlas is a fixed-size R8 texture, so a sub-rect covering
+                 * [y0,y1) avoids re-sending the whole 2048x2048 (4 MB) on every
+                 * new glyph. */
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y0, aw, y1 - y0,
+                                GL_RED, GL_UNSIGNED_BYTE,
+                                bits + (size_t)y0 * aw);
+            }
             term_render_clear_atlas_dirty(shader->term);
         }
 

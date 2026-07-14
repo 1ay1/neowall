@@ -359,6 +359,10 @@ int term_render_cell_h(const term_render *tr) { return tr ? tr->cell_h * tr->ss 
 bool term_render_atlas_dirty(const term_render *tr) {
     return tr ? glyph_atlas_dirty(tr->atlas) : false;
 }
+void term_render_atlas_dirty_rows(const term_render *tr, int *y0, int *y1) {
+    if (tr) glyph_atlas_dirty_rows(tr->atlas, y0, y1);
+    else { if (y0) *y0 = 0; if (y1) *y1 = 0; }
+}
 void term_render_clear_atlas_dirty(term_render *tr) {
     if (tr) glyph_atlas_clear_dirty(tr->atlas);
 }

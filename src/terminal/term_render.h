@@ -72,6 +72,7 @@ int            term_render_atlas_h(const term_render *tr);
 int            term_render_cell_w(const term_render *tr);
 int            term_render_cell_h(const term_render *tr);
 bool           term_render_atlas_dirty(const term_render *tr);
+void           term_render_atlas_dirty_rows(const term_render *tr, int *y0, int *y1);
 void           term_render_clear_atlas_dirty(term_render *tr);
 
 /* Cursor (in cell coords) for the shader to draw a block/underline. */

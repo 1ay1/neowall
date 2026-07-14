@@ -80,4 +80,8 @@ int            glyph_atlas_cell_h(const glyph_atlas *a);
 bool           glyph_atlas_dirty(const glyph_atlas *a);
 void           glyph_atlas_clear_dirty(glyph_atlas *a);
 
+/* Row range [*y0, *y1) of the atlas that changed since the last clear_dirty.
+ * The GL uploader pushes only these rows instead of the whole atlas. */
+void           glyph_atlas_dirty_rows(const glyph_atlas *a, int *y0, int *y1);
+
 #endif /* NEOWALL_TERMINAL_GLYPH_ATLAS_H */
