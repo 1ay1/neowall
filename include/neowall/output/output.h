@@ -290,6 +290,12 @@ struct output_state {
     uint64_t pace_period_ns;            /* target frame period; 0 = pacer inactive */
     uint64_t pace_next_deadline_ns;     /* absolute CLOCK_MONOTONIC target for next present */
 
+    /* Real presentation-time feedback (wp_presentation, Wayland only). When the
+     * compositor reports an actual present timestamp + hardware refresh period
+     * these carry the ground truth the pacer phase-locks to; 0 = none yet. */
+    uint64_t pace_last_present_ns;      /* last real present time (pacer clock) */
+    uint64_t pace_hw_refresh_ns;        /* measured display refresh period, 0 = unknown */
+
     struct output_state *next;
 };
 
@@ -397,5 +403,13 @@ int output_get_frame_timer_fd(struct output_state *output);
  * drift against the display's vblank cadence. No-op / false when the pacer is
  * inactive (vsync on, static wallpaper, or no frame timer). */
 bool output_pace_advance(struct output_state *output, uint64_t now_ns);
+
+/* Feed a real present event (from wp_presentation feedback, Wayland only) into
+ * the pacer: `present_ns` = compositor-reported present time in the
+ * presentation clock (ns), `refresh_ns` = display refresh period (ns, 0 if
+ * unknown). The next output_pace_advance() phase-locks to this instead of its
+ * own predicted deadline and quantises the period to whole refreshes. */
+void output_pace_note_present(struct output_state *output,
+                              uint64_t present_ns, uint64_t refresh_ns);
 
 #endif /* OUTPUT_H */

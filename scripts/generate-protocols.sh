@@ -54,6 +54,20 @@ else
     echo "  ! viewporter protocol not found (optional)"
 fi
 
+# presentation-time
+if [ -f "$PROTO_BASE/stable/presentation-time/presentation-time.xml" ]; then
+    echo "  - presentation-time"
+    wayland-scanner client-header \
+        "$PROTO_BASE/stable/presentation-time/presentation-time.xml" \
+        "$PROTO_DIR/presentation-time-client-protocol.h"
+
+    wayland-scanner private-code \
+        "$PROTO_BASE/stable/presentation-time/presentation-time.xml" \
+        "$PROTO_DIR/presentation-time-client-protocol.c"
+else
+    echo "  ! presentation-time protocol not found (optional; disables phase-locked pacing feedback)"
+fi
+
 echo "Protocol generation complete!"
 echo ""
 echo "Generated files in $PROTO_DIR/:"

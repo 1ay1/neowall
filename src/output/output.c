@@ -2236,11 +2236,31 @@ bool output_pace_advance(struct output_state *output, uint64_t now_ns) {
     }
 
     uint64_t period = output->pace_period_ns;
-    uint64_t deadline = output->pace_next_deadline_ns + period;
 
-    /* Overrun recovery: if the next scheduled deadline is already in the past
-     * (we missed one or more slots), resync the phase to the present rather
-     * than trying to "catch up" with rapid-fire frames the display can't show. */
+    /* If the compositor has told us the display's TRUE refresh period via
+     * wp_presentation, quantise our period to a whole number of refreshes so we
+     * present exactly once every N vblanks (e.g. a 60fps request on a 59.94Hz
+     * panel locks to 59.94, not a fractional cadence that beats against it).
+     * Never below one refresh. */
+    if (output->pace_hw_refresh_ns > 0) {
+        uint64_t hw = output->pace_hw_refresh_ns;
+        uint64_t mult = (period + hw / 2) / hw;      /* round to nearest N vblanks */
+        if (mult < 1) mult = 1;
+        period = mult * hw;
+    }
+
+    /* Anchor the schedule to the LAST REAL PRESENT when we have one (ground
+     * truth for where the display's phase actually is), otherwise to our own
+     * previous deadline. Advancing by exactly one period keeps average FPS with
+     * zero long-term drift. */
+    uint64_t anchor = output->pace_last_present_ns ? output->pace_last_present_ns
+                                                   : output->pace_next_deadline_ns;
+    uint64_t deadline = anchor + period;
+
+    /* Overrun / stale-anchor recovery: if the next target is already in the
+     * past (slow frame, stall, just-unpaused, or a present report we haven't
+     * caught up to), resync the phase to the present rather than firing a burst
+     * of catch-up frames the display can't show. */
     if (deadline <= now_ns) {
         deadline = now_ns + period;
     }
@@ -2258,4 +2278,23 @@ bool output_pace_advance(struct output_state *output, uint64_t now_ns) {
         return false;
     }
     return true;
+}
+
+/* Record a real present event from wp_presentation feedback. `present_ns` is
+ * the compositor-reported present timestamp converted to nanoseconds in the
+ * presentation clock; `refresh_ns` is the display's refresh period (may be 0 if
+ * the compositor didn't report one, e.g. a variable-refresh present). These
+ * become the pacer's phase anchor + quantisation base on the next re-arm.
+ *
+ * The presentation clock is CLOCK_MONOTONIC in practice (compositors advertise
+ * it via wp_presentation.clock_id; the caller only routes feedback here when it
+ * matches our timer clock), so present_ns is directly comparable to the
+ * absolute deadlines the frame timer is armed with. */
+void output_pace_note_present(struct output_state *output,
+                              uint64_t present_ns, uint64_t refresh_ns) {
+    if (!output) return;
+    output->pace_last_present_ns = present_ns;
+    if (refresh_ns > 0) {
+        output->pace_hw_refresh_ns = refresh_ns;
+    }
 }

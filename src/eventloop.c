@@ -25,6 +25,7 @@ extern void handle_signal_from_fd(struct neowall_state *state, int signum);
 #ifdef HAVE_WAYLAND_BACKEND
 bool output_configure_compositor_surface(struct output_state *output);
 static void reinit_reconnected_outputs(struct neowall_state *state);
+void wayland_request_present_feedback(struct output_state *output);
 #endif
 
 static struct neowall_state *event_loop_state = NULL;
@@ -423,6 +424,19 @@ static void render_outputs(struct neowall_state *state) {
         /* Damage BEFORE swap+commit — wl_surface damage must be queued before
          * the commit that publishes the new buffer (audit fix #17). */
         compositor_surface_damage(output->compositor_surface, 0, 0, INT32_MAX, INT32_MAX);
+
+        /* Ask the compositor for a real present timestamp for the frame we are
+         * about to publish (wp_presentation). The feedback attaches to the next
+         * commit on this surface — and eglSwapBuffers itself performs that
+         * commit on Wayland — so it must be requested BEFORE the swap. Only for
+         * animated outputs the pacer actually drives; no-op without the
+         * protocol. Wayland-only. */
+#ifdef HAVE_WAYLAND_BACKEND
+        if (wallpaper_is_animated(output->config->type) &&
+            output_get_frame_timer_fd(output) >= 0) {
+            wayland_request_present_feedback(output);
+        }
+#endif
 
         /* Swap can block waiting for vsync; we hold no locks here. */
         if (!eglSwapBuffers(state->egl_display, output->compositor_surface->egl_surface)) {

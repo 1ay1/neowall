@@ -44,6 +44,16 @@ typedef struct wayland {
     struct wl_shm *shm;
     struct zxdg_output_manager_v1 *xdg_output_manager;
     struct wp_tearing_control_manager_v1 *tearing_control_manager;
+    /* wp_presentation: real present-time feedback. The compositor reports the
+     * actual framebuffer-flip timestamp + hardware refresh period per commit,
+     * which the frame pacer phase-locks to (see output_pace_note_present). NULL
+     * on compositors without the protocol — the pacer falls back to anchoring
+     * on swap-completion time. presentation_clock is the clockid the timestamps
+     * are in (clock_id event); we only route feedback to the pacer when it
+     * matches CLOCK_MONOTONIC, which every real compositor advertises. */
+    struct wp_presentation *presentation;
+    uint32_t presentation_clock;
+    bool presentation_clock_ok;
     /* wp_fractional_scale_manager_v1 + wp_viewporter: together they let a
      * fractional-scale output be rendered at its TRUE pixel size instead of
      * the integer-rounded wl_output.scale. The manager reports the exact scale
@@ -126,5 +136,16 @@ bool wayland_available(void);
  * Caller may hold output_list_lock (read); this touches only the given output.
  */
 void wayland_apply_fractional_scale(struct output_state *output);
+
+/**
+ * Request wp_presentation feedback for an output's next surface commit.
+ *
+ * Call once per rendered frame, immediately BEFORE the commit that publishes
+ * it. When the compositor supports wp_presentation (and advertises a usable
+ * CLOCK_MONOTONIC present clock) the reported flip timestamp + refresh period
+ * are fed into that output's phase-locked frame pacer (output_pace_note_present).
+ * No-op otherwise — the pacer falls back to swap-completion-time anchoring.
+ */
+void wayland_request_present_feedback(struct output_state *output);
 
 #endif /* WAYLAND_H */

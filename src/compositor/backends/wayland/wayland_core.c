@@ -10,6 +10,7 @@
 #include "frame_watchdog.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
+#include "presentation-time-client-protocol.h"
 #include "cursor-shape-v1-client-protocol.h"
 
 /* Maximum retries and delay when waiting for compositor to be ready */
@@ -469,6 +470,25 @@ static void output_on_closed_callback(struct compositor_surface *surface) {
 
 
 
+/* wp_presentation.clock_id: the compositor tells us which POSIX clock its
+ * present timestamps are in. We only trust the feedback for pacing when it is
+ * CLOCK_MONOTONIC (what our frame timer is armed against); every real-world
+ * compositor advertises exactly that. */
+static void presentation_handle_clock_id(void *data,
+                                         struct wp_presentation *presentation,
+                                         uint32_t clk_id) {
+    (void)data; (void)presentation;
+    wayland_t *wl = &g_wayland;
+    wl->presentation_clock = clk_id;
+    wl->presentation_clock_ok = (clk_id == CLOCK_MONOTONIC);
+    log_info("Presentation-time clock id=%u (%s for phase-locked pacing)",
+             clk_id, wl->presentation_clock_ok ? "usable" : "unusable");
+}
+
+static const struct wp_presentation_listener presentation_listener = {
+    .clock_id = presentation_handle_clock_id,
+};
+
 /* Registry listener callbacks */
 static void registry_handle_global(void *data, struct wl_registry *registry,
                                    uint32_t name, const char *interface,
@@ -490,6 +510,11 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
         wl->tearing_control_manager = wl_registry_bind(registry, name,
                                                            &wp_tearing_control_manager_v1_interface, 1);
         log_info("Bound to tearing control manager (immediate presentation support)");
+    } else if (strcmp(interface, wp_presentation_interface.name) == 0) {
+        wl->presentation = wl_registry_bind(registry, name,
+                                            &wp_presentation_interface, 1);
+        wp_presentation_add_listener(wl->presentation, &presentation_listener, state);
+        log_info("Bound to wp_presentation (real present-time feedback for pacing)");
     } else if (strcmp(interface, wp_cursor_shape_manager_v1_interface.name) == 0) {
         wl->cursor_shape_manager = wl_registry_bind(registry, name,
                                                     &wp_cursor_shape_manager_v1_interface, 1);
@@ -805,6 +830,12 @@ void wayland_cleanup(void) {
     }
     wl->cursor_shape_device = NULL;
 
+    if (wl->presentation) {
+        wp_presentation_destroy(wl->presentation);
+        wl->presentation = NULL;
+    }
+    wl->presentation_clock_ok = false;
+
     /* Per-surface wp_fractional_scale_v1 / wp_viewport objects are destroyed
      * with their surface by the backend; only the manager globals are ours. */
     if (wl->fractional_scale_manager) {
@@ -841,6 +872,91 @@ void wayland_cleanup(void) {
     wl->state = NULL;
 
     log_debug("Wayland cleanup complete");
+}
+
+/* ---- wp_presentation per-frame feedback ------------------------------- */
+
+/* Per-request context: which output this feedback belongs to, holding a ref so
+ * a concurrent hotplug-removal can't free the output before the compositor
+ * answers. The feedback object auto-destroys after presented|discarded, at
+ * which point we drop the ref and free this. */
+struct present_fb_ctx {
+    struct output_state *output;
+};
+
+static void present_fb_finish(struct present_fb_ctx *ctx,
+                              struct wp_presentation_feedback *fb) {
+    if (fb) wp_presentation_feedback_destroy(fb);
+    if (ctx) {
+        if (ctx->output) output_unref(ctx->output);
+        free(ctx);
+    }
+}
+
+static void present_fb_sync_output(void *data,
+                                   struct wp_presentation_feedback *fb,
+                                   struct wl_output *output) {
+    (void)data; (void)fb; (void)output;   /* which output; we already know */
+}
+
+/* The frame reached the screen: feed the real present timestamp + refresh into
+ * this output's pacer. tv_sec is split hi/lo across two u32s. */
+static void present_fb_presented(void *data,
+                                 struct wp_presentation_feedback *fb,
+                                 uint32_t tv_sec_hi, uint32_t tv_sec_lo,
+                                 uint32_t tv_nsec, uint32_t refresh,
+                                 uint32_t seq_hi, uint32_t seq_lo,
+                                 uint32_t flags) {
+    (void)seq_hi; (void)seq_lo; (void)flags;
+    struct present_fb_ctx *ctx = data;
+    wayland_t *wl = &g_wayland;
+    if (ctx && ctx->output && wl->presentation_clock_ok) {
+        uint64_t sec = ((uint64_t)tv_sec_hi << 32) | (uint64_t)tv_sec_lo;
+        uint64_t present_ns = sec * 1000000000ULL + (uint64_t)tv_nsec;
+        output_pace_note_present(ctx->output, present_ns, (uint64_t)refresh);
+    }
+    present_fb_finish(ctx, fb);
+}
+
+/* The update never became visible (superseded / hidden). No timing info; just
+ * release the object and our ref. The pacer keeps its previous anchor. */
+static void present_fb_discarded(void *data,
+                                 struct wp_presentation_feedback *fb) {
+    present_fb_finish((struct present_fb_ctx *)data, fb);
+}
+
+static const struct wp_presentation_feedback_listener present_fb_listener = {
+    .sync_output = present_fb_sync_output,
+    .presented   = present_fb_presented,
+    .discarded   = present_fb_discarded,
+};
+
+/* Ask the compositor for a present timestamp on `output`'s surface's NEXT
+ * commit. Call once per rendered frame, right BEFORE the commit that publishes
+ * it (the feedback associates with the following commit). No-op when the
+ * protocol is absent or the clock is unusable, so non-Wayland / old compositors
+ * simply fall back to swap-time anchoring. */
+void wayland_request_present_feedback(struct output_state *output) {
+    wayland_t *wl = &g_wayland;
+    if (!output || !wl->presentation || !wl->presentation_clock_ok) return;
+    if (!output->compositor_surface || !output->compositor_surface->native_surface) return;
+
+    struct wl_surface *surface =
+        (struct wl_surface *)output->compositor_surface->native_surface;
+
+    struct present_fb_ctx *ctx = calloc(1, sizeof(*ctx));
+    if (!ctx) return;
+    output_ref(output);
+    ctx->output = output;
+
+    struct wp_presentation_feedback *fb =
+        wp_presentation_feedback(wl->presentation, surface);
+    if (!fb) {
+        output_unref(output);
+        free(ctx);
+        return;
+    }
+    wp_presentation_feedback_add_listener(fb, &present_fb_listener, ctx);
 }
 
 /* Configure compositor surface for an output using abstraction layer */
