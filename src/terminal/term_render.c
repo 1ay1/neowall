@@ -70,6 +70,9 @@ struct term_render {
     int          cell_w, cell_h;
     int          ss;          /* atlas supersample factor (glyph px = cell*ss) */
     uint32_t    *cells;       /* cols*rows*4 uint32 */
+    uint32_t    *prev_cells;  /* previous frame's packed cells, for row diffing */
+    int          dirty_y0;    /* [dirty_y0, dirty_y1) rows changed this update */
+    int          dirty_y1;    /* dirty_y1<=dirty_y0 means nothing changed */
     uint64_t     last_epoch;
     bool         have_frame;  /* cells populated at least once */
     int          cursor_x, cursor_y;
@@ -94,8 +97,15 @@ static double mono_secs(void) {
 
 static bool alloc_cells(term_render *tr) {
     free(tr->cells);
-    tr->cells = calloc((size_t)tr->cols * (size_t)tr->rows * 4, sizeof(uint32_t));
-    return tr->cells != NULL;
+    free(tr->prev_cells);
+    size_t n = (size_t)tr->cols * (size_t)tr->rows * 4;
+    tr->cells = calloc(n, sizeof(uint32_t));
+    tr->prev_cells = calloc(n, sizeof(uint32_t));
+    /* Force a full upload on the first frame after (re)alloc: prev is all-zero
+     * but the shader's texture is undefined, so the diff must not skip rows. */
+    tr->dirty_y0 = 0;
+    tr->dirty_y1 = tr->rows;
+    return tr->cells != NULL && tr->prev_cells != NULL;
 }
 
 term_render *term_render_create(const term_render_opts *opts, nw_result *err_out) {
@@ -177,6 +187,7 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
         if (err_out) *err_out = r;
         glyph_atlas_destroy(tr->atlas);
         free(tr->cells);
+        free(tr->prev_cells);
         free(tr);
         return NULL;
     }
@@ -214,6 +225,7 @@ void term_render_destroy(term_render *tr) {
     free(tr->cwd);
     free(tr->term_env);
     free(tr->cells);
+    free(tr->prev_cells);
     free(tr);
 }
 
@@ -347,12 +359,45 @@ bool term_render_update(term_render *tr) {
         o[2] = TERM_PACK_COL(fr, fg, fb, 0xFF);
         o[3] = TERM_PACK_COL(br, bg, bb, attr8);
     }
+
+    /* Diff against the previous frame ROW BY ROW to find the smallest
+     * contiguous [y0,y1) band that actually changed. The GPU uploader then
+     * pushes only those rows instead of the whole grid — for a terminal where
+     * only a handful of lines move per frame (a scrolling log, a cmatrix
+     * column stepping), this cuts the per-frame PCIe traffic from the full
+     * cols*rows*16 bytes down to just the touched band. memcmp over a row is
+     * cheap and vectorised; the win is the smaller glTexSubImage2D. */
+    {
+        size_t roww = (size_t)tr->cols * 4;   /* uint32s per row */
+        int y0 = tr->rows, y1 = 0;
+        for (int y = 0; y < tr->rows; y++) {
+            const uint32_t *cur = tr->cells + (size_t)y * roww;
+            const uint32_t *prv = tr->prev_cells + (size_t)y * roww;
+            if (memcmp(cur, prv, roww * sizeof(uint32_t)) != 0) {
+                if (y < y0) y0 = y;
+                if (y + 1 > y1) y1 = y + 1;
+                memcpy((void *)prv, cur, roww * sizeof(uint32_t));
+            }
+        }
+        tr->dirty_y0 = y0;
+        tr->dirty_y1 = y1;
+        /* Whole grid identical to last frame — tell the caller to skip the
+         * upload entirely (the shader keeps the current texture). */
+        if (y1 <= y0) return false;
+    }
     return true;
 }
 
 const uint32_t *term_render_cells(const term_render *tr) { return tr ? tr->cells : NULL; }
 int term_render_cols(const term_render *tr) { return tr ? tr->cols : 0; }
 int term_render_rows(const term_render *tr) { return tr ? tr->rows : 0; }
+
+/* Rows [y0,y1) that changed in the last term_render_update() that returned
+ * true. Lets the uploader push only the touched band of the cell texture. */
+void term_render_cells_dirty_rows(const term_render *tr, int *y0, int *y1) {
+    if (tr) { if (y0) *y0 = tr->dirty_y0; if (y1) *y1 = tr->dirty_y1; }
+    else    { if (y0) *y0 = 0; if (y1) *y1 = 0; }
+}
 
 const uint8_t *term_render_atlas(const term_render *tr) {
     return tr ? glyph_atlas_bitmap(tr->atlas) : NULL;

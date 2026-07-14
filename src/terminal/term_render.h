@@ -65,6 +65,11 @@ const uint32_t *term_render_cells(const term_render *tr); /* 4 uint32 per cell *
 int             term_render_cols(const term_render *tr);
 int             term_render_rows(const term_render *tr);
 
+/* Rows [y0,y1) of the cell buffer that changed in the last update() that
+ * returned true. The uploader pushes only this band (glTexSubImage2D sub-rect)
+ * instead of the whole grid. y1<=y0 means no rows changed. */
+void            term_render_cells_dirty_rows(const term_render *tr, int *y0, int *y1);
+
 /* Atlas coverage bitmap (GL_R8), and whether it grew since last clear. */
 const uint8_t *term_render_atlas(const term_render *tr);
 int            term_render_atlas_w(const term_render *tr);

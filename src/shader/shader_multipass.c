@@ -2345,10 +2345,24 @@ void multipass_render(multipass_shader_t *shader,
             int cols = term_render_cols(shader->term);
             int rows = term_render_rows(shader->term);
             const uint32_t *cells = term_render_cells(shader->term);
-            glBindTexture(GL_TEXTURE_2D, shader->term_cell_texture);
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cols, rows,
-                            GL_RGBA_INTEGER, GL_UNSIGNED_INT, cells);
+            /* Push only the band of rows that changed since the last frame
+             * (computed by term_render_update's row diff). For a terminal where
+             * a few lines move per frame this is a fraction of the full
+             * cols*rows*16-byte grid. UNPACK_ROW_LENGTH keeps the source
+             * stride at the full row width while we upload a sub-rect. */
+            int y0 = 0, y1 = rows;
+            term_render_cells_dirty_rows(shader->term, &y0, &y1);
+            if (y0 < 0) y0 = 0;
+            if (y1 > rows) y1 = rows;
+            if (y1 > y0) {
+                glBindTexture(GL_TEXTURE_2D, shader->term_cell_texture);
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+                glPixelStorei(GL_UNPACK_ROW_LENGTH, cols);
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y0, cols, y1 - y0,
+                                GL_RGBA_INTEGER, GL_UNSIGNED_INT,
+                                cells + (size_t)y0 * cols * 4);
+                glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            }
         }
     }
 #endif
