@@ -1057,6 +1057,18 @@ bool render_frame(struct output_state *output) {
         return false;
     }
 
+    /* Terminal wallpapers render through the same multipass pipeline as GLSL
+     * shaders (nwTerm() samples the terminal channel), so they take the shader
+     * render path. Without this they fall through to the image path below,
+     * find no texture, and draw a black screen. */
+    if (output->config->type == WALLPAPER_TERMINAL) {
+        if (output->multipass_shader != NULL) {
+            return render_frame_shader(output);
+        }
+        /* Not attached yet (surface still coming up) — nothing to draw. */
+        return true;
+    }
+
     /* Check if this is a shader wallpaper */
     if (output->config->type == WALLPAPER_SHADER) {
         /* Check if shader loading has permanently failed */
