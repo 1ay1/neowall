@@ -1083,12 +1083,36 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
     }
 
     /* Derive a grid from the output size if not specified. Cell size is fixed at
-     * a legible 9x18; the grid is output_px / cell rounded down. */
-    int cell_w = 9, cell_h = 18;
+     * a legible 9x18 by default; term_font_size overrides the cell HEIGHT (width
+     * scales ~0.5x to keep a monospace aspect). */
+    int cell_h = output->config->term_font_size > 0 ? output->config->term_font_size : 18;
+    if (cell_h < 6)  cell_h = 6;
+    if (cell_h > 96) cell_h = 96;
+    int cell_w = (cell_h + 1) / 2;
+    if (cell_w < 3) cell_w = 3;
     int gc = cols > 0 ? cols : output->width / cell_w;
     int gr = rows > 0 ? rows : output->height / cell_h;
     if (gc < 1) gc = 80;
     if (gr < 1) gr = 24;
+
+    /* Carry optional terminal config onto the shader so attach_terminal can
+     * pass it through to the emulator (cwd/env/font faces/default colours). */
+    if (output->config->term_cwd[0])
+        output->multipass_shader->term_cwd = strdup(output->config->term_cwd);
+    if (output->config->term_env[0])
+        output->multipass_shader->term_env = strdup(output->config->term_env);
+    if (output->config->term_font_bold[0])
+        output->multipass_shader->term_font_bold = strdup(output->config->term_font_bold);
+    if (output->config->term_font_italic[0])
+        output->multipass_shader->term_font_italic = strdup(output->config->term_font_italic);
+    if (output->config->term_fg >= 0) {
+        output->multipass_shader->term_fg = output->config->term_fg;
+        output->multipass_shader->term_has_fg = true;
+    }
+    if (output->config->term_bg >= 0) {
+        output->multipass_shader->term_bg = output->config->term_bg;
+        output->multipass_shader->term_has_bg = true;
+    }
 
     /* Attach the terminal BEFORE init_gl (init creates the cell/atlas textures
      * sized to the grid) and before compile (nwTerm uniforms must resolve). */

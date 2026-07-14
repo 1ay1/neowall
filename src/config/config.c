@@ -498,6 +498,29 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->term_font[0] = '\0';
     config->term_cols = 0;
     config->term_rows = 0;
+    config->term_font_bold[0] = '\0';
+    config->term_font_italic[0] = '\0';
+    config->term_cwd[0] = '\0';
+    config->term_env[0] = '\0';
+    config->term_font_size = 0;
+    config->term_fg = -1;
+    config->term_bg = -1;
+}
+
+/* Parse a "#RRGGBB" or "RRGGBB" hex colour into 0xRRGGBB, or -1 if invalid. */
+static long parse_hex_color(const char *s) {
+    if (!s) return -1;
+    if (*s == '#') s++;
+    long v = 0; int n = 0;
+    for (; *s; s++) {
+        int d;
+        if (*s >= '0' && *s <= '9') d = *s - '0';
+        else if (*s >= 'a' && *s <= 'f') d = *s - 'a' + 10;
+        else if (*s >= 'A' && *s <= 'F') d = *s - 'A' + 10;
+        else return -1;
+        v = v * 16 + d; n++;
+    }
+    return n == 6 ? v : -1;
 }
 
 /* Parse wallpaper configuration with strict validation */
@@ -684,6 +707,24 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         if (tshader && tshader->type == VIBE_TYPE_STRING) {
             snprintf(config->shader_path, sizeof(config->shader_path), "%s", tshader->as_string);
         }
+        VibeValue *tfb = vibe_object_get(obj->as_object, "term_font_bold");
+        if (tfb && tfb->type == VIBE_TYPE_STRING)
+            snprintf(config->term_font_bold, sizeof(config->term_font_bold), "%s", tfb->as_string);
+        VibeValue *tfi = vibe_object_get(obj->as_object, "term_font_italic");
+        if (tfi && tfi->type == VIBE_TYPE_STRING)
+            snprintf(config->term_font_italic, sizeof(config->term_font_italic), "%s", tfi->as_string);
+        VibeValue *tcwd = vibe_object_get(obj->as_object, "term_cwd");
+        if (tcwd && tcwd->type == VIBE_TYPE_STRING)
+            snprintf(config->term_cwd, sizeof(config->term_cwd), "%s", tcwd->as_string);
+        VibeValue *tenv = vibe_object_get(obj->as_object, "term_env");
+        if (tenv && tenv->type == VIBE_TYPE_STRING)
+            snprintf(config->term_env, sizeof(config->term_env), "%s", tenv->as_string);
+        VibeValue *tfs = vibe_object_get(obj->as_object, "term_font_size");
+        if (tfs && tfs->type == VIBE_TYPE_INTEGER) config->term_font_size = (int)tfs->as_integer;
+        VibeValue *tfg = vibe_object_get(obj->as_object, "term_fg");
+        if (tfg && tfg->type == VIBE_TYPE_STRING) config->term_fg = parse_hex_color(tfg->as_string);
+        VibeValue *tbg = vibe_object_get(obj->as_object, "term_bg");
+        if (tbg && tbg->type == VIBE_TYPE_STRING) config->term_bg = parse_hex_color(tbg->as_string);
     }
 
     /* ========================================================================
@@ -992,7 +1033,9 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     /* Warn about unknown keys */
     const char *known_keys[] = {
         "path", "shader", "terminal", "term_font", "term_cols", "term_rows",
-        "term_shader", "mode", "duration", "transition",
+        "term_shader", "term_font_bold", "term_font_italic", "term_cwd",
+        "term_env", "term_font_size", "term_fg", "term_bg",
+        "mode", "duration", "transition",
         "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps",
         "pause_on_fullscreen", "pause_coverage_threshold", "shuffle"
     };

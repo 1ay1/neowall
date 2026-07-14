@@ -89,8 +89,15 @@ struct wallpaper_config {
      * means the built-in crisp pass-through. */
     char term_cmd[OUTPUT_MAX_PATH_LENGTH];   /* command to run, e.g. "htop" */
     char term_font[OUTPUT_MAX_PATH_LENGTH];  /* font file path ('' = system search) */
+    char term_font_bold[OUTPUT_MAX_PATH_LENGTH];   /* optional bold face ('' = synth) */
+    char term_font_italic[OUTPUT_MAX_PATH_LENGTH]; /* optional italic face ('' = synth) */
+    char term_cwd[OUTPUT_MAX_PATH_LENGTH];   /* working directory ('' = inherit) */
+    char term_env[OUTPUT_MAX_PATH_LENGTH];   /* TERM value ('' = xterm-256color) */
     int  term_cols;                          /* grid width  (0 = auto from output) */
     int  term_rows;                          /* grid height (0 = auto from output) */
+    int  term_font_size;                     /* cell height in px (0 = default 18) */
+    long term_fg;                            /* default fg 0xRRGGBB (-1 = built-in) */
+    long term_bg;                            /* default bg 0xRRGGBB (-1 = built-in) */
 };
 
 /* Output (monitor) state */
