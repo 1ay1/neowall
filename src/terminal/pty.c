@@ -86,9 +86,25 @@ static void *reader_main(void *arg) {
         if (FD_ISSET(t->master_fd, &rf)) {
             ssize_t n = read(t->master_fd, buf, sizeof(buf));
             if (n > 0) {
+                char reply[128];
+                size_t rlen;
                 pthread_mutex_lock(&t->lock);
                 term_screen_feed(t->screen, buf, (size_t)n);
+                /* Drain any query responses (DSR/DA/…) the app requested and
+                 * send them straight back to the child. This is what unblocks
+                 * probing TUIs (btop, vim) that stall on the startup handshake
+                 * waiting for a cursor-position / device-attributes reply. */
+                rlen = term_screen_take_reply(t->screen, reply, sizeof(reply));
                 pthread_mutex_unlock(&t->lock);
+                if (rlen > 0) {
+                    size_t off = 0;
+                    while (off < rlen) {
+                        ssize_t w = write(t->master_fd, reply + off, rlen - off);
+                        if (w > 0) { off += (size_t)w; continue; }
+                        if (w < 0 && (errno == EAGAIN || errno == EINTR)) { usleep(200); continue; }
+                        break;
+                    }
+                }
                 atomic_fetch_add(&t->dirty_epoch, 1);
             } else if (n == 0) {
                 /* EOF: child closed the PTY. */

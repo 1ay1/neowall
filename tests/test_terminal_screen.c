@@ -149,6 +149,41 @@ int main(void) {
     expect(strcmp(term_screen_title(s), "Second") == 0, "OSC 2 sets title (ST-terminated)");
     term_screen_destroy(s);
 
+    /* --- query responses (DSR / Device Attributes) — the startup handshake
+     * that probing TUIs like btop and vim block on. Without a reply they paint
+     * once and freeze, so this is a load-bearing regression guard. --- */
+    s = term_screen_create(20, 6);
+    {
+        char rep[128];
+        /* DSR 5 -> "terminal OK" (CSI 0 n) */
+        feed(s, "\x1b[5n");
+        size_t n = term_screen_take_reply(s, rep, sizeof(rep));
+        expect(n == 4 && memcmp(rep, "\x1b[0n", 4) == 0, "DSR 5n -> CSI 0n");
+
+        /* DSR 6 (CPR) at a known cursor position -> CSI row;col R (1-based). */
+        feed(s, "\x1b[3;7H\x1b[6n");
+        n = term_screen_take_reply(s, rep, sizeof(rep));
+        rep[n] = 0;
+        expect(strcmp(rep, "\x1b[3;7R") == 0, "DSR 6n -> CPR row;col");
+
+        /* Primary DA (CSI c) -> a VT-class attribute report starting CSI ? */
+        feed(s, "\x1b[c");
+        n = term_screen_take_reply(s, rep, sizeof(rep));
+        expect(n >= 3 && rep[0] == 0x1b && rep[1] == '[' && rep[2] == '?' &&
+               rep[n-1] == 'c', "Primary DA -> CSI ? ... c");
+
+        /* Secondary DA (CSI > c) -> CSI > ... c */
+        feed(s, "\x1b[>c");
+        n = term_screen_take_reply(s, rep, sizeof(rep));
+        expect(n >= 3 && rep[0] == 0x1b && rep[1] == '[' && rep[2] == '>' &&
+               rep[n-1] == 'c', "Secondary DA -> CSI > ... c");
+
+        /* Buffer is empty once drained. */
+        n = term_screen_take_reply(s, rep, sizeof(rep));
+        expect(n == 0, "reply buffer empty after drain");
+    }
+    term_screen_destroy(s);
+
     printf("terminal_screen: %d checks, %d failures\n", g_checks, g_fails);
     return g_fails ? 1 : 0;
 }

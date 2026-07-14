@@ -187,6 +187,13 @@ const char      *term_screen_title(const term_screen *s);
  * events into the PTY. */
 void             term_screen_mouse_mode(const term_screen *s, int *proto, bool *sgr);
 
+/* Drain queued reply bytes (responses to DSR / Device-Attributes / other query
+ * control functions the app sent) into `out`, up to `cap` bytes; returns the
+ * count copied and clears the buffer. The PTY layer writes these back to the
+ * child after each feed. Query-answering is what lets probing TUIs (btop, vim)
+ * finish their startup handshake and actually animate. */
+size_t           term_screen_take_reply(term_screen *s, char *out, size_t cap);
+
 /* Render the visible grid to a UTF-8 string (glyphs only, no colour), one line
  * per row, trailing blanks trimmed. Caller frees. For the headless harness so
  * we can diff our grid against what a reference terminal would show. */

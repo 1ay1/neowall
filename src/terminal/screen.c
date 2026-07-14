@@ -25,6 +25,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 /* ------------------------------------------------------------------------ */
 
@@ -82,6 +83,15 @@ struct term_screen {
     /* Latest window title from OSC 0/2 (cosmetic for a wallpaper; kept so a
      * host could surface it). NUL-terminated. */
     char title[256];
+
+    /* Reply back-channel (host -> child): query control functions such as DSR
+     * (CSI 6n cursor-position report), Device Attributes (CSI c / CSI >c) and
+     * DECRQM append their response bytes here. The PTY layer drains this after
+     * every feed and writes it to the master fd. Without it, TUIs that probe
+     * the terminal at startup (btop, vim) block forever waiting for a reply and
+     * never animate. */
+    char   reply[128];
+    size_t reply_len;
 
     vtparser parser;
 };
@@ -384,6 +394,13 @@ static void set_mode(term_screen *s, uint8_t marker, const int *p, int n, bool s
 static void enter_alt(term_screen *s, bool clear);
 static void leave_alt(term_screen *s);
 
+/* Queue a response to the child (drained by the PTY layer after each feed). */
+static void screen_reply(term_screen *s, const char *bytes, size_t len) {
+    if (s->reply_len + len > sizeof(s->reply)) return; /* drop if full */
+    memcpy(s->reply + s->reply_len, bytes, len);
+    s->reply_len += len;
+}
+
 static void cb_csi(void *u, uint8_t final, const int *p, int n,
                    uint8_t marker, const uint8_t *im, int nim) {
     term_screen *s = u;
@@ -460,6 +477,35 @@ static void cb_csi(void *u, uint8_t final, const int *p, int n,
             int mode = pget(p,n,0,0);
             if (mode == 0) s->tabstops[s->cur.x] = false;
             else if (mode == 3) for (int x = 0; x < s->cols; x++) s->tabstops[x] = false;
+            break;
+        }
+        case 'n': { /* DSR: device status report */
+            /* Only the non-private form carries the queries TUIs rely on. */
+            if (marker == 0) {
+                int req = pget(p,n,0,0);
+                if (req == 5) {
+                    /* "terminal OK" */
+                    screen_reply(s, "\x1b[0n", 4);
+                } else if (req == 6) {
+                    /* CPR: cursor position report, 1-based, honouring origin. */
+                    int row = s->cur.y + 1, col = s->cur.x + 1;
+                    if (s->cur.origin_mode) row = s->cur.y - s->scroll_top + 1;
+                    char buf[32];
+                    int len = snprintf(buf, sizeof(buf), "\x1b[%d;%dR", row, col);
+                    if (len > 0) screen_reply(s, buf, (size_t)len);
+                }
+            }
+            break;
+        }
+        case 'c': { /* DA: device attributes */
+            if (marker == 0) {
+                /* Primary DA. Advertise a VT220 with 132-columns + selective
+                 * erase (62;1;6) — enough for TUIs to enable rich features. */
+                screen_reply(s, "\x1b[?62;1;6c", 10);
+            } else if (marker == '>') {
+                /* Secondary DA: "VT220, firmware 0, ROM 0". */
+                screen_reply(s, "\x1b[>0;0;0c", 9);
+            }
             break;
         }
         default: break;
@@ -661,6 +707,19 @@ const char *term_screen_title(const term_screen *s) {
 void term_screen_mouse_mode(const term_screen *s, int *proto, bool *sgr) {
     if (proto) *proto = s ? s->mouse_proto : 0;
     if (sgr)   *sgr   = s ? s->mouse_sgr : false;
+}
+
+/* Drain any queued reply bytes (query responses) into `out` (up to cap).
+ * Returns the number of bytes copied and clears the internal buffer. The PTY
+ * layer calls this after each feed and writes the result to the master fd. */
+size_t term_screen_take_reply(term_screen *s, char *out, size_t cap) {
+    if (!s || s->reply_len == 0) return 0;
+    size_t n = s->reply_len < cap ? s->reply_len : cap;
+    memcpy(out, s->reply, n);
+    /* Shift any remainder that didn't fit (rare) to the front. */
+    if (n < s->reply_len) memmove(s->reply, s->reply + n, s->reply_len - n);
+    s->reply_len -= n;
+    return n;
 }
 
 /* Resize: reallocate grids, preserving the top-left overlap of the primary
