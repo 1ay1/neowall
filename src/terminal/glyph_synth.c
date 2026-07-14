@@ -8,6 +8,7 @@
 #include "glyph_synth.h"
 
 #include <string.h>
+#include <math.h>
 
 /* ---- tiny raster helpers (all clamp to the cell) ---------------------- */
 
@@ -217,18 +218,22 @@ static bool render_box(uint32_t cp, uint8_t *o, int W, int H) {
  *     2 5      bit1 bit4
  *     3 6      bit2 bit5
  *     7 8      bit6 bit7
- * We render each set dot as a filled sub-rectangle covering its quadrant so
- * sparklines read as solid ramps (kitty/foot do the same — round dots look
- * worse for data graphs at small cell sizes). */
+ * Each set dot is drawn as an anti-aliased FILLED CIRCLE centred in its
+ * 2-wide x 4-tall sub-cell, with a gap around it — exactly how a real font
+ * renders braille (kitty/foot/wezterm show discrete dots, not solid quads).
+ * The dot radius is a share of the sub-cell so dense glyphs (U+28FF) still
+ * read as a rich textured fill while sparse ones read as a dotted plot. */
 static bool render_braille(uint32_t cp, uint8_t *o, int W, int H) {
     unsigned bits = cp - 0x2800;
 
-    /* Column x-ranges (2 columns) and row y-ranges (4 rows), edge-to-edge so
-     * adjacent braille cells tile without seams. */
-    int cxs[2] = { 0, W / 2 };
-    int cxe[2] = { W / 2, W };
-    int rys[4], rye[4];
-    for (int r = 0; r < 4; r++) { rys[r] = (r * H) / 4; rye[r] = ((r + 1) * H) / 4; }
+    /* Sub-cell grid: 2 columns x 4 rows. Dot centres sit at the middle of
+     * each sub-cell; radius fills most of it, leaving a thin inter-dot gap so
+     * dots read as discrete (like a real braille font) not a solid block. */
+    float subw = (float)W / 2.0f;
+    float subh = (float)H / 4.0f;
+    float rad = 0.44f * (subw < subh ? subw : subh);  /* round, gapped */
+    if (rad < 1.0f) rad = 1.0f;
+    float aa = 1.0f;                                   /* edge softness in px */
 
     /* bit -> (col,row) */
     static const int col_of[8] = {0,0,0,1,1,1,0,1};
@@ -236,8 +241,29 @@ static bool render_braille(uint32_t cp, uint8_t *o, int W, int H) {
 
     for (int b = 0; b < 8; b++) {
         if (!(bits & (1u << b))) continue;
-        int c = col_of[b], r = row_of[b];
-        fill_rect(o, W, H, cxs[c], rys[r], cxe[c], rye[r], 0xFF);
+        float cxf = ((float)col_of[b] + 0.5f) * subw;
+        float cyf = ((float)row_of[b] + 0.5f) * subh;
+        int x0 = (int)(cxf - rad - aa), x1 = (int)(cxf + rad + aa) + 1;
+        int y0 = (int)(cyf - rad - aa), y1 = (int)(cyf + rad + aa) + 1;
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > W) x1 = W;
+        if (y1 > H) y1 = H;
+        for (int y = y0; y < y1; y++) {
+            for (int x = x0; x < x1; x++) {
+                float dx = (float)x + 0.5f - cxf;
+                float dy = (float)y + 0.5f - cyf;
+                float d = dx * dx + dy * dy;
+                float dist = d > 0.0f ? sqrtf(d) : 0.0f;
+                float cov = (rad + aa - dist) / (2.0f * aa);  /* 1 inside, 0 outside */
+                if (cov <= 0.0f) continue;
+                if (cov > 1.0f) cov = 1.0f;
+                uint8_t v = (uint8_t)(cov * 255.0f + 0.5f);
+                /* max-blend so overlapping AA doesn't darken */
+                uint8_t *p = &o[(size_t)y * W + x];
+                if (v > *p) *p = v;
+            }
+        }
     }
     return true;
 }
