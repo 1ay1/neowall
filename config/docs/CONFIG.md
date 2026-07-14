@@ -302,6 +302,35 @@ term_shader crt.glsl
 
 `shader_fps` and `vsync` also apply in terminal mode (they pace the redraw).
 
+#### Terminal render effects (`term_fade`, `term_bloom`, `term_scanline`, `term_crt`, `term_chroma`)
+
+The built-in terminal path renders the cell grid procedurally on the GPU, so it
+can add effects a real terminal can't. Each key is a `0.0`–`1.0` intensity;
+omit a key to use its built-in default. Set to `0` to disable an effect.
+
+| Key | Effect | Default |
+|-----|--------|---------|
+| `term_fade` | Change-driven pulse: a cell briefly glows when its content updates, then settles — graphs and numbers glide instead of snapping. | `0.5` |
+| `term_bloom` | Brightness-keyed glow: bright/bold cells bleed light; dim text stays crisp. | `0.35` |
+| `term_scanline` | Faint phosphor scanline locked to the cell rows (never moires with pixels). | `0` (off) |
+| `term_crt` | Gentle CRT barrel warp + vignette. | `0` (off) |
+| `term_chroma` | Per-channel chromatic aberration that grows toward the screen edges. | `0` (off) |
+
+```vibe
+default {
+  terminal btop
+  term_font_size 18
+  # a full retro-CRT look:
+  term_bloom 0.5
+  term_scanline 0.4
+  term_crt 0.6
+  term_chroma 0.4
+}
+```
+
+A custom `term_shader` samples `nwTerm()` (the crisp grid, no effects). The
+built-in effects live in `nwTermFX()`, which a styling shader may also call.
+
 ## Global Options
 
 These sit at the top level of `config.vibe`, **outside** any `default {}` or
