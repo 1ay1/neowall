@@ -62,6 +62,7 @@ typedef struct {
     struct wl_keyboard *keyboard;
     bool initialized;
     bool occlusion_active;
+    bool has_pointer_cap;   /* seat advertised WL_SEAT_CAPABILITY_POINTER */
 
     /* Pointer tracking for terminal-wallpaper input forwarding. The pointer
      * `enter` binds these to the output under the cursor; motion updates the
@@ -606,6 +607,8 @@ static void seat_handle_capabilities(void *data, struct wl_seat *seat,
     wlr_backend_data_t *backend = data;
 
     log_debug("Wayland seat capabilities: 0x%x", capabilities);
+
+    backend->has_pointer_cap = (capabilities & WL_SEAT_CAPABILITY_POINTER) != 0;
 
     if (capabilities & WL_SEAT_CAPABILITY_POINTER) {
         /* Respect the global mouse_interaction setting. If disabled, don't bind
@@ -1237,6 +1240,14 @@ static void wlr_apply_input_config(void *data, struct neowall_state *state) {
     }
 
     if (want_pointer && !b->pointer && b->seat) {
+        /* Only bind if the seat actually advertised a pointer. Binding without
+         * the capability is a protocol violation and Wayland kills the
+         * connection — fatal on headless/kiosk/CI seats with no input device. */
+        if (!b->has_pointer_cap) {
+            log_debug("mouse_interaction=true but seat has no pointer capability, "
+                      "not binding pointer");
+            return;
+        }
         b->pointer = wl_seat_get_pointer(b->seat);
         if (b->pointer) {
             wl_pointer_add_listener(b->pointer, &pointer_listener, b);
