@@ -63,6 +63,12 @@ struct neowall_state {
     atomic_bool_t outputs_need_init; /* Flag when new outputs need initialization */
     atomic_int_t next_requested;     /* Counter for skip to next wallpaper requests */
     atomic_int_t set_index_requested; /* Requested wallpaper index (-1 = no request) */
+    atomic_bool_t set_terminal_requested; /* A `neowall set-terminal <cmd>` is pending; the
+                                           * command text is in pending_terminal_cmd (guarded by
+                                           * state_mutex). Consumed once by the event loop, which
+                                           * kills the current terminal child and spawns the new. */
+    char pending_terminal_cmd[512];   /* The command to swap in; valid only while
+                                       * set_terminal_requested is true. Written under state_mutex. */
     atomic_bool_t mouse_interaction;  /* Global: bind wl_pointer / poll X11 mouse / set cursor.
                                        * Default true. When false, the wallpaper surface receives
                                        * no pointer events and iMouse stays at center. Read by

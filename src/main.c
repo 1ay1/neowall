@@ -94,6 +94,96 @@ int read_set_index_file(void) {
     return index;
 }
 
+/* Get path to the set-terminal command file. Mirrors get_set_index_file_path. */
+static const char *get_set_terminal_file_path(void) {
+    static char path[MAX_PATH_LENGTH];
+    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+
+    if (runtime_dir) {
+        snprintf(path, sizeof(path), "%s/neowall-set-terminal", runtime_dir);
+    } else {
+        const char *home = getenv("HOME");
+        if (home) {
+            snprintf(path, sizeof(path), "%s/.neowall-set-terminal", home);
+        } else {
+            const char *rt = neowall_secure_runtime_dir();
+            if (rt) {
+                snprintf(path, sizeof(path), "%s/set-terminal", rt);
+            } else {
+                path[0] = '\0';
+            }
+        }
+    }
+
+    return path;
+}
+
+/* Write the requested terminal command to a file for the daemon to read.
+ *
+ * Atomic via mkstemp + rename(): a concurrent `set-terminal` can never make the
+ * daemon observe a half-written command. Same discipline as write_set_index_file. */
+static bool write_set_terminal_file(const char *cmd) {
+    const char *path = get_set_terminal_file_path();
+    if (!path || !path[0]) {
+        fprintf(stderr, "Cannot determine set-terminal file path\n");
+        return false;
+    }
+    char tmp[MAX_PATH_LENGTH];
+    int n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", path);
+    if (n < 0 || (size_t)n >= sizeof(tmp)) {
+        fprintf(stderr, "set-terminal path too long\n");
+        return false;
+    }
+    int fd = mkstemp(tmp);
+    if (fd < 0) {
+        fprintf(stderr, "Failed to create set-terminal file: %s\n", strerror(errno));
+        return false;
+    }
+    /* Store the command verbatim on one line. Newlines in the command would
+     * confuse the single-line reader, so reject them up front. */
+    size_t len = strlen(cmd);
+    if (write(fd, cmd, len) != (ssize_t)len ||
+        write(fd, "\n", 1) != 1) {
+        fprintf(stderr, "Failed to write set-terminal file: %s\n", strerror(errno));
+        close(fd);
+        unlink(tmp);
+        return false;
+    }
+    close(fd);
+    if (rename(tmp, path) != 0) {
+        fprintf(stderr, "Failed to install set-terminal file: %s\n", strerror(errno));
+        unlink(tmp);
+        return false;
+    }
+    return true;
+}
+
+/* Read the requested terminal command from the file (called by daemon).
+ * Copies up to out_len-1 bytes into out (always NUL-terminated), strips a
+ * trailing newline, removes the file. Returns true on success. */
+bool read_set_terminal_file(char *out, size_t out_len) {
+    if (!out || out_len == 0) return false;
+    out[0] = '\0';
+    const char *path = get_set_terminal_file_path();
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        return false;
+    }
+    char *line = fgets(out, (int)out_len, fp);
+    fclose(fp);
+    unlink(path);
+    if (!line) {
+        out[0] = '\0';
+        return false;
+    }
+    /* Strip the trailing newline write_set_terminal_file appended. */
+    size_t l = strlen(out);
+    while (l > 0 && (out[l - 1] == '\n' || out[l - 1] == '\r')) {
+        out[--l] = '\0';
+    }
+    return out[0] != '\0';
+}
+
 static struct neowall_state *global_state = NULL;
 
 /* Forward declarations */
@@ -466,6 +556,7 @@ static void print_usage(const char *program_name) {
     /* Shader-animation freeze controls (handled outside the table — RT signals). */
     printf("  %-21s %s\n", "pause-shader", "Freeze the shader animation in place");
     printf("  %-21s %s\n", "resume-shader", "Resume a frozen shader animation");
+    printf("  %-21s %s\n", "set-terminal <cmd>", "Swap the live terminal-wallpaper command");
     printf("\n");
     printf("Note: By default, neowall runs as a daemon. Use -f for foreground.\n");
     printf("If a daemon is already running, subsequent calls act as control commands.\n");
@@ -593,6 +684,22 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
             } else if (signum == SIGRTMIN + 2) {
                 log_info("Received SIGRTMIN+2, resuming shader animation...");
                 atomic_store_explicit(&state->shader_paused, false, memory_order_release);
+            } else if (signum == SIGRTMIN + 3) {
+                /* Swap the live terminal-wallpaper command. Read it into the
+                 * state buffer under state_mutex, then flag the event loop to
+                 * apply it (which kills the old child + spawns the new). */
+                char buf[512];
+                if (read_set_terminal_file(buf, sizeof(buf))) {
+                    pthread_mutex_lock(&state->state_mutex);
+                    snprintf(state->pending_terminal_cmd,
+                             sizeof(state->pending_terminal_cmd), "%s", buf);
+                    pthread_mutex_unlock(&state->state_mutex);
+                    atomic_store_explicit(&state->set_terminal_requested, true,
+                                          memory_order_release);
+                    log_info("Received SIGRTMIN+3, swapping terminal wallpaper to: %s", buf);
+                } else {
+                    log_error("Received SIGRTMIN+3 but no valid terminal command file found");
+                }
             } else {
                 log_debug("Received signal: %d", signum);
             }
@@ -650,6 +757,7 @@ static int setup_signalfd(void) {
     sigaddset(&mask, SIGRTMIN);      /* For set-index command */
     sigaddset(&mask, SIGRTMIN + 1);  /* For pause-shader command */
     sigaddset(&mask, SIGRTMIN + 2);  /* For resume-shader command */
+    sigaddset(&mask, SIGRTMIN + 3);  /* For set-terminal command */
 
     /* Block these signals for all threads */
     if (pthread_sigmask(SIG_BLOCK, &mask, NULL) != 0) {
@@ -907,6 +1015,72 @@ int main(int argc, char *argv[]) {
             return EXIT_SUCCESS;
         }
 
+        /* Special case: set-terminal swaps the live terminal-wallpaper command.
+         * Takes the command string as its argument. The daemon kills the old
+         * terminal child (and its process group) before spawning the new one,
+         * so nothing is orphaned. */
+        if (strcmp(cmd, "set-terminal") == 0) {
+            if (argc < 3 || argv[2][0] == '\0') {
+                fprintf(stderr, "Usage: %s set-terminal \"<command>\"\n", argv[0]);
+                fprintf(stderr, "  <command>  Program to run as the terminal wallpaper,\n");
+                fprintf(stderr, "             e.g. %s set-terminal \"htop\"\n", argv[0]);
+                return EXIT_FAILURE;
+            }
+            /* Join argv[2..] with spaces so an unquoted multi-word command
+             * (neowall set-terminal htop --tree) still works, while a quoted
+             * one arrives as a single argv element unchanged. */
+            char cmd_buf[512];
+            size_t off = 0;
+            for (int i = 2; i < argc; i++) {
+                int w = snprintf(cmd_buf + off, sizeof(cmd_buf) - off,
+                                 "%s%s", (i > 2) ? " " : "", argv[i]);
+                if (w < 0 || (size_t)w >= sizeof(cmd_buf) - off) {
+                    fprintf(stderr, "Error: terminal command too long\n");
+                    return EXIT_FAILURE;
+                }
+                off += (size_t)w;
+            }
+            /* Newlines would break the single-line command file protocol. */
+            if (strchr(cmd_buf, '\n') || strchr(cmd_buf, '\r')) {
+                fprintf(stderr, "Error: terminal command must not contain newlines\n");
+                return EXIT_FAILURE;
+            }
+
+            const char *pid_path = get_pid_file_path();
+            FILE *fp = fopen(pid_path, "r");
+            if (!fp) {
+                printf("No running neowall daemon found.\n");
+                printf("Start the daemon first with: neowall\n");
+                return EXIT_FAILURE;
+            }
+            pid_t pid;
+            if (fscanf(fp, "%d", &pid) != 1) {
+                fclose(fp);
+                fprintf(stderr, "Failed to read PID\n");
+                return EXIT_FAILURE;
+            }
+            fclose(fp);
+
+            if (kill(pid, 0) == -1 && errno == ESRCH) {
+                printf("NeoWall daemon (PID %d) is not running.\n", pid);
+                remove_pid_file();
+                return EXIT_FAILURE;
+            }
+
+            if (!write_set_terminal_file(cmd_buf)) {
+                return EXIT_FAILURE;
+            }
+
+            if (kill(pid, SIGRTMIN + 3) == -1) {
+                fprintf(stderr, "Failed to send signal to daemon: %s\n", strerror(errno));
+                unlink(get_set_terminal_file_path());
+                return EXIT_FAILURE;
+            }
+
+            printf("Setting terminal wallpaper to: %s\n", cmd_buf);
+            return EXIT_SUCCESS;
+        }
+
         /* Lookup command in table and dispatch */
         for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
             if (strcmp(cmd, daemon_commands[i].name) == 0) {
@@ -931,7 +1105,7 @@ int main(int argc, char *argv[]) {
         for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
             fprintf(stderr, ", %s", daemon_commands[i].name);
         }
-        fprintf(stderr, ", pause-shader, resume-shader");
+        fprintf(stderr, ", pause-shader, resume-shader, set-terminal");
         fprintf(stderr, "\n\nRun '%s --help' for more information.\n", argv[0]);
         return EXIT_FAILURE;
     }
@@ -1030,6 +1204,8 @@ int main(int argc, char *argv[]) {
     atomic_init(&state.outputs_need_init, false);
     atomic_init(&state.next_requested, 0);
     atomic_init(&state.set_index_requested, -1);  /* -1 means no request */
+    atomic_init(&state.set_terminal_requested, false);
+    state.pending_terminal_cmd[0] = '\0';
     atomic_init(&state.mouse_interaction, true);  /* default: pointer enabled, override from config */
     state.timer_fd = -1;
     state.wakeup_fd = -1;

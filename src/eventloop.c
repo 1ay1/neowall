@@ -254,6 +254,38 @@ static void render_outputs(struct neowall_state *state) {
             atomic_store_explicit(&state->set_index_requested, -1, memory_order_release);
         }
 
+        /* Handle set-terminal request — swap the live terminal-wallpaper
+         * command. output_set_terminal destroys the current multipass shader
+         * (killing the old terminal child and its whole process group before
+         * spawning the new one), so no orphan is possible. We apply it to every
+         * output that currently hosts a terminal wallpaper. */
+        if (atomic_load_explicit(&state->set_terminal_requested, memory_order_acquire) &&
+            output->config->type == WALLPAPER_TERMINAL) {
+            char cmd[512];
+            pthread_mutex_lock(&state->state_mutex);
+            snprintf(cmd, sizeof(cmd), "%s", state->pending_terminal_cmd);
+            pthread_mutex_unlock(&state->state_mutex);
+
+            if (cmd[0] != '\0') {
+                log_info("Swapping terminal wallpaper on output %s: '%s'",
+                         output->model[0] ? output->model : "unknown", cmd);
+                /* Reuse the output's existing grid + styling shader; passing
+                 * cols/rows 0 lets output_set_terminal re-derive the grid from
+                 * the output size, matching the original spawn. */
+                nw_result tr = output_set_terminal(
+                    output, cmd,
+                    output->config->shader_path[0] ? output->config->shader_path : NULL,
+                    output->config->term_font[0] ? output->config->term_font : NULL,
+                    0, 0);
+                if (nw_is_err(tr)) {
+                    log_error("Failed to swap terminal wallpaper on output %s: %s",
+                              output->model[0] ? output->model : "unknown",
+                              tr.context ? tr.context : nw_status_str(tr.status));
+                }
+                current_time = get_time_ms();
+            }
+        }
+
         /* Handle next wallpaper request - cycle ALL outputs with same config for synchronization */
         if (next_count > 0 && !processed_next && output->config->cycle && output->config->cycle_count > 0) {
             size_t cycled_count = output_cycle_group(outputs_snapshot, output_n, output);
@@ -402,6 +434,9 @@ static void render_outputs(struct neowall_state *state) {
     }
 
     /* === PHASE 3: damage + swap + commit (still no locks held) ============= */
+    /* The terminal-swap request was consumed for every terminal output in the
+     * loop above; clear it now so it fires exactly once. */
+    atomic_store_explicit(&state->set_terminal_requested, false, memory_order_release);
     for (size_t i = 0; i < swaps.len; i++) {
         struct output_state *output = swaps.data[i].output;
         if (!swaps.data[i].render_success) {
@@ -1126,6 +1161,7 @@ void event_loop_run(struct neowall_state *state) {
 
         if (any_needs_redraw ||
             atomic_load_explicit(&state->next_requested, memory_order_acquire) > 0 ||
+            atomic_load_explicit(&state->set_terminal_requested, memory_order_acquire) ||
             atomic_load_explicit(&state->set_index_requested, memory_order_acquire) >= 0) {
             render_outputs(state);
         }
