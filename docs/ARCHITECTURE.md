@@ -120,10 +120,23 @@ A single `poll(2)` over:
 | `fds[1]` | `timerfd` | wallpaper cycle due |
 | `fds[2]` | `eventfd` | internal wakeup (e.g. config events) |
 | `fds[3]` | `signalfd` | `next`/`pause`/`set`/`kill` etc. — **race-free** signal handling, no work in a signal handler |
-| `fds[4..]` | per-output `timerfd` | high-precision frame pacing for vsync-off shaders |
+| `fds[4..]` | per-output `timerfd` | high-precision **phase-locked** frame pacing for vsync-off animated wallpapers |
 
 There is **no polling thread** — the loop blocks in `poll` and wakes only on a
 real event or a capped 1 s timeout (so signals stay responsive).
+
+**Frame pacing.** vsync-off animated wallpapers (shaders + the live terminal)
+are paced by a per-output `timerfd` armed as a **one-shot absolute deadline**
+(`TFD_TIMER_ABSTIME`), re-armed after every present one period ahead. This is a
+*phase-locked* schedule, not a free-running interval: it anchors to the real
+present time so it can't drift against the display's vblank cadence (the source
+of periodic judder a fixed-interval timer produces). Overruns snap the phase
+forward instead of firing catch-up bursts. When the compositor supports
+`wp_presentation`, the real flip timestamp + hardware refresh period feed the
+pacer (`output_pace_note_present`), which then anchors to true present times and
+quantises its period to a whole number of refreshes; without it the pacer falls
+back to swap-completion time. Default presentation is **tearing-control async**
+(immediate flips, bypasses compositor FPS caps); `vsync=true` uses EGL vsync.
 
 `render_outputs()` runs in three phases, which is the key to its concurrency
 safety:
@@ -132,7 +145,13 @@ safety:
    each output, then **drop the lock**.
 2. **Render** each output (cycling, transitions, `eglMakeCurrent`, draw) — all
    the *blocking* GL work happens here, with **no lock held**.
-3. **Present** (damage → `eglSwapBuffers` → commit), still lockless.
+3. **Present**, still lockless:
+   - compute the changed region — a crisp terminal that moved only a few rows
+     reports a pixel band, everything else full-surface;
+   - queue `wl_surface` damage + request `wp_presentation` feedback;
+   - present via `eglSwapBuffersWithDamage` (only the changed rect is re-scanned;
+     falls back to `eglSwapBuffers` when the extension is absent) → `commit`;
+   - phase-lock the next frame to this present (`output_pace_advance`).
 
 Finally it **unrefs** every snapshotted output. See §7 for why the ref matters.
 
