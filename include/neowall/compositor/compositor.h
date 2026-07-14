@@ -340,7 +340,23 @@ typedef struct compositor_backend_ops {
      * @return true on success, false on failure
      */
     bool (*prepare_events)(void *backend_data);
-    
+
+    /**
+     * Optional: does the backend already hold events that poll() will not see?
+     *
+     * Xlib keeps a userspace event queue. Any Xlib call that talks to the server
+     * (XSync, XFlush, XPending) can drain the connection socket into that queue,
+     * so events can be waiting for us while poll() on get_fd() reports nothing
+     * readable and blocks for the full timeout. A backend with an internal queue
+     * reports it here so the event loop does not sleep on work it already has.
+     *
+     * Leave NULL if the backend has no such queue; the loop then just polls.
+     *
+     * @param backend_data Data returned from init()
+     * @return true if events are already queued and dispatch should run now
+     */
+    bool (*has_pending_events)(void *backend_data);
+
     /**
      * Read events from compositor
      * Reads events from the compositor (may block if prepared).

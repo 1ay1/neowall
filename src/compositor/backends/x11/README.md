@@ -138,7 +138,7 @@ bspc rule -a NeoWall state=floating layer=below
 X11 Backend
 ├── Display Connection (Xlib)
 ├── Window Management
-│   ├── XCreateSimpleWindow()
+│   ├── XCreateWindow() (managed or override-redirect, per WM detection)
 │   ├── EWMH property setup
 │   └── XRandR multi-monitor
 ├── EGL Integration
@@ -148,24 +148,89 @@ X11 Backend
 └── Event Handling
     ├── ConfigureNotify (resize)
     ├── Expose (redraw)
+    ├── PropertyNotify on root (_NET_SUPPORTING_WM_CHECK: a WM started/exited)
     └── RRScreenChangeNotify (monitor changes)
 ```
 
 ### Window Properties Set
 
-The backend automatically sets these X11 properties:
+Every wallpaper window carries these properties, set before it is mapped
+(`x11_set_wallpaper_properties`, `x11_core.c`):
 
 ```c
 _NET_WM_WINDOW_TYPE = _NET_WM_WINDOW_TYPE_DESKTOP
 _NET_WM_STATE = [
     _NET_WM_STATE_BELOW,
-    _NET_WM_STATE_STICKY,
+    _NET_WM_STATE_STICKY,        /* viewport-fixed; NOT "all desktops" */
     _NET_WM_STATE_SKIP_TASKBAR,
     _NET_WM_STATE_SKIP_PAGER
 ]
-WM_CLASS = "neowall\0NeoWall"
-WM_NAME = "NeoWall Wallpaper"
+_NET_WM_DESKTOP = 0xFFFFFFFF     /* all desktops (EWMH 5.5 / 9.2) */
+WM_CLASS        = "neowall", "NeoWall"   /* instance, class */
+WM_NAME         = "NeoWall Wallpaper"
+_NET_WM_NAME    = "NeoWall Wallpaper"    /* UTF8_STRING */
+WM_NORMAL_HINTS = { PPosition, PSize }   /* our geometry, not WM policy */
+WM_HINTS        = { input: False }       /* never takes keyboard focus */
 ```
+
+`WM_CLASS` is what a WM rule keys on, so it is also the handle you need to
+override our stacking if your WM gets it wrong — see
+[Wallpaper Appears Above Windows](#wallpaper-appears-above-windows).
+
+`WM_NORMAL_HINTS` matters on multi-monitor: ICCCM 4.1.2.3 makes a managed
+window's requested position merely advisory without `PPosition`, which would let
+the WM place a per-monitor wallpaper window on the wrong monitor.
+
+### Window Stacking: Managed vs Override-Redirect
+
+An override-redirect window is by definition **not managed**, so no WM ever reads
+its `_NET_WM_WINDOW_TYPE` and the `DESKTOP` hint above has no effect. The backend
+therefore picks per-display:
+
+| Situation | Window is | Stacked by |
+|---|---|---|
+| EWMH WM that advertises `_NET_WM_WINDOW_TYPE_DESKTOP` | managed | the WM, as the desktop |
+| EWMH WM that does not advertise it (dwm, i3) | override-redirect | `XLowerWindow` + raising the root's other children |
+| No WM (bare X, or a non-EWMH WM) | override-redirect | `XLowerWindow` + raising the root's other children |
+
+The WM is detected with the two-step `_NET_SUPPORTING_WM_CHECK` handshake (EWMH
+1.5): the root property names a window, and that window must carry the same
+property naming *itself*. A WM that exited without cleaning up leaves the root
+property behind, so only the self-reference proves one is actually alive.
+
+Liveness alone does not earn a managed window: the WM must also list
+`_NET_WM_WINDOW_TYPE_DESKTOP` in `_NET_SUPPORTED` (which EWMH says "MUST" name
+every supported hint). dwm and i3 pass the handshake but omit it, and neither
+honours the hint — dwm tiles every managed window, and i3 floats a window
+carrying `_NET_WM_DESKTOP=0xFFFFFFFF` above the tiling layer — so a managed
+wallpaper there would become an ordinary client window. Such WMs keep the
+override-redirect path; a WM that honours `DESKTOP` without advertising it can
+be forced managed with `NEOWALL_X11_OVERRIDE_REDIRECT=0` (below).
+
+**A window manager that starts after us is handled.** A wallpaper daemon is
+autostarted at login and routinely wins the race against the WM. The backend
+selects `PropertyChangeMask` on the root, and when `_NET_SUPPORTING_WM_CHECK`
+or `_NET_SUPPORTED` changes it re-runs the probe (a starting WM may write those
+two properties in either order); if a WM has appeared, the wallpaper windows are
+destroyed and recreated on the managed path. They must be *recreated* —
+`override_redirect` is fixed at `XCreateWindow` time, so re-setting properties on
+the existing window would not hand it to the WM. The shared `EGLContext` outlives
+the swap, so textures and compiled shaders are not rebuilt.
+
+**A window manager that dies is handled too.** When the WM goes away the window is
+rebuilt on the override-redirect path, restoring exactly the setup the daemon
+would have had if it had started with no WM. This is not cosmetic: when the WM
+dies the wallpaper window loses its contents, and for a static image
+`needs_redraw` has already been cleared after the first frame, so nothing ever
+repaints it — the wallpaper goes black and stays black. Rebuilding repaints it and
+re-arms the `XLowerWindow` path.
+
+A WM *restart* (`--replace`) flaps the property down and straight back up, so the
+WM-went-away edge is **debounced** (`X11_WM_GONE_DEBOUNCE_MS`, 1.5 s): the daemon
+waits, re-probes, and only rebuilds if no replacement has appeared. A restart
+therefore costs zero window rebuilds. Both edges are idempotent — the action is
+derived from the window state actually in use, so a repeated `PropertyNotify`
+does nothing.
 
 ### EGL Context Creation
 
@@ -212,12 +277,39 @@ notify with an unchanged layout is a no-op.
 
 ### Wallpaper Appears Above Windows
 
-**Cause:** Window manager not respecting EWMH hints
+**Cause:** Window manager not respecting EWMH hints, or the backend picked the
+wrong window type for your WM.
 
 **Solution:**
-1. Check if WM supports EWMH: `xprop -root | grep _NET_SUPPORTED`
-2. Add manual rules (see WM-specific sections above)
-3. Try a compositor like `picom` for better stacking
+1. Check if WM advertises desktop windows: `xprop -root _NET_SUPPORTED | grep -o _NET_WM_WINDOW_TYPE_DESKTOP`
+2. Check what the backend actually chose — run with `-f -v` and look for one of:
+   ```
+   X11: EWMH window manager with _NET_WM_WINDOW_TYPE_DESKTOP support detected - using managed wallpaper windows
+   X11: EWMH window manager detected, but its _NET_SUPPORTED does not advertise _NET_WM_WINDOW_TYPE_DESKTOP - using override-redirect wallpaper windows
+   X11: no EWMH window manager - using override-redirect wallpaper windows
+   ```
+3. Override the choice with `NEOWALL_X11_OVERRIDE_REDIRECT` (see below)
+4. Add manual rules keyed on `WM_CLASS` (see WM-specific sections above), e.g.
+   i3: `for_window [class="NeoWall"] ...`
+5. Try a compositor like `picom` for better stacking
+
+#### `NEOWALL_X11_OVERRIDE_REDIRECT`
+
+Escape hatch for a WM that mishandles the auto-detected choice. Accepts exactly
+two values; anything else logs a warning and is ignored.
+
+| Value | Effect |
+|---|---|
+| `1` | Force **override-redirect**. The WM never manages or stacks the wallpaper; `XLowerWindow` keeps it at the bottom. Use if your WM stacks the desktop window *above* other windows. |
+| `0` | Force a **managed** window. Use if auto-detection fails to see your WM but it does honour `_NET_WM_WINDOW_TYPE_DESKTOP`. |
+| unset | Auto-detect (the default), and switch to managed if a WM appears later. |
+
+```bash
+NEOWALL_X11_OVERRIDE_REDIRECT=1 neowall -f -v
+```
+
+Setting either value **pins** the choice: the backend will not revise it if a
+window manager starts or exits later.
 
 ### Black Screen / No Rendering
 

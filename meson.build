@@ -355,6 +355,7 @@ if has_x11
   x11_sources = files(
     'src/compositor/backends/x11/x11_core.c',
     'src/compositor/backends/x11/x11_geometry.c',
+    'src/compositor/backends/x11/x11_wm_detect.c',
   )
   occlusion_sources += files('src/compositor/backends/x11/x11_occlusion.c')
 endif
@@ -561,6 +562,18 @@ test_x11_geometry_exe = executable('test_x11_geometry',
 )
 
 test('x11_geometry', test_x11_geometry_exe)
+
+# X11 window-manager detection — the _NET_SUPPORTING_WM_CHECK decision matrix,
+# the NEOWALL_X11_OVERRIDE_REDIRECT contract, and the heal-on-late-WM edge.
+# Pure decision logic, no Xlib/display needed (see x11_wm_detect.c).
+test_x11_wm_detect_exe = executable('test_x11_wm_detect',
+  files('tests/test_x11_wm_detect.c',
+        'src/compositor/backends/x11/x11_wm_detect.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('x11_wm_detect', test_x11_wm_detect_exe)
 
 # Wayland toplevel output set — a toplevel can occupy several outputs at once.
 # Pure pointer-set logic, no Wayland headers or display needed.

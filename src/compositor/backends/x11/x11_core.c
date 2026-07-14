@@ -20,6 +20,7 @@
 #include "neowall/config/config.h"
 #include "x11_occlusion.h"
 #include "x11_geometry.h"
+#include "x11_wm_detect.h"
 #include "neowall/output/output.h"
 
 /*
@@ -71,11 +72,58 @@ typedef struct {
     Atom atom_net_wm_state_sticky;
     Atom atom_net_wm_state_skip_taskbar;
     Atom atom_net_wm_state_skip_pager;
+    Atom atom_net_wm_desktop;
+    Atom atom_net_wm_name;
+    Atom atom_utf8_string;
+    Atom atom_net_supporting_wm_check;
+    Atom atom_net_supported;
+
+    /* Root-pixmap advertisement, for pseudo-transparency clients. */
+    Atom atom_xrootpmap_id;
+    Atom atom_esetroot_pmap_id;
+
+    /* The pixmap XID currently advertised by _XROOTPMAP_ID / ESETROOT_PMAP_ID
+     * because we put it there. 0 when we have advertised nothing (or have since
+     * withdrawn it). Tracked on the backend, not the surface, because the
+     * properties are a screen-wide singleton that outlives any one surface: a
+     * window rebuild destroys the surface that published, and the replacement
+     * must not be able to leave the root naming a pixmap that no longer exists. */
+    Pixmap published_root_pixmap;
 
     /* XRandR support */
     bool has_xrandr;
     int xrandr_event_base;
     int xrandr_error_base;
+
+    /* How every per-monitor window is currently created. Resolved at init, and
+     * revised if a window manager appears later (see x11_recheck_wm). */
+    bool override_redirect;
+
+    /* NEOWALL_X11_OVERRIDE_REDIRECT pinned the choice: never auto-revise it. */
+    bool or_env_forced;
+
+    /* Result of the last WM probe: a live EWMH WM that advertises
+     * _NET_WM_WINDOW_TYPE_DESKTOP in _NET_SUPPORTED, i.e. one we should hand a
+     * managed window to. Cached so a PropertyNotify that does not change the
+     * answer costs nothing. */
+    bool wm_present;
+
+    /* The last probe saw a live EWMH WM, whether or not it advertises desktop
+     * support (dwm and i3 announce EWMH but tile/float DESKTOP windows). Only
+     * consulted for logging, so a user can tell "no WM" from "your WM does not
+     * advertise _NET_WM_WINDOW_TYPE_DESKTOP". */
+    bool wm_alive;
+
+    /* When the WM went away, the time (ms) at which we stop giving it the benefit
+     * of the doubt and rebuild on the override-redirect path. 0 = nothing pending.
+     * Debounces a WM restart, which flaps the property down and back up. */
+    uint64_t wm_gone_deadline_ms;
+
+    /* The window named by _NET_SUPPORTING_WM_CHECK at the last successful probe.
+     * We select StructureNotifyMask on it so that its DestroyNotify tells us the
+     * WM has gone: a WM killed outright (kill -9, crash) does not clean up the
+     * root property, so waiting for a PropertyNotify would wait forever. */
+    Window wm_check_window;
 
     bool occlusion_active;
 
@@ -92,7 +140,12 @@ typedef struct {
                             * background pixmap for pseudo-transparency. Secondary
                             * monitors render their own window but must not clobber
                             * the shared root pixmap with just their slice. */
-    Pixmap root_pixmap;  /* Pixmap set on root window for pseudo-transparency */
+    Pixmap root_pixmap;  /* Pixmap set on root window for pseudo-transparency.
+                          * Whether it is *advertised* is backend state, not surface
+                          * state: see x11_backend_data_t.published_root_pixmap.
+                          * Until the first commit fills it, it holds whatever
+                          * XCreatePixmap handed back, which is undefined — so it is
+                          * not advertised at create time. */
     GC gc;               /* Graphics context for copying to pixmap */
     XImage *ximage;      /* XImage for transferring OpenGL pixels to pixmap */
     unsigned char *pixel_buffer;  /* Buffer for glReadPixels */
@@ -116,23 +169,240 @@ static bool x11_init_atoms(x11_backend_data_t *backend) {
     backend->atom_net_wm_state_skip_taskbar = XInternAtom(dpy, "_NET_WM_STATE_SKIP_TASKBAR", False);
     backend->atom_net_wm_state_skip_pager = XInternAtom(dpy, "_NET_WM_STATE_SKIP_PAGER", False);
 
+    /* Desktop placement + name, for the managed path. */
+    backend->atom_net_wm_desktop = XInternAtom(dpy, "_NET_WM_DESKTOP", False);
+    backend->atom_net_wm_name = XInternAtom(dpy, "_NET_WM_NAME", False);
+    backend->atom_utf8_string = XInternAtom(dpy, "UTF8_STRING", False);
+
+    /* Interned once, not per-probe: the probe re-runs on every root
+     * PropertyNotify naming these atoms. */
+    backend->atom_net_supporting_wm_check =
+        XInternAtom(dpy, "_NET_SUPPORTING_WM_CHECK", False);
+    backend->atom_net_supported = XInternAtom(dpy, "_NET_SUPPORTED", False);
+
+    /* Root-pixmap advertisement. Interned here, with the rest, rather than being
+     * cached in a function-static: atom IDs are per-server, and the backend is
+     * re-initialised against a fresh Display if the X server restarts. */
+    backend->atom_xrootpmap_id = XInternAtom(dpy, "_XROOTPMAP_ID", False);
+    backend->atom_esetroot_pmap_id = XInternAtom(dpy, "ESETROOT_PMAP_ID", False);
+
     return true;
 }
 
-/* Declare a wallpaper window as the desktop, before it is mapped.
+/* Defined with its publishing counterpart, below the commit path. Used by both
+ * the surface-destroy path and backend cleanup. */
+static void x11_unpublish_root_pixmap(x11_backend_data_t *backend);
+
+/* ============================================================================
+ * WINDOW MANAGER DETECTION
+ * ============================================================================ */
+
+/* XGetWindowProperty on the window named by a stale _NET_SUPPORTING_WM_CHECK
+ * raises BadWindow, and Xlib's default error handler terminates the process.
+ * Swallow errors for the duration of the probe.
  *
- * EWMH requires _NET_WM_WINDOW_TYPE to be set before the window is mapped, and a
- * client may only set _NET_WM_STATE directly while the window is unmapped; once
- * mapped, state changes must go through the window manager via a _NET_WM_STATE
- * client message.
+ * THREADING CONSTRAINT: XSetErrorHandler is process-global, not per-Display.
+ * Xlib keeps exactly one handler pointer for the whole process, so the
+ * save/install/restore dance below is only safe because nothing else in the
+ * process can be making X requests concurrently: compositor_backend_init()
+ * (and hence every call to this probe that runs at startup) completes before
+ * the first pthread_create() in the codebase. The re-probe on the no-WM -> WM
+ * edge runs later, but on the event-loop thread, which is the only thread that
+ * touches this Display.
  *
- * The wallpaper windows are override-redirect, so no window manager reads these
- * properties today and setting them changes nothing about how the window is
- * stacked or drawn. They are set because they are the properties the window is
- * meant to carry: the atoms are already interned for exactly this purpose, and
- * anything that does inspect the window (a pager, a screenshot tool, a future
- * managed-window path) then finds the correct hints rather than none at all. */
-static void x11_set_wallpaper_properties(x11_backend_data_t *backend, Window window) {
+ * If a future change spawns a thread that makes X requests, or moves backend
+ * init after thread spawn, this becomes a race: the other thread's errors would
+ * be swallowed for the probe's duration, and its own handler could be clobbered.
+ * Either keep that invariant or move to a per-probe Display connection. */
+static bool x11_probe_error;
+
+static int x11_probe_error_handler(Display *dpy, XErrorEvent *err) {
+    (void)dpy;
+    (void)err;
+    x11_probe_error = true;
+    return 0;
+}
+
+/* Read one XA_WINDOW-typed property naming a single window. Returns true if the
+ * property is present with the expected type/format/count, and writes the window
+ * it names to *out. */
+static bool x11_read_window_prop(Display *dpy, Window target, Atom prop_atom,
+                                 unsigned long *out) {
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *prop = NULL;
+
+    if (XGetWindowProperty(dpy, target, prop_atom, 0, 1, False, XA_WINDOW,
+                           &actual_type, &actual_format, &nitems, &bytes_after,
+                           &prop) != Success) {
+        return false;
+    }
+    if (actual_type != XA_WINDOW || actual_format != 32 || nitems != 1 || !prop) {
+        if (prop) XFree(prop);
+        return false;
+    }
+
+    *out = (unsigned long)*(Window *)prop;
+    XFree(prop);
+    return true;
+}
+
+/* Fill obs->supported_prop_valid / obs->desktop_in_supported from the root's
+ * _NET_SUPPORTED. A root property read cannot raise BadWindow, so this needs no
+ * error handler. Bounded read: 4096 32-bit items is far beyond any real WM's
+ * list (metacity's is under a hundred). */
+static void x11_read_supported(x11_backend_data_t *backend, x11_wm_check_obs_t *obs) {
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *prop = NULL;
+
+    if (XGetWindowProperty(backend->x_display, backend->root_window,
+                           backend->atom_net_supported, 0, 4096, False, XA_ATOM,
+                           &actual_type, &actual_format, &nitems, &bytes_after,
+                           &prop) != Success) {
+        return;
+    }
+    if (actual_type != XA_ATOM || actual_format != 32 || nitems == 0 || !prop) {
+        if (prop) XFree(prop);
+        return;
+    }
+
+    obs->supported_prop_valid = true;
+    Atom *atoms = (Atom *)prop;
+    for (unsigned long i = 0; i < nitems; i++) {
+        if (atoms[i] == backend->atom_net_wm_window_type_desktop) {
+            obs->desktop_in_supported = true;
+            break;
+        }
+    }
+    XFree(prop);
+}
+
+/* True if a window manager we should hand a managed window to owns the screen:
+ * a live EWMH WM (two-step _NET_SUPPORTING_WM_CHECK handshake, EWMH 1.5) that
+ * advertises _NET_WM_WINDOW_TYPE_DESKTOP in _NET_SUPPORTED.
+ *
+ * This function gathers the facts from the X server; the decisions made from
+ * them are x11_ewmh_wm_check_decide() / x11_ewmh_wm_manages_desktop(), in
+ * x11_wm_detect.c, so they can be unit-tested without an X server. Also records
+ * backend->wm_alive (liveness regardless of desktop support) for logging. */
+static bool x11_ewmh_wm_present(x11_backend_data_t *backend) {
+    Display *dpy = backend->x_display;
+    Atom check = backend->atom_net_supporting_wm_check;
+
+    x11_wm_check_obs_t obs;
+    memset(&obs, 0, sizeof(obs));
+
+    obs.root_prop_valid =
+        x11_read_window_prop(dpy, backend->root_window, check, &obs.root_names);
+
+    /* Only the second read can touch a window that may not exist, so only it
+     * needs the error handler. */
+    bool present = false;
+    if (obs.root_prop_valid && obs.root_names != 0) {
+        x11_read_supported(backend, &obs);
+
+        x11_probe_error = false;
+        XErrorHandler prev = XSetErrorHandler(x11_probe_error_handler);
+
+        obs.child_prop_valid =
+            x11_read_window_prop(dpy, (Window)obs.root_names, check, &obs.child_names);
+
+        obs.x_error = x11_probe_error;
+        present = x11_ewmh_wm_manages_desktop(&obs);
+
+        /* Watch the WM's check window die. A WM that is killed outright leaves the
+         * root property behind, so its death produces no PropertyNotify — this
+         * DestroyNotify is the only event that tells us. Selecting input on
+         * another client's window is fine (StructureNotify is not exclusive); it
+         * races with the window being destroyed, hence the error handler, which is
+         * still installed here.
+         *
+         * XSelectInput REPLACES this client's mask on the window. If a broken WM
+         * ever named the root as its check window, a bare StructureNotifyMask here
+         * would drop the PropertyChangeMask selected at init and blind the WM
+         * tracker for the rest of the session — so keep it in that case. */
+        if (present) {
+            backend->wm_check_window = (Window)obs.root_names;
+            long mask = StructureNotifyMask;
+            if (backend->wm_check_window == backend->root_window) {
+                mask |= PropertyChangeMask;
+            }
+            XSelectInput(dpy, backend->wm_check_window, mask);
+        }
+
+        XSync(dpy, False);  /* Flush any BadWindow before restoring the handler. */
+        XSetErrorHandler(prev);
+
+        /* A BadWindow at any point in the probe — including XSelectInput racing
+         * the check window's destruction — means the WM is already gone. Fold it
+         * into the observations and re-decide, so present and wm_alive below are
+         * derived from one consistent set of facts. */
+        obs.x_error = obs.x_error || x11_probe_error;
+        present = x11_ewmh_wm_manages_desktop(&obs);
+    }
+
+    backend->wm_alive = x11_ewmh_wm_check_decide(&obs);
+    if (!present) {
+        backend->wm_check_window = None;
+    }
+    return present;
+}
+
+/* Decide how the per-monitor wallpaper windows are created, and record whether
+ * the env var pinned that choice (which disables the later heal).
+ *
+ * NEOWALL_X11_OVERRIDE_REDIRECT=1 forces override-redirect, =0 forces a managed
+ * window, as an escape hatch for WMs that mis-handle the auto-detected choice.
+ * Any other value is a mistake and is reported rather than silently ignored. */
+static bool x11_use_override_redirect(x11_backend_data_t *backend) {
+    const char *env = getenv("NEOWALL_X11_OVERRIDE_REDIRECT");
+    x11_or_env_t mode = x11_or_env_parse(env);
+
+    if (mode == X11_OR_ENV_INVALID) {
+        log_warn("X11: NEOWALL_X11_OVERRIDE_REDIRECT=\"%s\" is not recognised "
+                 "(expected \"0\" for a managed window or \"1\" for "
+                 "override-redirect) - ignoring it and auto-detecting", env);
+    }
+
+    backend->or_env_forced = x11_or_env_is_forced(mode);
+    backend->wm_present = x11_ewmh_wm_present(backend);
+
+    bool override_redirect = x11_or_decide(mode, backend->wm_present);
+
+    if (backend->or_env_forced) {
+        log_info("X11: NEOWALL_X11_OVERRIDE_REDIRECT=%s, forcing %s wallpaper window",
+                 env, override_redirect ? "override-redirect" : "managed");
+    } else if (backend->wm_present) {
+        log_info("X11: EWMH window manager with _NET_WM_WINDOW_TYPE_DESKTOP "
+                 "support detected - using managed wallpaper windows");
+    } else if (backend->wm_alive) {
+        log_info("X11: EWMH window manager detected, but its _NET_SUPPORTED does "
+                 "not advertise _NET_WM_WINDOW_TYPE_DESKTOP - using "
+                 "override-redirect wallpaper windows "
+                 "(NEOWALL_X11_OVERRIDE_REDIRECT=0 forces managed)");
+    } else {
+        log_info("X11: no EWMH window manager - using override-redirect wallpaper "
+                 "windows (will switch to managed if one appears)");
+    }
+
+    return override_redirect;
+}
+
+/* Declare the wallpaper window as the desktop, before it is mapped. EWMH requires
+ * _NET_WM_WINDOW_TYPE to be set before the window is mapped, and the client may
+ * only set _NET_WM_STATE directly while the window is unmapped; once mapped, state
+ * changes must go through the WM via a _NET_WM_STATE client message.
+ *
+ * Everything here is set on both the managed and the override-redirect path. A
+ * WM does not read properties off an override-redirect window, so on that path
+ * they are inert — but they are also free, and setting them unconditionally
+ * means the heal path (x11_recreate_surfaces) has one window-setup path to get
+ * right instead of two. */
+static void x11_set_wallpaper_properties(x11_backend_data_t *backend, Window window,
+                                         int pos_x, int pos_y, int width, int height) {
     Display *dpy = backend->x_display;
 
     XChangeProperty(dpy, window, backend->atom_net_wm_window_type, XA_ATOM, 32,
@@ -148,6 +418,61 @@ static void x11_set_wallpaper_properties(x11_backend_data_t *backend, Window win
     XChangeProperty(dpy, window, backend->atom_net_wm_state, XA_ATOM, 32,
                     PropModeReplace, (unsigned char *)states,
                     (int)(sizeof(states) / sizeof(states[0])));
+
+    /* EWMH 5.5 / 9.2: a desktop window belongs on every desktop, which is what
+     * 0xFFFFFFFF means. _NET_WM_STATE_STICKY above is not the same thing — it
+     * means "fixed relative to the viewport", i.e. it does not scroll with a
+     * large desktop, and says nothing about which desktops the window is on. A
+     * format-32 property is passed to Xlib as an array of long. */
+    unsigned long all_desktops = 0xFFFFFFFFUL;
+    XChangeProperty(dpy, window, backend->atom_net_wm_desktop, XA_CARDINAL, 32,
+                    PropModeReplace, (unsigned char *)&all_desktops, 1);
+
+    /* ICCCM 4.1.2.5: WM_CLASS "must be present when the window leaves the
+     * Withdrawn state". An override-redirect window is never managed, so it was
+     * exempt; a managed wallpaper window is not. This is also the handle a user
+     * needs to write a WM rule against us if our stacking misbehaves on their
+     * WM (i3 `for_window [class="NeoWall"]`, KWin window rules, openbox
+     * `<application class="NeoWall">`). */
+    XClassHint class_hint = {
+        .res_name = (char *)"neowall",   /* instance name */
+        .res_class = (char *)"NeoWall",  /* class name */
+    };
+    XSetClassHint(dpy, window, &class_hint);
+
+    /* WM_NAME (ICCCM, latin-1) and _NET_WM_NAME (EWMH, UTF-8). EWMH says a WM
+     * must prefer _NET_WM_NAME where both are present; pagers and `xprop` read
+     * either, so set both. */
+    static const char wm_name[] = "NeoWall Wallpaper";
+    XStoreName(dpy, window, wm_name);
+    XChangeProperty(dpy, window, backend->atom_net_wm_name, backend->atom_utf8_string,
+                    8, PropModeReplace, (const unsigned char *)wm_name,
+                    (int)(sizeof(wm_name) - 1));
+
+    /* ICCCM 4.1.2.3: for a managed window the geometry passed to XCreateWindow is
+     * only a request, and without PPosition the WM is free to place the window by
+     * its own policy. We create one window per monitor at that monitor's origin,
+     * so being placed anywhere else puts the wrong wallpaper on the wrong screen.
+     * PPosition/PSize say the position and size are ours, not the WM's.
+     *
+     * Deliberately no PMinSize/PMaxSize: the window is resized on RandR changes
+     * (x11_configure_surface), and pinning min == max here would leave stale hints
+     * fighting that. */
+    XSizeHints size_hints;
+    memset(&size_hints, 0, sizeof(size_hints));
+    size_hints.flags = PPosition | PSize;
+    size_hints.x = pos_x;
+    size_hints.y = pos_y;
+    size_hints.width = width;
+    size_hints.height = height;
+    XSetWMNormalHints(dpy, window, &size_hints);
+
+    /* input=False: the wallpaper must never take keyboard focus from real apps. */
+    XWMHints wm_hints;
+    memset(&wm_hints, 0, sizeof(wm_hints));
+    wm_hints.flags = InputHint;
+    wm_hints.input = False;
+    XSetWMHints(dpy, window, &wm_hints);
 }
 
 /* ============================================================================
@@ -247,6 +572,21 @@ static void *x11_backend_init(struct neowall_state *state) {
     /* Initialize XRandR */
     x11_init_xrandr(backend);
 
+    /* Watch the root for _NET_SUPPORTING_WM_CHECK appearing or changing, so a
+     * window manager that starts *after* us is noticed. A wallpaper daemon is
+     * autostarted at login and routinely wins that race; probing once at init and
+     * never looking again would leave us override-redirect for the whole session,
+     * painting over every window the WM later maps.
+     *
+     * No other code in the process selects a core event mask on the root
+     * (XRRSelectInput sets the RandR extension's own mask, which is separate), so
+     * this does not clobber anyone else's selection. */
+    XSelectInput(backend->x_display, backend->root_window, PropertyChangeMask);
+
+    /* Probe the WM; every per-monitor window is created the same way. Re-run on
+     * the root PropertyNotify above (see x11_recheck_wm). */
+    backend->override_redirect = x11_use_override_redirect(backend);
+
     backend->initialized = true;
 
     log_info("X11 backend initialized successfully");
@@ -265,6 +605,14 @@ static void x11_backend_cleanup(void *backend_data) {
     log_info("Cleaning up X11 backend");
 
     if (backend->x_display) {
+        /* Shutdown does not tear surfaces down one by one — main() cleans up EGL
+         * and then closes the display — so this is the only place the root-pixmap
+         * advertisement gets withdrawn on exit. Without it, closing the connection
+         * destroys the pixmap (X protocol: a client's resources are freed at
+         * connection close unless the close-down mode retains them) and leaves
+         * _XROOTPMAP_ID / ESETROOT_PMAP_ID naming a dead XID for the next reader. */
+        x11_unpublish_root_pixmap(backend);
+
         XCloseDisplay(backend->x_display);
         backend->x_display = NULL;
     }
@@ -356,7 +704,7 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
 
     /* Create a fullscreen window at the bottom of the stack */
     XSetWindowAttributes attrs;
-    attrs.override_redirect = True;  /* Bypass WM completely */
+    attrs.override_redirect = backend->override_redirect ? True : False;
     attrs.background_pixel = BlackPixel(backend->x_display, backend->screen);
     attrs.border_pixel = 0;
     attrs.event_mask = ExposureMask | StructureNotifyMask |
@@ -382,28 +730,35 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
         return NULL;
     }
 
-    /* Must precede XMapWindow: EWMH hints are read at map time. */
-    x11_set_wallpaper_properties(backend, surf_data->x_window);
+    /* Must precede XMapWindow: EWMH hints on an already-mapped window are not
+     * read by the WM at map time. */
+    x11_set_wallpaper_properties(backend, surf_data->x_window,
+                                 pos_x, pos_y, width, height);
 
     /* Map and lower the window to bottom of stack */
     XMapWindow(backend->x_display, surf_data->x_window);
     XLowerWindow(backend->x_display, surf_data->x_window);
 
-    /* Raise all other windows above this one */
-    Window root_return, parent_return;
-    Window *children = NULL;
-    unsigned int nchildren = 0;
+    /* Only meaningful without a WM. A managed window may be reparented into a
+     * frame, so the root's children are the WM's frames - raising them all would
+     * fight the WM's own stacking of the desktop window. */
+    if (backend->override_redirect) {
+        /* Raise all other windows above this one */
+        Window root_return, parent_return;
+        Window *children = NULL;
+        unsigned int nchildren = 0;
 
-    if (XQueryTree(backend->x_display, backend->root_window, &root_return,
-                   &parent_return, &children, &nchildren)) {
-        /* Raise all windows except our wallpaper window */
-        for (unsigned int i = 0; i < nchildren; i++) {
-            if (children[i] != surf_data->x_window) {
-                XRaiseWindow(backend->x_display, children[i]);
+        if (XQueryTree(backend->x_display, backend->root_window, &root_return,
+                       &parent_return, &children, &nchildren)) {
+            /* Raise all windows except our wallpaper window */
+            for (unsigned int i = 0; i < nchildren; i++) {
+                if (children[i] != surf_data->x_window) {
+                    XRaiseWindow(backend->x_display, children[i]);
+                }
             }
-        }
-        if (children) {
-            XFree(children);
+            if (children) {
+                XFree(children);
+            }
         }
     }
 
@@ -413,28 +768,18 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
      * don't paint just their slice onto the whole root. */
     surf_data->owns_root_pixmap = (pos_x == 0 && pos_y == 0);
 
-    if (surf_data->owns_root_pixmap) {
-        /* Set the pixmap as root window background */
-        XSetWindowBackgroundPixmap(backend->x_display, backend->root_window, surf_data->root_pixmap);
-        XClearWindow(backend->x_display, backend->root_window);
-
-        /* Set root window properties for pseudo-transparency apps (Conky, etc) */
-        Atom prop_root = XInternAtom(backend->x_display, "_XROOTPMAP_ID", False);
-        Atom prop_esetroot = XInternAtom(backend->x_display, "ESETROOT_PMAP_ID", False);
-        XChangeProperty(backend->x_display, backend->root_window, prop_root, XA_PIXMAP, 32,
-                       PropModeReplace, (unsigned char *)&surf_data->root_pixmap, 1);
-        XChangeProperty(backend->x_display, backend->root_window, prop_esetroot, XA_PIXMAP, 32,
-                       PropModeReplace, (unsigned char *)&surf_data->root_pixmap, 1);
-
-        /* Send PropertyNotify event to notify apps like Conky that background changed */
-        XEvent event;
-        memset(&event, 0, sizeof(event));
-        event.type = PropertyNotify;
-        event.xproperty.window = backend->root_window;
-        event.xproperty.atom = prop_root;
-        event.xproperty.state = PropertyNewValue;
-        XSendEvent(backend->x_display, backend->root_window, False, PropertyChangeMask, &event);
-    }
+    /* The pixmap is deliberately NOT made the root's background here. The X
+     * protocol leaves the initial contents of a pixmap undefined (XCreatePixmap
+     * does not clear it), so publishing it now and clearing the root would put
+     * undefined server memory on the screen.
+     *
+     * That matters because the root's background is exactly what is visible while
+     * the wallpaper window is not: on the managed path the window is mapped by the
+     * window manager, in another process, so there is a gap between creating the
+     * window and it becoming viewable. Publishing is therefore deferred to the
+     * first x11_commit_surface that has actually rendered into the pixmap
+     * (x11_publish_root_pixmap). Until then the root keeps the background it
+     * already had. */
 
     XFlush(backend->x_display);
 
@@ -487,6 +832,12 @@ static void x11_destroy_surface(struct compositor_surface *surface) {
                 XFreeGC(backend->x_display, surf_data->gc);
             }
             if (surf_data->root_pixmap) {
+                /* Withdraw the advertisement first: after XFreePixmap the XID is
+                 * invalid, and nothing republishes until the replacement surface's
+                 * first rendered commit. */
+                if (backend->published_root_pixmap == surf_data->root_pixmap) {
+                    x11_unpublish_root_pixmap(backend);
+                }
                 XFreePixmap(backend->x_display, surf_data->root_pixmap);
             }
             if (surf_data->ximage) {
@@ -522,9 +873,12 @@ static bool x11_configure_surface(struct compositor_surface *surface,
     if (!surface || !config) return false;
 
     x11_surface_data_t *surf_data = surface->backend_data;
-    x11_backend_data_t *backend = (x11_backend_data_t *)surface->backend;
+    /* surface->backend is the compositor_backend wrapper (compositor_surface.c
+     * re-points it after create_surface returns); the X11 state is its ->data. */
+    x11_backend_data_t *backend =
+        surface->backend ? (x11_backend_data_t *)surface->backend->data : NULL;
 
-    if (!surf_data || !backend) return false;
+    if (!surf_data || !backend || !backend->x_display) return false;
 
     log_debug("Configuring X11 surface");
 
@@ -707,6 +1061,106 @@ static bool x11_handle_events(x11_backend_data_t *backend) {
  * COMMIT SURFACE
  * ============================================================================ */
 
+/* Does the root property `prop` still name the pixmap we put there? */
+static bool x11_root_prop_names(x11_backend_data_t *backend, Atom prop, Pixmap pixmap) {
+    Atom type;
+    int format;
+    unsigned long n, rem;
+    unsigned char *data = NULL;
+
+    if (XGetWindowProperty(backend->x_display, backend->root_window, prop, 0, 1,
+                           False, XA_PIXMAP, &type, &format, &n, &rem,
+                           &data) != Success || !data) {
+        return false;
+    }
+    bool match = (type == XA_PIXMAP && format == 32 && n == 1 &&
+                  *(Pixmap *)(void *)data == pixmap);
+    XFree(data);
+    return match;
+}
+
+/* Withdraw the root-pixmap advertisement before the pixmap it names is freed.
+ *
+ * XFreePixmap invalidates the XID at the protocol level immediately, so any
+ * client that reads _XROOTPMAP_ID / ESETROOT_PMAP_ID after the free and before
+ * the replacement surface republishes gets a dangling drawable. The window in
+ * which that can happen is new: this backend now destroys and rebuilds its
+ * windows mid-session (WM appears, WM dies), where before it created them once.
+ *
+ * Deleting the properties is the right shape rather than deferring the free
+ * until the replacement has published, because:
+ *   - "no root pixmap" is a state every pseudo-transparency client already
+ *     handles: it is what the root looks like before any wallpaper setter has
+ *     run. A dangling XID is not — it is a BadDrawable on the client's next
+ *     XCopyArea, which is a class of bug the client cannot even see coming.
+ *   - deferring the free has no safe end: if the replacement surface never
+ *     commits (recreate failed, or we are shutting down) the pixmap is leaked in
+ *     the server for the life of the connection, and the properties still name
+ *     it. It trades a short-lived dangling XID for a permanent one plus a leak.
+ *
+ * The root's *background* is unaffected: the server holds its own reference to a
+ * window's background-pixmap, so freeing the pixmap does not blank the root. (X
+ * protocol, ChangeWindowAttributes: the background pixmap may be freed
+ * immediately if no further explicit references to it are to be made.)
+ *
+ * Only deletes properties that still name our own pixmap, so a wallpaper setter
+ * that took the root over while we were running keeps its advertisement. */
+static void x11_unpublish_root_pixmap(x11_backend_data_t *backend) {
+    if (!backend->x_display || !backend->published_root_pixmap) {
+        return;
+    }
+
+    Display *dpy = backend->x_display;
+    Pixmap ours = backend->published_root_pixmap;
+
+    if (x11_root_prop_names(backend, backend->atom_xrootpmap_id, ours)) {
+        XDeleteProperty(dpy, backend->root_window, backend->atom_xrootpmap_id);
+    }
+    if (x11_root_prop_names(backend, backend->atom_esetroot_pmap_id, ours)) {
+        XDeleteProperty(dpy, backend->root_window, backend->atom_esetroot_pmap_id);
+    }
+    backend->published_root_pixmap = 0;
+
+    /* Requests are processed in order on this connection, so the deletes (and
+     * the PropertyNotify they generate) reach the server before the caller's
+     * XFreePixmap. Flush so that holds even if we are on our way out. */
+    XFlush(dpy);
+}
+
+/* Make the (now filled) root pixmap the root window's background and tell
+ * pseudo-transparency clients about it.
+ *
+ * _XROOTPMAP_ID / ESETROOT_PMAP_ID name the pixmap for clients like Conky. They
+ * are (re)written whenever the advertised pixmap ID changes — which it does on
+ * every surface recreation, since each new surface gets a fresh XCreatePixmap —
+ * so a client that reads them does not end up holding a stale ID. */
+static void x11_publish_root_pixmap(x11_backend_data_t *backend,
+                                    x11_surface_data_t *surf_data) {
+    Display *dpy = backend->x_display;
+
+    XSetWindowBackgroundPixmap(dpy, backend->root_window, surf_data->root_pixmap);
+    XClearWindow(dpy, backend->root_window);
+
+    if (backend->published_root_pixmap != surf_data->root_pixmap) {
+        XChangeProperty(dpy, backend->root_window, backend->atom_xrootpmap_id,
+                        XA_PIXMAP, 32, PropModeReplace,
+                        (unsigned char *)&surf_data->root_pixmap, 1);
+        XChangeProperty(dpy, backend->root_window, backend->atom_esetroot_pmap_id,
+                        XA_PIXMAP, 32, PropModeReplace,
+                        (unsigned char *)&surf_data->root_pixmap, 1);
+        backend->published_root_pixmap = surf_data->root_pixmap;
+    }
+
+    /* Poke Conky and friends: the background changed. */
+    XEvent event;
+    memset(&event, 0, sizeof(event));
+    event.type = PropertyNotify;
+    event.xproperty.window = backend->root_window;
+    event.xproperty.atom = backend->atom_xrootpmap_id;
+    event.xproperty.state = PropertyNewValue;
+    XSendEvent(dpy, backend->root_window, False, PropertyChangeMask, &event);
+}
+
 static void x11_commit_surface(struct compositor_surface *surface) {
     if (!surface) return;
 
@@ -765,22 +1219,10 @@ static void x11_commit_surface(struct compositor_surface *surface) {
             XPutImage(backend->x_display, surf_data->root_pixmap, surf_data->gc,
                      surf_data->ximage, 0, 0, 0, 0, surface->width, surface->height);
 
-            /* Update root window background */
-            XSetWindowBackgroundPixmap(backend->x_display, backend->root_window, surf_data->root_pixmap);
-            XClearWindow(backend->x_display, backend->root_window);
-
-            /* Notify apps like Conky that background changed */
-            static Atom prop_root = 0;
-            if (!prop_root) {
-                prop_root = XInternAtom(backend->x_display, "_XROOTPMAP_ID", False);
-            }
-            XEvent event;
-            memset(&event, 0, sizeof(event));
-            event.type = PropertyNotify;
-            event.xproperty.window = backend->root_window;
-            event.xproperty.atom = prop_root;
-            event.xproperty.state = PropertyNewValue;
-            XSendEvent(backend->x_display, backend->root_window, False, PropertyChangeMask, &event);
+            /* The pixmap now holds real rendered content, so it is safe to be the
+             * root's background. On the first commit after a surface is created this
+             * is what publishes it (x11_create_surface deliberately does not). */
+            x11_publish_root_pixmap(backend, surf_data);
         }
     }
 
@@ -804,9 +1246,8 @@ static bool x11_create_egl_window(struct compositor_surface *surface,
     if (!surface) return false;
 
     x11_surface_data_t *surf_data = surface->backend_data;
-    x11_backend_data_t *backend = (x11_backend_data_t *)surface->backend;
 
-    if (!surf_data || !backend) return false;
+    if (!surf_data || !surface->backend) return false;
 
     log_debug("Creating EGL surface for X11 window");
 
@@ -1317,6 +1758,190 @@ static void x11_reconcile_outputs(x11_backend_data_t *backend) {
 
 
 /* ============================================================================
+ * WM APPEARED LATE (heal override-redirect -> managed)
+ * ============================================================================ */
+
+/* Destroy and rebuild every wallpaper window with the current
+ * backend->override_redirect.
+ *
+ * The window has to be *recreated*, not re-propertied: override_redirect is a
+ * window attribute fixed at XCreateWindow time. XChangeWindowAttributes can set
+ * it on a mapped window, but the WM decided whether to manage the window when it
+ * saw the MapRequest (or, for an override-redirect window, when it saw the
+ * MapNotify it was told to ignore), so flipping the attribute afterwards does not
+ * retroactively hand the window to the WM.
+ *
+ * The EGL *context* is a single shared state->egl_context, not one per surface;
+ * only the EGLSurface is tied to the native window. So destroying the EGLSurface
+ * and the X window and rebuilding both keeps every GL object — textures, shader
+ * programs, VAOs — alive in the context. No re-upload, no re-compile, and hence
+ * no call to output_init_render() here (unlike the hotplug path, which is
+ * building a brand-new output_state that has no render state yet).
+ *
+ * Runs on the event-loop thread, which owns the EGL context, so the GL work is
+ * safe inline. Same thread and same teardown order as the hotplug reconcile.
+ * Caller must NOT hold output_list_lock. */
+static void x11_recreate_surfaces(x11_backend_data_t *backend) {
+    struct neowall_state *state = backend->state;
+    if (!state) return;
+
+    /* Snapshot the list under the read lock, with a ref on each output; the
+     * rebuild below runs without the lock. */
+    struct output_state *outs[MAX_OUTPUTS];
+    int n = 0;
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o && n < MAX_OUTPUTS; o = o->next) {
+        output_ref(o);
+        outs[n++] = o;
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+
+    for (int i = 0; i < n; i++) {
+        struct output_state *o = outs[i];
+
+        /* Release the EGL surface from this thread before destroying it. */
+        egl_core_make_current(state, NULL);
+
+        if (o->compositor_surface) {
+            if (o->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+                compositor_surface_destroy_egl(o->compositor_surface, state->egl_display);
+            }
+            compositor_surface_destroy(o->compositor_surface);
+            o->compositor_surface = NULL;
+        }
+
+        if (!x11_attach_surface(state, o) ||
+            !output_create_egl_surface(o) ||
+            !egl_core_make_current(state, o)) {
+            log_error("X11: failed to recreate wallpaper window for %s",
+                      o->connector_name);
+            output_unref(o);
+            continue;
+        }
+
+        atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+        log_info("X11: wallpaper window for %s recreated as %s",
+                 o->connector_name,
+                 backend->override_redirect ? "override-redirect" : "managed");
+        output_unref(o);
+    }
+}
+
+/* Mark the output that owns an X window for redraw.
+ *
+ * An X11 window does not retain its contents: when it is obscured, restacked,
+ * reparented into (or out of) a WM frame, or remapped, whatever was drawn is
+ * discarded and the server sends Expose. A shader wallpaper repaints every frame
+ * anyway, but a static image is drawn once and then needs_redraw is cleared
+ * (eventloop.c), so without this the window stays black for the rest of the
+ * session. Observed on Xvfb: a static wallpaper goes black the moment the WM
+ * takes the window over, and again when the WM dies. */
+static void x11_mark_window_dirty(x11_backend_data_t *backend, Window window) {
+    struct neowall_state *state = backend->state;
+    if (!state) return;
+
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (!o->compositor_surface) continue;
+        x11_surface_data_t *sd = o->compositor_surface->backend_data;
+        if (sd && sd->x_window == window) {
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+}
+
+/* Act on the current WM state: rebuild the wallpaper windows if the world no
+ * longer matches how they were created. Idempotent. */
+static void x11_apply_wm_transition(x11_backend_data_t *backend) {
+    x11_wm_action_t action = x11_wm_transition(backend->or_env_forced,
+                                               backend->override_redirect,
+                                               backend->wm_present);
+    switch (action) {
+        case X11_WM_ACTION_RECREATE_MANAGED:
+            log_info("X11: EWMH window manager appeared - recreating wallpaper "
+                     "windows as managed");
+            backend->override_redirect = false;
+            x11_recreate_surfaces(backend);
+            break;
+
+        case X11_WM_ACTION_RECREATE_OVERRIDE:
+            /* Observed on Xvfb (metacity, and a reparenting test WM): when the WM
+             * dies the wallpaper window's contents are lost, and with a static
+             * image needs_redraw has already been cleared, so nothing ever
+             * repaints it — the wallpaper stays black. Rebuilding on the
+             * override-redirect path restores the no-WM setup (XLowerWindow plus
+             * the raise-the-other-children loop) and repaints. */
+            log_info("X11: EWMH window manager went away - recreating wallpaper "
+                     "windows as override-redirect");
+            backend->override_redirect = true;
+            x11_recreate_surfaces(backend);
+            break;
+
+        case X11_WM_ACTION_NONE:
+        default:
+            break;
+    }
+}
+
+/* Re-run the WM probe after _NET_SUPPORTING_WM_CHECK changed on the root.
+ *
+ * The WM-appeared edge is acted on at once. The WM-went-away edge is deferred by
+ * X11_WM_GONE_DEBOUNCE_MS and re-checked in x11_dispatch_events, so a WM restart
+ * (which flaps the property down and straight back up) does not destroy and
+ * recreate every window twice. */
+static void x11_recheck_wm(x11_backend_data_t *backend) {
+    bool wm_now = x11_ewmh_wm_present(backend);
+
+    if (wm_now == backend->wm_present) {
+        return;  /* Property churn that does not change the answer. */
+    }
+    backend->wm_present = wm_now;
+
+    if (wm_now) {
+        /* A WM is up. Any pending "the WM is gone" action is stale — this is what
+         * makes a restart a no-op rather than two rebuilds. */
+        if (backend->wm_gone_deadline_ms) {
+            log_debug("X11: window manager came back before the rebuild deadline "
+                      "- cancelling");
+            backend->wm_gone_deadline_ms = 0;
+        }
+        x11_apply_wm_transition(backend);
+        return;
+    }
+
+    /* The WM is gone. Do not believe it yet. */
+    if (x11_wm_transition(backend->or_env_forced, backend->override_redirect,
+                          false) == X11_WM_ACTION_NONE) {
+        return;  /* Nothing would change anyway (forced, or already override-redirect). */
+    }
+    log_info("X11: EWMH window manager went away - waiting %d ms for a replacement",
+             X11_WM_GONE_DEBOUNCE_MS);
+    backend->wm_gone_deadline_ms = get_time_ms() + X11_WM_GONE_DEBOUNCE_MS;
+}
+
+/* Called every event-loop iteration. Fires the deferred WM-went-away rebuild once
+ * the debounce window has passed and no replacement WM has turned up. */
+static void x11_check_wm_gone_deadline(x11_backend_data_t *backend) {
+    if (!backend->wm_gone_deadline_ms ||
+        get_time_ms() < backend->wm_gone_deadline_ms) {
+        return;
+    }
+    backend->wm_gone_deadline_ms = 0;
+
+    /* Re-probe rather than trusting the earlier answer: a replacement WM may have
+     * come up without us having processed its PropertyNotify yet. */
+    backend->wm_present = x11_ewmh_wm_present(backend);
+    if (backend->wm_present) {
+        log_info("X11: a replacement window manager is running - keeping the "
+                 "managed wallpaper windows");
+        return;
+    }
+    x11_apply_wm_transition(backend);
+}
+
+/* ============================================================================
  * EVENT HANDLING OPERATIONS
  * ============================================================================ */
 
@@ -1340,6 +1965,24 @@ static bool x11_read_events(void *backend_data) {
     return true;
 }
 
+/* True if Xlib is already holding events for us.
+ *
+ * The event loop polls the connection fd, but Xlib does not hand events straight
+ * from the socket to poll(): it queues them in userspace, and any Xlib call that
+ * round-trips (XSync in the WM probe, XFlush in every commit) will drain the
+ * socket into that queue as a side effect. The fd then has nothing to report and
+ * poll() sleeps for its full timeout while the events sit in the queue.
+ *
+ * XPending() reports the queue length, flushing and reading the socket first if
+ * the queue is empty, so it is the right question to ask just before poll(). */
+static bool x11_has_pending_events(void *backend_data) {
+    x11_backend_data_t *backend = backend_data;
+    if (!backend || !backend->x_display) {
+        return false;
+    }
+    return XPending(backend->x_display) > 0;
+}
+
 static bool x11_dispatch_events(void *backend_data) {
     x11_backend_data_t *backend = backend_data;
     if (!backend || !backend->x_display) {
@@ -1347,6 +1990,7 @@ static bool x11_dispatch_events(void *backend_data) {
     }
 
     bool layout_changed = false;
+    bool wm_check_changed = false;
     bool mouse_on = backend->state &&
         atomic_load_explicit(&backend->state->mouse_interaction, memory_order_acquire);
 
@@ -1370,6 +2014,50 @@ static bool x11_dispatch_events(void *backend_data) {
                 }
                 break;
 
+            case Expose:
+                /* The window's contents were discarded and must be redrawn. Only
+                 * the last event of a burst matters (count == 0 = no more to come). */
+                if (event.xexpose.count == 0) {
+                    x11_mark_window_dirty(backend, event.xexpose.window);
+                }
+                break;
+
+            case PropertyNotify:
+                /* A window manager starting (or cleanly exiting) rewrites
+                 * _NET_SUPPORTING_WM_CHECK on the root. Coalesce a burst — a WM
+                 * start can touch the property more than once — into one re-probe
+                 * after the queue drains.
+                 *
+                 * The atom test is load-bearing, not just an optimisation:
+                 * x11_commit_surface XSendEvents a synthetic PropertyNotify for
+                 * _XROOTPMAP_ID to the root (to poke Conky) once a second, and now
+                 * that we select PropertyChangeMask on the root we receive our own
+                 * event back.
+                 *
+                 * _NET_SUPPORTED re-probes too: the managed choice requires
+                 * _NET_WM_WINDOW_TYPE_DESKTOP to be advertised there, and a
+                 * starting WM's write order between the two root properties is
+                 * not specified — keying on the handshake alone could read
+                 * _NET_SUPPORTED before the WM has set it and latch
+                 * override-redirect for the session. */
+                if (event.xproperty.window == backend->root_window &&
+                    (event.xproperty.atom == backend->atom_net_supporting_wm_check ||
+                     event.xproperty.atom == backend->atom_net_supported)) {
+                    wm_check_changed = true;
+                }
+                break;
+
+            case DestroyNotify:
+                /* The WM's _NET_SUPPORTING_WM_CHECK window has been destroyed. A
+                 * WM that is killed outright (kill -9, crash) does not clean up the
+                 * root property, so this is the only notification we get that it
+                 * has gone; waiting for a PropertyNotify would wait for ever. */
+                if (backend->wm_check_window != None &&
+                    event.xdestroywindow.window == backend->wm_check_window) {
+                    wm_check_changed = true;
+                }
+                break;
+
             default:
                 /* RRScreenChangeNotify: monitor layout changed. Coalesce a burst
                  * of notifies (mode set fires several) into one reconcile after
@@ -1382,6 +2070,14 @@ static bool x11_dispatch_events(void *backend_data) {
                 break;
         }
     }
+
+    if (wm_check_changed) {
+        x11_recheck_wm(backend);
+    }
+
+    /* Deferred WM-went-away rebuild. Checked every iteration (the event loop polls
+     * with at most a 1s timeout), not on a busy poll of the X server. */
+    x11_check_wm_gone_deadline(backend);
 
     if (layout_changed) {
         log_info("X11: monitor layout changed, reconciling outputs");
@@ -1456,6 +2152,7 @@ static const compositor_backend_ops_t x11_backend_ops = {
     /* Event handling operations */
     .get_fd = x11_get_fd,
     .prepare_events = x11_prepare_events,
+    .has_pending_events = x11_has_pending_events,
     .read_events = x11_read_events,
     .dispatch_events = x11_dispatch_events,
     .flush = x11_flush,
