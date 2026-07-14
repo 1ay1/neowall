@@ -73,6 +73,16 @@ struct term_screen {
 
     bool *tabstops;      /* cols booleans */
 
+    /* Charset selection (VT100 national/DEC special graphics). g[0]/g[1] hold
+     * the designated set for G0/G1 ('B'=ASCII, '0'=DEC line-drawing). gl selects
+     * which is active in GL (0 or 1), toggled by SI (^O) / SO (^N). */
+    char g[2];
+    int  gl;
+
+    /* Latest window title from OSC 0/2 (cosmetic for a wallpaper; kept so a
+     * host could surface it). NUL-terminated. */
+    char title[256];
+
     vtparser parser;
 };
 
@@ -241,7 +251,20 @@ static void tab_forward(term_screen *s) {
 /* ------------------------------------------------------------------------ */
 
 static void cb_print(void *u, uint32_t cp) {
-    put_glyph((term_screen *)u, cp);
+    term_screen *s = u;
+    /* DEC special graphics (ESC ( 0, active via SO/SI): map the ASCII range
+     * 0x60..0x7E to the VT100 line-drawing Unicode codepoints so legacy apps
+     * that draw boxes with `qqqq`/`lk`/`mj` render real box lines, not letters. */
+    if (s->g[s->gl] == '0' && cp >= 0x60 && cp <= 0x7E) {
+        static const uint32_t dec[0x7F - 0x60] = {
+            0x25C6,0x2592,0x2409,0x240C,0x240D,0x240A,0x00B0,0x00B1, /* ` a b c d e f g */
+            0x2424,0x240B,0x2518,0x2510,0x250C,0x2514,0x253C,0x23BA, /* h i j k l m n o */
+            0x23BB,0x2500,0x23BC,0x23BD,0x251C,0x2524,0x2534,0x252C, /* p q r s t u v w */
+            0x2502,0x2264,0x2265,0x03C0,0x2260,0x00A3,0x00B7,        /* x y z { | } ~ */
+        };
+        cp = dec[cp - 0x60];
+    }
+    put_glyph(s, cp);
 }
 
 static void cb_execute(void *u, uint8_t c) {
@@ -254,6 +277,8 @@ static void cb_execute(void *u, uint8_t c) {
         case 0x0B: /* VT  */
         case 0x0C: /* FF  */ line_feed(s); break;
         case 0x0D: /* CR  */ s->cur.x = 0; s->pending_wrap = false; break;
+        case 0x0E: /* SO (^N): shift to G1 */ s->gl = 1; break;
+        case 0x0F: /* SI (^O): shift to G0 */ s->gl = 0; break;
         default: break;
     }
 }
@@ -262,6 +287,28 @@ static void cb_execute(void *u, uint8_t c) {
 static int pget(const int *p, int n, int i, int def) {
     if (i >= n) return def;
     return (p[i] < 0) ? def : p[i];
+}
+
+/* OSC handler: Operating System Commands, "<Ps>;<Pt>". We consume window title
+ * (0/2) into s->title; palette / clipboard / hyperlink commands are parsed but
+ * not acted on (a wallpaper has no window title bar or clipboard). */
+static void cb_osc(void *u, const uint8_t *data, size_t len) {
+    term_screen *s = u;
+    if (!data || len == 0) return;
+    /* split leading numeric Ps up to the first ';' */
+    size_t i = 0;
+    int ps = 0; bool have_ps = false;
+    while (i < len && data[i] >= '0' && data[i] <= '9') { ps = ps * 10 + (data[i] - '0'); have_ps = true; i++; }
+    if (i < len && data[i] == ';') i++;
+    if (!have_ps) return;
+    if (ps == 0 || ps == 2) {           /* set window/icon title */
+        size_t n = len - i;
+        if (n >= sizeof(s->title)) n = sizeof(s->title) - 1;
+        memcpy(s->title, data + i, n);
+        s->title[n] = 0;
+    }
+    /* ps 4/10/11 (palette / default fg-bg), 52 (clipboard), 8 (hyperlink):
+     * accepted, no-op — out of scope for a wallpaper surface. */
 }
 
 static void apply_sgr(term_screen *s, const int *p, int n) {
@@ -434,15 +481,21 @@ static void cb_esc(void *u, uint8_t final, const uint8_t *im, int nim) {
                 s->pen_fg = (term_color){.kind = TERM_COLOR_DEFAULT};
                 s->pen_bg = (term_color){.kind = TERM_COLOR_DEFAULT};
                 s->pen_attr = 0; s->cursor_visible = true;
+                s->g[0] = 'B'; s->g[1] = 'B'; s->gl = 0;
                 s->scroll_top = 0; s->scroll_bottom = s->rows - 1;
                 clear_all(s); cursor_to(s, 0, 0); reset_tabstops(s);
                 break;
             default: break;
         }
     }
-    /* charset-selection ESC ( / ESC ) etc. (im[0]=='(') are accepted and
-     * ignored: we render Unicode directly, so the DEC special graphics set is
-     * approximated by the box-drawing codepoints the atlas carries. */
+    /* Charset designation: ESC ( <c> designates G0, ESC ) <c> designates G1.
+     * <c>='0' selects the DEC special-graphics (line-drawing) set, 'B'/'0'
+     * otherwise ASCII. We honour '0' vs everything-else (ASCII) which covers
+     * every box-drawing TUI; other national sets fall back to ASCII. */
+    if (nim >= 1 && (im[0] == '(' || im[0] == ')')) {
+        int gset = (im[0] == ')') ? 1 : 0;
+        s->g[gset] = (char)final;
+    }
 }
 
 /* DEC private + ANSI modes. */
@@ -558,6 +611,7 @@ term_screen *term_screen_create(int cols, int rows) {
     s->pen_bg = (term_color){.kind = TERM_COLOR_DEFAULT};
     s->cursor_visible = true;
     s->cur.autowrap = true;
+    s->g[0] = 'B'; s->g[1] = 'B'; s->gl = 0;   /* both G0/G1 = ASCII */
     reset_tabstops(s);
     clear_all(s);
 
@@ -566,6 +620,7 @@ term_screen *term_screen_create(int cols, int rows) {
     cb.execute = cb_execute;
     cb.csi = cb_csi;
     cb.esc = cb_esc;
+    cb.osc = cb_osc;
     vtparse_init(&s->parser, &cb, s);
     return s;
 }
@@ -597,6 +652,10 @@ void term_screen_cursor(const term_screen *s, int *x, int *y) {
 
 bool term_screen_cursor_visible(const term_screen *s) {
     return s ? s->cursor_visible : true;
+}
+
+const char *term_screen_title(const term_screen *s) {
+    return s ? s->title : "";
 }
 
 void term_screen_mouse_mode(const term_screen *s, int *proto, bool *sgr) {

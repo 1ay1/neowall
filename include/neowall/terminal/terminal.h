@@ -178,6 +178,9 @@ void             term_screen_cursor(const term_screen *s, int *x, int *y);
 /* Cursor visibility (DECTCEM). False when the app has hidden the cursor. */
 bool             term_screen_cursor_visible(const term_screen *s);
 
+/* Latest window title set via OSC 0/2 (empty string if none). Borrowed. */
+const char      *term_screen_title(const term_screen *s);
+
 /* Current mouse-reporting state (set by the app via DECSET 1000/1002/1003 and
  * 1006). *proto is 0 (off), 1000, 1002 or 1003; *sgr is true when SGR extended
  * coordinates were requested. Used to decide whether/how to forward pointer
