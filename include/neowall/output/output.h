@@ -279,6 +279,17 @@ struct output_state {
     /* High-precision frame pacing for vsync-off mode */
     int frame_timer_fd;                 /* timerfd for precise frame timing when vsync is disabled */
 
+    /* Phase-locked pacer state (vsync-off animated wallpapers). The frame timer
+     * is armed as a ONE-SHOT ABSOLUTE deadline instead of a free-running
+     * recurring interval: each cycle we advance the deadline by exactly one
+     * period and re-arm to that absolute CLOCK_MONOTONIC time. This anchors the
+     * schedule to real present-completion times so it can't drift out of phase
+     * with the display's vblank cadence (the source of periodic judder that a
+     * fixed-interval timer produces). If a frame overruns its slot the deadline
+     * is snapped forward (drop, don't pile up catch-up frames). */
+    uint64_t pace_period_ns;            /* target frame period; 0 = pacer inactive */
+    uint64_t pace_next_deadline_ns;     /* absolute CLOCK_MONOTONIC target for next present */
+
     struct output_state *next;
 };
 
@@ -378,5 +389,13 @@ void output_destroy_texture(GLuint texture);
 
 /* Frame timing */
 int output_get_frame_timer_fd(struct output_state *output);
+
+/* Phase-locked frame pacer. Call once per output immediately after its buffer
+ * swap, passing a CLOCK_MONOTONIC timestamp (ns) captured just after the swap.
+ * Re-arms the frame timer as a one-shot absolute deadline exactly one period
+ * ahead, keeping the schedule phase-anchored to real present times so it can't
+ * drift against the display's vblank cadence. No-op / false when the pacer is
+ * inactive (vsync on, static wallpaper, or no frame timer). */
+bool output_pace_advance(struct output_state *output, uint64_t now_ns);
 
 #endif /* OUTPUT_H */

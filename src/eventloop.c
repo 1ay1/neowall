@@ -440,6 +440,20 @@ static void render_outputs(struct neowall_state *state) {
 
         compositor_surface_commit(output->compositor_surface);
 
+        /* Phase-lock the next frame to this present. Re-arms the per-output
+         * frame timer as a one-shot absolute deadline one period ahead, anchored
+         * to the instant the swap completed, so vsync-off animated wallpapers
+         * hold a stable cadence instead of drifting against the display's vblank
+         * (which a fixed recurring interval does, producing periodic judder).
+         * No-op for vsync / static / non-timed outputs. */
+        {
+            struct timespec pace_now;
+            clock_gettime(CLOCK_MONOTONIC, &pace_now);
+            uint64_t pace_now_ns = (uint64_t)pace_now.tv_sec * 1000000000ULL +
+                                   (uint64_t)pace_now.tv_nsec;
+            output_pace_advance(output, pace_now_ns);
+        }
+
         output->last_frame_time = current_time;
         state->frames_rendered++;
 

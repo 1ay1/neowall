@@ -137,6 +137,20 @@ static bool output_configure_frame_timer(struct output_state *output) {
         .it_value = { .tv_sec = interval_sec, .tv_nsec = interval_ns }      /* Initial expiration */
     };
 
+    /* Record the target period for the phase-locked pacer. The recurring
+     * interval above is only the BOOTSTRAP arming; from the first present
+     * onward output_pace_advance() re-arms this fd as a one-shot absolute
+     * deadline, so the schedule tracks real completion times instead of
+     * free-running (see output.h pace_* fields). Seed the deadline to "now +
+     * one period" so the very first re-arm has a sane anchor. */
+    output->pace_period_ns = (uint64_t)interval_sec * 1000000000ULL + (uint64_t)interval_ns;
+    {
+        struct timespec now_ts;
+        clock_gettime(CLOCK_MONOTONIC, &now_ts);
+        uint64_t now_ns = (uint64_t)now_ts.tv_sec * 1000000000ULL + (uint64_t)now_ts.tv_nsec;
+        output->pace_next_deadline_ns = now_ns + output->pace_period_ns;
+    }
+
     if (timerfd_settime(output->frame_timer_fd, 0, &timer_spec, NULL) < 0) {
         log_error("Failed to set frame timer for output %s: %s",
                  output_get_identifier(output), strerror(errno));
@@ -2192,4 +2206,56 @@ int output_get_frame_timer_fd(struct output_state *output) {
         return -1;
     }
     return output->frame_timer_fd;
+}
+
+/* Phase-locked frame pacer: re-arm the per-output frame timer as a ONE-SHOT
+ * ABSOLUTE deadline exactly one period after the previous target, instead of
+ * letting a free-running recurring interval drift out of phase with the
+ * display.
+ *
+ * Called once per output right after its buffer swap completes. `now_ns` is a
+ * CLOCK_MONOTONIC timestamp captured just after the swap (the best available
+ * phase anchor for when the frame actually reached the compositor without the
+ * full wp_presentation feedback path).
+ *
+ * Behaviour:
+ *   - advance the deadline by exactly one period (preserves average FPS with
+ *     zero long-term drift — errors don't accumulate);
+ *   - if we've fallen more than one period behind (a slow frame, a stall, or
+ *     the app was just unpaused), SNAP the deadline forward to now+period so we
+ *     drop the backlog instead of firing a burst of catch-up frames;
+ *   - arm with TFD_TIMER_ABSTIME so the kernel wakes us at the true wall-clock
+ *     instant, absorbing poll()/scheduler latency that a relative timer bakes
+ *     into every subsequent frame.
+ *
+ * No-op (returns false) if the pacer is inactive (vsync on, static wallpaper,
+ * or no frame timer) — those paths keep their existing scheduling. */
+bool output_pace_advance(struct output_state *output, uint64_t now_ns) {
+    if (!output || output->frame_timer_fd < 0 || output->pace_period_ns == 0) {
+        return false;
+    }
+
+    uint64_t period = output->pace_period_ns;
+    uint64_t deadline = output->pace_next_deadline_ns + period;
+
+    /* Overrun recovery: if the next scheduled deadline is already in the past
+     * (we missed one or more slots), resync the phase to the present rather
+     * than trying to "catch up" with rapid-fire frames the display can't show. */
+    if (deadline <= now_ns) {
+        deadline = now_ns + period;
+    }
+    output->pace_next_deadline_ns = deadline;
+
+    struct itimerspec ts = {
+        .it_interval = { .tv_sec = 0, .tv_nsec = 0 },   /* one-shot: we re-arm each present */
+        .it_value = {
+            .tv_sec  = (time_t)(deadline / 1000000000ULL),
+            .tv_nsec = (long)(deadline % 1000000000ULL),
+        },
+    };
+    if (timerfd_settime(output->frame_timer_fd, TFD_TIMER_ABSTIME, &ts, NULL) < 0) {
+        /* Fall back to the free-running arming already in place; not fatal. */
+        return false;
+    }
+    return true;
 }
