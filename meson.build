@@ -281,10 +281,23 @@ if not terminal_option.disabled()
   util_dep = cc.find_library('util', required: terminal_option)
   if util_dep.found() or terminal_option.enabled()
     has_terminal = true
+    add_project_arguments('-DNEOWALL_HAVE_TERMINAL=1', language: 'c')
     terminal_sources = files(
       'src/terminal/vtparse.c',
       'src/terminal/screen.c',
       'src/terminal/pty.c',
+    )
+    # glyph_atlas.c is the sole TU that includes the vendored public-domain
+    # stb_truetype.h, which is not -Wpedantic/-Werror clean. Compile it in its
+    # own static library with relaxed warnings so the strict project-wide gate
+    # (warning_level=3, werror=true) still governs all our own code.
+    terminal_glyph_lib = static_library('terminal_glyph',
+      files('src/terminal/glyph_atlas.c'),
+      include_directories: [inc_dirs, inc_dirs_build,
+                            include_directories('src/terminal')],
+      c_args: cc.get_supported_arguments(
+        '-Wno-error', '-w'),
+      override_options: ['warning_level=0', 'werror=false'],
     )
   endif
 endif
@@ -357,7 +370,6 @@ endif
 
 if has_terminal
   deps += [util_dep]
-  add_project_arguments('-DNEOWALL_HAVE_TERMINAL=1', language: 'c')
 endif
 
 # =============================================================================
@@ -390,6 +402,7 @@ neowall_exe = executable('neowall',
   all_sources,
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: deps,
+  link_with: has_terminal ? [terminal_glyph_lib] : [],
   install: true,
 )
 
@@ -603,6 +616,18 @@ if has_terminal
     build_by_default: false,
   )
   test('terminal_screen', test_terminal_exe)
+
+  # Glyph atlas: real font rasterization (stb_truetype). Links the relaxed-
+  # warning glyph lib. SKIPs (exit 77) if no system monospace font is present.
+  test_glyph_exe = executable('test_glyph_atlas',
+    files('tests/test_glyph_atlas.c'),
+    include_directories: [inc_dirs, inc_dirs_build,
+                          include_directories('src/terminal')],
+    link_with: [terminal_glyph_lib],
+    dependencies: [m_dep],
+    build_by_default: false,
+  )
+  test('glyph_atlas', test_glyph_exe)
 endif
 
 # =============================================================================
