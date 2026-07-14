@@ -271,6 +271,24 @@ occlusion_sources = files(
   'src/occlusion/occlusion.c',
 )
 
+# Terminal emulator wallpaper source (in-tree PTY + VT parser; no external dep,
+# uses glibc <pty.h>/forkpty). Gated behind -Dterminal.
+terminal_option = get_option('terminal')
+terminal_sources = []
+has_terminal = false
+if not terminal_option.disabled()
+  # forkpty lives in libutil on glibc; probe for it.
+  util_dep = cc.find_library('util', required: terminal_option)
+  if util_dep.found() or terminal_option.enabled()
+    has_terminal = true
+    terminal_sources = files(
+      'src/terminal/vtparse.c',
+      'src/terminal/screen.c',
+      'src/terminal/pty.c',
+    )
+  endif
+endif
+
 # Wayland protocol sources (pre-generated, only when Wayland backend enabled)
 wayland_protocol_sources = []
 if has_wayland
@@ -337,6 +355,11 @@ if has_x11
   deps += [x11_dep, xrandr_dep]
 endif
 
+if has_terminal
+  deps += [util_dep]
+  add_project_arguments('-DNEOWALL_HAVE_TERMINAL=1', language: 'c')
+endif
+
 # =============================================================================
 # Combine All Sources
 # =============================================================================
@@ -353,6 +376,7 @@ all_sources = (
   image_sources +
   compositor_sources +
   occlusion_sources +
+  terminal_sources +
   wayland_protocol_sources +
   wayland_sources +
   x11_sources
@@ -565,6 +589,21 @@ test_span_exe = executable('test_span',
 )
 
 test('span', test_span_exe)
+
+# In-tree terminal emulator: VT parser + screen model. Headless, no PTY/GPU —
+# feeds raw escape sequences and asserts the cell grid. Only built when the
+# terminal feature is enabled.
+if has_terminal
+  test_terminal_exe = executable('test_terminal_screen',
+    files('tests/test_terminal_screen.c',
+          'src/terminal/screen.c',
+          'src/terminal/vtparse.c'),
+    include_directories: [inc_dirs, inc_dirs_build,
+                          include_directories('src/terminal')],
+    build_by_default: false,
+  )
+  test('terminal_screen', test_terminal_exe)
+endif
 
 # =============================================================================
 # Fuzzers (opt-in: -Dfuzz=true, clang only)

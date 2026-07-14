@@ -18,3 +18,9 @@ option('fuzz',
   value: false,
   description: 'Build libFuzzer harnesses (requires clang with -fsanitize=fuzzer)'
 )
+
+option('terminal',
+  type: 'feature',
+  value: 'enabled',
+  description: 'Build the in-tree terminal emulator wallpaper source (PTY + VT parser; uses glibc <pty.h>, no external dependency)'
+)
