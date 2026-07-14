@@ -57,8 +57,8 @@ static uint8_t *read_file(const char *path, size_t *out_len) {
 }
 
 /* ---- atlas geometry ---- */
-#define ATLAS_W 1024
-#define ATLAS_H 1024
+#define ATLAS_W 2048
+#define ATLAS_H 2048
 
 /* ---- hash map: codepoint -> slot index ---- */
 #define MAP_CAP 4096   /* power of two; load kept < 0.7 */

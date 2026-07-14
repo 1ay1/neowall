@@ -67,6 +67,7 @@ struct term_render {
     glyph_atlas *atlas;
     int          cols, rows;
     int          cell_w, cell_h;
+    int          ss;          /* atlas supersample factor (glyph px = cell*ss) */
     uint32_t    *cells;       /* cols*rows*4 uint32 */
     uint64_t     last_epoch;
     bool         have_frame;  /* cells populated at least once */
@@ -97,6 +98,17 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
     tr->cell_w = opts->cell_w > 0 ? opts->cell_w : 9;
     tr->cell_h = opts->cell_h > 0 ? opts->cell_h : 18;
 
+    /* Supersample the glyph atlas: rasterize every glyph at SS x the on-screen
+     * cell size, then let nwTerm's LINEAR atlas fetch box-filter it back down.
+     * This is the standard "draw text at Nx, sample down" AA — without it the
+     * atlas maps 1 texel per output pixel (no oversampling) and glyph/graph
+     * edges show raw stair-steps. iTermInfo carries the SS-scaled glyph size so
+     * nwTerm's per-cell glyph math stays in atlas-pixel space; the grid layout
+     * (cols x rows across the screen) is unaffected. */
+    tr->ss = 3;
+    int atlas_cw = tr->cell_w * tr->ss;
+    int atlas_ch = tr->cell_h * tr->ss;
+
     /* Load font: explicit in-memory buffer, else a path, else system search. */
     const uint8_t *font_data = opts->font_data;
     size_t         font_len  = opts->font_len;
@@ -121,7 +133,7 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
         }
     }
 
-    tr->atlas = glyph_atlas_create(font_data, font_len, tr->cell_w, tr->cell_h);
+    tr->atlas = glyph_atlas_create(font_data, font_len, atlas_cw, atlas_ch);
     free(file_buf); /* atlas copies what it needs; system-font path owns its own */
     if (!tr->atlas) {
         if (err_out) *err_out = nw_err(NW_ERR_IO, "term_render: no usable font");
@@ -236,8 +248,12 @@ const uint8_t *term_render_atlas(const term_render *tr) {
 }
 int term_render_atlas_w(const term_render *tr) { return tr ? glyph_atlas_width(tr->atlas) : 0; }
 int term_render_atlas_h(const term_render *tr) { return tr ? glyph_atlas_height(tr->atlas) : 0; }
-int term_render_cell_w(const term_render *tr) { return tr ? tr->cell_w : 0; }
-int term_render_cell_h(const term_render *tr) { return tr ? tr->cell_h : 0; }
+/* The glyph-pixel cell size the shader needs: nwTerm maps each cell's 0..1
+ * fraction into atlas-pixel space, and the atlas is supersampled, so this is
+ * the SS-scaled size. (Pixel->cell hit-testing uses tr->cell_w directly and
+ * stays at the on-screen size.) */
+int term_render_cell_w(const term_render *tr) { return tr ? tr->cell_w * tr->ss : 0; }
+int term_render_cell_h(const term_render *tr) { return tr ? tr->cell_h * tr->ss : 0; }
 bool term_render_atlas_dirty(const term_render *tr) {
     return tr ? glyph_atlas_dirty(tr->atlas) : false;
 }
