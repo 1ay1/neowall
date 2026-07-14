@@ -1141,6 +1141,10 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
         output->config->term_crt      >= 0.0f ? output->config->term_crt      : 0.0f;
     output->multipass_shader->term_fx[3] =
         output->config->term_chroma   >= 0.0f ? output->config->term_chroma   : 0.0f;
+    /* Change-driven fade defaults ON at a gentle level — it makes graphs and
+     * updating numbers glide, which is the biggest "feels alive" win. */
+    output->multipass_shader->term_fade =
+        output->config->term_fade     >= 0.0f ? output->config->term_fade     : 0.5f;
 
     /* Attach the terminal BEFORE init_gl (init creates the cell/atlas textures
      * sized to the grid) and before compile (nwTerm uniforms must resolve). */

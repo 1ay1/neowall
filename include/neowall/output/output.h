@@ -102,6 +102,7 @@ struct wallpaper_config {
     float term_scanline;                     /* nwTermFX scanline 0..1 (-1 = default) */
     float term_crt;                          /* nwTermFX CRT curve+vignette 0..1 (-1) */
     float term_chroma;                       /* nwTermFX chromatic aberration 0..1 (-1) */
+    float term_fade;                         /* change-driven fade 0..1 (-1 = default) */
 };
 
 /* Output (monitor) state */

@@ -509,6 +509,7 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->term_scanline = -1.0f;
     config->term_crt = -1.0f;
     config->term_chroma = -1.0f;
+    config->term_fade = -1.0f;
 }
 
 /* Parse a "#RRGGBB" or "RRGGBB" hex colour into 0xRRGGBB, or -1 if invalid. */
@@ -738,6 +739,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             { "term_scanline", &config->term_scanline },
             { "term_crt",      &config->term_crt },
             { "term_chroma",   &config->term_chroma },
+            { "term_fade",     &config->term_fade },
         };
         for (size_t k = 0; k < sizeof(fxk)/sizeof(fxk[0]); k++) {
             VibeValue *v = vibe_object_get(obj->as_object, fxk[k].key);
@@ -1061,7 +1063,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         "path", "shader", "terminal", "term_font", "term_cols", "term_rows",
         "term_shader", "term_font_bold", "term_font_italic", "term_cwd",
         "term_env", "term_font_size", "term_fg", "term_bg",
-        "term_bloom", "term_scanline", "term_crt", "term_chroma",
+        "term_bloom", "term_scanline", "term_crt", "term_chroma", "term_fade",
         "mode", "duration", "transition",
         "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps",
         "pause_on_fullscreen", "pause_coverage_threshold", "shuffle"

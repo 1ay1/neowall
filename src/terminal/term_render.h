@@ -70,6 +70,14 @@ int             term_render_rows(const term_render *tr);
  * instead of the whole grid. y1<=y0 means no rows changed. */
 void            term_render_cells_dirty_rows(const term_render *tr, int *y0, int *y1);
 
+/* Per-cell "last changed" timestamps for the change-driven fade: one uint32 per
+ * cell (cols*rows, row-major), each the ms-since-start when that cell's record
+ * last differed from the prior frame. Upload as an R32UI texture; the shader
+ * computes age = now_ms - change_ms and eases the cell in from its background.
+ * Valid until the next update. now_ms is the matching current clock reading. */
+const uint32_t *term_render_change_ms(const term_render *tr);
+uint32_t        term_render_now_ms(const term_render *tr);
+
 /* Atlas coverage bitmap (GL_R8), and whether it grew since last clear. */
 const uint8_t *term_render_atlas(const term_render *tr);
 int            term_render_atlas_w(const term_render *tr);

@@ -673,6 +673,7 @@ static const char *multipass_wrapper_prefix =
     "// then sample with nwTerm(iChannelN_as_usampler...). To keep call sites\n"
     "// simple we expose a dedicated integer sampler + the metadata uniforms.\n"
     "uniform highp usampler2D iTermCells;\n"
+    "uniform highp usampler2D iTermChange; // R32UI: per-cell last-change ms\n"
     "uniform sampler2D iTermAtlas;\n"
     "uniform sampler2D iTermColorAtlas;\n"
     "uniform vec4 iTermInfo;       // cols, rows, cellW, cellH\n"
@@ -680,6 +681,7 @@ static const char *multipass_wrapper_prefix =
     "uniform vec3 iTermCursor;     // cursorX, cursorY, visible\n"
     "uniform vec4 iTermCursorPrev; // prevX, prevY, moveTime, (unused)\n"
     "uniform vec4 iTermFX;         // bloom, scanline, crt-curve, chromatic\n"
+    "uniform vec2 iTermFade;       // x = change-fade intensity, y = now (ms)\n"
     "#define NW_HAS_ITERMFX 1\n"
     "\n"
     "// Channel resolutions\n"
@@ -1243,6 +1245,17 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+        /* Per-cell last-change timestamps (R32UI) for the change-driven fade,
+         * same cols x rows grid, NEAREST like every integer texture. */
+        glGenTextures(1, &shader->term_change_texture);
+        glBindTexture(GL_TEXTURE_2D, shader->term_change_texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, cols, rows, 0,
+                     GL_RED_INTEGER, GL_UNSIGNED_INT, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
         int aw = term_render_atlas_w(shader->term);
         int ah = term_render_atlas_h(shader->term);
         glGenTextures(1, &shader->term_atlas_texture);
@@ -1425,14 +1438,16 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iTermAtlas    = glGetUniformLocation(prog, "iTermAtlas");
     u->iTermColorAtlas = glGetUniformLocation(prog, "iTermColorAtlas");
     u->iTermCells    = glGetUniformLocation(prog, "iTermCells");
+    u->iTermChange   = glGetUniformLocation(prog, "iTermChange");
     u->iTermInfo     = glGetUniformLocation(prog, "iTermInfo");
     u->iTermAtlasSize = glGetUniformLocation(prog, "iTermAtlasSize");
     u->iTermCursor   = glGetUniformLocation(prog, "iTermCursor");
     u->iTermCursorPrev = glGetUniformLocation(prog, "iTermCursorPrev");
     u->iTermFX       = glGetUniformLocation(prog, "iTermFX");
+    u->iTermFade     = glGetUniformLocation(prog, "iTermFade");
 
     u->cached = true;
-    
+
     log_debug("Cached uniform locations for %s: iTime=%d, iResolution=%d, iFrame=%d",
               pass->name, u->iTime, u->iResolution, u->iFrame);
 }
@@ -1723,6 +1738,7 @@ void multipass_destroy(multipass_shader_t *shader) {
     if (shader->font_texture) glDeleteTextures(1, &shader->font_texture);
 #ifdef NEOWALL_HAVE_TERMINAL
     if (shader->term_cell_texture) glDeleteTextures(1, &shader->term_cell_texture);
+    if (shader->term_change_texture) glDeleteTextures(1, &shader->term_change_texture);
     if (shader->term_atlas_texture) glDeleteTextures(1, &shader->term_atlas_texture);
     if (shader->term_color_atlas_texture) glDeleteTextures(1, &shader->term_color_atlas_texture);
     if (shader->term) term_render_destroy(shader->term);
@@ -2035,6 +2051,18 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
         glBindTexture(GL_TEXTURE_2D, shader->term_cell_texture);
         glUniform1i(u->iTermCells, MULTIPASS_MAX_CHANNELS + 2);
     }
+    /* Per-cell change-time texture on unit 8 (R32UI) for the change-driven
+     * fade. Fall back to the cell texture when absent so the sampler is valid;
+     * the fade is gated by iTermFade.x anyway. */
+    if (u->iTermChange >= 0) {
+        GLuint chtex = shader->term_change_texture ? shader->term_change_texture
+                                                   : shader->term_cell_texture;
+        if (chtex) {
+            glActiveTexture(GL_TEXTURE0 + MULTIPASS_MAX_CHANNELS + 4);
+            glBindTexture(GL_TEXTURE_2D, chtex);
+            glUniform1i(u->iTermChange, MULTIPASS_MAX_CHANNELS + 4);
+        }
+    }
     /* Color-emoji atlas on unit 7. When absent, bind the coverage atlas as a
      * harmless stand-in so the sampler is always valid; the shader never reads
      * it unless a cell carries the color flag (which requires the font). */
@@ -2092,6 +2120,10 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
         if (u->iTermFX >= 0) {
             glUniform4f(u->iTermFX, shader->term_fx[0], shader->term_fx[1],
                         shader->term_fx[2], shader->term_fx[3]);
+        }
+        if (u->iTermFade >= 0) {
+            glUniform2f(u->iTermFade, shader->term_fade,
+                        (float)term_render_now_ms(shader->term));
         }
     }
 #endif
@@ -2398,6 +2430,20 @@ void multipass_render(multipass_shader_t *shader,
                                 GL_RGBA_INTEGER, GL_UNSIGNED_INT,
                                 cells + (size_t)y0 * cols * 4);
                 glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
+                /* Push the matching band of per-cell change timestamps (R32UI,
+                 * one uint per cell) so the shader's change-driven fade sees the
+                 * fresh stamps. Same [y0,y1) band as the cell upload. */
+                const uint32_t *chg = term_render_change_ms(shader->term);
+                if (chg && shader->term_change_texture) {
+                    glBindTexture(GL_TEXTURE_2D, shader->term_change_texture);
+                    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+                    glPixelStorei(GL_UNPACK_ROW_LENGTH, cols);
+                    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y0, cols, y1 - y0,
+                                    GL_RED_INTEGER, GL_UNSIGNED_INT,
+                                    chg + (size_t)y0 * cols);
+                    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+                }
             }
         }
     }

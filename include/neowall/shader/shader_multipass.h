@@ -129,11 +129,13 @@ typedef struct {
     GLint iTermAtlas;           /* terminal glyph-atlas coverage sampler (R8) */
     GLint iTermColorAtlas;      /* terminal color-emoji atlas sampler (RGBA8) */
     GLint iTermCells;           /* terminal cell-record integer sampler (RGBA32UI) */
+    GLint iTermChange;          /* terminal per-cell change-time sampler (R32UI) */
     GLint iTermInfo;            /* vec4: cols, rows, cellW, cellH */
     GLint iTermAtlasSize;       /* vec2: atlas texel w,h */
     GLint iTermCursor;          /* vec3: cursorX, cursorY, visible */
     GLint iTermCursorPrev;      /* vec4: prevX, prevY, moveTime, unused */
     GLint iTermFX;              /* vec4: bloom, scanline, crt-curve, chromatic */
+    GLint iTermFade;           /* vec2: change-fade intensity, now(ms) */
     bool cached;                /* True if locations have been cached */
 } uniform_locations_t;
 
@@ -190,6 +192,7 @@ typedef struct {
      * the terminal drew. NULL/0 when no terminal source is attached. */
     struct term_render *term;
     GLuint term_cell_texture;                /* RGBA32UI cols x rows */
+    GLuint term_change_texture;              /* R32UI cols x rows: per-cell last-change ms */
     GLuint term_atlas_texture;               /* R8 glyph coverage atlas */
     GLuint term_color_atlas_texture;         /* RGBA8 color-emoji atlas (0 if none) */
     int    term_atlas_uploaded_w, term_atlas_uploaded_h; /* last atlas dims uploaded */
@@ -202,6 +205,7 @@ typedef struct {
     long   term_fg, term_bg;                 /* 0xRRGGBB when *_has_* is set */
     bool   term_has_fg, term_has_bg;
     float  term_fx[4];                       /* bloom, scanline, crt-curve, chromatic (0 = off) */
+    float  term_fade;                        /* change-driven fade intensity (0 = off) */
     int    term_cursor_px, term_cursor_py;   /* last cursor cell, for slide interpolation */
     float  term_cursor_move_t;               /* iTime at which the cursor last moved */
     bool   term_cursor_seen;                 /* prev fields are valid */

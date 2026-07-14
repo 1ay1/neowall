@@ -71,10 +71,13 @@ struct term_render {
     int          ss;          /* atlas supersample factor (glyph px = cell*ss) */
     uint32_t    *cells;       /* cols*rows*4 uint32 */
     uint32_t    *prev_cells;  /* previous frame's packed cells, for row diffing */
+    uint32_t    *change_ms;   /* cols*rows: ms-since-start each cell last changed */
+    double       start_secs;  /* mono baseline so change_ms fits in 32 bits */
     int          dirty_y0;    /* [dirty_y0, dirty_y1) rows changed this update */
     int          dirty_y1;    /* dirty_y1<=dirty_y0 means nothing changed */
     uint64_t     last_epoch;
     bool         have_frame;  /* cells populated at least once */
+    bool         have_frame_once; /* prev_cells valid for per-cell change stamps */
     int          cursor_x, cursor_y;
     bool         cursor_vis;
 
@@ -98,14 +101,18 @@ static double mono_secs(void) {
 static bool alloc_cells(term_render *tr) {
     free(tr->cells);
     free(tr->prev_cells);
+    free(tr->change_ms);
     size_t n = (size_t)tr->cols * (size_t)tr->rows * 4;
+    size_t nc = (size_t)tr->cols * (size_t)tr->rows;
     tr->cells = calloc(n, sizeof(uint32_t));
     tr->prev_cells = calloc(n, sizeof(uint32_t));
+    tr->change_ms = calloc(nc, sizeof(uint32_t));
     /* Force a full upload on the first frame after (re)alloc: prev is all-zero
      * but the shader's texture is undefined, so the diff must not skip rows. */
     tr->dirty_y0 = 0;
     tr->dirty_y1 = tr->rows;
-    return tr->cells != NULL && tr->prev_cells != NULL;
+    tr->have_frame_once = false;
+    return tr->cells != NULL && tr->prev_cells != NULL && tr->change_ms != NULL;
 }
 
 term_render *term_render_create(const term_render_opts *opts, nw_result *err_out) {
@@ -133,6 +140,7 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
      * nwTerm's per-cell glyph math stays in atlas-pixel space; the grid layout
      * (cols x rows across the screen) is unaffected. */
     tr->ss = 3;
+    tr->start_secs = mono_secs();
     int atlas_cw = tr->cell_w * tr->ss;
     int atlas_ch = tr->cell_h * tr->ss;
 
@@ -188,6 +196,7 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
         glyph_atlas_destroy(tr->atlas);
         free(tr->cells);
         free(tr->prev_cells);
+        free(tr->change_ms);
         free(tr);
         return NULL;
     }
@@ -226,6 +235,7 @@ void term_render_destroy(term_render *tr) {
     free(tr->term_env);
     free(tr->cells);
     free(tr->prev_cells);
+    free(tr->change_ms);
     free(tr);
 }
 
@@ -292,6 +302,7 @@ bool term_render_update(term_render *tr) {
     const term_cell *src = f->cells;
     uint32_t *dst = tr->cells;
     int n = tr->cols * tr->rows;
+    uint32_t now_ms = (uint32_t)((mono_secs() - tr->start_secs) * 1000.0);
     for (int i = 0; i < n; i++) {
         const term_cell *c = &src[i];
         uint32_t *o = &dst[i * 4];
@@ -358,7 +369,21 @@ bool term_render_update(term_render *tr) {
         o[1] = TERM_PACK_G(gw, gh, ox, oy);
         o[2] = TERM_PACK_COL(fr, fg, fb, 0xFF);
         o[3] = TERM_PACK_COL(br, bg, bb, attr8);
+
+        /* Change-driven fade: stamp the wall time this cell's record last
+         * differed from the previous frame's, so the shader can ease the cell
+         * in from its background over a short window (graphs/values glide
+         * instead of snapping). prev_cells still holds last frame here (the
+         * row diff below overwrites it). Skip the very first frame
+         * (prev all-zero) so the whole grid doesn't flash on startup. */
+        if (tr->have_frame_once) {
+            const uint32_t *p = &tr->prev_cells[i * 4];
+            if (o[0] != p[0] || o[1] != p[1] || o[2] != p[2] || o[3] != p[3]) {
+                tr->change_ms[i] = now_ms;
+            }
+        }
     }
+    tr->have_frame_once = true;
 
     /* Diff against the previous frame ROW BY ROW to find the smallest
      * contiguous [y0,y1) band that actually changed. The GPU uploader then
@@ -397,6 +422,13 @@ int term_render_rows(const term_render *tr) { return tr ? tr->rows : 0; }
 void term_render_cells_dirty_rows(const term_render *tr, int *y0, int *y1) {
     if (tr) { if (y0) *y0 = tr->dirty_y0; if (y1) *y1 = tr->dirty_y1; }
     else    { if (y0) *y0 = 0; if (y1) *y1 = 0; }
+}
+
+const uint32_t *term_render_change_ms(const term_render *tr) {
+    return tr ? tr->change_ms : NULL;
+}
+uint32_t term_render_now_ms(const term_render *tr) {
+    return tr ? (uint32_t)((mono_secs() - tr->start_secs) * 1000.0) : 0;
 }
 
 const uint8_t *term_render_atlas(const term_render *tr) {
