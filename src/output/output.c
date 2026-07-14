@@ -85,8 +85,9 @@ static bool output_configure_frame_timer(struct output_state *output) {
         return true;
     }
 
-    /* For shaders with vsync disabled, set up precise frame timer */
-    if (output->config->type != WALLPAPER_SHADER) {
+    /* For animated wallpapers (shader or terminal) with vsync disabled, set up
+     * a precise frame timer. Static images don't need one. */
+    if (!wallpaper_is_animated(output->config->type)) {
         if (output->frame_timer_fd >= 0) {
             close(output->frame_timer_fd);
             output->frame_timer_fd = -1;

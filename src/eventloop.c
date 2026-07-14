@@ -454,10 +454,13 @@ static void render_outputs(struct neowall_state *state) {
             }
         }
 
-        /* Reset needs_redraw unless we're in a transition or using a shader wallpaper */
+        /* Reset needs_redraw unless we're in a transition or using an animated
+         * (shader / terminal) wallpaper. Animated wallpapers keep needs_redraw
+         * set so the loop re-renders them every frame — a terminal must be
+         * re-pumped continuously or it freezes on its first frame. */
         if ((output->transition_start_time == 0 ||
              output->config->transition == TRANSITION_NONE) &&
-            output->config->type != WALLPAPER_SHADER) {
+            !wallpaper_is_animated(output->config->type)) {
             atomic_store_explicit(&output->needs_redraw, false, memory_order_release);
         }
     }
@@ -792,7 +795,8 @@ void event_loop_run(struct neowall_state *state) {
 
             /* Skip frame timer for STATIC shaders — they painted their one
              * frame; waking poll() at 60Hz to re-render an identical image
-             * wastes CPU+GPU. (needs_redraw still works for resize/reload.) */
+             * wastes CPU+GPU. (needs_redraw still works for resize/reload.)
+             * Terminal wallpapers are never static — they must keep pumping. */
             if (output->config->type == WALLPAPER_SHADER &&
                 output->multipass_shader &&
                 !output->multipass_shader->is_animated &&
@@ -816,7 +820,7 @@ void event_loop_run(struct neowall_state *state) {
             }
 
             /* Only count shader as active if it loaded successfully and hasn't failed */
-            if (output->config->type == WALLPAPER_SHADER &&
+            if (wallpaper_is_animated(output->config->type) &&
                 !output->shader_load_failed &&
                 (output->live_shader_program != 0 || output->multipass_shader != NULL)) {
                 shader_count++;
@@ -1053,14 +1057,18 @@ void event_loop_run(struct neowall_state *state) {
                 o->config->transition != TRANSITION_NONE) {
                 atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
             }
-            /* For shader wallpapers with vsync enabled, always redraw (vsync paces us)
-             * For shaders with vsync disabled, only redraw when frame timer fires (handled above) */
-            if (o->config->type == WALLPAPER_SHADER &&
+            /* For animated wallpapers (shader / terminal) with vsync enabled,
+             * always redraw (vsync paces us). With vsync disabled, only redraw
+             * when the frame timer fires (handled above). A terminal wallpaper
+             * must be re-armed here every iteration or it renders one frame and
+             * freezes. */
+            if (wallpaper_is_animated(o->config->type) &&
                 !o->shader_load_failed &&
                 (o->live_shader_program != 0 || o->multipass_shader != NULL) &&
                 !atomic_load_explicit(&state->shader_paused, memory_order_acquire)) {
-                /* Static shaders idle after their first frame */
-                bool is_static = o->multipass_shader &&
+                /* Static shaders idle after their first frame; terminals never do. */
+                bool is_static = o->config->type == WALLPAPER_SHADER &&
+                                 o->multipass_shader &&
                                  !o->multipass_shader->is_animated &&
                                  o->frames_rendered > 0;
                 if (!is_static &&

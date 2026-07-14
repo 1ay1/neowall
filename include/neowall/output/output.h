@@ -48,6 +48,15 @@ enum wallpaper_type {
     WALLPAPER_TERMINAL, /* Live terminal (a program rendered as the wallpaper) */
 };
 
+/* Wallpaper types that drive the multipass GLSL pipeline and need continuous
+ * frame scheduling (frame timer / repeated needs_redraw). Both GLSL shaders and
+ * terminal wallpapers render through render_frame_shader(); a static image does
+ * not. Kept as one predicate so every animation gate in the render loop and the
+ * event loop stays in agreement. */
+static inline bool wallpaper_is_animated(enum wallpaper_type t) {
+    return t == WALLPAPER_SHADER || t == WALLPAPER_TERMINAL;
+}
+
 /* Wallpaper configuration for a specific output */
 struct wallpaper_config {
     enum wallpaper_type type;           /* Wallpaper type (image or shader) */
