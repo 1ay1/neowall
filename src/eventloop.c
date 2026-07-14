@@ -1105,6 +1105,26 @@ void event_loop_run(struct neowall_state *state) {
                                 atomic_store_explicit(&fto->needs_redraw, true,
                                                       memory_order_release);
                             }
+                            /* ALWAYS re-arm the one-shot pace timer when it
+                             * expires, whether or not we render this tick. The
+                             * swap path also re-arms it, but an idle-gated
+                             * terminal often skips the render (and thus the
+                             * swap), so without this the timer fires exactly
+                             * once and goes silent — the loop then only wakes on
+                             * the 1s poll timeout and a non-continuous terminal
+                             * collapses to ~1 FPS. Re-arming here keeps the
+                             * frame timer ticking so the next child byte is
+                             * observed within one frame period. A double re-arm
+                             * (here + swap) is harmless: both compute the same
+                             * next absolute deadline. */
+                            {
+                                struct timespec pnow;
+                                clock_gettime(CLOCK_MONOTONIC, &pnow);
+                                uint64_t pnow_ns =
+                                    (uint64_t)pnow.tv_sec * 1000000000ULL +
+                                    (uint64_t)pnow.tv_nsec;
+                                output_pace_advance(fto, pnow_ns);
+                            }
                         }
                     }
                 }
