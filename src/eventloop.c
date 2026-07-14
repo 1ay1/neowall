@@ -421,9 +421,37 @@ static void render_outputs(struct neowall_state *state) {
             }
         }
 
+        /* Compute the changed screen region for damage-aware presentation. A
+         * crisp terminal that only moved a few rows reports a pixel band (GL
+         * bottom-left origin); everything else damages the full surface. The
+         * same rect drives BOTH the wl_surface damage (what the compositor
+         * recomposites) and eglSwapBuffersWithDamage (the buffer sub-region). */
+        int dmg_x = 0, dmg_y = 0, dmg_w = INT32_MAX, dmg_h = INT32_MAX;
+        bool partial = false;
+        if (state->swap_damage_supported &&
+            output->config->type == WALLPAPER_TERMINAL &&
+            output->multipass_shader &&
+            output->config->shader_path[0] == '\0' /* crisp built-in, no post-shader */) {
+            int px, py, pw, ph;
+            if (multipass_last_damage(output->multipass_shader, true,
+                                      output->width, output->height,
+                                      &px, &py, &pw, &ph)) {
+                dmg_x = px; dmg_y = py; dmg_w = pw; dmg_h = ph;
+                partial = true;
+            }
+        }
+
         /* Damage BEFORE swap+commit — wl_surface damage must be queued before
-         * the commit that publishes the new buffer (audit fix #17). */
-        compositor_surface_damage(output->compositor_surface, 0, 0, INT32_MAX, INT32_MAX);
+         * the commit that publishes the new buffer (audit fix #17). wl_surface
+         * damage is in SURFACE (top-left origin) coords; convert the GL
+         * bottom-left band back for the partial case. */
+        if (partial) {
+            int surf_y = output->height - (dmg_y + dmg_h);   /* flip to top-left */
+            compositor_surface_damage(output->compositor_surface,
+                                      dmg_x, surf_y, dmg_w, dmg_h);
+        } else {
+            compositor_surface_damage(output->compositor_surface, 0, 0, INT32_MAX, INT32_MAX);
+        }
 
         /* Ask the compositor for a real present timestamp for the frame we are
          * about to publish (wp_presentation). The feedback attaches to the next
@@ -438,8 +466,25 @@ static void render_outputs(struct neowall_state *state) {
         }
 #endif
 
-        /* Swap can block waiting for vsync; we hold no locks here. */
-        if (!eglSwapBuffers(state->egl_display, output->compositor_surface->egl_surface)) {
+        /* Present. With EGL_EXT/KHR_swap_buffers_with_damage we hand the driver
+         * the exact changed rect (GL bottom-left origin) so it re-scans/
+         * recomposites only those scanlines; otherwise a plain full swap. Swap
+         * can block waiting for vsync; we hold no locks here. */
+        bool swap_ok;
+        if (partial && state->swap_with_damage) {
+            typedef EGLBoolean (*swap_dmg_fn)(EGLDisplay, EGLSurface, const EGLint *, EGLint);
+            /* Launder the void* through a union: a direct object->function
+             * pointer cast is ISO-C-undefined (-Wpedantic), but eglGetProcAddress
+             * hands back a function address, so this is safe on every real ABI. */
+            union { void *obj; swap_dmg_fn fn; } u = { .obj = state->swap_with_damage };
+            EGLint rect[4] = { dmg_x, dmg_y, dmg_w, dmg_h };
+            swap_ok = u.fn(state->egl_display,
+                           output->compositor_surface->egl_surface, rect, 1);
+        } else {
+            swap_ok = eglSwapBuffers(state->egl_display,
+                                     output->compositor_surface->egl_surface);
+        }
+        if (!swap_ok) {
             log_error("Failed to swap buffers for output %s: 0x%x",
                      output->model, eglGetError());
             state->errors_count++;

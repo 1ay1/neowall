@@ -36,6 +36,15 @@ struct neowall_state {
     EGLContext egl_context;
     EGLConfig egl_config;
 
+    /* eglSwapBuffersWithDamageEXT/KHR: present only the changed screen region so
+     * the compositor recomposites/re-scans just that rect instead of the whole
+     * surface. Loaded at EGL init if EGL_EXT_swap_buffers_with_damage (or the
+     * KHR variant) is advertised; NULL means fall back to plain eglSwapBuffers.
+     * The terminal path feeds its dirty cell-row band here; other wallpapers
+     * damage the full surface. */
+    void *swap_with_damage;   /* PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC, NULL if unsupported */
+    bool swap_damage_supported;
+
     /* ===== OUTPUTS ===== */
     struct output_state *outputs;
     uint32_t output_count;

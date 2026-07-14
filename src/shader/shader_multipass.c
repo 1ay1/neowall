@@ -2667,6 +2667,54 @@ GLuint multipass_get_buffer_texture(const multipass_shader_t *shader,
     return 0;
 }
 
+/* Report the changed screen region from the last render, in framebuffer pixels
+ * with a BOTTOM-LEFT origin (EGL/GL damage convention). Returns true and fills
+ * the x/y/w/h out-params with a partial rect when the last frame changed only a
+ * sub-region we can prove is local; returns false when the caller should damage
+ * the whole surface.
+ *
+ * Only the crisp built-in terminal pass-through (a single Image pass sampling
+ * the cell grid 1:1, no user post-shader) qualifies: there a dirty band of cell
+ * rows maps to a contiguous pixel band, so we damage just those scanlines (plus
+ * a one-cell margin for glyph overhang / linear-atlas bleed). Any buffered or
+ * user shader can spread a changed texel arbitrarily, so those full-damage.
+ * `crisp` tells us the host sees no custom term shader bound. */
+bool multipass_last_damage(const multipass_shader_t *shader, bool crisp,
+                           int surf_w, int surf_h,
+                           int *x, int *y, int *w, int *h) {
+    if (!shader || !shader->term || !crisp) return false;
+    if (shader->has_buffers || shader->pass_count != 1) return false;
+    if (surf_w <= 0 || surf_h <= 0) return false;
+
+    int rows = term_render_rows(shader->term);
+    if (rows <= 0) return false;
+
+    int y0 = 0, y1 = rows;
+    term_render_cells_dirty_rows(shader->term, &y0, &y1);
+    if (y0 < 0) y0 = 0;
+    if (y1 > rows) y1 = rows;
+    if (y1 <= y0) return false;                 /* nothing changed */
+    if (y0 == 0 && y1 == rows) return false;    /* whole grid — just full-damage */
+
+    /* Cell row -> surface pixel band. The grid covers the full surface height,
+     * so each cell row is surf_h/rows px tall; add a one-row margin each side. */
+    double px_per_row = (double)surf_h / (double)rows;
+    int top_px    = (int)((double)(y0 - 1) * px_per_row);           /* top-down */
+    int bot_px    = (int)((double)(y1 + 1) * px_per_row + 0.5);
+    if (top_px < 0) top_px = 0;
+    if (bot_px > surf_h) bot_px = surf_h;
+    int band_h = bot_px - top_px;
+    if (band_h <= 0) return false;
+
+    /* Flip to bottom-left origin for EGL damage: a top-down band [top,bot) has
+     * its bottom edge at surf_h-bot from the framebuffer bottom. */
+    if (x) *x = 0;
+    if (y) *y = surf_h - bot_px;
+    if (w) *w = surf_w;
+    if (h) *h = band_h;
+    return true;
+}
+
 /* ============================================
  * Debug Functions
  * ============================================ */

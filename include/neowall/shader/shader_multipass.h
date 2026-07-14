@@ -604,6 +604,16 @@ int multipass_get_pass_index(const multipass_shader_t *shader, multipass_type_t 
 GLuint multipass_get_buffer_texture(const multipass_shader_t *shader, 
                                      multipass_type_t type);
 
+/* Report the changed screen region from the last render, in framebuffer pixels
+ * with a BOTTOM-LEFT origin (EGL/GL damage convention), for damage-aware
+ * presentation (eglSwapBuffersWithDamage). Returns true + a partial rect when
+ * the frame changed only a provably-local sub-region (crisp terminal
+ * pass-through, dirty cell-row band); returns false when the whole surface must
+ * be damaged. `crisp` = the host has no custom terminal post-shader bound. */
+bool multipass_last_damage(const multipass_shader_t *shader, bool crisp,
+                           int surf_w, int surf_h,
+                           int *x, int *y, int *w, int *h);
+
 /* ============================================
  * Utility Functions
  * ============================================ */

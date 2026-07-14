@@ -103,6 +103,35 @@ bool egl_core_init(struct neowall_state *state) {
 
     log_info("EGL version: %d.%d", major, minor);
 
+    /* Damage-aware presentation. eglSwapBuffersWithDamageEXT/KHR lets us hand the
+     * compositor the exact changed rectangle(s) so it recomposites just that
+     * region (and, on a frei-buffer path, re-scans only those scanlines) instead
+     * of the whole surface. The terminal wallpaper feeds its dirty cell-row band;
+     * other wallpaper types damage the full surface. Falls back to plain
+     * eglSwapBuffers when neither extension is present. */
+    state->swap_with_damage = NULL;
+    state->swap_damage_supported = false;
+    {
+        const char *egl_exts = eglQueryString(state->egl_display, EGL_EXTENSIONS);
+        if (egl_exts) {
+            /* eglGetProcAddress returns a function pointer; store it as void*
+             * through a union to avoid the ISO-C function<->object cast warning. */
+            union { void (*fn)(void); void *obj; } u = { .fn = NULL };
+            if (strstr(egl_exts, "EGL_EXT_swap_buffers_with_damage")) {
+                u.fn = eglGetProcAddress("eglSwapBuffersWithDamageEXT");
+            }
+            if (!u.fn && strstr(egl_exts, "EGL_KHR_swap_buffers_with_damage")) {
+                u.fn = eglGetProcAddress("eglSwapBuffersWithDamageKHR");
+            }
+            state->swap_with_damage = u.obj;
+        }
+        state->swap_damage_supported = state->swap_with_damage != NULL;
+        log_info("Damage-aware presentation: %s",
+                 state->swap_damage_supported
+                     ? "enabled (eglSwapBuffersWithDamage)"
+                     : "unavailable (full-surface swaps)");
+    }
+
     /* Use desktop OpenGL for Shadertoy compatibility */
     if (!eglBindAPI(EGL_OPENGL_API)) {
         log_error("Failed to bind desktop OpenGL API");
