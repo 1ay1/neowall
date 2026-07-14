@@ -48,6 +48,13 @@ typedef struct glyph_slot {
 glyph_atlas *glyph_atlas_create(const uint8_t *font_data, size_t font_len,
                                 int cell_w, int cell_h);
 
+/* Like glyph_atlas_create, but also loads optional bold/italic faces (NULL =
+ * none; bold/italic cells then fall back to the regular face) and a built-in
+ * system fallback chain for glyphs the primary font lacks (CJK/symbols). */
+glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
+                                   const char *bold_path, const char *italic_path,
+                                   int cell_w, int cell_h);
+
 void glyph_atlas_destroy(glyph_atlas *a);
 
 /* Look up (rasterizing + inserting on first touch) the slot for a codepoint.
@@ -55,6 +62,11 @@ void glyph_atlas_destroy(glyph_atlas *a);
  * lifetime). On atlas-full or un-rasterizable glyph, returns a blank slot
  * (valid=false) — the renderer draws nothing, never garbage. */
 const glyph_slot *glyph_atlas_get(glyph_atlas *a, uint32_t cp);
+
+/* As above, but selects the bold/italic face for the glyph (falling back to
+ * regular when that face isn't loaded). Bold/italic variants cache separately. */
+const glyph_slot *glyph_atlas_get_styled(glyph_atlas *a, uint32_t cp,
+                                         bool bold, bool italic);
 
 /* Atlas bitmap accessors (single-channel, 8-bit coverage, row-major). The
  * shader engine uploads this to a GL_R8 texture. `dirty` is set whenever new

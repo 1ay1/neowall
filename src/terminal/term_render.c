@@ -150,7 +150,9 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
         }
     }
 
-    tr->atlas = glyph_atlas_create(font_data, font_len, atlas_cw, atlas_ch);
+    tr->atlas = glyph_atlas_create_ex(font_data, font_len,
+                                      opts->font_bold_path, opts->font_italic_path,
+                                      atlas_cw, atlas_ch);
     free(file_buf); /* atlas copies what it needs; system-font path owns its own */
     if (!tr->atlas) {
         if (err_out) *err_out = nw_err(NW_ERR_IO, "term_render: no usable font");
@@ -301,11 +303,32 @@ bool term_render_update(term_render *tr) {
         int16_t ox = 0, oy = 0;
         if (!tail && c->cp != 0 && c->cp != ' ' &&
             !(c->attr & TERM_ATTR_INVISIBLE)) {
-            const glyph_slot *s = glyph_atlas_get(tr->atlas, c->cp);
+            bool bold   = (c->attr & TERM_ATTR_BOLD) != 0;
+            bool italic = (c->attr & TERM_ATTR_ITALIC) != 0;
+            const glyph_slot *s = glyph_atlas_get_styled(tr->atlas, c->cp, bold, italic);
             if (s && s->valid && s->w > 0 && s->h > 0) {
                 has_glyph = true;
                 ax = s->x; ay = s->y; gw = s->w; gh = s->h;
                 ox = s->off_x; oy = s->off_y;
+            }
+        } else if (tail && i > 0 && !(c->attr & TERM_ATTR_INVISIBLE)) {
+            /* Wide-glyph continuation: draw the RIGHT half of the head cell's
+             * glyph here instead of leaving it blank, so CJK/emoji span both
+             * of their two cells at natural width. We reference the same atlas
+             * slot but shift the draw offset left by one on-screen cell, so
+             * this cell samples the glyph's second half. */
+            const term_cell *head = &src[i - 1];
+            if (head->cp != 0 && !(head->attr & TERM_ATTR_INVISIBLE)) {
+                bool bold   = (head->attr & TERM_ATTR_BOLD) != 0;
+                bool italic = (head->attr & TERM_ATTR_ITALIC) != 0;
+                const glyph_slot *s = glyph_atlas_get_styled(tr->atlas, head->cp, bold, italic);
+                int cw_ss = tr->cell_w * tr->ss;
+                if (s && s->valid && s->w > cw_ss) {   /* only if it actually overflows */
+                    has_glyph = true;
+                    ax = s->x; ay = s->y; gw = s->w; gh = s->h;
+                    ox = (int16_t)(s->off_x - cw_ss);
+                    oy = s->off_y;
+                }
             }
         }
 
