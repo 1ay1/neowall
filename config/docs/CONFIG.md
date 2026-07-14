@@ -205,6 +205,103 @@ shuffle false   # Alphabetical order (default)
   refers to a different random permutation than the one you'd get on the
   next launch, so resuming at it is meaningless.
 
+### Terminal Options
+
+Run any terminal program as the wallpaper. neowall has its own in-tree,
+dependency-free VT/xterm-class terminal emulator — a real PTY running the
+command, a spec-correct ANSI/DEC parser, and a cell grid (SGR truecolour,
+scroll regions, alternate screen, mouse reporting, colour emoji) rendered on the
+GPU. TUIs like `btop`, `htop`, `cava` and `vim` run live behind your windows.
+
+#### `terminal` - Command to Run
+
+Names the command launched under the PTY. Mutually exclusive with `path` and
+`shader`.
+
+```vibe
+terminal btop                    # a bare command
+terminal "journalctl -f"         # quote if it has arguments
+terminal "htop -d 10"
+```
+
+The command runs via `$SHELL -c`, so pipelines and arguments work. If it exits,
+neowall relaunches it after a short backoff (so a transient crash resumes the
+wallpaper instead of freezing on the last frame).
+
+#### `term_cols` / `term_rows` - Grid Size
+
+The terminal grid in character cells. `0` (the default) means **auto-fit the
+whole display** from its resolution and the font's cell size.
+
+```vibe
+term_cols 0     # auto-fit width  (default)
+term_rows 0     # auto-fit height (default)
+term_cols 120   # or pin an explicit grid
+term_rows 40
+```
+
+#### `term_font_size` - Font Size
+
+Cell font size in pixels. Larger = bigger text, fewer cells when auto-fitting.
+
+```vibe
+term_font_size 16    # default is a mid-size cell
+term_font_size 24    # chunkier, fewer rows/cols
+```
+
+#### `term_font` / `term_font_bold` / `term_font_italic` - Fonts
+
+Paths to TrueType/OpenType font files. If unset, neowall picks a sensible
+monospace face it finds on the system. Bold/italic fall back to the regular
+face synthesised if not given.
+
+```vibe
+term_font ~/.fonts/JetBrainsMono-Regular.ttf
+term_font_bold ~/.fonts/JetBrainsMono-Bold.ttf
+term_font_italic ~/.fonts/JetBrainsMono-Italic.ttf
+```
+
+Colour emoji fonts (CBDT/CBLC or sbix bitmap strikes, e.g.
+`NotoColorEmoji.ttf`) are detected automatically and rendered in colour.
+
+#### `term_fg` / `term_bg` - Default Colours
+
+Hex colours for the default foreground and background (cells that don't set
+their own via SGR). `term_bg` also sets the surface behind the text.
+
+```vibe
+term_fg #d0d0d0
+term_bg #101018
+```
+
+#### `term_cwd` - Working Directory
+
+Directory the command starts in (defaults to inherited cwd).
+
+```vibe
+term_cwd ~/projects
+```
+
+#### `term_env` - TERM Value
+
+The value of `$TERM` seen by the child (default `xterm-256color`).
+`COLORTERM=truecolor` is always exported so 24-bit colour works.
+
+```vibe
+term_env xterm-256color
+```
+
+#### `term_shader` - Styling Pass
+
+Optional GLSL shader that post-processes the rendered terminal (a CRT curve,
+glow, scanlines, …). The shader samples the terminal via `nwTerm()`.
+
+```vibe
+term_shader crt.glsl
+```
+
+`shader_fps` and `vsync` also apply in terminal mode (they pace the redraw).
+
 ## Global Options
 
 These sit at the top level of `config.vibe`, **outside** any `default {}` or
@@ -345,6 +442,28 @@ default {
 }
 ```
 
+### Terminal (TUI) Wallpaper
+
+```vibe
+default {
+  terminal btop
+  term_cols 0        # auto-fit the whole display
+  term_rows 0
+  term_font_size 16
+}
+```
+
+With a CRT styling pass and a scrolling log:
+
+```vibe
+default {
+  terminal "journalctl -f"
+  term_shader crt.glsl
+  term_fg #33ff66
+  term_bg #001100
+}
+```
+
 ### Mixed Setup
 
 ```vibe
@@ -374,11 +493,12 @@ output {
 
 Don't mix these in the same section:
 
-**Images vs Shaders:**
-- Use `path` OR `shader`, not both
-- Use `mode` with images, not shaders
-- Use `transition` with images, not shaders
+**Images vs Shaders vs Terminal:**
+- Use exactly one of `path`, `shader`, or `terminal` per section
+- Use `mode` / `transition` with images, not shaders or terminals
 - Use `shader_speed` with shaders, not images
+- `term_*` keys apply only with `terminal`
+- `shader_fps` / `vsync` apply to shaders and terminals (both animate)
 
 **Valid:**
 ```vibe

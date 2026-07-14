@@ -156,6 +156,42 @@ a `.neowall` sidecar lets you bind each channel explicitly — `channel0 audio`,
 `channel1 self`, `channel2 font`, etc.
 See [`docs/REACTIVE_SHADERS.md`](docs/REACTIVE_SHADERS.md#3-neowall-manifests).
 
+## Terminal as wallpaper
+
+Any terminal program can *be* the wallpaper. neowall ships its own in-tree,
+dependency-free VT/xterm-class terminal emulator (real PTY, spec-correct
+ANSI/DEC parser, cell grid with SGR truecolour, scroll regions, the alternate
+screen, mouse reporting and colour emoji) and renders its cell grid on the GPU —
+so `btop`, `htop`, `cava`, `vim` or a scrolling `journalctl -f` run live behind
+your windows.
+
+```
+default {
+  terminal btop
+  term_cols 0     # 0 = auto-fit the whole display
+  term_rows 0
+}
+```
+
+```
+default {
+  terminal "journalctl -f"
+  term_font_size 16
+  term_shader crt.glsl    # optional: pipe the terminal through a CRT/glow pass
+}
+```
+
+It's a *real* terminal, not a screenshot: it answers the startup handshake
+(cursor-position report, Device Attributes) so probing TUIs enter their render
+loop and animate, forwards the pointer when the app enables mouse reporting, and
+auto-restarts the command if it exits. No libvterm, no external terminal — every
+byte of the parser and screen model is in-tree, in the same spirit as neowall's
+hand-rolled event loop and config parser.
+
+Full key reference (`term_font`, `term_font_size`, `term_fg`/`term_bg`,
+`term_cwd`, `term_env`, `term_shader`, …) is in
+[`config/docs/CONFIG.md`](config/docs/CONFIG.md#terminal-options).
+
 ## How it works
 
 Single C binary. The event loop is built on `timerfd` + `signalfd` — there is no polling thread anywhere. Rendering goes through EGL → OpenGL 3.3 (desktop) with a GLES 2.0 fallback for older GPUs.
@@ -179,6 +215,7 @@ Result: while a fullscreen game, a maximized browser, or a wall of tiled termina
 |-|---------|------|----------|-----------|
 | Animated GLSL shaders | ✓ | – | – | – |
 | Drop-in Shadertoy support | ✓ | – | – | – |
+| Terminal / TUI as wallpaper | ✓ | – | – | – |
 | Image slideshow | ✓ | ✓ | – | ✓ |
 | Video | – | gifs only | ✓ | – |
 | Wayland | ✓ | ✓ | ✓ | ✓ |

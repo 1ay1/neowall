@@ -9,8 +9,9 @@ before making structural changes.
 ## 1. One-paragraph mental model
 
 neowall is a single-process daemon that renders a wallpaper (a static image, an
-image slideshow, or a live GLSL shader) onto every monitor, on both Wayland and
-X11. It is built around a **`poll(2)` event loop** over a small set of file
+image slideshow, a live GLSL shader, or a full terminal running any TUI) onto
+every monitor, on both Wayland and X11. It is built around a **`poll(2)` event
+loop** over a small set of file
 descriptors (compositor socket, cycle timer, wakeup eventfd, signalfd, and
 per-output frame timers). All display-server specifics sit behind a **compositor
 backend vtable**, so the core never sees a `wl_*` or `X*` type. Rendering goes
@@ -49,10 +50,15 @@ include/neowall/          PUBLIC headers (the project's API surface)
   render/  image/  egl/       rendering, image decode, EGL context
   occlusion/                 "pause when covered" dispatcher
   shader/                    GLSL engine: multipass, shadertoy-compat, optimizers
+  terminal/                  in-tree VT/xterm emulator (terminal-as-wallpaper)
 src/                       IMPLEMENTATION (.c) + truly-private impl headers
   main.c eventloop.c utils.c
   compositor/backends/{wayland,x11}/   backend implementations; private headers
                                        (frame_watchdog.h, *_occlusion.h) live here
+  terminal/                  utf8 · vtparse (ANSI/DEC state machine) · screen
+                             (cell grid + control functions) · pty (forkpty +
+                             reader thread) · glyph_atlas · cbdt (colour emoji)
+                             · term_render (grid → GPU cell texture)
 protocols/                 generated Wayland *-client-protocol.{c,h}
 tests/                     headless unit/concurrency tests (run under sanitizers)
 ```

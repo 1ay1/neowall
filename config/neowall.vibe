@@ -188,6 +188,20 @@ output {
 #   shader_speed 1.5    # Optional: run animations 1.5x faster
 # }
 
+# --- Example 1c: Terminal (TUI) Wallpaper ---
+# Run any terminal program as the wallpaper via neowall's in-tree, dependency-
+# free VT emulator. TUIs like btop / htop / cava / vim run live behind windows.
+# default {
+#   terminal btop         # quote if it has args: terminal "htop -d 10"
+#   term_cols 0           # 0 = auto-fit the whole display (default)
+#   term_rows 0
+#   term_font_size 16     # cell font size in px
+#   # term_font ~/.fonts/JetBrainsMono-Regular.ttf
+#   # term_fg #d0d0d0
+#   # term_bg #101018
+#   # term_shader crt.glsl   # optional CRT/glow styling pass (samples nwTerm())
+# }
+
 # --- Example 2: Laptop + External Monitor ---
 # default {
 #   path ~/Pictures/default.png
