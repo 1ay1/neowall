@@ -1,0 +1,6 @@
+default {
+  terminal "/home/ayush/rockbottom/build/rb --refresh=250"
+  term_cols 0
+  term_rows 0
+  term_fade 0.8
+}
