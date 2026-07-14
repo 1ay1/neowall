@@ -867,12 +867,16 @@ bool output_configure_compositor_surface(struct output_state *output) {
               output->model[0] ? output->model : "unknown",
               (void*)output->native_output, output->configured);
 
+    /* Enable keyboard focus only for terminal wallpapers (so they can be typed
+     * into once clicked). Image/shader wallpapers stay keyboard-inert. */
+    bool want_kbd = output->config && output->config->type == WALLPAPER_TERMINAL;
+
     /* Create compositor surface using abstraction layer */
     compositor_surface_config_t config = {
         .layer = COMPOSITOR_LAYER_BACKGROUND,
         .anchor = COMPOSITOR_ANCHOR_FILL,
         .exclusive_zone = -1,
-        .keyboard_interactivity = false,
+        .keyboard_interactivity = want_kbd,
         .width = 0,   /* Auto-size from compositor */
         .height = 0,  /* Auto-size from compositor */
         .output = output->native_output,

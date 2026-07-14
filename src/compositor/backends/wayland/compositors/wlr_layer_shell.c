@@ -6,6 +6,11 @@
 #include <wayland-client.h>
 #include <wayland-cursor.h>
 #include <wayland-egl.h>
+#ifdef NEOWALL_HAVE_XKB
+#include <sys/mman.h>
+#include <unistd.h>
+#include <xkbcommon/xkbcommon.h>
+#endif
 #include "neowall/compositor/compositor.h"
 #include "neowall/compositor/backends/wayland.h"
 #include "neowall/neowall.h"
@@ -54,6 +59,7 @@ typedef struct {
     struct zwlr_layer_shell_v1 *layer_shell;
     struct wl_seat *seat;
     struct wl_pointer *pointer;
+    struct wl_keyboard *keyboard;
     bool initialized;
     bool occlusion_active;
 
@@ -63,6 +69,16 @@ typedef struct {
     struct output_state *ptr_output;  /* output the pointer is currently over */
     int  ptr_x, ptr_y;                /* surface-local pixel position */
     bool ptr_left_down;               /* left button currently held (for drag) */
+
+    /* Keyboard focus + xkb state for terminal-wallpaper typing. kbd_output is
+     * the terminal surface that currently holds keyboard focus (via ON_DEMAND
+     * interactivity + a click), NULL when unfocused. */
+    struct output_state *kbd_output;
+#ifdef NEOWALL_HAVE_XKB
+    struct xkb_context *xkb_ctx;
+    struct xkb_keymap  *xkb_keymap;
+    struct xkb_state   *xkb_state;
+#endif
 } wlr_backend_data_t;
 
 /* Surface backend data */
@@ -427,6 +443,161 @@ static const struct wl_pointer_listener pointer_listener = {
 };
 
 /* ============================================================================
+ * KEYBOARD EVENT HANDLERS (terminal-wallpaper typing)
+ * ============================================================================ */
+
+#ifdef NEOWALL_HAVE_XKB
+/* Find the output_state whose compositor surface matches a wl_surface. */
+static struct output_state *output_for_surface(wlr_backend_data_t *b,
+                                               struct wl_surface *surf) {
+    if (!b || !b->state || !surf) return NULL;
+    for (struct output_state *o = b->state->outputs; o; o = o->next) {
+        if (o->compositor_surface &&
+            o->compositor_surface->native_surface == surf)
+            return o;
+    }
+    return NULL;
+}
+
+/* Translate an xkb keysym (+ current modifiers) into the VT byte sequence a
+ * terminal expects, writing it to `out` (cap bytes). Returns the byte count, or
+ * 0 if the key produces nothing. Covers control chars, the cursor/edit/function
+ * keys, and Alt-as-ESC-prefix; ordinary text comes from xkb_state_key_get_utf8. */
+static int keysym_to_vt(struct xkb_state *st, xkb_keysym_t sym, uint32_t keycode,
+                        bool ctrl, bool alt, char *out, int cap) {
+    int n = 0;
+    #define EMIT(s) do { const char *_s=(s); while(*_s && n<cap) out[n++]=*_s++; } while(0)
+    /* Alt sends ESC prefix before the key's normal bytes. */
+    if (alt && n < cap) out[n++] = 0x1b;
+
+    switch (sym) {
+        case XKB_KEY_Return:
+        case XKB_KEY_KP_Enter:   EMIT("\r");   return n;
+        case XKB_KEY_BackSpace:  EMIT("\x7f"); return n;
+        case XKB_KEY_Tab:        EMIT("\t");   return n;
+        case XKB_KEY_Escape:     EMIT("\x1b"); return n;
+        case XKB_KEY_Up:         EMIT("\x1b[A"); return n;
+        case XKB_KEY_Down:       EMIT("\x1b[B"); return n;
+        case XKB_KEY_Right:      EMIT("\x1b[C"); return n;
+        case XKB_KEY_Left:       EMIT("\x1b[D"); return n;
+        case XKB_KEY_Home:       EMIT("\x1b[H"); return n;
+        case XKB_KEY_End:        EMIT("\x1b[F"); return n;
+        case XKB_KEY_Insert:     EMIT("\x1b[2~"); return n;
+        case XKB_KEY_Delete:     EMIT("\x1b[3~"); return n;
+        case XKB_KEY_Page_Up:    EMIT("\x1b[5~"); return n;
+        case XKB_KEY_Page_Down:  EMIT("\x1b[6~"); return n;
+        case XKB_KEY_F1:  EMIT("\x1bOP"); return n;
+        case XKB_KEY_F2:  EMIT("\x1bOQ"); return n;
+        case XKB_KEY_F3:  EMIT("\x1bOR"); return n;
+        case XKB_KEY_F4:  EMIT("\x1bOS"); return n;
+        case XKB_KEY_F5:  EMIT("\x1b[15~"); return n;
+        case XKB_KEY_F6:  EMIT("\x1b[17~"); return n;
+        case XKB_KEY_F7:  EMIT("\x1b[18~"); return n;
+        case XKB_KEY_F8:  EMIT("\x1b[19~"); return n;
+        case XKB_KEY_F9:  EMIT("\x1b[20~"); return n;
+        case XKB_KEY_F10: EMIT("\x1b[21~"); return n;
+        case XKB_KEY_F11: EMIT("\x1b[23~"); return n;
+        case XKB_KEY_F12: EMIT("\x1b[24~"); return n;
+        default: break;
+    }
+
+    /* Ctrl+letter -> control code (Ctrl-A = 0x01 .. Ctrl-Z = 0x1a), plus the
+     * classic Ctrl-[\]^_ and Ctrl-Space=NUL. */
+    if (ctrl) {
+        xkb_keysym_t low = sym;
+        if (low >= XKB_KEY_A && low <= XKB_KEY_Z) low += 32;
+        if (low >= XKB_KEY_a && low <= XKB_KEY_z) { if (n<cap) out[n++]=(char)(low - 'a' + 1); return n; }
+        if (low == XKB_KEY_space || low == XKB_KEY_2) { if (n<cap) out[n++]=0; return n; }
+        if (low >= XKB_KEY_bracketleft && low <= XKB_KEY_underscore) { if (n<cap) out[n++]=(char)(low - XKB_KEY_bracketleft + 0x1b); return n; }
+    }
+
+    /* Ordinary text: let xkb produce the UTF-8 for the keycode with the layout
+     * + shift/level already applied. */
+    char buf[16];
+    int len = xkb_state_key_get_utf8(st, keycode, buf, sizeof(buf));
+    for (int i = 0; i < len && n < cap; i++) out[n++] = buf[i];
+    return n;
+    #undef EMIT
+}
+
+static void kb_handle_keymap(void *data, struct wl_keyboard *kb,
+                             uint32_t format, int32_t fd, uint32_t size) {
+    wlr_backend_data_t *b = data;
+    (void)kb;
+    if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) { close(fd); return; }
+    char *map = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (map == MAP_FAILED) { close(fd); return; }
+    if (!b->xkb_ctx) b->xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    struct xkb_keymap *km = b->xkb_ctx
+        ? xkb_keymap_new_from_string(b->xkb_ctx, map, XKB_KEYMAP_FORMAT_TEXT_V1,
+                                     XKB_KEYMAP_COMPILE_NO_FLAGS)
+        : NULL;
+    munmap(map, size);
+    close(fd);
+    if (!km) return;
+    if (b->xkb_state)  xkb_state_unref(b->xkb_state);
+    if (b->xkb_keymap) xkb_keymap_unref(b->xkb_keymap);
+    b->xkb_keymap = km;
+    b->xkb_state  = xkb_state_new(km);
+}
+
+static void kb_handle_enter(void *data, struct wl_keyboard *kb, uint32_t serial,
+                            struct wl_surface *surface, struct wl_array *keys) {
+    wlr_backend_data_t *b = data;
+    (void)kb; (void)serial; (void)keys;
+    b->kbd_output = output_for_surface(b, surface);
+    if (b->kbd_output) log_debug("Keyboard focus entered a terminal wallpaper");
+}
+
+static void kb_handle_leave(void *data, struct wl_keyboard *kb, uint32_t serial,
+                            struct wl_surface *surface) {
+    wlr_backend_data_t *b = data;
+    (void)kb; (void)serial; (void)surface;
+    b->kbd_output = NULL;
+}
+
+static void kb_handle_key(void *data, struct wl_keyboard *kb, uint32_t serial,
+                          uint32_t time, uint32_t key, uint32_t state) {
+    wlr_backend_data_t *b = data;
+    (void)kb; (void)serial; (void)time;
+    if (state != WL_KEYBOARD_KEY_STATE_PRESSED) return;
+    if (!b->kbd_output || !b->xkb_state) return;
+
+    uint32_t keycode = key + 8;   /* evdev -> xkb keycode offset */
+    xkb_keysym_t sym = xkb_state_key_get_one_sym(b->xkb_state, keycode);
+    bool ctrl = xkb_state_mod_name_is_active(b->xkb_state, XKB_MOD_NAME_CTRL,
+                                             XKB_STATE_MODS_EFFECTIVE) > 0;
+    bool alt  = xkb_state_mod_name_is_active(b->xkb_state, XKB_MOD_NAME_ALT,
+                                             XKB_STATE_MODS_EFFECTIVE) > 0;
+    char seq[32];
+    int n = keysym_to_vt(b->xkb_state, sym, keycode, ctrl, alt, seq, sizeof(seq));
+    if (n > 0) output_terminal_key(b->kbd_output, seq, (size_t)n);
+}
+
+static void kb_handle_modifiers(void *data, struct wl_keyboard *kb, uint32_t serial,
+                                uint32_t dep, uint32_t lat, uint32_t lck, uint32_t grp) {
+    wlr_backend_data_t *b = data;
+    (void)kb; (void)serial;
+    if (b->xkb_state)
+        xkb_state_update_mask(b->xkb_state, dep, lat, lck, 0, 0, grp);
+}
+
+static void kb_handle_repeat_info(void *data, struct wl_keyboard *kb,
+                                  int32_t rate, int32_t delay) {
+    (void)data; (void)kb; (void)rate; (void)delay;
+}
+
+static const struct wl_keyboard_listener keyboard_listener = {
+    .keymap = kb_handle_keymap,
+    .enter = kb_handle_enter,
+    .leave = kb_handle_leave,
+    .key = kb_handle_key,
+    .modifiers = kb_handle_modifiers,
+    .repeat_info = kb_handle_repeat_info,
+};
+#endif /* NEOWALL_HAVE_XKB */
+
+/* ============================================================================
  * SEAT EVENT HANDLERS
  * ============================================================================ */
 
@@ -463,6 +634,23 @@ static void seat_handle_capabilities(void *data, struct wl_seat *seat,
             log_info("Wayland pointer capability disabled");
         }
     }
+
+#ifdef NEOWALL_HAVE_XKB
+    /* Keyboard: bound whenever the seat has one, so a focused terminal
+     * wallpaper can be typed into. Focus is opt-in per surface (ON_DEMAND
+     * keyboard-interactivity) and only granted when the user clicks it, so
+     * binding here does not steal keys from normal windows. */
+    if (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) {
+        if (!backend->keyboard) {
+            backend->keyboard = wl_seat_get_keyboard(seat);
+            wl_keyboard_add_listener(backend->keyboard, &keyboard_listener, backend);
+            log_info("Wayland keyboard capability enabled (terminal typing)");
+        }
+    } else if (backend->keyboard) {
+        wl_keyboard_destroy(backend->keyboard);
+        backend->keyboard = NULL;
+    }
+#endif
 }
 
 static void seat_handle_name(void *data, struct wl_seat *seat, const char *name) {
@@ -570,6 +758,16 @@ static void wlr_cleanup(void *data) {
     if (backend_data->pointer) {
         destroy_pointer(backend_data);
     }
+
+#ifdef NEOWALL_HAVE_XKB
+    if (backend_data->keyboard) {
+        wl_keyboard_destroy(backend_data->keyboard);
+        backend_data->keyboard = NULL;
+    }
+    if (backend_data->xkb_state)  xkb_state_unref(backend_data->xkb_state);
+    if (backend_data->xkb_keymap) xkb_keymap_unref(backend_data->xkb_keymap);
+    if (backend_data->xkb_ctx)    xkb_context_unref(backend_data->xkb_ctx);
+#endif
 
     if (backend_data->seat) {
         wl_seat_destroy(backend_data->seat);
@@ -748,10 +946,12 @@ static struct compositor_surface *wlr_create_surface(void *data,
     zwlr_layer_surface_v1_set_exclusive_zone(surface_data->layer_surface,
                                             config->exclusive_zone);
 
-    /* Set keyboard interactivity */
+    /* Set keyboard interactivity. ON_DEMAND (not EXCLUSIVE) so a terminal
+     * wallpaper receives keys only while the user has clicked/focused it, and
+     * never steals input from real windows. */
     enum zwlr_layer_surface_v1_keyboard_interactivity kb_mode =
         config->keyboard_interactivity ?
-        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE :
+        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND :
         ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
 
     zwlr_layer_surface_v1_set_keyboard_interactivity(surface_data->layer_surface, kb_mode);

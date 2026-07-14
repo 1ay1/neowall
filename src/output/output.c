@@ -2064,6 +2064,16 @@ bool output_terminal_mouse(struct output_state *output, int px, int py,
                                     button, pressed, motion);
 }
 
+/* Forward already-encoded key bytes to this output's terminal wallpaper child.
+ * Returns true if written. No-op unless this output hosts a terminal. */
+bool output_terminal_key(struct output_state *output, const void *bytes, size_t len) {
+    if (!output || output->config->type != WALLPAPER_TERMINAL ||
+        !output->multipass_shader) {
+        return false;
+    }
+    return multipass_terminal_write(output->multipass_shader, bytes, len);
+}
+
 /* Upload preloaded image to GPU and return texture ID */
 GLuint output_upload_preload_texture(struct output_state *output) {
     if (!output || !output->preload_decoded_image) {

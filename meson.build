@@ -70,6 +70,13 @@ wayland_protocols_dep = dependency('wayland-protocols', required: false)
 # We use pre-generated protocol files, so only need client libs at runtime
 has_wayland_deps = wayland_client_dep.found() and wayland_egl_dep.found() and wayland_cursor_dep.found() and wayland_protocols_dep.found()
 
+# xkbcommon: keymap + keysym translation for terminal-wallpaper keyboard input.
+# Optional — without it the terminal is display+mouse only (no typing).
+xkbcommon_dep = dependency('xkbcommon', required: false)
+if xkbcommon_dep.found()
+  add_project_arguments('-DNEOWALL_HAVE_XKB=1', language: 'c')
+endif
+
 # Determine if Wayland backend should be enabled
 if wayland_backend_option.disabled()
   has_wayland = false
@@ -364,6 +371,9 @@ deps = [
 
 if has_wayland
   deps += [wayland_client_dep, wayland_egl_dep, wayland_cursor_dep]
+  if xkbcommon_dep.found()
+    deps += [xkbcommon_dep]
+  endif
 endif
 
 if has_x11
