@@ -9,6 +9,14 @@
 #define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
+/* pthread_timedjoin_np (bounded thread join in reactive_shutdown) is a GNU
+ * extension; the project builds with c_std=c11 + _POSIX_C_SOURCE only, so we
+ * must opt into the GNU surface for this translation unit specifically. Must
+ * precede every #include so the feature-test macro is seen first. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "neowall/shader/reactive.h"
 #include "neowall/neowall.h"
 
@@ -667,15 +675,44 @@ bool reactive_init(void) {
 
 void reactive_shutdown(void) {
     if (!atomic_load(&g_inited)) return;
+    /* Both capture threads block in a read()/fgets() on a pipe fed by a child
+     * (parec / nvidia-smi). Clearing the run flag alone does NOT unblock them —
+     * the read only re-checks the flag after it returns. To wake them we make
+     * the pipe hit EOF by killing the child. SIGTERM can be slow or ignored
+     * (observed: nvidia-smi still alive after SIGTERM), and there are startup /
+     * respawn / zombie races where g_*_pid is momentarily stale so the kill
+     * misses entirely — either way the plain pthread_join then hangs forever,
+     * and the daemon has to be SIGKILLed, which orphans the terminal-wallpaper
+     * child.
+     *
+     * So: SIGKILL the child to force EOF, then join with a BOUNDED timeout. If a
+     * thread is still wedged after the grace period we stop waiting and let the
+     * process exit take it down — a never-returning shutdown is far worse than
+     * a detached capture thread the kernel reaps on _exit. */
+    struct timespec deadline;
+
     if (atomic_load(&g_audio_run)) {
         atomic_store(&g_audio_run, false);
-        if (g_parec_pid > 0) kill(g_parec_pid, SIGTERM);
-        pthread_join(g_audio_thread, NULL);
+        if (g_parec_pid > 0) kill(g_parec_pid, SIGKILL);
+        clock_gettime(CLOCK_REALTIME, &deadline);
+        deadline.tv_sec += 1;   /* 1s grace */
+        if (pthread_timedjoin_np(g_audio_thread, NULL, &deadline) != 0) {
+            /* still stuck — detach so no resource leak, then abandon it */
+            pthread_detach(g_audio_thread);
+            if (g_parec_pid > 0) kill(g_parec_pid, SIGKILL);
+            log_warn("reactive: audio capture thread did not stop in time; abandoning");
+        }
     }
     if (atomic_load(&g_nv_run)) {
         atomic_store(&g_nv_run, false);
-        if (g_nv_pid > 0) kill(g_nv_pid, SIGTERM);
-        pthread_join(g_nv_thread, NULL);
+        if (g_nv_pid > 0) kill(g_nv_pid, SIGKILL);
+        clock_gettime(CLOCK_REALTIME, &deadline);
+        deadline.tv_sec += 1;   /* 1s grace */
+        if (pthread_timedjoin_np(g_nv_thread, NULL, &deadline) != 0) {
+            pthread_detach(g_nv_thread);
+            if (g_nv_pid > 0) kill(g_nv_pid, SIGKILL);
+            log_warn("reactive: NVIDIA capture thread did not stop in time; abandoning");
+        }
     }
     atomic_store(&g_inited, false);
 }

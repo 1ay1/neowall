@@ -744,6 +744,12 @@ bool multipass_terminal_wants_mouse(const multipass_shader_t *shader);
 bool multipass_terminal_animating(const multipass_shader_t *shader,
                                   unsigned fx_settle_ms);
 
+/* Kill an attached terminal's child process (and its process group) without
+ * touching GL state. Call on daemon shutdown so the child never outlives the
+ * daemon — the normal multipass_destroy path may be skipped on exit. Idempotent
+ * and safe with no GL context. No-op if no terminal is attached. */
+void multipass_terminal_shutdown(multipass_shader_t *shader);
+
 /* Write raw (already-encoded) key bytes to the attached terminal's child. */
 bool multipass_terminal_write(multipass_shader_t *shader, const void *bytes, size_t len);
 

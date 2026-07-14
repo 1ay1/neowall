@@ -1086,6 +1086,19 @@ int main(int argc, char *argv[]) {
     /* Cleanup */
     log_info("Shutting down...");
 
+    /* Kill any terminal-wallpaper children FIRST, before the alarm and GL
+     * teardown. The normal multipass_destroy path (which frees the terminal)
+     * is NOT reached on this exit path, so without this the child is orphaned
+     * to init and a TUI keeps spinning on its dead PTY. This only signals a
+     * process group, so it's fast and must not be skipped. */
+    pthread_rwlock_rdlock(&state.output_list_lock);
+    for (struct output_state *o = state.outputs; o; o = o->next) {
+        if (o->multipass_shader) {
+            multipass_terminal_shutdown(o->multipass_shader);
+        }
+    }
+    pthread_rwlock_unlock(&state.output_list_lock);
+
     /* Set alarm as last resort - force exit after 2 seconds if cleanup hangs */
     alarm(2);
 

@@ -413,6 +413,22 @@ bool multipass_terminal_animating(const multipass_shader_t *shader,
 #endif
 }
 
+void multipass_terminal_shutdown(multipass_shader_t *shader) {
+#ifdef NEOWALL_HAVE_TERMINAL
+    /* Kill the terminal child + its process group NOW, without touching any GL
+     * state. Safe to call from the main thread during daemon shutdown, before
+     * (or instead of) the full multipass_destroy — which otherwise never runs
+     * on the exit path, orphaning the child (a TUI then spins on its dead PTY).
+     * Idempotent: term_render_destroy nulls shader->term. */
+    if (shader && shader->term) {
+        term_render_destroy(shader->term);
+        shader->term = NULL;
+    }
+#else
+    (void)shader;
+#endif
+}
+
 bool multipass_terminal_write(multipass_shader_t *shader, const void *bytes, size_t len) {
 #ifdef NEOWALL_HAVE_TERMINAL
     if (!shader || !shader->term) return false;

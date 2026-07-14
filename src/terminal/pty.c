@@ -207,16 +207,33 @@ void term_destroy(terminal *t) {
     if (t->selfpipe[1] >= 0) { char b = 1; ssize_t w = write(t->selfpipe[1], &b, 1); (void)w; }
     pthread_join(t->reader, NULL);
 
-    /* terminate the child if still alive */
+    /* terminate the child if still alive.
+     *
+     * forkpty() put the child in its own session with the PTY as controlling
+     * terminal, so t->child is a process-GROUP leader. The command usually runs
+     * under a shell ($SHELL -c "..."), and that shell may FORK the real program
+     * (e.g. `fish -c rb` keeps fish as a wrapper around a child rb) rather than
+     * exec-replacing itself. Signalling only t->child then kills the wrapper and
+     * ORPHANS the grandchild (reparented to init), which keeps running — and a
+     * TUI whose PTY just closed can spin at 100%% CPU on the dead fd.
+     *
+     * Signal the whole process group (negative pid) so the shell AND anything
+     * it spawned die together. SIGHUP first (clean "terminal went away"), then
+     * SIGKILL for anything that ignored it. */
     if (!atomic_load(&t->child_exited) && t->child > 0) {
-        kill(t->child, SIGHUP);
+        killpg(t->child, SIGHUP);
+        kill(t->child, SIGHUP);   /* belt-and-suspenders if it's not a pgrp leader */
         int status = 0;
+        bool reaped = false;
         for (int i = 0; i < 50; i++) {
-            if (waitpid(t->child, &status, WNOHANG) == t->child) break;
+            if (waitpid(t->child, &status, WNOHANG) == t->child) { reaped = true; break; }
             usleep(2000);
         }
-        kill(t->child, SIGKILL);
-        waitpid(t->child, &status, 0);
+        if (!reaped) {
+            killpg(t->child, SIGKILL);
+            kill(t->child, SIGKILL);
+            waitpid(t->child, &status, 0);
+        }
     }
 
     if (t->master_fd >= 0) close(t->master_fd);
