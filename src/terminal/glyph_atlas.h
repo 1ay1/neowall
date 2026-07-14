@@ -39,6 +39,8 @@ typedef struct glyph_slot {
     uint16_t w, h;        /* glyph bitmap size */
     int16_t  off_x, off_y;/* pixel offset from cell top-left to glyph top-left */
     bool     valid;
+    bool     color;       /* true = RGBA emoji in the COLOR atlas (x,y index it),
+                             sampled directly; false = R8 coverage, tinted by fg */
 } glyph_slot;
 
 /* Create an atlas that rasterizes `font` at a cell size of cell_w x cell_h
@@ -79,6 +81,14 @@ int            glyph_atlas_cell_w(const glyph_atlas *a);
 int            glyph_atlas_cell_h(const glyph_atlas *a);
 bool           glyph_atlas_dirty(const glyph_atlas *a);
 void           glyph_atlas_clear_dirty(glyph_atlas *a);
+
+/* Color-emoji atlas (RGBA8, straight alpha, row-major). Same fixed dimensions
+ * as the coverage atlas. Color glyph_slots index into THIS bitmap. Uploaded to
+ * a GL_RGBA8 texture by the shader engine and sampled directly (no fg tint). */
+const uint8_t *glyph_atlas_color_bitmap(const glyph_atlas *a);
+bool           glyph_atlas_color_dirty(const glyph_atlas *a);
+void           glyph_atlas_color_dirty_rows(const glyph_atlas *a, int *y0, int *y1);
+void           glyph_atlas_clear_color_dirty(glyph_atlas *a);
 
 /* Row range [*y0, *y1) of the atlas that changed since the last clear_dirty.
  * The GL uploader pushes only these rows instead of the whole atlas. */

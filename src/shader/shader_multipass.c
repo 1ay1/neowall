@@ -674,6 +674,7 @@ static const char *multipass_wrapper_prefix =
     "// simple we expose a dedicated integer sampler + the metadata uniforms.\n"
     "uniform highp usampler2D iTermCells;\n"
     "uniform sampler2D iTermAtlas;\n"
+    "uniform sampler2D iTermColorAtlas;\n"
     "uniform vec4 iTermInfo;       // cols, rows, cellW, cellH\n"
     "uniform vec2 iTermAtlasSize;  // atlas texel w, h\n"
     "uniform vec3 iTermCursor;     // cursorX, cursorY, visible\n"
@@ -724,7 +725,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
                               const char *user_uniform_decls) {
     size_t prefix_len = strlen(multipass_wrapper_prefix);
     size_t react_len  = strlen(neowall_reactive_uniforms);
-    size_t lib_len    = strlen(neowall_glsl_stdlib) + strlen(neowall_glsl_stdlib2) + strlen(neowall_glsl_stdlib3) + strlen(neowall_glsl_stdlib4);
+    size_t lib_len    = strlen(neowall_glsl_stdlib) + strlen(neowall_glsl_stdlib2) + strlen(neowall_glsl_stdlib3) + strlen(neowall_glsl_stdlib4) + strlen(neowall_glsl_stdlib5);
     size_t udecl_len  = user_uniform_decls ? strlen(user_uniform_decls) : 0;
     size_t common_len = common ? strlen(common) : 0;
     size_t pass_len = pass_source ? strlen(pass_source) : 0;
@@ -743,6 +744,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
     strcat(wrapped, neowall_glsl_stdlib2);
     strcat(wrapped, neowall_glsl_stdlib3);
     strcat(wrapped, neowall_glsl_stdlib4);
+    strcat(wrapped, neowall_glsl_stdlib5);
     if (user_uniform_decls) {
         strcat(wrapped, user_uniform_decls);
     }
@@ -1250,7 +1252,23 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         shader->term_atlas_uploaded_w = 0;
         shader->term_atlas_uploaded_h = 0;
-        log_info("Created terminal textures: cells %dx%d, atlas %dx%d", cols, rows, aw, ah);
+
+        /* Color-emoji atlas (RGBA8). Only created when the terminal actually
+         * loaded a color-emoji font; otherwise the shader's color branch never
+         * fires (no cell sets TERM_FLAG_COLOR) and we keep the texture unbound. */
+        if (term_render_color_atlas(shader->term)) {
+            glGenTextures(1, &shader->term_color_atlas_texture);
+            glBindTexture(GL_TEXTURE_2D, shader->term_color_atlas_texture);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, aw, ah, 0,
+                         GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+        log_info("Created terminal textures: cells %dx%d, atlas %dx%d%s", cols, rows, aw, ah,
+                 shader->term_color_atlas_texture ? " (+color emoji)" : "");
     }
 #endif
 
@@ -1400,6 +1418,7 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iAudioActive  = glGetUniformLocation(prog, "iAudioActive");
     u->iAudio        = glGetUniformLocation(prog, "iAudio");
     u->iTermAtlas    = glGetUniformLocation(prog, "iTermAtlas");
+    u->iTermColorAtlas = glGetUniformLocation(prog, "iTermColorAtlas");
     u->iTermCells    = glGetUniformLocation(prog, "iTermCells");
     u->iTermInfo     = glGetUniformLocation(prog, "iTermInfo");
     u->iTermAtlasSize = glGetUniformLocation(prog, "iTermAtlasSize");
@@ -1698,6 +1717,7 @@ void multipass_destroy(multipass_shader_t *shader) {
 #ifdef NEOWALL_HAVE_TERMINAL
     if (shader->term_cell_texture) glDeleteTextures(1, &shader->term_cell_texture);
     if (shader->term_atlas_texture) glDeleteTextures(1, &shader->term_atlas_texture);
+    if (shader->term_color_atlas_texture) glDeleteTextures(1, &shader->term_color_atlas_texture);
     if (shader->term) term_render_destroy(shader->term);
     free(shader->term_cwd);
     free(shader->term_env);
@@ -2007,6 +2027,18 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
         glBindTexture(GL_TEXTURE_2D, shader->term_cell_texture);
         glUniform1i(u->iTermCells, MULTIPASS_MAX_CHANNELS + 2);
     }
+    /* Color-emoji atlas on unit 7. When absent, bind the coverage atlas as a
+     * harmless stand-in so the sampler is always valid; the shader never reads
+     * it unless a cell carries the color flag (which requires the font). */
+    if (u->iTermColorAtlas >= 0) {
+        GLuint ctex = shader->term_color_atlas_texture ? shader->term_color_atlas_texture
+                                                       : shader->term_atlas_texture;
+        if (ctex) {
+            glActiveTexture(GL_TEXTURE0 + MULTIPASS_MAX_CHANNELS + 3);
+            glBindTexture(GL_TEXTURE_2D, ctex);
+            glUniform1i(u->iTermColorAtlas, MULTIPASS_MAX_CHANNELS + 3);
+        }
+    }
     if (shader->term) {
         if (u->iTermInfo >= 0) {
             glUniform4f(u->iTermInfo,
@@ -2288,6 +2320,25 @@ void multipass_render(multipass_shader_t *shader,
                                 bits + (size_t)y0 * aw);
             }
             term_render_clear_atlas_dirty(shader->term);
+        }
+
+        /* Color-emoji atlas: same dirty-row sub-rect upload, RGBA8. */
+        if (shader->term_color_atlas_texture && term_render_color_atlas_dirty(shader->term)) {
+            int aw = term_render_atlas_w(shader->term);
+            int ah = term_render_atlas_h(shader->term);
+            const uint8_t *bits = term_render_color_atlas(shader->term);
+            int y0 = 0, y1 = ah;
+            term_render_color_atlas_dirty_rows(shader->term, &y0, &y1);
+            if (y0 < 0) y0 = 0;
+            if (y1 > ah) y1 = ah;
+            if (bits && y1 > y0) {
+                glBindTexture(GL_TEXTURE_2D, shader->term_color_atlas_texture);
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y0, aw, y1 - y0,
+                                GL_RGBA, GL_UNSIGNED_BYTE,
+                                bits + (size_t)y0 * aw * 4);
+            }
+            term_render_clear_color_atlas_dirty(shader->term);
         }
 
         if (cells_changed) {

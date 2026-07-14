@@ -75,6 +75,14 @@ bool           term_render_atlas_dirty(const term_render *tr);
 void           term_render_atlas_dirty_rows(const term_render *tr, int *y0, int *y1);
 void           term_render_clear_atlas_dirty(term_render *tr);
 
+/* Color-emoji atlas (GL_RGBA8, same dimensions as the coverage atlas). NULL if
+ * no color-emoji font is present, in which case the shader's color branch is
+ * never taken (no cell ever sets TERM_FLAG_COLOR). */
+const uint8_t *term_render_color_atlas(const term_render *tr);
+bool           term_render_color_atlas_dirty(const term_render *tr);
+void           term_render_color_atlas_dirty_rows(const term_render *tr, int *y0, int *y1);
+void           term_render_clear_color_atlas_dirty(term_render *tr);
+
 /* Cursor (in cell coords) for the shader to draw a block/underline. */
 void           term_render_cursor(const term_render *tr, int *x, int *y, bool *visible);
 
@@ -101,9 +109,11 @@ bool           term_render_wants_mouse(const term_render *tr);
 bool           term_render_write(term_render *tr, const void *bytes, size_t len);
 
 /* --- cell-record packing helpers (shared with the GLSL decode) --- */
-/* r channel: atlas x (12 bits) | atlas y (12 bits) | flags(8): bit0 = has-glyph */
+/* r channel: atlas x (12 bits) | atlas y (12 bits) | flags(8): bit0 = has-glyph,
+ * bit1 = color glyph (sample the RGBA color atlas, don't tint coverage). */
 #define TERM_PACK_R(ax, ay, has) \
     (((uint32_t)((ax) & 0xFFFu) << 20) | ((uint32_t)((ay) & 0xFFFu) << 8) | ((has) ? 1u : 0u))
+#define TERM_FLAG_COLOR 2u
 /* g channel: w (8) | h (8) | off_x+128 (8) | off_y+128 (8) */
 #define TERM_PACK_G(w, h, ox, oy) \
     (((uint32_t)((w) & 0xFFu) << 24) | ((uint32_t)((h) & 0xFFu) << 16) | \

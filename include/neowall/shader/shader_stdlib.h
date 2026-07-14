@@ -276,6 +276,17 @@ static const char *neowall_glsl_stdlib4 =
     "        vec2 px = vec2(frac.x * cw, frac.y * ch);\n"
     "        vec2 gp = px - vec2(ox, oy);           // into glyph-local px\n"
     "        if (gp.x >= 0.0 && gp.x < gw && gp.y >= 0.0 && gp.y < gh) {\n"
+    "            // rec.r bit1 = COLOR emoji: sample the RGBA atlas directly and\n"
+    "            // alpha-composite over bg (no fg tint, no blink/underline).\n"
+    "            if ((rec.r & 2u) != 0u) {\n"
+    "                vec2 gpc2 = clamp(gp, vec2(0.5), vec2(gw, gh) - 0.5);\n"
+    "                vec2 cuv = (vec2(ax, ay) + gpc2) / iTermAtlasSize;\n"
+    "                vec4 e = texture(iTermColorAtlas, cuv);\n"
+    "                col = mix(bg, e.rgb, e.a);\n"
+    "                if (iTermCursor.z > 0.5 && cell.x == int(iTermCursor.x) && cell.y == int(iTermCursor.y))\n"
+    "                    col = vec3(1.0) - col;\n"
+    "                return col;\n"
+    "            }\n"
     "            // Clamp to the glyph's own texel centres so the LINEAR fetch\n"
     "            // never reaches the 1px atlas gutter (=0) at cell edges; that\n"
     "            // bleed is a thin dark seam per cell that breaks full-cell\n"
@@ -285,7 +296,10 @@ static const char *neowall_glsl_stdlib4 =
     "            float cov = texture(iTermAtlas, auv).r * blinkA;\n"
     "            col = mix(bg, fg, cov);\n"
     "        }\n"
-    "    }\n"
+    "    }\n";
+
+/* Continuation (split again for the C99 4095-char string-literal limit). */
+static const char *neowall_glsl_stdlib5 =
     "    // UNDERLINE / STRIKETHROUGH: draw a fg-coloured bar across the cell.\n"
     "    // frac.y is 0 at the cell top, 1 at the bottom. Bar thickness scales\n"
     "    // with the cell so it stays ~1-2px. Uses smoothstep for a soft edge.\n"

@@ -299,6 +299,7 @@ bool term_render_update(term_render *tr) {
         }
 
         bool has_glyph = false;
+        bool is_color = false;
         uint16_t ax = 0, ay = 0, gw = 0, gh = 0;
         int16_t ox = 0, oy = 0;
         if (!tail && c->cp != 0 && c->cp != ' ' &&
@@ -308,6 +309,7 @@ bool term_render_update(term_render *tr) {
             const glyph_slot *s = glyph_atlas_get_styled(tr->atlas, c->cp, bold, italic);
             if (s && s->valid && s->w > 0 && s->h > 0) {
                 has_glyph = true;
+                is_color = s->color;
                 ax = s->x; ay = s->y; gw = s->w; gh = s->h;
                 ox = s->off_x; oy = s->off_y;
             }
@@ -323,8 +325,13 @@ bool term_render_update(term_render *tr) {
                 bool italic = (head->attr & TERM_ATTR_ITALIC) != 0;
                 const glyph_slot *s = glyph_atlas_get_styled(tr->atlas, head->cp, bold, italic);
                 int cw_ss = tr->cell_w * tr->ss;
-                if (s && s->valid && s->w > cw_ss) {   /* only if it actually overflows */
+                /* Color emoji always span two cells (drawn into a 2-cell box),
+                 * so the tail half is drawn unconditionally; monochrome glyphs
+                 * only overflow into the tail when actually wider than a cell. */
+                bool overflows = s && s->valid && (s->color || s->w > cw_ss);
+                if (overflows) {
                     has_glyph = true;
+                    is_color = s->color;
                     ax = s->x; ay = s->y; gw = s->w; gh = s->h;
                     ox = (int16_t)(s->off_x - cw_ss);
                     oy = s->off_y;
@@ -333,7 +340,9 @@ bool term_render_update(term_render *tr) {
         }
 
         uint8_t attr8 = (uint8_t)(c->attr & 0xFF);
-        o[0] = TERM_PACK_R(ax, ay, has_glyph);
+        uint32_t rflags = TERM_PACK_R(ax, ay, has_glyph);
+        if (is_color) rflags |= TERM_FLAG_COLOR;
+        o[0] = rflags;
         o[1] = TERM_PACK_G(gw, gh, ox, oy);
         o[2] = TERM_PACK_COL(fr, fg, fb, 0xFF);
         o[3] = TERM_PACK_COL(br, bg, bb, attr8);
@@ -365,6 +374,20 @@ void term_render_atlas_dirty_rows(const term_render *tr, int *y0, int *y1) {
 }
 void term_render_clear_atlas_dirty(term_render *tr) {
     if (tr) glyph_atlas_clear_dirty(tr->atlas);
+}
+
+const uint8_t *term_render_color_atlas(const term_render *tr) {
+    return tr ? glyph_atlas_color_bitmap(tr->atlas) : NULL;
+}
+bool term_render_color_atlas_dirty(const term_render *tr) {
+    return tr ? glyph_atlas_color_dirty(tr->atlas) : false;
+}
+void term_render_color_atlas_dirty_rows(const term_render *tr, int *y0, int *y1) {
+    if (tr) glyph_atlas_color_dirty_rows(tr->atlas, y0, y1);
+    else { if (y0) *y0 = 0; if (y1) *y1 = 0; }
+}
+void term_render_clear_color_atlas_dirty(term_render *tr) {
+    if (tr) glyph_atlas_clear_color_dirty(tr->atlas);
 }
 
 void term_render_cursor(const term_render *tr, int *x, int *y, bool *visible) {

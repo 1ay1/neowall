@@ -127,6 +127,7 @@ typedef struct {
     GLint iAudioLevel, iAudioBass, iAudioMid, iAudioTreble, iAudioBeat, iAudioActive;
     GLint iAudio;               /* audio spectrum/waveform sampler */
     GLint iTermAtlas;           /* terminal glyph-atlas coverage sampler (R8) */
+    GLint iTermColorAtlas;      /* terminal color-emoji atlas sampler (RGBA8) */
     GLint iTermCells;           /* terminal cell-record integer sampler (RGBA32UI) */
     GLint iTermInfo;            /* vec4: cols, rows, cellW, cellH */
     GLint iTermAtlasSize;       /* vec2: atlas texel w,h */
@@ -188,6 +189,7 @@ typedef struct {
     struct term_render *term;
     GLuint term_cell_texture;                /* RGBA32UI cols x rows */
     GLuint term_atlas_texture;               /* R8 glyph coverage atlas */
+    GLuint term_color_atlas_texture;         /* RGBA8 color-emoji atlas (0 if none) */
     int    term_atlas_uploaded_w, term_atlas_uploaded_h; /* last atlas dims uploaded */
     /* Optional terminal config (set before multipass_attach_terminal). Owned
      * strings freed in multipass_destroy; *_has_* gate the fg/bg overrides. */

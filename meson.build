@@ -297,11 +297,13 @@ if not terminal_option.disabled()
       'src/terminal/glyph_synth.c',
     )
     # glyph_atlas.c is the sole TU that includes the vendored public-domain
-    # stb_truetype.h, which is not -Wpedantic/-Werror clean. Compile it in its
-    # own static library with relaxed warnings so the strict project-wide gate
+    # stb_truetype.h, and cbdt.c is the sole TU that includes stb_image.h —
+    # neither is -Wpedantic/-Werror clean. Compile them in their own static
+    # library with relaxed warnings so the strict project-wide gate
     # (warning_level=3, werror=true) still governs all our own code.
     terminal_glyph_lib = static_library('terminal_glyph',
-      files('src/terminal/glyph_atlas.c'),
+      files('src/terminal/glyph_atlas.c',
+            'src/terminal/cbdt.c'),
       include_directories: [inc_dirs, inc_dirs_build,
                             include_directories('src/terminal')],
       c_args: cc.get_supported_arguments(
