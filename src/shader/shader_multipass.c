@@ -354,7 +354,15 @@ nw_result multipass_attach_terminal(multipass_shader_t *shader,
         .cell_h = cell_h > 0 ? cell_h : 18,
         .font_data = NULL, .font_len = 0,
         .font_path = font_path,
+        .default_fg = -1, .default_bg = -1,   /* no override → built-in */
     };
+    /* Optional overrides carried on the shader (set by the config layer). */
+    if (shader->term_cwd && shader->term_cwd[0]) o.cwd = shader->term_cwd;
+    if (shader->term_env && shader->term_env[0]) o.term_env = shader->term_env;
+    if (shader->term_font_bold)   o.font_bold_path   = shader->term_font_bold;
+    if (shader->term_font_italic) o.font_italic_path = shader->term_font_italic;
+    if (shader->term_has_fg) o.default_fg = shader->term_fg;
+    if (shader->term_has_bg) o.default_bg = shader->term_bg;
     nw_result err = nw_ok();
     shader->term = term_render_create(&o, &err);
     if (!shader->term) {
@@ -716,7 +724,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
                               const char *user_uniform_decls) {
     size_t prefix_len = strlen(multipass_wrapper_prefix);
     size_t react_len  = strlen(neowall_reactive_uniforms);
-    size_t lib_len    = strlen(neowall_glsl_stdlib) + strlen(neowall_glsl_stdlib2) + strlen(neowall_glsl_stdlib3);
+    size_t lib_len    = strlen(neowall_glsl_stdlib) + strlen(neowall_glsl_stdlib2) + strlen(neowall_glsl_stdlib3) + strlen(neowall_glsl_stdlib4);
     size_t udecl_len  = user_uniform_decls ? strlen(user_uniform_decls) : 0;
     size_t common_len = common ? strlen(common) : 0;
     size_t pass_len = pass_source ? strlen(pass_source) : 0;
@@ -734,6 +742,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
     strcat(wrapped, neowall_glsl_stdlib);
     strcat(wrapped, neowall_glsl_stdlib2);
     strcat(wrapped, neowall_glsl_stdlib3);
+    strcat(wrapped, neowall_glsl_stdlib4);
     if (user_uniform_decls) {
         strcat(wrapped, user_uniform_decls);
     }
@@ -1690,6 +1699,10 @@ void multipass_destroy(multipass_shader_t *shader) {
     if (shader->term_cell_texture) glDeleteTextures(1, &shader->term_cell_texture);
     if (shader->term_atlas_texture) glDeleteTextures(1, &shader->term_atlas_texture);
     if (shader->term) term_render_destroy(shader->term);
+    free(shader->term_cwd);
+    free(shader->term_env);
+    free(shader->term_font_bold);
+    free(shader->term_font_italic);
 #endif
     
     /* Cleanup adaptive resolution system */

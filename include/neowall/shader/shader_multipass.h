@@ -189,6 +189,14 @@ typedef struct {
     GLuint term_cell_texture;                /* RGBA32UI cols x rows */
     GLuint term_atlas_texture;               /* R8 glyph coverage atlas */
     int    term_atlas_uploaded_w, term_atlas_uploaded_h; /* last atlas dims uploaded */
+    /* Optional terminal config (set before multipass_attach_terminal). Owned
+     * strings freed in multipass_destroy; *_has_* gate the fg/bg overrides. */
+    char  *term_cwd;
+    char  *term_env;
+    char  *term_font_bold;
+    char  *term_font_italic;
+    long   term_fg, term_bg;                 /* 0xRRGGBB when *_has_* is set */
+    bool   term_has_fg, term_has_bg;
     GLint default_framebuffer;               /* Default framebuffer ID (may not be 0 in GTK) */
     
     /* Resolution scaling */

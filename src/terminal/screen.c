@@ -595,6 +595,10 @@ void term_screen_cursor(const term_screen *s, int *x, int *y) {
     if (y) *y = s->cur.y;
 }
 
+bool term_screen_cursor_visible(const term_screen *s) {
+    return s ? s->cursor_visible : true;
+}
+
 void term_screen_mouse_mode(const term_screen *s, int *proto, bool *sgr) {
     if (proto) *proto = s ? s->mouse_proto : 0;
     if (sgr)   *sgr   = s ? s->mouse_sgr : false;

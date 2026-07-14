@@ -103,6 +103,7 @@ typedef struct term_spawn_opts {
     int         rows;         /* initial grid height */
     int         scrollback;   /* scrollback lines to retain (0 = none) */
     const char *term_env;     /* value for TERM (default "xterm-256color") */
+    const char *cwd;          /* working directory for the child (NULL = inherit) */
 } term_spawn_opts;
 
 /* Spawn `opts.cmd` under a fresh PTY and start the reader thread. On success
@@ -173,6 +174,9 @@ int              term_screen_cols(const term_screen *s);
 int              term_screen_rows(const term_screen *s);
 const term_cell *term_screen_row(const term_screen *s, int y);   /* cols cells */
 void             term_screen_cursor(const term_screen *s, int *x, int *y);
+
+/* Cursor visibility (DECTCEM). False when the app has hidden the cursor. */
+bool             term_screen_cursor_visible(const term_screen *s);
 
 /* Current mouse-reporting state (set by the app via DECSET 1000/1002/1003 and
  * 1006). *proto is 0 (off), 1000, 1002 or 1003; *sgr is true when SGR extended

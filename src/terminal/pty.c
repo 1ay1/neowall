@@ -151,6 +151,9 @@ nw_result term_spawn(const term_spawn_opts *opts, terminal **out) {
 
     if (pid == 0) {
         /* child */
+        if (opts->cwd && opts->cwd[0]) {
+            if (chdir(opts->cwd) != 0) { /* fall through: run in inherited cwd */ }
+        }
         setenv("TERM", opts->term_env ? opts->term_env : "xterm-256color", 1);
         setenv("COLORTERM", "truecolor", 1);
         /* Run via the shell so a full command line ("journalctl -f", "htop -d 10")
@@ -319,6 +322,7 @@ const term_frame *term_snapshot(terminal *t) {
     }
     int cx, cy;
     term_screen_cursor(t->screen, &cx, &cy);
+    bool cvis = term_screen_cursor_visible(t->screen);
     pthread_mutex_unlock(&t->lock);
 
     t->frame.cols = cols;
@@ -326,7 +330,7 @@ const term_frame *term_snapshot(terminal *t) {
     t->frame.cells = t->snap_cells;
     t->frame.cursor_x = cx;
     t->frame.cursor_y = cy;
-    t->frame.cursor_visible = true;
+    t->frame.cursor_visible = cvis;
     t->frame.epoch = de;
     return &t->frame;
 }

@@ -41,6 +41,13 @@ typedef struct term_render_opts {
     const uint8_t *font_data;   /* optional in-memory font (NULL = system font). Must outlive. */
     size_t         font_len;
     const char    *font_path;   /* optional path to a font file (NULL = search). */
+    const char    *font_bold_path;   /* optional bold face (NULL = synth). */
+    const char    *font_italic_path; /* optional italic face (NULL = synth). */
+    const char    *cwd;         /* optional working directory for the child. */
+    const char    *term_env;    /* optional TERM value (NULL = xterm-256color). */
+    /* optional default fg/bg override (each -1 = use built-in). RGB packed 0xRRGGBB. */
+    long           default_fg;
+    long           default_bg;
 } term_render_opts;
 
 /* Spawn the terminal + build the atlas. NULL on failure. */

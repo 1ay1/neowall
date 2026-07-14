@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 /* ---- default xterm 256-colour palette (index -> RGB) ------------------- */
 
@@ -73,7 +74,23 @@ struct term_render {
     bool         have_frame;  /* cells populated at least once */
     int          cursor_x, cursor_y;
     bool         cursor_vis;
+
+    /* respawn-on-exit: keep enough to relaunch the child if it dies. */
+    char        *cmd;
+    char        *cwd;
+    char        *term_env;
+    double       exit_at;     /* monotonic secs when the child was seen exited (0 = alive) */
+    int          restart_count;
+
+    uint8_t      def_fg[3];   /* default fg (config override or built-in) */
+    uint8_t      def_bg[3];   /* default bg */
 };
+
+static double mono_secs(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
 
 static bool alloc_cells(term_render *tr) {
     free(tr->cells);
@@ -150,7 +167,8 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
 
     term_spawn_opts so = {
         .cmd = opts->cmd, .cols = tr->cols, .rows = tr->rows,
-        .scrollback = 0, .term_env = NULL,
+        .scrollback = 0, .term_env = opts->term_env,
+        .cwd = opts->cwd,
     };
     nw_result r = term_spawn(&so, &tr->term);
     if (nw_is_err(r)) {
@@ -161,6 +179,27 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
         return NULL;
     }
 
+    /* keep respawn info so a dead child can be relaunched in-place. */
+    tr->cmd      = opts->cmd ? strdup(opts->cmd) : NULL;
+    tr->cwd      = (opts->cwd && opts->cwd[0]) ? strdup(opts->cwd) : NULL;
+    tr->term_env = (opts->term_env && opts->term_env[0]) ? strdup(opts->term_env) : NULL;
+
+    /* default fg/bg: config override (0xRRGGBB) or the built-in. */
+    if (opts->default_fg >= 0) {
+        tr->def_fg[0] = (uint8_t)((opts->default_fg >> 16) & 0xFF);
+        tr->def_fg[1] = (uint8_t)((opts->default_fg >> 8) & 0xFF);
+        tr->def_fg[2] = (uint8_t)(opts->default_fg & 0xFF);
+    } else {
+        tr->def_fg[0] = kDefaultFg[0]; tr->def_fg[1] = kDefaultFg[1]; tr->def_fg[2] = kDefaultFg[2];
+    }
+    if (opts->default_bg >= 0) {
+        tr->def_bg[0] = (uint8_t)((opts->default_bg >> 16) & 0xFF);
+        tr->def_bg[1] = (uint8_t)((opts->default_bg >> 8) & 0xFF);
+        tr->def_bg[2] = (uint8_t)(opts->default_bg & 0xFF);
+    } else {
+        tr->def_bg[0] = kDefaultBg[0]; tr->def_bg[1] = kDefaultBg[1]; tr->def_bg[2] = kDefaultBg[2];
+    }
+
     if (err_out) *err_out = nw_ok();
     return tr;
 }
@@ -169,12 +208,52 @@ void term_render_destroy(term_render *tr) {
     if (!tr) return;
     if (tr->term)  term_destroy(tr->term);
     if (tr->atlas) glyph_atlas_destroy(tr->atlas);
+    free(tr->cmd);
+    free(tr->cwd);
+    free(tr->term_env);
     free(tr->cells);
     free(tr);
 }
 
+/* Relaunch the child in-place after it exits. Keeps the same atlas + cell
+ * buffer + geometry; only the PTY/reader-thread is torn down and respawned.
+ * Backs off after repeated rapid exits so a command that instantly dies
+ * doesn't spin. Returns true if a fresh child is running. */
+static bool term_render_respawn(term_render *tr) {
+    if (!tr || !tr->cmd) return false;
+    if (tr->term) { term_destroy(tr->term); tr->term = NULL; }
+
+    term_spawn_opts so = {
+        .cmd = tr->cmd, .cols = tr->cols, .rows = tr->rows,
+        .scrollback = 0, .term_env = tr->term_env, .cwd = tr->cwd,
+    };
+    nw_result r = term_spawn(&so, &tr->term);
+    if (nw_is_err(r)) { tr->term = NULL; return false; }
+    tr->have_frame = false;
+    tr->last_epoch = 0;
+    tr->exit_at = 0.0;
+    tr->restart_count++;
+    return true;
+}
+
 bool term_render_update(term_render *tr) {
     if (!tr) return false;
+
+    /* Auto-restart: if the child exited, relaunch it after a short backoff so a
+     * transient crash resumes the wallpaper instead of freezing on the last
+     * frame. A command that dies instantly gets an increasing delay (capped)
+     * so we don't spin. */
+    if (tr->term && term_child_exited(tr->term, NULL)) {
+        double now = mono_secs();
+        if (tr->exit_at == 0.0) tr->exit_at = now;
+        double backoff = tr->restart_count < 3 ? 0.5
+                       : tr->restart_count < 8 ? 2.0 : 5.0;
+        if (now - tr->exit_at >= backoff) {
+            term_render_respawn(tr);
+        }
+        return false;   /* nothing new to upload while dead/restarting */
+    }
+
     const term_frame *f = term_snapshot(tr->term);
     if (!f) return false;
 
@@ -207,8 +286,8 @@ bool term_render_update(term_render *tr) {
         bool tail = (c->attr & TERM_ATTR_WIDE_TAIL) != 0;
 
         uint8_t fr, fg, fb, br, bg, bb;
-        resolve_color(&c->fg, kDefaultFg, &fr, &fg, &fb);
-        resolve_color(&c->bg, kDefaultBg, &br, &bg, &bb);
+        resolve_color(&c->fg, tr->def_fg, &fr, &fg, &fb);
+        resolve_color(&c->bg, tr->def_bg, &br, &bg, &bb);
 
         /* reverse video: swap fg/bg */
         if (c->attr & TERM_ATTR_REVERSE) {
