@@ -678,6 +678,7 @@ static const char *multipass_wrapper_prefix =
     "uniform vec4 iTermInfo;       // cols, rows, cellW, cellH\n"
     "uniform vec2 iTermAtlasSize;  // atlas texel w, h\n"
     "uniform vec3 iTermCursor;     // cursorX, cursorY, visible\n"
+    "uniform vec4 iTermCursorPrev; // prevX, prevY, moveTime, (unused)\n"
     "uniform vec4 iTermFX;         // bloom, scanline, crt-curve, chromatic\n"
     "#define NW_HAS_ITERMFX 1\n"
     "\n"
@@ -727,7 +728,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
                               const char *user_uniform_decls) {
     size_t prefix_len = strlen(multipass_wrapper_prefix);
     size_t react_len  = strlen(neowall_reactive_uniforms);
-    size_t lib_len    = strlen(neowall_glsl_stdlib) + strlen(neowall_glsl_stdlib2) + strlen(neowall_glsl_stdlib3) + strlen(neowall_glsl_stdlib4) + strlen(neowall_glsl_stdlib5) + strlen(neowall_glsl_stdlib6);
+    size_t lib_len    = strlen(neowall_glsl_stdlib) + strlen(neowall_glsl_stdlib2) + strlen(neowall_glsl_stdlib3) + strlen(neowall_glsl_stdlib4) + strlen(neowall_glsl_stdlib5) + strlen(neowall_glsl_stdlib6) + strlen(neowall_glsl_stdlib7);
     size_t udecl_len  = user_uniform_decls ? strlen(user_uniform_decls) : 0;
     size_t common_len = common ? strlen(common) : 0;
     size_t pass_len = pass_source ? strlen(pass_source) : 0;
@@ -748,6 +749,7 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
     strcat(wrapped, neowall_glsl_stdlib4);
     strcat(wrapped, neowall_glsl_stdlib5);
     strcat(wrapped, neowall_glsl_stdlib6);
+    strcat(wrapped, neowall_glsl_stdlib7);
     if (user_uniform_decls) {
         strcat(wrapped, user_uniform_decls);
     }
@@ -1426,6 +1428,7 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iTermInfo     = glGetUniformLocation(prog, "iTermInfo");
     u->iTermAtlasSize = glGetUniformLocation(prog, "iTermAtlasSize");
     u->iTermCursor   = glGetUniformLocation(prog, "iTermCursor");
+    u->iTermCursorPrev = glGetUniformLocation(prog, "iTermCursorPrev");
     u->iTermFX       = glGetUniformLocation(prog, "iTermFX");
 
     u->cached = true;
@@ -1764,6 +1767,7 @@ void multipass_set_uniforms(multipass_shader_t *shader,
      * per frame in multipass_render) so time-step-integrating shaders
      * (physics, flow fields) advance at the correct rate at any FPS. */
     if (u->iTime >= 0) glUniform1f(u->iTime, shader_time);
+    shader->frame_shader_time = shader_time;
     if (u->iTimeDelta >= 0) glUniform1f(u->iTimeDelta, shader->frame_dt);
     if (u->iFrameRate >= 0) glUniform1f(u->iFrameRate, shader->frame_fps);
     if (u->iFrame >= 0) glUniform1i(u->iFrame, shader->frame_count);
@@ -2059,7 +2063,31 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
         if (u->iTermCursor >= 0) {
             int cx = 0, cy = 0; bool vis = false;
             term_render_cursor(shader->term, &cx, &cy, &vis);
+
+            /* Cursor as a physical object: when the cell changes, remember where
+             * it was and stamp the move time, so the shader can slide the drawn
+             * cursor from the old cell to the new one over a short window rather
+             * than hard-jumping (which is all a real terminal can do). */
+            if (!shader->term_cursor_seen) {
+                shader->term_cursor_px = cx;
+                shader->term_cursor_py = cy;
+                shader->term_cursor_move_t = shader->frame_shader_time;
+                shader->term_cursor_seen = true;
+            } else if (cx != shader->term_cursor_px || cy != shader->term_cursor_py) {
+                /* Anchor the slide at wherever the cursor visually IS right now
+                 * (it may still be mid-slide), then retarget to the new cell. */
+                shader->term_cursor_move_t = shader->frame_shader_time;
+                /* prev stays the last settled cell; update AFTER upload below. */
+            }
             glUniform3f(u->iTermCursor, (float)cx, (float)cy, vis ? 1.0f : 0.0f);
+            if (u->iTermCursorPrev >= 0) {
+                glUniform4f(u->iTermCursorPrev,
+                            (float)shader->term_cursor_px,
+                            (float)shader->term_cursor_py,
+                            shader->term_cursor_move_t, 0.0f);
+            }
+            shader->term_cursor_px = cx;
+            shader->term_cursor_py = cy;
         }
         if (u->iTermFX >= 0) {
             glUniform4f(u->iTermFX, shader->term_fx[0], shader->term_fx[1],

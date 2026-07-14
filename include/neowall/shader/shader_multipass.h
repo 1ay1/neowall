@@ -132,6 +132,7 @@ typedef struct {
     GLint iTermInfo;            /* vec4: cols, rows, cellW, cellH */
     GLint iTermAtlasSize;       /* vec2: atlas texel w,h */
     GLint iTermCursor;          /* vec3: cursorX, cursorY, visible */
+    GLint iTermCursorPrev;      /* vec4: prevX, prevY, moveTime, unused */
     GLint iTermFX;              /* vec4: bloom, scanline, crt-curve, chromatic */
     bool cached;                /* True if locations have been cached */
 } uniform_locations_t;
@@ -201,6 +202,10 @@ typedef struct {
     long   term_fg, term_bg;                 /* 0xRRGGBB when *_has_* is set */
     bool   term_has_fg, term_has_bg;
     float  term_fx[4];                       /* bloom, scanline, crt-curve, chromatic (0 = off) */
+    int    term_cursor_px, term_cursor_py;   /* last cursor cell, for slide interpolation */
+    float  term_cursor_move_t;               /* iTime at which the cursor last moved */
+    bool   term_cursor_seen;                 /* prev fields are valid */
+    float  frame_shader_time;                /* this frame's shader time, for bind_textures */
     GLint default_framebuffer;               /* Default framebuffer ID (may not be 0 in GTK) */
     
     /* Resolution scaling */
