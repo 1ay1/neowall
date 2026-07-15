@@ -208,8 +208,23 @@ static bool face_init(face *fc, const uint8_t *data, size_t len, bool owns, int 
     fc->data = data; fc->owns = owns;
     int ascent, descent, line_gap;
     stbtt_GetFontVMetrics(&fc->font, &ascent, &descent, &line_gap);
-    fc->scale = stbtt_ScaleForPixelHeight(&fc->font, (float)cell_h);
-    fc->ascent_px = (int)(ascent * fc->scale + 0.5f);
+
+    /* Scale so the font's FULL line box (ascent - descent + line_gap) fits the
+     * cell, not just ascent-descent. ScaleForPixelHeight maps ascent-descent to
+     * the target, which leaves ZERO room for descenders + the font's natural
+     * line gap: descenders (g p y, and box-line │ tails) then spill into the
+     * next row and the text looks crammed / colliding. Fitting the whole line
+     * box gives each row proper breathing space. */
+    int line_px = ascent - descent + line_gap;
+    if (line_px <= 0) line_px = ascent - descent;
+    if (line_px <= 0) line_px = 1;
+    fc->scale = (float)cell_h / (float)line_px;
+
+    /* Baseline: center the line box in the cell, then place the baseline at the
+     * top of the box + the ascent. half_gap splits the leading above/below so
+     * text sits vertically centered rather than jammed against the cell top. */
+    int half_gap = (int)((line_gap * fc->scale) * 0.5f + 0.5f);
+    fc->ascent_px = (int)(ascent * fc->scale + 0.5f) + half_gap;
     fc->ready = true;
     return true;
 }

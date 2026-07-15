@@ -141,8 +141,13 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
      * atlas maps 1 texel per output pixel (no oversampling) and glyph/graph
      * edges show raw stair-steps. iTermInfo carries the SS-scaled glyph size so
      * nwTerm's per-cell glyph math stays in atlas-pixel space; the grid layout
-     * (cols x rows across the screen) is unaffected. */
-    tr->ss = 3;
+     * (cols x rows across the screen) is unaffected.
+     *
+     * 4x (vs 3x): on a wide, stretched wallpaper grid each cell covers many
+     * screen pixels, so a higher oversample visibly smooths diagonal strokes
+     * (/ A curves) and thin box lines. Cost is ~1.8x the coverage-atlas memory
+     * and glyph raster time — cheap and one-time (atlas is cached). */
+    tr->ss = 4;
     tr->start_secs = mono_secs();
     int atlas_cw = tr->cell_w * tr->ss;
     int atlas_ch = tr->cell_h * tr->ss;
