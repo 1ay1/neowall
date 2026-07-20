@@ -13,6 +13,7 @@ compile_commands.json
 
 # Generated files
 include/version.h
+docs/.agentty_rag_cache.bin
 
 # Backup files
 *.old
