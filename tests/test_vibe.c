@@ -1,4 +1,5 @@
-/* Unit tests for the VIBE config parser (src/config/vibe.c).
+/* Unit tests for the VIBE config parser (vendored single-header libvibe,
+ *  compiled via src/config/vibe_impl.c).
  *
  * vibe.c has no GL / Wayland / filesystem deps in its string-parse path, so
  * these run headless in CI. They lock down both the happy path and several
@@ -112,22 +113,20 @@ int main(void) {
         if (r) vibe_value_free(r);
         vibe_parser_free(p);
     }
-    /* objects-in-arrays via braces parse */
+    /* objects-in-arrays are REJECTED by libvibe's First Law: an array must not
+     * contain an object or another array. The old in-tree fork accepted them;
+     * the canonical parser (github.com/1ay1/vibe) does not, and neowall never
+     * relied on the old behavior (its only arrays, e.g. `channels`, are scalar). */
     {
         checks++;
         VibeParser *p = vibe_parser_new();
         VibeValue *r = vibe_parse_string(p, "x [ { a 1 } { b 2 } ]\n");
-        VibeArray *arr = r ? vibe_get_array(r, "x") : NULL;
-        bool ok = arr && arr->count == 2 &&
-                  vibe_array_get(arr, 0)->type == VIBE_TYPE_OBJECT &&
-                  vibe_get_int(vibe_array_get(arr, 0), "a") == 1 &&
-                  vibe_get_int(vibe_array_get(arr, 1), "b") == 2;
-        if (!ok) {
+        if (r != NULL) {
             failures++;
-            fprintf(stderr, "FAIL %s:%d: objects-in-array did not parse\n",
+            fprintf(stderr, "FAIL %s:%d: objects-in-array should be rejected (First Law)\n",
                     __FILE__, __LINE__);
+            vibe_value_free(r);
         }
-        if (r) vibe_value_free(r);
         vibe_parser_free(p);
     }
 

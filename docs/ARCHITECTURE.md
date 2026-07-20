@@ -226,7 +226,9 @@ metadata.
 
 ## 9. Configuration (`src/config/`)
 
-`config.vibe` is parsed by the **VIBE** parser (`vibe.c`) into a value tree, then
+`config.vibe` is parsed by the **VIBE** parser (vendored single-header libvibe
+from <https://github.com/1ay1/vibe>, compiled once via `vibe_impl.c`) into a
+value tree, then
 mapped into `wallpaper_config` by `config.c`. The parser is strict: malformed
 input (value on the wrong line, integer overflow, dangling key) is **rejected
 with a line/column error** rather than silently producing wrong config. Covered

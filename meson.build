@@ -253,7 +253,7 @@ output_sources = files(
 config_sources = files(
   'src/config/config.c',
   'src/config/shuffle.c',
-  'src/config/vibe.c',
+  'src/config/vibe_impl.c',  # compiles vendored single-header libvibe (VIBE_IMPLEMENTATION)
 )
 
 # Render sources
@@ -526,7 +526,7 @@ test('shadertoy_compat', test_compat_exe)
 
 # VIBE config parser is filesystem/GL-free in its string-parse path.
 test_vibe_exe = executable('test_vibe',
-  files('tests/test_vibe.c', 'src/config/vibe.c'),
+  files('tests/test_vibe.c', 'src/config/vibe_impl.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   build_by_default: false,
 )
@@ -683,7 +683,7 @@ if get_option('fuzz')
   endif
   fuzz_args = ['-fsanitize=fuzzer']
   executable('fuzz_vibe',
-    files('tests/fuzz_vibe.c', 'src/config/vibe.c'),
+    files('tests/fuzz_vibe.c', 'src/config/vibe_impl.c'),
     include_directories: [inc_dirs, inc_dirs_build],
     c_args: fuzz_args,
     link_args: fuzz_args,
