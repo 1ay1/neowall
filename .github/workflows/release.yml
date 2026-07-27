@@ -620,8 +620,25 @@ jobs:
           git config --global user.name  "neowall release bot"
           git config --global user.email "actions@github.com"
 
-      - name: Wait for the release binary tarball to be downloadable
+      - name: Verify the AUR accepts the key
         if: steps.creds.outputs.have == 'true'
+        id: auth
+        run: |
+          # The AUR answers `ssh aur@aur.archlinux.org help` for an authorized
+          # key. If the public half was never registered on the AUR account the
+          # key is useless — say so loudly, but do NOT fail the release: the
+          # binaries are already published and the daily freshness watchdog
+          # will keep reminding us until someone registers it.
+          if ssh -o BatchMode=yes -o ConnectTimeout=20 aur@aur.archlinux.org help >/dev/null 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::error::AUR rejected the SSH key in AUR_SSH_PRIVATE_KEY."
+            echo "::error::Register its PUBLIC half at https://aur.archlinux.org/account/ -> SSH keys."
+          fi
+
+      - name: Wait for the release binary tarball to be downloadable
+        if: steps.creds.outputs.have == 'true' && steps.auth.outputs.ok == 'true'
         id: tarball
         run: |
           TAG="${{ steps.version.outputs.TAG }}"
@@ -639,7 +656,7 @@ jobs:
           echo "binary tarball sha256: $SUM"
 
       - name: Publish neowall-git
-        if: steps.creds.outputs.have == 'true'
+        if: steps.creds.outputs.have == 'true' && steps.auth.outputs.ok == 'true'
         run: |
           V="${{ steps.version.outputs.VERSION }}"
           rm -rf aur-git && git clone ssh://aur@aur.archlinux.org/neowall-git.git aur-git
@@ -660,7 +677,7 @@ jobs:
           fi
 
       - name: Publish neowall-bin
-        if: steps.creds.outputs.have == 'true'
+        if: steps.creds.outputs.have == 'true' && steps.auth.outputs.ok == 'true'
         run: |
           V="${{ steps.version.outputs.VERSION }}"
           TAG="${{ steps.version.outputs.TAG }}"
