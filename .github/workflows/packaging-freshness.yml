@@ -44,20 +44,32 @@ jobs:
         if: steps.latest.outputs.SKIP == 'false'
         id: aur
         run: |
-          RESP=$(curl -fsSL "https://aur.archlinux.org/rpc/v5/info?arg[]=neowall-git&arg[]=neowall-bin&arg[]=neowall")
-          echo "$RESP" > aur.json
-          # Extract "Name": "...", "Version": "..." pairs without needing jq's
-          # object model — the RPC always emits Name before Version per result.
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-          with open("aur.json") as f:
-              data = json.load(f)
-          found = {r["Name"]: r["Version"] for r in data.get("results", [])}
-          for pkg in ("neowall-git", "neowall-bin", "neowall"):
-              key = pkg.replace("-", "_").upper()
-              print(f"{key}={found.get(pkg, 'ABSENT')}")
-          PY
-          cat "$GITHUB_OUTPUT"
+          # NOTE: do NOT use the RPC (/rpc/v5/info) as the source of truth here.
+          # Its package index lags a push by a long and unpredictable interval
+          # (observed >10 minutes), so a freshness check built on it reports
+          # drift that was already fixed and files false-alarm issues. A
+          # watchdog that cries wolf gets muted, which defeats the point.
+          #
+          # cgit serves the repository contents directly and is authoritative
+          # the instant a push lands. Read pkgver/pkgrel out of each package's
+          # .SRCINFO, and treat a 404 as genuinely absent.
+          fetch_srcinfo_ver() {
+            pkg=$1
+            url="https://aur.archlinux.org/cgit/aur.git/plain/.SRCINFO?h=$pkg"
+            body=$(curl -fsSL "$url" 2>/dev/null) || { echo "ABSENT"; return; }
+            [ -n "$body" ] || { echo "ABSENT"; return; }
+            ver=$(printf '%s\n' "$body" | sed -n 's/^[[:space:]]*pkgver = //p' | head -1)
+            rel=$(printf '%s\n' "$body" | sed -n 's/^[[:space:]]*pkgrel = //p' | head -1)
+            [ -n "$ver" ] || { echo "ABSENT"; return; }
+            printf '%s-%s\n' "$ver" "${rel:-1}"
+          }
+
+          for pkg in neowall-git neowall-bin; do
+            v=$(fetch_srcinfo_ver "$pkg")
+            key=$(printf '%s' "$pkg" | tr 'a-z-' 'A-Z_')
+            echo "$key=$v" >> "$GITHUB_OUTPUT"
+            echo "$pkg: $v"
+          done
 
       - name: Report drift
         if: steps.latest.outputs.SKIP == 'false'
