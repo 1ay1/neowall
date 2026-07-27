@@ -28,19 +28,40 @@ dir=$(cd "$dir" && pwd)
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 cp "$dir/PKGBUILD" "$scratch/PKGBUILD"
+# The container runs as UID 1000; make sure it can read the PKGBUILD and write
+# makepkg's scratch files into the mount.
+chmod 777 "$scratch"
+chmod 644 "$scratch/PKGBUILD"
 
-docker run --rm -v "$scratch:/pkg" -w /pkg archlinux:base-devel bash -c '
-  set -e
-  useradd -m build
-  chown -R build:build /pkg
-  sudo -u build makepkg --printsrcinfo > /pkg/.SRCINFO
-'
+# makepkg refuses to run as root. Rather than useradd + sudo inside the
+# container (sudo can fail outright when the runtime sets no-new-privileges,
+# and it was masking the real error), run the container directly as a non-root
+# UID. makepkg only checks EUID != 0, so it does not care that the UID has no
+# /etc/passwd entry; HOME just has to be somewhere writable.
+#
+# Output is captured on the HOST side: redirecting inside the container meant a
+# failure in there could leave a silently empty file behind. Container stderr
+# stays attached so the real diagnostic reaches the CI log.
+if ! docker run --rm \
+        -v "$scratch:/pkg" -w /pkg \
+        --user 1000:1000 -e HOME=/tmp \
+        archlinux:base-devel \
+        makepkg --printsrcinfo > "$dir/.SRCINFO.tmp"; then
+    echo "gen-srcinfo: makepkg failed (see container output above)" >&2
+    rm -f "$dir/.SRCINFO.tmp"
+    exit 1
+fi
 
-[ -s "$scratch/.SRCINFO" ] || { echo "gen-srcinfo: makepkg produced nothing" >&2; exit 1; }
+if [ ! -s "$dir/.SRCINFO.tmp" ]; then
+    echo "gen-srcinfo: makepkg produced an empty .SRCINFO" >&2
+    echo "gen-srcinfo: PKGBUILD was:" >&2
+    sed 's/^/  | /' "$scratch/PKGBUILD" >&2
+    rm -f "$dir/.SRCINFO.tmp"
+    exit 1
+fi
 
-# The container ran as a foreign UID; normalise ownership before it lands in
-# the checkout so `git add` can read it.
-cp "$scratch/.SRCINFO" "$dir/.SRCINFO"
+mv "$dir/.SRCINFO.tmp" "$dir/.SRCINFO"
 chmod 644 "$dir/.SRCINFO"
 
 echo "gen-srcinfo: wrote $dir/.SRCINFO"
+head -4 "$dir/.SRCINFO"
