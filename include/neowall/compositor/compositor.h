@@ -309,7 +309,26 @@ typedef struct compositor_backend_ops {
      * @param scale Scale factor (1 = normal, 2 = HiDPI, etc.)
      */
     void (*set_scale)(struct compositor_surface *surface, int32_t scale);
-    
+
+    /**
+     * Change keyboard interactivity on a LIVE surface (optional)
+     *
+     * Surfaces are created before the wallpaper config has resolved, so the
+     * keyboard_interactivity passed to create_surface() reflects whatever the
+     * config said at that instant — for a terminal wallpaper started from a
+     * config file that is "not a terminal yet", i.e. keyboard-inert. This op
+     * lets the owner flip it once the wallpaper's real type is known, without
+     * tearing the surface down.
+     *
+     * Backends that cannot change it after creation leave this NULL; callers
+     * must treat a NULL op as "unsupported", not as an error.
+     *
+     * @param surface Surface to update
+     * @param enabled true = accept keyboard focus on demand, false = never
+     * @return true if applied, false if unsupported/failed
+     */
+    bool (*set_keyboard_interactivity)(struct compositor_surface *surface, bool enabled);
+
     /**
      * Initialize outputs for this backend (optional)
      * Called when no Wayland outputs are available (X11 backend)
@@ -666,6 +685,20 @@ bool compositor_surface_resize_egl(struct compositor_surface *surface,
  * @param scale Scale factor (typically 1, 2, 3, etc.)
  */
 void compositor_surface_set_scale(struct compositor_surface *surface, int32_t scale);
+
+/**
+ * Change keyboard interactivity on an already-created surface.
+ *
+ * Idempotent: a call that matches the surface's cached state is a no-op, so
+ * this is safe to invoke from the render loop on every wallpaper change.
+ *
+ * @param surface Surface to update (NULL tolerated)
+ * @param enabled true = accept keyboard focus on demand, false = never
+ * @return true if the surface now has the requested state, false if the
+ *         backend cannot change it after creation
+ */
+bool compositor_surface_set_keyboard_interactivity(struct compositor_surface *surface,
+                                                   bool enabled);
 
 /**
  * Set surface callbacks

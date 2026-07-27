@@ -27,6 +27,61 @@ static inline const char *output_get_identifier(const struct output_state *outpu
     return output->model;
 }
 
+/* Copy a string into a fixed-size config field, tolerating self-assignment.
+ *
+ * The deferred re-apply paths call the setters with the config's own buffer as
+ * the argument — output_set_terminal(output, output->config->term_cmd, ...),
+ * output_set_shader(output, output->config->shader_path),
+ * output_set_wallpaper(output, output->config->path) — and every setter then
+ * writes the argument back into that same field. snprintf() with overlapping
+ * source and destination is undefined; glibc in practice produces an EMPTY
+ * string, so a terminal wallpaper restored from a deferred config lost its
+ * command ("Terminal wallpaper running: ''") and a re-applied shader/image
+ * lost its path. Skipping the copy when the buffers are identical is both the
+ * correct and the cheap answer. */
+static void config_str_set(char *dst, size_t dst_size, const char *src) {
+    if (!dst || dst_size == 0) {
+        return;
+    }
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    if (dst == src) {
+        return;  /* Self-assignment: already holds the value. */
+    }
+    snprintf(dst, dst_size, "%s", src);
+}
+
+/* Keep the surface's keyboard interactivity in step with the wallpaper type.
+ *
+ * The layer surface is created in output_configure_compositor_surface() long
+ * before the config that says "this output is a terminal" has been parsed, so
+ * the interactivity chosen at creation time is stale for exactly the case that
+ * needs it: a terminal wallpaper comes up keyboard-inert and could never be
+ * typed into on first paint. Every path that changes output->config->type must
+ * call this afterwards.
+ *
+ * Direction of failure is safe: only WALLPAPER_TERMINAL asks for keyboard
+ * focus, and it is ON_DEMAND (never EXCLUSIVE), so an image/shader wallpaper
+ * can only ever lose keyboard focus here, never grab it from real windows. */
+static void output_sync_keyboard_focus(struct output_state *output) {
+    if (!output || !output->compositor_surface || !output->config) {
+        return;
+    }
+
+    bool want_kbd = output->config->type == WALLPAPER_TERMINAL;
+
+    if (!compositor_surface_set_keyboard_interactivity(output->compositor_surface, want_kbd) &&
+        want_kbd) {
+        /* Backend pins interactivity at creation (X11, GNOME subsurface,
+         * fallback). Not fatal — those paths route keys by other means — but
+         * worth saying out loud when a terminal wallpaper won't take input. */
+        log_debug("Backend cannot enable keyboard focus post-creation for output %s",
+                  output->model[0] ? output->model : "unknown");
+    }
+}
+
 /* Helper function to configure vsync (swap interval) for shader rendering
  * DRY principle: Single source of truth for vsync configuration logic */
 static void output_configure_vsync(struct output_state *output) {
@@ -763,7 +818,11 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     }
 
     /* Update config path */
-    snprintf(output->config->path, sizeof(output->config->path), "%s", path);
+    config_str_set(output->config->path, sizeof(output->config->path), path);
+
+    /* An image wallpaper never takes keyboard input; if this output was a
+     * terminal a moment ago, hand focus back to real windows. */
+    output_sync_keyboard_focus(output);
 
     /* Initialize frame time for cycling */
     uint64_t now = get_time_ms();
@@ -845,7 +904,7 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
         log_debug("EGL surface not ready for output %s, deferring shader load: %s",
                   output->model[0] ? output->model : "unknown", shader_path);
         /* Store shader path in config for later application when surface is ready */
-        snprintf(output->config->shader_path, sizeof(output->config->shader_path), "%s", shader_path);
+        config_str_set(output->config->shader_path, sizeof(output->config->shader_path), shader_path);
         output->config->type = WALLPAPER_SHADER;
         /* Deferred, not failed: the render loop applies this path once the
          * surface comes up, so callers must not treat it as a load failure. */
@@ -975,9 +1034,12 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
 
     /* Update config with new shader path - protected by state mutex */
     pthread_mutex_lock(&output->state->state_mutex);
-    snprintf(output->config->shader_path, sizeof(output->config->shader_path), "%s", shader_path);
+    config_str_set(output->config->shader_path, sizeof(output->config->shader_path), shader_path);
     output->config->type = WALLPAPER_SHADER;
     pthread_mutex_unlock(&output->state->state_mutex);
+
+    /* Leaving terminal mode (if we were in it): drop keyboard focus. */
+    output_sync_keyboard_focus(output);
 
     /* Write state to file */
     const char *mode_str = wallpaper_mode_to_string(output->config->mode);
@@ -1055,11 +1117,11 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
          * re-apply once the surface arrives (mirrors output_set_shader). */
         pthread_mutex_lock(&output->state->state_mutex);
         output->config->type = WALLPAPER_TERMINAL;
-        snprintf(output->config->term_cmd, sizeof(output->config->term_cmd), "%s", cmd);
-        if (shader_path) snprintf(output->config->shader_path,
-                                  sizeof(output->config->shader_path), "%s", shader_path);
-        if (font_path) snprintf(output->config->term_font,
-                                sizeof(output->config->term_font), "%s", font_path);
+        config_str_set(output->config->term_cmd, sizeof(output->config->term_cmd), cmd);
+        if (shader_path) config_str_set(output->config->shader_path,
+                                        sizeof(output->config->shader_path), shader_path);
+        if (font_path) config_str_set(output->config->term_font,
+                                      sizeof(output->config->term_font), font_path);
         output->config->term_cols = cols;
         output->config->term_rows = rows;
         pthread_mutex_unlock(&output->state->state_mutex);
@@ -1181,13 +1243,17 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
 
     pthread_mutex_lock(&output->state->state_mutex);
     output->config->type = WALLPAPER_TERMINAL;
-    snprintf(output->config->term_cmd, sizeof(output->config->term_cmd), "%s", cmd);
-    if (shader_path) snprintf(output->config->shader_path,
-                              sizeof(output->config->shader_path), "%s", shader_path);
+    config_str_set(output->config->term_cmd, sizeof(output->config->term_cmd), cmd);
+    if (shader_path) config_str_set(output->config->shader_path,
+                                    sizeof(output->config->shader_path), shader_path);
     else output->config->shader_path[0] = '\0';
     output->config->term_cols = gc;
     output->config->term_rows = gr;
     pthread_mutex_unlock(&output->state->state_mutex);
+
+    /* The surface was created before the config resolved as a terminal, so it
+     * is keyboard-inert until this point. Make it typeable now. */
+    output_sync_keyboard_focus(output);
 
     /* Terminal wallpapers don't use images; free any lingering texture. */
     if (output->current_image) { image_free(output->current_image); output->current_image = NULL; }

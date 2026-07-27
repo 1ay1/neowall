@@ -1114,6 +1114,45 @@ static bool wlr_configure_surface(struct compositor_surface *surface,
     return true;
 }
 
+/* Flip keyboard interactivity on a live layer surface.
+ *
+ * The surface is created before the wallpaper's type is known (the config load
+ * that says "this output is a terminal" lands after the layer surface has been
+ * created and committed), so a terminal wallpaper comes up keyboard-inert and
+ * has to be made typeable afterwards. Re-committing is required: the layer
+ * shell treats set_keyboard_interactivity as double-buffered state, so without
+ * a wl_surface_commit the compositor never applies it.
+ *
+ * ON_DEMAND only — see wlr_configure_surface() for why EXCLUSIVE must never
+ * appear on a BACKGROUND-layer surface. */
+static bool wlr_set_keyboard_interactivity(struct compositor_surface *surface, bool enabled) {
+    if (!surface) {
+        return false;
+    }
+
+    wlr_surface_data_t *surface_data = surface->backend_data;
+    if (!surface_data || !surface_data->layer_surface || !surface->native_surface) {
+        return false;
+    }
+
+    zwlr_layer_surface_v1_set_keyboard_interactivity(
+        surface_data->layer_surface,
+        enabled ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
+                : ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+
+    wl_surface_commit((struct wl_surface *)surface->native_surface);
+
+    wayland_t *wl = wayland_get();
+    if (wl && wl->display) {
+        wl_display_flush(wl->display);
+    }
+
+    log_info("Layer surface keyboard interactivity -> %s",
+             enabled ? "on-demand" : "none");
+
+    return true;
+}
+
 static void wlr_commit_surface(struct compositor_surface *surface) {
     if (!surface || !surface->native_surface) {
         log_error("Invalid surface for commit");
@@ -1434,6 +1473,7 @@ static const compositor_backend_ops_t wlr_backend_ops = {
     .create_surface = wlr_create_surface,
     .destroy_surface = wlr_destroy_surface,
     .configure_surface = wlr_configure_surface,
+    .set_keyboard_interactivity = wlr_set_keyboard_interactivity,
     .commit_surface = wlr_commit_surface,
     .create_egl_window = wlr_create_egl_window,
     .destroy_egl_window = wlr_destroy_egl_window,

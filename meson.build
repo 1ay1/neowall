@@ -552,6 +552,16 @@ test_refcount_exe = executable('test_output_refcount',
 
 test('output_refcount', test_refcount_exe)
 
+# Alias-safe config field setter — guards the self-assignment bug that blanked
+# term_cmd/shader_path/path on every deferred wallpaper re-apply.
+test_config_str_exe = executable('test_config_str_set',
+  files('tests/test_config_str_set.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('config_str_set', test_config_str_exe)
+
 # X11 multi-monitor geometry — occlusion coverage + per-output mouse mapping.
 # Pure integer math, no Xlib/display needed (see x11_geometry.c).
 test_x11_geometry_exe = executable('test_x11_geometry',

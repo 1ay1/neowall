@@ -394,6 +394,33 @@ void compositor_surface_set_scale(struct compositor_surface *surface, int32_t sc
     surface->scale = scale;
 }
 
+bool compositor_surface_set_keyboard_interactivity(struct compositor_surface *surface,
+                                                   bool enabled) {
+    if (!surface) {
+        return false;
+    }
+
+    struct compositor_backend *backend = surface->backend;
+    if (!backend || !backend->ops || !backend->ops->set_keyboard_interactivity) {
+        /* Backend fixes interactivity at creation time (X11, GNOME subsurface,
+         * fallback). Report the truth rather than pretending it worked. */
+        return surface->config.keyboard_interactivity == enabled;
+    }
+
+    if (surface->config.keyboard_interactivity == enabled) {
+        return true;  /* Already there — don't spam the protocol every frame. */
+    }
+
+    log_debug("Setting surface keyboard interactivity: %s", enabled ? "on-demand" : "none");
+
+    if (!backend->ops->set_keyboard_interactivity(surface, enabled)) {
+        return false;
+    }
+
+    surface->config.keyboard_interactivity = enabled;
+    return true;
+}
+
 /* Set surface callbacks */
 void compositor_surface_set_callbacks(struct compositor_surface *surface,
                                      void (*on_configure)(struct compositor_surface*, int32_t, int32_t),
