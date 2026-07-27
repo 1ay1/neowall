@@ -1090,10 +1090,18 @@ static bool wlr_configure_surface(struct compositor_surface *surface,
     zwlr_layer_surface_v1_set_exclusive_zone(surface_data->layer_surface,
                                             config->exclusive_zone);
 
-    /* Set keyboard interactivity */
+    /* Set keyboard interactivity. ON_DEMAND (not EXCLUSIVE) so a terminal
+     * wallpaper receives keys only while the user has clicked/focused it, and
+     * never steals input from real windows.
+     *
+     * EXCLUSIVE on a BACKGROUND-layer surface is a trap: the compositor routes
+     * ALL keyboard input to the wallpaper for as long as it is mapped, so the
+     * user cannot type into any window and — on compositors that honour it for
+     * background layers — cannot reach their WM keybinds to recover. It must
+     * never appear on this path; keep it identical to wlr_create_surface(). */
     enum zwlr_layer_surface_v1_keyboard_interactivity kb_mode =
         config->keyboard_interactivity ?
-        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE :
+        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND :
         ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
 
     zwlr_layer_surface_v1_set_keyboard_interactivity(surface_data->layer_surface, kb_mode);
