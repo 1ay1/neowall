@@ -389,7 +389,10 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
     a->cell_w = cell_w;
     a->cell_h = cell_h;
 
-    /* --- primary (regular) face --- */
+    /* --- primary (regular) face ---
+     * NOTE: face_init() takes ownership of an owns=true buffer on BOTH paths —
+     * it frees the buffer itself when the font fails to parse. Callers must
+     * therefore never free it again (that was a double free). */
     if (font_data && font_len) {
         uint8_t *copy = malloc(font_len);
         if (!copy) { free(a); return NULL; }
@@ -401,9 +404,9 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
             loaded = read_file(kDefaultFontPaths[i], &len);
             if (loaded) break;
         }
-        if (!loaded || !face_init(&a->regular, loaded, len, true, cell_h)) {
-            free(loaded); free(a); return NULL;
-        }
+        if (!loaded) { free(a); return NULL; }
+        /* face_init already freed `loaded` if it rejected the font. */
+        if (!face_init(&a->regular, loaded, len, true, cell_h)) { free(a); return NULL; }
     }
 
     /* --- optional bold / italic faces (fall back to regular if absent) --- */
@@ -428,7 +431,7 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
     }
 
     a->bitmap = calloc((size_t)ATLAS_W * ATLAS_H, 1);
-    if (!a->bitmap) { face_free(&a->regular); free(a); return NULL; }
+    if (!a->bitmap) goto fail;
     /* Color atlas is only allocated when an emoji font is actually present. */
     if (a->emoji) {
         a->color_bitmap = calloc((size_t)ATLAS_W * ATLAS_H * 4, 1);
@@ -439,7 +442,7 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
     }
     a->slot_cap = 512;
     a->slots = calloc((size_t)a->slot_cap, sizeof(glyph_slot));
-    if (!a->slots) { free(a->bitmap); face_free(&a->regular); free(a); return NULL; }
+    if (!a->slots) goto fail;
 
     a->shelf_x = a->shelf_y = a->shelf_h = 0;
     a->cshelf_x = a->cshelf_y = a->cshelf_h = 0;
@@ -448,6 +451,13 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
     a->color_dirty = a->emoji ? true : false;
     a->color_dirty_y0 = 0; a->color_dirty_y1 = ATLAS_H;
     return a;
+
+    /* One teardown path so the constructor can never drift out of sync with
+     * the destructor: by this point bold/italic/fallback faces and the emoji
+     * font buffer may all be live, and each was previously leaked. */
+fail:
+    glyph_atlas_destroy(a);
+    return NULL;
 }
 
 glyph_atlas *glyph_atlas_create(const uint8_t *font_data, size_t font_len,

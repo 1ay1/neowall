@@ -184,6 +184,27 @@ int main(void) {
     }
     term_screen_destroy(s);
 
+    /* --- resize clamping — term_screen_resize silently clamps to its internal
+     * [1,1024]x[1,512] bounds. Anything that mirrors the geometry (the PTY's
+     * snapshot grid) must read it back rather than trust the request, or it
+     * memcpys past the end of the grid. Guard the contract here. --- */
+    s = term_screen_create(20, 6);
+    {
+        term_screen_resize(s, 100000, 100000);
+        expect(term_screen_cols(s) <= 1024 && term_screen_rows(s) <= 512,
+               "resize clamps absurd geometry to the internal maximum");
+        expect(term_screen_cols(s) >= 1 && term_screen_rows(s) >= 1,
+               "clamped geometry stays positive");
+        /* Row access at the reported bounds must be in range. */
+        const term_cell *last = term_screen_row(s, term_screen_rows(s) - 1);
+        expect(last != NULL, "last row addressable after clamped resize");
+
+        term_screen_resize(s, 0, 0);
+        expect(term_screen_cols(s) >= 1 && term_screen_rows(s) >= 1,
+               "resize clamps zero geometry up to the minimum");
+    }
+    term_screen_destroy(s);
+
     printf("terminal_screen: %d checks, %d failures\n", g_checks, g_fails);
     return g_fails ? 1 : 0;
 }

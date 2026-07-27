@@ -249,9 +249,23 @@ nw_result term_resize(terminal *t, int cols, int rows) {
     if (!t || cols <= 0 || rows <= 0) return nw_err(NW_ERR_INVALID_ARG, "term_resize");
     pthread_mutex_lock(&t->lock);
     term_screen_resize(t->screen, cols, rows);
-    t->cols = cols; t->rows = rows;
-    term_cell *ns = calloc((size_t)cols * rows, sizeof(term_cell));
-    if (ns) { free(t->snap_cells); t->snap_cells = ns; }
+    /* term_screen_resize CLAMPS to [1,TERM_MAX_COLS]x[1,TERM_MAX_ROWS] and may
+     * also bail out on OOM, so the authoritative geometry is whatever the
+     * screen actually adopted — taking the requested size on trust let
+     * term_snapshot() memcpy past the end of both grids. */
+    int ncols = term_screen_cols(t->screen);
+    int nrows = term_screen_rows(t->screen);
+    term_cell *ns = calloc((size_t)ncols * (size_t)nrows, sizeof(term_cell));
+    if (ns) {
+        free(t->snap_cells);
+        t->snap_cells = ns;
+        t->cols = ncols;
+        t->rows = nrows;
+    }
+    /* On calloc failure the snapshot buffer keeps its old geometry, so cols/rows
+     * must keep it too; the screen is bigger but snapshots stay in bounds. */
+    cols = t->cols;
+    rows = t->rows;
     pthread_mutex_unlock(&t->lock);
 
     struct winsize ws = {.ws_row = (unsigned short)rows, .ws_col = (unsigned short)cols};
@@ -323,8 +337,11 @@ bool term_mouse(terminal *t, int cell_x, int cell_y, int button, bool pressed, b
         n = snprintf(seq, sizeof(seq), "\x1b[<%d;%d;%d%c", cb, cell_x + 1, cell_y + 1, final);
     } else {
         /* Legacy X10: CSI M  Cb Cx Cy, each offset by 32. On release the button
-         * bits become 3. Coordinates cap at 223 (255-32). */
-        int b = pressed ? cb : (cb & ~0x03) | 0x03;
+         * bits become 3. Coordinates cap at 223 (255-32).
+         * NOTE the parentheses: `cb & ~0x03 | 0x03` parses as
+         * `cb & (~0x03 | 0x03)` == `cb & ~0` == cb, so releases were being
+         * reported as presses. */
+        int b = pressed ? cb : ((cb & ~0x03) | 0x03);
         int cx = cell_x + 1, cy = cell_y + 1;
         if (cx > 223) cx = 223;
         if (cy > 223) cy = 223;

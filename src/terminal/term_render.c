@@ -102,20 +102,30 @@ static double mono_secs(void) {
 }
 
 static bool alloc_cells(term_render *tr) {
+    size_t n = (size_t)tr->cols * (size_t)tr->rows * 4;
+    size_t nc = (size_t)tr->cols * (size_t)tr->rows;
+    /* Allocate into locals and commit only on FULL success: a partial failure
+     * used to leave tr with a NULL prev_cells/change_ms that the very next
+     * term_render_update() would dereference. */
+    uint32_t *cells = calloc(n, sizeof(uint32_t));
+    uint32_t *prev = calloc(n, sizeof(uint32_t));
+    uint32_t *chg = calloc(nc, sizeof(uint32_t));
+    if (!cells || !prev || !chg) {
+        free(cells); free(prev); free(chg);
+        return false;   /* old grids survive untouched */
+    }
     free(tr->cells);
     free(tr->prev_cells);
     free(tr->change_ms);
-    size_t n = (size_t)tr->cols * (size_t)tr->rows * 4;
-    size_t nc = (size_t)tr->cols * (size_t)tr->rows;
-    tr->cells = calloc(n, sizeof(uint32_t));
-    tr->prev_cells = calloc(n, sizeof(uint32_t));
-    tr->change_ms = calloc(nc, sizeof(uint32_t));
+    tr->cells = cells;
+    tr->prev_cells = prev;
+    tr->change_ms = chg;
     /* Force a full upload on the first frame after (re)alloc: prev is all-zero
      * but the shader's texture is undefined, so the diff must not skip rows. */
     tr->dirty_y0 = 0;
     tr->dirty_y1 = tr->rows;
     tr->have_frame_once = false;
-    return tr->cells != NULL && tr->prev_cells != NULL && tr->change_ms != NULL;
+    return true;
 }
 
 term_render *term_render_create(const term_render_opts *opts, nw_result *err_out) {
