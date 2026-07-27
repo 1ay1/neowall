@@ -1,0 +1,124 @@
+name: Packaging freshness
+
+# Downstream packages going stale is a silent failure: the release succeeds,
+# but AUR keeps serving an old version and nobody notices for months (that is
+# exactly how neowall-git ended up pinned at 0.4.6 while upstream was 0.5.2).
+#
+# This workflow is the watchdog. It compares the AUR packages against the
+# latest GitHub release every day and opens an issue when they diverge, and it
+# can re-run the AUR publish on demand without cutting a new release.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # daily, off the hour to dodge scheduler congestion
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-aur:
+    name: Compare AUR against the latest release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve latest released version
+        id: latest
+        run: |
+          # The newest non-draft, non-prerelease tag on this repo.
+          LATEST=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" \
+                   | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+          if [ -z "$LATEST" ]; then
+            echo "no published release yet; nothing to compare"
+            echo "SKIP=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "SKIP=false" >> "$GITHUB_OUTPUT"
+          echo "TAG=$LATEST"          >> "$GITHUB_OUTPUT"
+          echo "VERSION=${LATEST#v}"  >> "$GITHUB_OUTPUT"
+          echo "latest release: $LATEST"
+
+      - name: Query the AUR
+        if: steps.latest.outputs.SKIP == 'false'
+        id: aur
+        run: |
+          RESP=$(curl -fsSL "https://aur.archlinux.org/rpc/v5/info?arg[]=neowall-git&arg[]=neowall-bin&arg[]=neowall")
+          echo "$RESP" > aur.json
+          # Extract "Name": "...", "Version": "..." pairs without needing jq's
+          # object model — the RPC always emits Name before Version per result.
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          with open("aur.json") as f:
+              data = json.load(f)
+          found = {r["Name"]: r["Version"] for r in data.get("results", [])}
+          for pkg in ("neowall-git", "neowall-bin", "neowall"):
+              key = pkg.replace("-", "_").upper()
+              print(f"{key}={found.get(pkg, 'ABSENT')}")
+          PY
+          cat "$GITHUB_OUTPUT"
+
+      - name: Report drift
+        if: steps.latest.outputs.SKIP == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.latest.outputs.VERSION }}
+          TAG: ${{ steps.latest.outputs.TAG }}
+          AUR_GIT: ${{ steps.aur.outputs.NEOWALL_GIT }}
+          AUR_BIN: ${{ steps.aur.outputs.NEOWALL_BIN }}
+        run: |
+          stale=""
+          # AUR versions carry a -pkgrel suffix; compare only the pkgver part.
+          gitver=${AUR_GIT%%-*}
+          binver=${AUR_BIN%%-*}
+
+          # neowall-git is a VCS package: its version tracks the last push, so
+          # only flag it when its base version trails the release outright.
+          case "$AUR_GIT" in
+            ABSENT) stale="$stale
+          - \`neowall-git\` is **missing from the AUR**" ;;
+            *) if [ "${gitver%%.r*}" != "$VERSION" ]; then
+                 stale="$stale
+          - \`neowall-git\` is at \`$AUR_GIT\` but the latest release is \`$VERSION\`"
+               fi ;;
+          esac
+
+          case "$AUR_BIN" in
+            ABSENT) stale="$stale
+          - \`neowall-bin\` is **missing from the AUR**" ;;
+            *) if [ "$binver" != "$VERSION" ]; then
+                 stale="$stale
+          - \`neowall-bin\` is at \`$AUR_BIN\` but the latest release is \`$VERSION\`"
+               fi ;;
+          esac
+
+          if [ -z "$stale" ]; then
+            echo "AUR packages are current for $VERSION"
+            exit 0
+          fi
+
+          echo "drift detected:$stale"
+
+          TITLE="Packaging out of date for $TAG"
+          # One rolling issue, not one per day.
+          EXISTING=$(gh issue list --state open --label packaging --search "$TITLE" --json number --jq '.[0].number' 2>/dev/null || echo "")
+          BODY="The daily packaging-freshness check found downstream packages lagging the latest release (\`$TAG\`).
+          $stale
+
+          **To fix:** re-run the \`Release\` workflow's AUR step via
+          \`gh workflow run release.yml -f version=$VERSION\`, or push the
+          refreshed PKGBUILDs by hand.
+
+          If this keeps happening, check that the \`AUR_SSH_PRIVATE_KEY\`
+          repository secret is present and still valid — the publish job skips
+          silently when it is unset.
+
+          _Filed automatically by .github/workflows/packaging-freshness.yml_"
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --label packaging --body "$BODY" \
+              || gh issue create --title "$TITLE" --body "$BODY"
+          fi

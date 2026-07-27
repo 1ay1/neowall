@@ -29,7 +29,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
-            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr sudo
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon sudo
 
       - uses: actions/checkout@v4
         with:
@@ -75,7 +75,7 @@ jobs:
           arch=('x86_64')
           url="https://github.com/1ay1/neowall"
           license=('MIT')
-          depends=('wayland' 'mesa' 'libpng' 'libjpeg-turbo' 'libx11' 'libxrandr')
+          depends=('wayland' 'mesa' 'libpng' 'libjpeg-turbo' 'libx11' 'libxrandr' 'libxkbcommon')
           provides=('neowall')
           conflicts=('neowall-git')
           options=(!debug)
@@ -109,7 +109,7 @@ jobs:
           apt-get install -y build-essential git pkg-config meson ninja-build \
             libwayland-dev wayland-protocols libwayland-egl1-mesa \
             libx11-dev libxrandr-dev libegl1-mesa-dev libgl-dev \
-            libpng-dev libjpeg-dev ruby ruby-dev rubygems
+            libpng-dev libjpeg-dev libxkbcommon-dev ruby ruby-dev rubygems
           gem install --no-document fpm
 
       - uses: actions/checkout@v4
@@ -155,6 +155,7 @@ jobs:
             --depends "libegl1" --depends "libgl1" \
             --depends "libpng16-16" --depends "libjpeg62-turbo" \
             --depends "libx11-6" --depends "libxrandr2" \
+            --depends "libxkbcommon0" \
             --deb-no-default-config-files \
             -C pkgroot -p "dist/neowall_${V}_amd64.deb" usr
 
@@ -212,6 +213,7 @@ jobs:
             --depends "libegl1" --depends "libgl1" \
             --depends "libpng16-16t64" --depends "libjpeg-turbo8" \
             --depends "libx11-6" --depends "libxrandr2" \
+            --depends "libxkbcommon0" \
             --deb-no-default-config-files \
             -C pkgroot -p "dist/neowall_${V}-ubuntu24.04_amd64.deb" usr
 
@@ -233,7 +235,7 @@ jobs:
         run: |
           dnf install -y gcc meson ninja-build wayland-devel mesa-libGL-devel \
             mesa-libEGL-devel libpng-devel libjpeg-turbo-devel \
-            wayland-protocols-devel libX11-devel libXrandr-devel git \
+            wayland-protocols-devel libX11-devel libXrandr-devel libxkbcommon-devel git \
             ruby ruby-devel rpm-build redhat-rpm-config
           gem install --no-document fpm
 
@@ -279,6 +281,7 @@ jobs:
             --depends "wayland-libs" --depends "mesa-libGL" --depends "mesa-libEGL" \
             --depends "libpng" --depends "libjpeg-turbo" \
             --depends "libX11" --depends "libXrandr" \
+            --depends "libxkbcommon" \
             -C pkgroot -p "dist/neowall-${V}-1.fc.x86_64.rpm" usr
 
       - uses: actions/upload-artifact@v4
@@ -311,7 +314,7 @@ jobs:
               gcc gcc-c++ meson ninja \
               wayland-devel wayland-protocols-devel Mesa-libGL-devel Mesa-libEGL-devel \
               Mesa-libGLESv3-devel \
-              libpng16-devel libjpeg8-devel libX11-devel libXrandr-devel git \
+              libpng16-devel libjpeg8-devel libX11-devel libXrandr-devel libxkbcommon-devel git \
               ruby ruby-devel rpm-build tar gzip gawk make && break
             sleep 5
           done
@@ -356,6 +359,7 @@ jobs:
             --depends "libwayland-client0" --depends "Mesa-libGL1" --depends "Mesa-libEGL1" \
             --depends "libpng16-16" --depends "libjpeg8" \
             --depends "libX11-6" --depends "libXrandr2" \
+            --depends "libxkbcommon0" \
             -C pkgroot -p "dist/neowall-${V}-1.suse.x86_64.rpm" usr
 
       - uses: actions/upload-artifact@v4
@@ -376,7 +380,7 @@ jobs:
           sudo apt-get install -y build-essential git pkg-config meson ninja-build \
             libwayland-dev wayland-protocols libwayland-egl1 \
             libx11-dev libxrandr-dev libegl1-mesa-dev libgl-dev \
-            libpng-dev libjpeg-dev wget file desktop-file-utils
+            libpng-dev libjpeg-dev libxkbcommon-dev wget file desktop-file-utils
 
       - uses: actions/checkout@v4
         with:
@@ -551,3 +555,192 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # AUR — push refreshed PKGBUILDs so the Arch packages never lag a release.
+  #
+  # This is the job that keeps downstream packaging from going out of date.
+  # It regenerates both AUR packages from the tag and pushes them:
+  #
+  #   neowall-git  VCS package; only pkgver()/deps/metadata need refreshing.
+  #   neowall-bin  binary package pinned to THIS release's tarball + sha256.
+  #
+  # Requires an AUR SSH private key in the AUR_SSH_PRIVATE_KEY repo secret
+  # (the public half must be registered on the AUR account). If the secret is
+  # absent the job SKIPS instead of failing, so a fork's release still works.
+  # ---------------------------------------------------------------------------
+  publish-aur:
+    name: Publish to AUR
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for AUR credentials
+        id: creds
+        env:
+          AUR_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -n "$AUR_KEY" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::AUR_SSH_PRIVATE_KEY is not set — skipping AUR publish."
+            echo "::warning::Add the secret to keep neowall-git / neowall-bin current automatically."
+          fi
+
+      - name: Resolve version
+        if: steps.creds.outputs.have == 'true'
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            TAG=${GITHUB_REF#refs/tags/}
+            V="${TAG#v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
+          echo "TAG=v$V" >> "$GITHUB_OUTPUT"
+
+      - name: Set up AUR SSH
+        if: steps.creds.outputs.have == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+          EOF
+          git config --global user.name  "neowall release bot"
+          git config --global user.email "actions@github.com"
+
+      - name: Wait for the release binary tarball to be downloadable
+        if: steps.creds.outputs.have == 'true'
+        id: tarball
+        run: |
+          TAG="${{ steps.version.outputs.TAG }}"
+          # neowall-bin ships the PREBUILT binary, so it must hash the release
+          # asset the build-arch job uploaded — not the git source tarball.
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/neowall-linux-x86_64-arch.tar.gz"
+          # Release assets propagate asynchronously; retry so we never race them.
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsSL -o binary.tar.gz "$URL"; then break; fi
+            echo "attempt $i failed; retrying in 15s"; sleep 15
+          done
+          test -s binary.tar.gz || { echo "could not fetch $URL"; exit 1; }
+          SUM=$(sha256sum binary.tar.gz | cut -d' ' -f1)
+          echo "SHA256=$SUM" >> "$GITHUB_OUTPUT"
+          echo "binary tarball sha256: $SUM"
+
+      - name: Publish neowall-git
+        if: steps.creds.outputs.have == 'true'
+        run: |
+          V="${{ steps.version.outputs.VERSION }}"
+          rm -rf aur-git && git clone ssh://aur@aur.archlinux.org/neowall-git.git aur-git
+          # The in-repo PKGBUILD is the canonical one; ship it verbatim.
+          cp packaging/PKGBUILD aur-git/PKGBUILD
+          cd aur-git
+          # .SRCINFO must match the PKGBUILD or the AUR rejects the push. Generate
+          # it in an Arch container so makepkg is the thing that writes it.
+          docker run --rm -v "$PWD:/pkg" -w /pkg archlinux:base-devel bash -c '
+            useradd -m build && chown -R build:build /pkg &&
+            sudo -u build makepkg --printsrcinfo > .SRCINFO'
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "neowall-git already up to date"
+          else
+            git commit -m "neowall-git: sync with upstream v$V"
+            git push origin master
+          fi
+
+      - name: Publish neowall-bin
+        if: steps.creds.outputs.have == 'true'
+        run: |
+          V="${{ steps.version.outputs.VERSION }}"
+          TAG="${{ steps.version.outputs.TAG }}"
+          SUM="${{ steps.tarball.outputs.SHA256 }}"
+          # neowall-bin may not exist yet; `git clone` of an empty AUR repo works
+          # and gives us an empty tree to populate.
+          rm -rf aur-bin && git clone ssh://aur@aur.archlinux.org/neowall-bin.git aur-bin
+          cd aur-bin
+          cat > PKGBUILD <<EOF
+          # Maintainer: 1ay1 <https://github.com/1ay1>
+          # Generated automatically by .github/workflows/release.yml — do not edit by hand.
+          pkgname=neowall-bin
+          pkgver=$V
+          pkgrel=1
+          pkgdesc="GPU shader wallpapers for Wayland and X11 (prebuilt binary)"
+          arch=('x86_64')
+          url="https://github.com/1ay1/neowall"
+          license=('MIT')
+          depends=('wayland' 'mesa' 'libpng' 'libjpeg-turbo' 'libx11' 'libxrandr' 'libxkbcommon')
+          provides=('neowall')
+          conflicts=('neowall' 'neowall-git')
+          options=(!strip !debug)
+          source=("neowall-\$pkgver-x86_64.tar.gz::https://github.com/1ay1/neowall/releases/download/$TAG/neowall-linux-x86_64-arch.tar.gz"
+                  "LICENSE-\$pkgver::https://raw.githubusercontent.com/1ay1/neowall/$TAG/LICENSE")
+          sha256sums=('$SUM'
+                      'SKIP')
+
+          package() {
+            install -Dm755 "\$srcdir/neowall" "\$pkgdir/usr/bin/neowall"
+            install -Dm644 "\$srcdir/LICENSE-\$pkgver" "\$pkgdir/usr/share/licenses/\$pkgname/LICENSE"
+          }
+          EOF
+          docker run --rm -v "$PWD:/pkg" -w /pkg archlinux:base-devel bash -c '
+            useradd -m build && chown -R build:build /pkg &&
+            sudo -u build makepkg --printsrcinfo > .SRCINFO'
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "neowall-bin already up to date"
+          else
+            git commit -m "neowall-bin: $V"
+            git push origin master
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Nix flake — bump the version pin so `nix run github:1ay1/neowall` tracks
+  # the release instead of whatever it was pinned to months ago.
+  # ---------------------------------------------------------------------------
+  publish-nix:
+    name: Sync nix flake version
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            TAG=${GITHUB_REF#refs/tags/}
+            V="${TAG#v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Sync derived version references and push if changed
+        run: |
+          git config user.name  "neowall release bot"
+          git config user.email "actions@github.com"
+          ./scripts/version.sh set "${{ steps.version.outputs.VERSION }}"
+          if git diff --quiet; then
+            echo "already in sync on main"
+          else
+            git add -A
+            git commit -m "chore: sync version references to ${{ steps.version.outputs.VERSION }}"
+            git push origin HEAD:main
+          fi
+

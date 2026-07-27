@@ -18,7 +18,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
-            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -55,7 +55,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
-            egl-wayland mesa libpng libjpeg-turbo
+            egl-wayland mesa libpng libjpeg-turbo libxkbcommon
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -120,7 +120,7 @@ jobs:
             libwayland-dev wayland-protocols libwayland-egl1-mesa \
             libx11-dev libxrandr-dev \
             libegl1-mesa-dev libgles2-mesa-dev \
-            libpng-dev libjpeg-dev
+            libpng-dev libjpeg-dev libxkbcommon-dev
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -187,7 +187,7 @@ jobs:
             libwayland-dev wayland-protocols libwayland-egl1-mesa \
             libx11-dev libxrandr-dev \
             libegl1-mesa-dev libgles2-mesa-dev \
-            libpng-dev libjpeg-dev
+            libpng-dev libjpeg-dev libxkbcommon-dev
 
       - name: Checkout code
         uses: actions/checkout@v4

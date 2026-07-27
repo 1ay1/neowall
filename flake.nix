@@ -13,7 +13,7 @@
 
         neowall = pkgs.stdenv.mkDerivation (finalAttrs: {
           pname = "neowall";
-          version = "0.5.0";
+          version = "0.5.3";
 
           src = self;
 

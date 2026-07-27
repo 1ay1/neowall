@@ -31,7 +31,8 @@ It pauses itself the moment a window covers the wallpaper, so it isn't burning y
 
 ```bash
 # Arch (AUR)
-yay -S neowall-git
+yay -S neowall-bin      # prebuilt, tracks each release
+yay -S neowall-git      # builds from git
 
 # Prebuilt binary
 # https://github.com/1ay1/neowall/releases/latest
@@ -51,17 +52,20 @@ sudo ninja -C build install
 # Debian/Ubuntu
 sudo apt install build-essential meson ninja-build libwayland-dev \
     libgles2-mesa-dev libpng-dev libjpeg-dev wayland-protocols \
-    libx11-dev libxrandr-dev
+    libx11-dev libxrandr-dev libxkbcommon-dev
 
 # Arch
 sudo pacman -S base-devel meson ninja wayland mesa libpng libjpeg-turbo \
-    wayland-protocols libx11 libxrandr
+    wayland-protocols libx11 libxrandr libxkbcommon
 
 # Fedora
 sudo dnf install gcc meson ninja-build wayland-devel mesa-libGLES-devel \
     libpng-devel libjpeg-turbo-devel wayland-protocols-devel \
-    libX11-devel libXrandr-devel
+    libX11-devel libXrandr-devel libxkbcommon-devel
 ```
+
+`libxkbcommon` is optional at build time, but without it the terminal
+wallpaper compiles fine and then silently has no keyboard input — install it.
 </details>
 
 ## Config

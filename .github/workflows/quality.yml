@@ -12,6 +12,18 @@ on:
     branches: [main]
 
 jobs:
+  # Cheap, fast gate: meson.build owns the version; flake.nix and
+  # packaging/PKGBUILD are derived from it. Without this the three drifted to
+  # 0.5.2 / 0.5.0 / 0.4.7 and downstream packages silently shipped stale
+  # metadata. scripts/version.sh sync fixes any mismatch.
+  version-consistency:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check every version reference agrees with meson.build
+        run: ./scripts/version.sh check
+
   sanitizers:
     name: ASan + UBSan (unit tests)
     runs-on: ubuntu-latest
@@ -22,7 +34,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
-            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr clang
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon clang
 
       - uses: actions/checkout@v4
 
@@ -48,7 +60,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
-            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon
 
       - uses: actions/checkout@v4
 
@@ -74,7 +86,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
-            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr clang
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon clang
 
       - uses: actions/checkout@v4
 
@@ -103,7 +115,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
-            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr gcc
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon gcc
 
       - uses: actions/checkout@v4
 
