@@ -50,13 +50,16 @@ jobs:
           # drift that was already fixed and files false-alarm issues. A
           # watchdog that cries wolf gets muted, which defeats the point.
           #
-          # cgit serves the repository contents directly and is authoritative
-          # the instant a push lands. Read pkgver/pkgrel out of each package's
-          # .SRCINFO, and treat a 404 as genuinely absent.
+          # cgit serves the repository contents directly, but its `plain` view
+          # is CACHED for a short window (observed ~60s of serving the previous
+          # .SRCINFO after a successful push). That is far better than the RPC,
+          # but still enough to misreport a release that just published, so a
+          # disagreement is re-checked against the git repository itself (see
+          # the confirm step below) before anything is filed.
           fetch_srcinfo_ver() {
             pkg=$1
-            url="https://aur.archlinux.org/cgit/aur.git/plain/.SRCINFO?h=$pkg"
-            body=$(curl -fsSL "$url" 2>/dev/null) || { echo "ABSENT"; return; }
+            url="https://aur.archlinux.org/cgit/aur.git/plain/.SRCINFO?h=$pkg&cachebust=$(date +%s)"
+            body=$(curl -fsSL -H 'Cache-Control: no-cache' "$url" 2>/dev/null) || { echo "ABSENT"; return; }
             [ -n "$body" ] || { echo "ABSENT"; return; }
             ver=$(printf '%s\n' "$body" | sed -n 's/^[[:space:]]*pkgver = //p' | head -1)
             rel=$(printf '%s\n' "$body" | sed -n 's/^[[:space:]]*pkgrel = //p' | head -1)
@@ -71,14 +74,64 @@ jobs:
             echo "$pkg: $v"
           done
 
+      # Anything cgit reported as stale/absent gets a second opinion from the
+      # git repository, which has no cache in front of it. A false alarm here
+      # costs more than a missed day: a watchdog that cries wolf gets muted.
+      - name: Confirm against the AUR git repositories
+        if: steps.latest.outputs.SKIP == 'false'
+        id: confirm
+        env:
+          VERSION: ${{ steps.latest.outputs.VERSION }}
+          AUR_GIT: ${{ steps.aur.outputs.NEOWALL_GIT }}
+          AUR_BIN: ${{ steps.aur.outputs.NEOWALL_BIN }}
+        run: |
+          set -u
+          recheck() {
+            pkg=$1
+            dir=$(mktemp -d)
+            if ! git clone -q --depth 1 "https://aur.archlinux.org/$pkg.git" "$dir/$pkg" 2>/dev/null; then
+              echo "ABSENT"; return
+            fi
+            src="$dir/$pkg/.SRCINFO"
+            [ -f "$src" ] || { echo "ABSENT"; return; }
+            ver=$(sed -n 's/^[[:space:]]*pkgver = //p' "$src" | head -1)
+            rel=$(sed -n 's/^[[:space:]]*pkgrel = //p' "$src" | head -1)
+            [ -n "$ver" ] || { echo "ABSENT"; return; }
+            printf '%s-%s\n' "$ver" "${rel:-1}"
+          }
+
+          for pkg in neowall-git neowall-bin; do
+            key=$(printf '%s' "$pkg" | tr 'a-z-' 'A-Z_')
+            case "$pkg" in
+              neowall-git) cached=$AUR_GIT ;;
+              *)           cached=$AUR_BIN ;;
+            esac
+
+            base=${cached%%-*}; base=${base%%.r*}
+            if [ "$cached" != "ABSENT" ] && [ "$base" = "$VERSION" ]; then
+              # cgit already agrees it is current; no need to clone.
+              echo "$key=$cached" >> "$GITHUB_OUTPUT"
+              echo "$pkg: $cached (cgit, current)"
+              continue
+            fi
+
+            v=$(recheck "$pkg")
+            echo "$key=$v" >> "$GITHUB_OUTPUT"
+            if [ "$v" != "$cached" ]; then
+              echo "$pkg: cgit said '$cached', git says '$v' (cgit cache was stale)"
+            else
+              echo "$pkg: $v (confirmed via git)"
+            fi
+          done
+
       - name: Report drift
         if: steps.latest.outputs.SKIP == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.latest.outputs.VERSION }}
           TAG: ${{ steps.latest.outputs.TAG }}
-          AUR_GIT: ${{ steps.aur.outputs.NEOWALL_GIT }}
-          AUR_BIN: ${{ steps.aur.outputs.NEOWALL_BIN }}
+          AUR_GIT: ${{ steps.confirm.outputs.NEOWALL_GIT }}
+          AUR_BIN: ${{ steps.confirm.outputs.NEOWALL_BIN }}
         run: |
           stale=""
           # AUR versions carry a -pkgrel suffix; compare only the pkgver part.
