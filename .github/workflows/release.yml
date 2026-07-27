@@ -667,12 +667,9 @@ jobs:
           rm -rf aur-git && git clone ssh://aur@aur.archlinux.org/neowall-git.git aur-git
           # The in-repo PKGBUILD is the canonical one; ship it verbatim.
           cp packaging/PKGBUILD aur-git/PKGBUILD
+          # .SRCINFO must match the PKGBUILD or the AUR rejects the push.
+          "$GITHUB_WORKSPACE/.github/scripts/gen-srcinfo.sh" aur-git
           cd aur-git
-          # .SRCINFO must match the PKGBUILD or the AUR rejects the push. Generate
-          # it in an Arch container so makepkg is the thing that writes it.
-          docker run --rm -v "$PWD:/pkg" -w /pkg archlinux:base-devel bash -c '
-            useradd -m build && chown -R build:build /pkg &&
-            sudo -u build makepkg --printsrcinfo > .SRCINFO'
           git add PKGBUILD .SRCINFO
           if git diff --cached --quiet; then
             echo "neowall-git already up to date"
@@ -715,9 +712,7 @@ jobs:
             install -Dm644 "\$srcdir/LICENSE-\$pkgver" "\$pkgdir/usr/share/licenses/\$pkgname/LICENSE"
           }
           EOF
-          docker run --rm -v "$PWD:/pkg" -w /pkg archlinux:base-devel bash -c '
-            useradd -m build && chown -R build:build /pkg &&
-            sudo -u build makepkg --printsrcinfo > .SRCINFO'
+          "$GITHUB_WORKSPACE/.github/scripts/gen-srcinfo.sh" .
           git add PKGBUILD .SRCINFO
           if git diff --cached --quiet; then
             echo "neowall-bin already up to date"
