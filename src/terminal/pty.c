@@ -227,7 +227,15 @@ nw_result term_spawn(const term_spawn_opts *opts, terminal **out) {
         prctl(PR_SET_PDEATHSIG, SIGHUP);
         if (getppid() == 1) _exit(129);
 #endif
-        if (opts->cwd && opts->cwd[0]) (void)chdir(opts->cwd);
+        if (opts->cwd && opts->cwd[0]) {
+            /* Best-effort: an unreadable/missing cwd is not fatal — fall through
+             * and let the child start in the inherited directory rather than
+             * failing the whole terminal. The explicit check also satisfies
+             * glibc's warn_unused_result on chdir (a (void) cast does not). */
+            if (chdir(opts->cwd) != 0) {
+                /* nothing to do; stderr goes to the PTY, which no one reads */
+            }
+        }
         char *const argv[] = {(char *)sh, (char *)"-c", (char *)opts->cmd, NULL};
         execve(sh, argv, child_env);
         _exit(127); /* exec failed */
