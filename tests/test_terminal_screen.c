@@ -205,6 +205,39 @@ int main(void) {
     }
     term_screen_destroy(s);
 
+    /* --- wide-cell invariants: overwriting/erasing either half cannot leave
+     * an orphan head or tail for the renderer. --- */
+    s = term_screen_create(6, 2);
+    feed(s, "\xE7\x95\x8C"); /* U+754C, width 2 */
+    {
+        const term_cell *r = term_screen_row(s, 0);
+        expect(r[0].cp == 0x754c && (r[1].attr & TERM_ATTR_WIDE_TAIL),
+               "wide glyph creates head and tail");
+        feed(s, "\x1b[1;2HX");
+        r = term_screen_row(s, 0);
+        expect(r[0].cp == 0 && r[1].cp == 'X' && !(r[1].attr & TERM_ATTR_WIDE_TAIL),
+               "overwriting wide tail clears stale head");
+    }
+    feed(s, "\x1b[2;1H\xE7\x95\x8C\x1b[2;2H\x1b[X");
+    {
+        const term_cell *r = term_screen_row(s, 1);
+        expect(r[0].cp == 0 && !(r[1].attr & TERM_ATTR_WIDE_TAIL),
+               "erasing wide tail clears whole pair");
+    }
+    term_screen_destroy(s);
+
+    s = term_screen_create(4, 1);
+    feed(s, "A\xE7\x95\x8C" "X");
+    expect(term_screen_resize(s, 3, 1), "resize reports success");
+    {
+        const term_cell *r = term_screen_row(s, 0);
+        expect(r[1].cp == 0,
+               "shrinking through wide tail clears retained head");
+        expect(r[2].cp == 0 && !(r[2].attr & TERM_ATTR_WIDE_TAIL),
+               "shrinking through wide tail clears retained tail");
+    }
+    term_screen_destroy(s);
+
     printf("terminal_screen: %d checks, %d failures\n", g_checks, g_fails);
     return g_fails ? 1 : 0;
 }

@@ -360,6 +360,34 @@ Use cases for turning it off:
   traffic from pointer events.
 - Principle: a wallpaper shouldn't grab input focus.
 
+### `term_raw_input` - Terminal Control Keys
+
+Whether a focused terminal wallpaper receives the signal/EOF/suspend control
+keys verbatim.
+
+```vibe
+term_raw_input false   # default — Ctrl-C / Ctrl-D / Ctrl-\ / Ctrl-Z are dropped
+term_raw_input true    # forward every key, incl. the ones that can kill the app
+```
+
+By default (`false`), the four control keys whose line-discipline meaning is to
+tear down or suspend the child are filtered out before they reach the terminal:
+
+| Key | Byte | Effect that's blocked |
+|-----|------|-----------------------|
+| `Ctrl-C` | `0x03` | SIGINT (would kill the app) |
+| `Ctrl-D` | `0x04` | EOF (exits shells / REPLs) |
+| `Ctrl-Z` | `0x1a` | SIGTSTP (would freeze the wallpaper) |
+| `Ctrl-\` | `0x1c` | SIGQUIT (would kill the app) |
+
+Everything else — text, arrows, function keys, Tab, Enter, and other `Ctrl`
+combos a TUI actually uses — still passes through. This keeps a stray keypress
+from quitting the program running as your wallpaper. Set `term_raw_input true`
+only if you genuinely want an interactive shell wallpaper you can `Ctrl-C` in.
+
+Keyboard input reaches a terminal wallpaper only after you click it (the layer
+surface uses on-demand keyboard focus), and only on Wayland.
+
 ### Performance Options
 
 #### `pause_on_fullscreen` - Pause When Occluded
@@ -448,6 +476,28 @@ default {
 ```
 
 ### Multi-Monitor
+
+Outputs are independent by default, even when they use the same image, shader,
+or cycle directory. To render one continuous virtual canvas across monitors,
+opt in explicitly with `span true` on every participating output. Use
+`span_group` when more than one independent span exists; specifying a group
+also enables spanning.
+
+```vibe
+output {
+  DP-1 {
+    shader matrix_real.glsl
+    span_group desk
+  }
+  HDMI-A-1 {
+    shader matrix_real.glsl
+    span_group desk
+  }
+}
+```
+
+Anonymous `span true` outputs are grouped only when they use compatible sources.
+Named groups must share the same wallpaper type.
 
 ```vibe
 output {

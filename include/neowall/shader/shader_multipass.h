@@ -371,6 +371,9 @@ bool multipass_compile_all(multipass_shader_t *shader);
  * @param height New height
  */
 void multipass_resize(multipass_shader_t *shader, int width, int height);
+/* Resize an attached terminal's PTY/grid and matching GPU cell textures.
+ * Must be called on the render thread with the output GL context current. */
+bool multipass_resize_terminal(multipass_shader_t *shader, int cols, int rows);
 
 /**
  * Place this output's window inside a larger virtual screen, so the shader draws
@@ -743,6 +746,11 @@ bool multipass_terminal_wants_mouse(const multipass_shader_t *shader);
  * until new child output arrives. False if no terminal is attached. */
 bool multipass_terminal_animating(const multipass_shader_t *shader,
                                   unsigned fx_settle_ms);
+
+/* True if the attached terminal's child process has exited, or no terminal is
+ * attached. Used to decide whether a live terminal wallpaper already exists
+ * before (re)spawning, so a redundant apply doesn't stack a second child. */
+bool multipass_terminal_child_exited(const multipass_shader_t *shader);
 
 /* Kill an attached terminal's child process (and its process group) without
  * touching GL state. Call on daemon shutdown so the child never outlives the

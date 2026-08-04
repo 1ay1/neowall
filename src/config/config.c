@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
+#include <math.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <strings.h>
@@ -119,16 +121,22 @@ static const size_t transition_mapping_count = sizeof(transition_mappings) / siz
  * String <-> Enum Conversion Functions
  * ============================================================================ */
 
-enum wallpaper_mode wallpaper_mode_from_string(const char *str) {
-    if (!str) return MODE_FILL;  /* Safe default */
-
+static bool parse_wallpaper_mode(const char *str, enum wallpaper_mode *mode) {
+    if (!str || !mode) return false;
     for (size_t i = 0; i < mode_mapping_count; i++) {
         if (strcasecmp(str, mode_mappings[i].name) == 0) {
-            return mode_mappings[i].mode;
+            *mode = mode_mappings[i].mode;
+            return true;
         }
     }
+    return false;
+}
 
-    log_error("Invalid wallpaper mode '%s', using 'fill' as default", str);
+enum wallpaper_mode wallpaper_mode_from_string(const char *str) {
+    enum wallpaper_mode mode;
+    if (parse_wallpaper_mode(str, &mode)) return mode;
+    log_error("Invalid wallpaper mode '%s', using 'fill' as default",
+              str ? str : "(null)");
     return MODE_FILL;
 }
 
@@ -141,22 +149,24 @@ const char *wallpaper_mode_to_string(enum wallpaper_mode mode) {
     return "fill";  /* Safe default */
 }
 
-enum transition_type transition_type_from_string(const char *str) {
-    if (!str) return TRANSITION_FADE;  /* Safe default */
-
+static bool parse_transition_type(const char *str, enum transition_type *type) {
+    if (!str || !type) return false;
     for (size_t i = 0; i < transition_mapping_count; i++) {
-        if (strcasecmp(str, transition_mappings[i].name) == 0) {
-            log_debug("Matched transition '%s' to type %d", str, transition_mappings[i].type);
-            return transition_mappings[i].type;
-        }
-        if (transition_mappings[i].alias &&
-            strcasecmp(str, transition_mappings[i].alias) == 0) {
-            log_debug("Matched transition '%s' (via alias) to type %d", str, transition_mappings[i].type);
-            return transition_mappings[i].type;
+        if (strcasecmp(str, transition_mappings[i].name) == 0 ||
+            (transition_mappings[i].alias &&
+             strcasecmp(str, transition_mappings[i].alias) == 0)) {
+            *type = transition_mappings[i].type;
+            return true;
         }
     }
+    return false;
+}
 
-    log_error("Invalid transition type '%s', using 'fade' as default", str);
+enum transition_type transition_type_from_string(const char *str) {
+    enum transition_type type;
+    if (parse_transition_type(str, &type)) return type;
+    log_error("Invalid transition type '%s', using 'fade' as default",
+              str ? str : "(null)");
     return TRANSITION_FADE;
 }
 
@@ -209,171 +219,117 @@ static int compare_strings(const void *a, const void *b) {
  * Directory Loading Functions
  * ============================================================================ */
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-truncation"
+static void free_path_array(char **paths, size_t count) {
+    if (!paths) return;
+    for (size_t i = 0; i < count; i++) free(paths[i]);
+    free(paths);
+}
+
+static bool expand_directory_path(const char *dir_path, char *expanded,
+                                  size_t expanded_size) {
+    const char *prefix = "";
+    const char *suffix = dir_path;
+    if (dir_path[0] == '~') {
+        if (dir_path[1] != '\0' && dir_path[1] != '/') {
+            log_error("Only '~' and '~/' path expansion are supported: %s", dir_path);
+            return false;
+        }
+        prefix = getenv("HOME");
+        if (!prefix) {
+            log_error("Cannot expand ~ without HOME environment variable");
+            return false;
+        }
+        suffix = dir_path + 1;
+    }
+
+    int written = snprintf(expanded, expanded_size, "%s%s", prefix, suffix);
+    if (written < 0 || (size_t)written >= expanded_size) {
+        log_error("Directory path is too long: %s", dir_path);
+        return false;
+    }
+
+    size_t len = (size_t)written;
+    while (len > 1 && expanded[len - 1] == '/') expanded[--len] = '\0';
+    return true;
+}
+
+static char **load_files_from_directory(const char *dir_path, size_t *count,
+                                        bool (*accept)(const char *)) {
+    if (!dir_path || !count) return NULL;
+    *count = 0;
+
+    char expanded_path[MAX_PATH_LENGTH];
+    if (!expand_directory_path(dir_path, expanded_path, sizeof(expanded_path)))
+        return NULL;
+
+    DIR *dir = opendir(expanded_path);
+    if (!dir) return NULL;
+
+    char **paths = NULL;
+    size_t used = 0;
+    size_t capacity = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if ((entry->d_type != DT_REG && entry->d_type != DT_UNKNOWN) ||
+            !accept(entry->d_name))
+            continue;
+
+        size_t dir_len = strlen(expanded_path);
+        size_t name_len = strlen(entry->d_name);
+        if (dir_len > SIZE_MAX - name_len - 2 ||
+            dir_len + name_len + 2 > MAX_PATH_LENGTH) {
+            log_error("Path too long: %s/%s", expanded_path, entry->d_name);
+            continue;
+        }
+
+        if (used == capacity) {
+            size_t new_capacity = capacity ? capacity * 2 : 8;
+            if (new_capacity < capacity || new_capacity > SIZE_MAX / sizeof(*paths)) {
+                free_path_array(paths, used);
+                closedir(dir);
+                return NULL;
+            }
+            char **grown = realloc(paths, new_capacity * sizeof(*paths));
+            if (!grown) {
+                free_path_array(paths, used);
+                closedir(dir);
+                return NULL;
+            }
+            paths = grown;
+            capacity = new_capacity;
+        }
+
+        size_t full_len = dir_len + 1 + name_len;
+        paths[used] = malloc(full_len + 1);
+        if (!paths[used]) {
+            free_path_array(paths, used);
+            closedir(dir);
+            return NULL;
+        }
+        memcpy(paths[used], expanded_path, dir_len);
+        paths[used][dir_len] = '/';
+        memcpy(paths[used] + dir_len + 1, entry->d_name, name_len + 1);
+        used++;
+    }
+    closedir(dir);
+
+    if (used == 0) {
+        free(paths);
+        return NULL;
+    }
+
+    qsort(paths, used, sizeof(*paths), compare_strings);
+    *count = used;
+    return paths;
+}
+
 char **load_shaders_from_directory(const char *dir_path, size_t *count) {
-    if (!dir_path || !count) return NULL;
-
-    *count = 0;
-
-    /* Expand ~ to home directory */
-    char expanded_path[MAX_PATH_LENGTH];
-    if (dir_path[0] == '~') {
-        const char *home = getenv("HOME");
-        if (!home) {
-            log_error("Cannot expand ~ without HOME environment variable");
-            return NULL;
-        }
-        snprintf(expanded_path, sizeof(expanded_path), "%s%s", home, dir_path + 1);
-    } else {
-        snprintf(expanded_path, sizeof(expanded_path), "%s", dir_path);
-    }
-
-    /* Strip trailing slash to avoid double slashes in path construction */
-    size_t path_len = strlen(expanded_path);
-    if (path_len > 1 && expanded_path[path_len - 1] == '/') {
-        expanded_path[path_len - 1] = '\0';
-    }
-
-    DIR *dir = opendir(expanded_path);
-    if (!dir) {
-        return NULL;  /* Not a directory */
-    }
-
-    /* First pass: count shader files */
-    struct dirent *entry;
-    size_t shader_count = 0;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
-            if (is_shader_file(entry->d_name)) {
-                shader_count++;
-            }
-        }
-    }
-
-    if (shader_count == 0) {
-        closedir(dir);
-        return NULL;
-    }
-
-    /* Allocate array for paths */
-    char **paths = calloc(shader_count, sizeof(char *));
-    if (!paths) {
-        closedir(dir);
-        return NULL;
-    }
-
-    /* Second pass: collect shader file paths */
-    rewinddir(dir);
-    size_t index = 0;
-    while ((entry = readdir(dir)) != NULL && index < shader_count) {
-        if (entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
-            if (is_shader_file(entry->d_name)) {
-                char full_path[MAX_PATH_LENGTH];
-                size_t expanded_len = strlen(expanded_path);
-                size_t name_len = strlen(entry->d_name);
-
-                /* Check if concatenated path would fit */
-                if (expanded_len + name_len + 2 >= MAX_PATH_LENGTH) {
-                    log_error("Path too long: %s/%s", expanded_path, entry->d_name);
-                    continue;
-                }
-
-                (void)snprintf(full_path, sizeof(full_path), "%s/%s",
-                        expanded_path, entry->d_name);
-                paths[index++] = strdup(full_path);
-            }
-        }
-    }
-    closedir(dir);
-
-    /* Sort alphabetically for deterministic order */
-    qsort(paths, shader_count, sizeof(char *), compare_strings);
-
-    *count = shader_count;
-    return paths;
+    return load_files_from_directory(dir_path, count, is_shader_file);
 }
-#pragma GCC diagnostic pop
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-truncation"
 char **load_images_from_directory(const char *dir_path, size_t *count) {
-    if (!dir_path || !count) return NULL;
-
-    *count = 0;
-
-    /* Expand ~ to home directory */
-    char expanded_path[MAX_PATH_LENGTH];
-    if (dir_path[0] == '~') {
-        const char *home = getenv("HOME");
-        if (!home) {
-            log_error("Cannot expand ~ without HOME environment variable");
-            return NULL;
-        }
-        snprintf(expanded_path, sizeof(expanded_path), "%s%s", home, dir_path + 1);
-    } else {
-        snprintf(expanded_path, sizeof(expanded_path), "%s", dir_path);
-    }
-
-    DIR *dir = opendir(expanded_path);
-    if (!dir) {
-        return NULL;  /* Not a directory */
-    }
-
-    /* First pass: count image files */
-    struct dirent *entry;
-    size_t image_count = 0;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
-            if (is_image_file(entry->d_name)) {
-                image_count++;
-            }
-        }
-    }
-
-    if (image_count == 0) {
-        closedir(dir);
-        return NULL;
-    }
-
-    /* Allocate array for paths */
-    char **paths = calloc(image_count, sizeof(char *));
-    if (!paths) {
-        closedir(dir);
-        return NULL;
-    }
-
-    /* Second pass: collect image file paths */
-    rewinddir(dir);
-    size_t index = 0;
-    while ((entry = readdir(dir)) != NULL && index < image_count) {
-        if (entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
-            if (is_image_file(entry->d_name)) {
-                char full_path[MAX_PATH_LENGTH];
-                size_t expanded_len = strlen(expanded_path);
-                size_t name_len = strlen(entry->d_name);
-
-                /* Check if concatenated path would fit */
-                if (expanded_len + name_len + 2 >= MAX_PATH_LENGTH) {
-                    log_error("Path too long: %s/%s", expanded_path, entry->d_name);
-                    continue;
-                }
-
-                (void)snprintf(full_path, sizeof(full_path), "%s/%s",
-                        expanded_path, entry->d_name);
-                paths[index++] = strdup(full_path);
-            }
-        }
-    }
-    closedir(dir);
-
-    /* Sort alphabetically for deterministic order */
-    qsort(paths, image_count, sizeof(char *), compare_strings);
-
-    *count = image_count;
-    return paths;
+    return load_files_from_directory(dir_path, count, is_image_file);
 }
-#pragma GCC diagnostic pop
 
 /* ============================================================================
  * Configuration Validation and Parsing
@@ -487,6 +443,8 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->show_fps = false;  /* Default: no FPS watermark */
     config->pause_on_fullscreen = true;  /* Default: pause rendering when occluded */
     config->pause_coverage_threshold = 0.8f;  /* Default: 80% tiled coverage = occluded */
+    config->span = false;
+    config->span_group[0] = '\0';
     config->cycle = false;
     config->shuffle = false;
     config->cycle_paths = NULL;
@@ -510,6 +468,24 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->term_crt = -1.0f;
     config->term_chroma = -1.0f;
     config->term_fade = -1.0f;
+}
+
+static bool copy_config_string(char *dst, size_t dst_size, const VibeValue *value,
+                               const char *key, const char *context_name,
+                               bool allow_empty) {
+    if (!value) return true;
+    if (value->type != VIBE_TYPE_STRING) {
+        log_error("[%s] '%s' must be a string", context_name, key);
+        return false;
+    }
+    size_t len = strlen(value->as_string);
+    if ((!allow_empty && len == 0) || len >= dst_size) {
+        log_error("[%s] '%s' must be a %sstring shorter than %zu bytes",
+                  context_name, key, allow_empty ? "" : "non-empty ", dst_size);
+        return false;
+    }
+    memcpy(dst, value->as_string, len + 1);
+    return true;
 }
 
 /* Parse a "#RRGGBB" or "RRGGBB" hex colour into 0xRRGGBB, or -1 if invalid. */
@@ -551,14 +527,37 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         config->shuffle = shuffle_val->as_boolean;
     }
 
+    VibeValue *span_val = vibe_object_get(obj->as_object, "span");
+    if (span_val) {
+        if (span_val->type != VIBE_TYPE_BOOLEAN) {
+            log_error("[%s] 'span' must be a boolean (true or false)", context_name);
+            return false;
+        }
+        config->span = span_val->as_boolean;
+    }
+    VibeValue *span_group_val = vibe_object_get(obj->as_object, "span_group");
+    if (!copy_config_string(config->span_group, sizeof(config->span_group), span_group_val,
+                            "span_group", context_name, false)) {
+        return false;
+    }
+    /* A named group is itself an explicit opt-in; accepting it without a
+     * redundant span=true keeps per-output configuration concise. */
+    if (span_group_val) config->span = true;
+
     /* Check for 'path' and 'shader' - these are MUTUALLY EXCLUSIVE */
     VibeValue *path_val = vibe_object_get(obj->as_object, "path");
     VibeValue *shader_val = vibe_object_get(obj->as_object, "shader");
     VibeValue *term_val = vibe_object_get(obj->as_object, "terminal");
 
-    bool has_path = (path_val != NULL && path_val->type == VIBE_TYPE_STRING);
-    bool has_shader = (shader_val != NULL && shader_val->type == VIBE_TYPE_STRING);
-    bool has_terminal = (term_val != NULL && term_val->type == VIBE_TYPE_STRING);
+    bool has_path = path_val && path_val->type == VIBE_TYPE_STRING;
+    bool has_shader = shader_val && shader_val->type == VIBE_TYPE_STRING;
+    bool has_terminal = term_val && term_val->type == VIBE_TYPE_STRING;
+
+    if ((path_val && !has_path) || (shader_val && !has_shader) ||
+        (term_val && !has_terminal)) {
+        log_error("[%s] 'path', 'shader', and 'terminal' must be strings", context_name);
+        return false;
+    }
 
     /* RULE: path, shader and terminal are mutually exclusive */
     if ((has_path && has_shader) || (has_path && has_terminal) ||
@@ -697,39 +696,60 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
      * ======================================================================== */
     if (has_terminal) {
         config->type = WALLPAPER_TERMINAL;
-        snprintf(config->term_cmd, sizeof(config->term_cmd), "%s", term_val->as_string);
+        if (!copy_config_string(config->term_cmd, sizeof(config->term_cmd), term_val,
+                                "terminal", context_name, false))
+            return false;
         log_info("[%s] TERMINAL MODE: command '%s'", context_name, config->term_cmd);
 
-        VibeValue *tfont = vibe_object_get(obj->as_object, "term_font");
-        if (tfont && tfont->type == VIBE_TYPE_STRING) {
-            snprintf(config->term_font, sizeof(config->term_font), "%s", tfont->as_string);
+#define COPY_TERM_STRING(key, field, allow_empty) do {                         \
+        VibeValue *value = vibe_object_get(obj->as_object, (key));             \
+        if (!copy_config_string(config->field, sizeof(config->field), value,   \
+                                (key), context_name, (allow_empty)))            \
+            return false;                                                       \
+    } while (0)
+        COPY_TERM_STRING("term_font", term_font, true);
+        COPY_TERM_STRING("term_shader", shader_path, true);
+        COPY_TERM_STRING("term_font_bold", term_font_bold, true);
+        COPY_TERM_STRING("term_font_italic", term_font_italic, true);
+        COPY_TERM_STRING("term_cwd", term_cwd, true);
+        COPY_TERM_STRING("term_env", term_env, true);
+#undef COPY_TERM_STRING
+
+        struct {
+            const char *key;
+            int *dst;
+            int maximum;
+        } integer_fields[] = {
+            { "term_cols", &config->term_cols, 1024 },
+            { "term_rows", &config->term_rows, 512 },
+            { "term_font_size", &config->term_font_size, 96 },
+        };
+        for (size_t i = 0; i < sizeof(integer_fields) / sizeof(integer_fields[0]); i++) {
+            VibeValue *value = vibe_object_get(obj->as_object, integer_fields[i].key);
+            if (!value) continue;
+            if (value->type != VIBE_TYPE_INTEGER || value->as_integer < 0 ||
+                value->as_integer > integer_fields[i].maximum) {
+                log_error("[%s] '%s' must be an integer between 0 and %d",
+                          context_name, integer_fields[i].key, integer_fields[i].maximum);
+                return false;
+            }
+            *integer_fields[i].dst = (int)value->as_integer;
         }
-        VibeValue *tcols = vibe_object_get(obj->as_object, "term_cols");
-        if (tcols && tcols->type == VIBE_TYPE_INTEGER) config->term_cols = (int)tcols->as_integer;
-        VibeValue *trows = vibe_object_get(obj->as_object, "term_rows");
-        if (trows && trows->type == VIBE_TYPE_INTEGER) config->term_rows = (int)trows->as_integer;
-        VibeValue *tshader = vibe_object_get(obj->as_object, "term_shader");
-        if (tshader && tshader->type == VIBE_TYPE_STRING) {
-            snprintf(config->shader_path, sizeof(config->shader_path), "%s", tshader->as_string);
+
+        struct { const char *key; long *dst; } color_fields[] = {
+            { "term_fg", &config->term_fg },
+            { "term_bg", &config->term_bg },
+        };
+        for (size_t i = 0; i < sizeof(color_fields) / sizeof(color_fields[0]); i++) {
+            VibeValue *value = vibe_object_get(obj->as_object, color_fields[i].key);
+            if (!value) continue;
+            if (value->type != VIBE_TYPE_STRING ||
+                (*color_fields[i].dst = parse_hex_color(value->as_string)) < 0) {
+                log_error("[%s] '%s' must be a six-digit RGB hex string",
+                          context_name, color_fields[i].key);
+                return false;
+            }
         }
-        VibeValue *tfb = vibe_object_get(obj->as_object, "term_font_bold");
-        if (tfb && tfb->type == VIBE_TYPE_STRING)
-            snprintf(config->term_font_bold, sizeof(config->term_font_bold), "%s", tfb->as_string);
-        VibeValue *tfi = vibe_object_get(obj->as_object, "term_font_italic");
-        if (tfi && tfi->type == VIBE_TYPE_STRING)
-            snprintf(config->term_font_italic, sizeof(config->term_font_italic), "%s", tfi->as_string);
-        VibeValue *tcwd = vibe_object_get(obj->as_object, "term_cwd");
-        if (tcwd && tcwd->type == VIBE_TYPE_STRING)
-            snprintf(config->term_cwd, sizeof(config->term_cwd), "%s", tcwd->as_string);
-        VibeValue *tenv = vibe_object_get(obj->as_object, "term_env");
-        if (tenv && tenv->type == VIBE_TYPE_STRING)
-            snprintf(config->term_env, sizeof(config->term_env), "%s", tenv->as_string);
-        VibeValue *tfs = vibe_object_get(obj->as_object, "term_font_size");
-        if (tfs && tfs->type == VIBE_TYPE_INTEGER) config->term_font_size = (int)tfs->as_integer;
-        VibeValue *tfg = vibe_object_get(obj->as_object, "term_fg");
-        if (tfg && tfg->type == VIBE_TYPE_STRING) config->term_fg = parse_hex_color(tfg->as_string);
-        VibeValue *tbg = vibe_object_get(obj->as_object, "term_bg");
-        if (tbg && tbg->type == VIBE_TYPE_STRING) config->term_bg = parse_hex_color(tbg->as_string);
 
         /* nwTermFX post-effect intensities, each 0..1. Accept int or float;
          * absent leaves the -1 sentinel, which output_set_terminal maps to the
@@ -774,7 +794,11 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             return false;
         }
 
-        config->mode = wallpaper_mode_from_string(mode_val->as_string);
+        if (!parse_wallpaper_mode(mode_val->as_string, &config->mode)) {
+            log_error("[%s] Invalid wallpaper mode '%s'", context_name,
+                      mode_val->as_string);
+            return false;
+        }
     }
 
     /* Parse duration (for cycling) */
@@ -816,7 +840,11 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
             return false;
         }
 
-        config->transition = transition_type_from_string(transition_val->as_string);
+        if (!parse_transition_type(transition_val->as_string, &config->transition)) {
+            log_error("[%s] Invalid transition type '%s'", context_name,
+                      transition_val->as_string);
+            return false;
+        }
 
         if (config->type == WALLPAPER_SHADER) {
             log_error("[%s] INVALID CONFIG: 'transition' specified in SHADER mode. "
@@ -897,22 +925,28 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     /* Parse shader_fps (only relevant for shader mode) */
     VibeValue *shader_fps_val = vibe_object_get(obj->as_object, "shader_fps");
     if (shader_fps_val) {
-        int fps = 0;
-
+        double fps_value;
         if (shader_fps_val->type == VIBE_TYPE_INTEGER) {
-            fps = (int)shader_fps_val->as_integer;
+            if (shader_fps_val->as_integer < 1 || shader_fps_val->as_integer > 240) {
+                log_error("[%s] Invalid shader_fps: value must be between 1 and 240",
+                          context_name);
+                return false;
+            }
+            fps_value = (double)shader_fps_val->as_integer;
         } else if (shader_fps_val->type == VIBE_TYPE_FLOAT) {
-            fps = (int)shader_fps_val->as_float;
+            fps_value = shader_fps_val->as_float;
+            if (!isfinite(fps_value) || fps_value < 1.0 || fps_value > 240.0 ||
+                trunc(fps_value) != fps_value) {
+                log_error("[%s] Invalid shader_fps: value must be a whole number between 1 and 240",
+                          context_name);
+                return false;
+            }
         } else {
             log_error("[%s] 'shader_fps' must be a number", context_name);
             return false;
         }
 
-        if (fps < 1 || fps > 240) {
-            log_error("[%s] Invalid shader_fps: %d (must be between 1 and 240)",
-                     context_name, fps);
-            return false;
-        }
+        int fps = (int)fps_value;
 
         config->shader_fps = fps;
         log_info("[%s] Shader FPS set to: %d", context_name, fps);
@@ -1020,6 +1054,12 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         }
 
         size_t count = channels_val->as_array->count;
+        enum { SHADERTOY_CHANNEL_COUNT = 4 };
+        if (count > SHADERTOY_CHANNEL_COUNT) {
+            log_error("[%s] 'channels' supports at most %d iChannel textures (got %zu)",
+                      context_name, SHADERTOY_CHANNEL_COUNT, count);
+            return false;
+        }
         if (count > 0) {
             if (config->type != WALLPAPER_SHADER) {
                 log_error("[%s] INVALID CONFIG: 'channels' specified in IMAGE mode. "
@@ -1050,7 +1090,24 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
                     return false;
                 }
 
+                if (elem->as_string[0] == '\0' ||
+                    strlen(elem->as_string) >= MAX_PATH_LENGTH) {
+                    log_error("[%s] Channel[%zu] must be a non-empty path shorter than %d bytes",
+                              context_name, i, MAX_PATH_LENGTH);
+                    for (size_t j = 0; j < i; j++) free(config->channel_paths[j]);
+                    free(config->channel_paths);
+                    config->channel_paths = NULL;
+                    config->channel_count = 0;
+                    return false;
+                }
                 config->channel_paths[i] = strdup(elem->as_string);
+                if (!config->channel_paths[i]) {
+                    for (size_t j = 0; j < i; j++) free(config->channel_paths[j]);
+                    free(config->channel_paths);
+                    config->channel_paths = NULL;
+                    config->channel_count = 0;
+                    return false;
+                }
                 log_debug("[%s] iChannel%zu: %s", context_name, i, elem->as_string);
             }
 
@@ -1677,28 +1734,103 @@ bool config_apply_to_output(struct neowall_state *state, struct output_state *ou
     return ok;
 }
 
-bool config_load(struct neowall_state *state, const char *config_path) {
+/* Validate every recognized block before config_load_internal() mutates any
+ * live state. Parsing may allocate directory/channel lists, so each temporary
+ * model is released immediately after validation. */
+static bool validate_config_tree(VibeValue *root, bool *out_has_config) {
+    bool has_config = false;
+
+    VibeValue *mouse_val = vibe_object_get(root->as_object, "mouse_interaction");
+    if (mouse_val && mouse_val->type != VIBE_TYPE_BOOLEAN) {
+        log_error("Top-level 'mouse_interaction' must be a boolean (true or false)");
+        return false;
+    }
+
+    VibeValue *raw_val = vibe_object_get(root->as_object, "term_raw_input");
+    if (raw_val && raw_val->type != VIBE_TYPE_BOOLEAN) {
+        log_error("Top-level 'term_raw_input' must be a boolean (true or false)");
+        return false;
+    }
+
+    VibeValue *default_obj = vibe_object_get(root->as_object, "default");
+    if (default_obj) {
+        if (default_obj->type != VIBE_TYPE_OBJECT) {
+            log_error("Default configuration must be an object");
+            return false;
+        }
+        struct wallpaper_config config = {0};
+        if (!parse_wallpaper_config(default_obj, &config, "default")) {
+            config_free_wallpaper(&config);
+            log_error("Default configuration validation failed");
+            return false;
+        }
+        config_free_wallpaper(&config);
+        has_config = true;
+    }
+
+    VibeValue *outputs_obj = vibe_object_get(root->as_object, "output");
+    if (!outputs_obj) outputs_obj = vibe_object_get(root->as_object, "outputs");
+    if (outputs_obj) {
+        if (outputs_obj->type != VIBE_TYPE_OBJECT) {
+            log_error("Top-level 'output'/'outputs' must be an object");
+            return false;
+        }
+        for (size_t i = 0; i < outputs_obj->as_object->count; i++) {
+            const char *name = outputs_obj->as_object->entries[i].key;
+            VibeValue *obj = outputs_obj->as_object->entries[i].value;
+            if (obj->type != VIBE_TYPE_OBJECT) {
+                log_error("Configuration for output '%s' must be an object", name);
+                return false;
+            }
+            char context[128];
+            snprintf(context, sizeof(context), "output.%s", name);
+            struct wallpaper_config config = {0};
+            if (!parse_wallpaper_config(obj, &config, context)) {
+                config_free_wallpaper(&config);
+                log_error("Configuration validation failed for output '%s'", name);
+                return false;
+            }
+            config_free_wallpaper(&config);
+            has_config = true;
+        }
+    }
+
+    if (!has_config) {
+        log_error("Config contains no default or output configuration blocks");
+        return false;
+    }
+    *out_has_config = true;
+    return true;
+}
+
+static bool config_load_internal(struct neowall_state *state, const char *config_path,
+                                 bool allow_builtin_fallback) {
     if (!state || !config_path) {
         log_error("Invalid parameters for config_load");
-        return apply_builtin_default_config(state);
+        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
 
     log_info("========================================");
     log_info("Loading configuration from: %s", config_path);
     log_info("========================================");
 
-    /* Check if file exists, create default if not */
+    /* Check if file exists, creating a starter config only during initial load. */
     struct stat st;
     if (stat(config_path, &st) == -1) {
+        if (!allow_builtin_fallback) {
+            log_error("Reload could not stat configuration '%s': %s; live configuration unchanged",
+                      config_path, strerror(errno));
+            return false;
+        }
         log_info("Configuration file not found, creating default: %s", config_path);
         if (!config_create_default(config_path)) {
             log_error("Failed to create default configuration, using built-in defaults");
-            return apply_builtin_default_config(state);
+            return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
         }
         /* Re-stat to get the new file */
         if (stat(config_path, &st) == -1) {
             log_error("Failed to stat newly created config file, using built-in defaults");
-            return apply_builtin_default_config(state);
+            return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
         }
     }
 
@@ -1706,14 +1838,14 @@ bool config_load(struct neowall_state *state, const char *config_path) {
     if (!S_ISREG(st.st_mode)) {
         log_error("Config path is not a regular file (mode=0%o), using built-in defaults",
                  st.st_mode);
-        return apply_builtin_default_config(state);
+        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
 
     /* Sanity check file size (config should be reasonable, < 1MB) */
     if (st.st_size > 1024 * 1024) {
         log_error("Config file too large (%ld bytes), using built-in defaults",
                  (long)st.st_size);
-        return apply_builtin_default_config(state);
+        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
 
     /* Read file content with error handling */
@@ -1725,7 +1857,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         } else {
             log_error("Failed to open config file: %s, using built-in defaults", strerror(errno));
         }
-        return apply_builtin_default_config(state);
+        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
 
     /* Use file size from stat (already validated) */
@@ -1737,7 +1869,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         log_error("Failed to allocate %ld bytes for config, using built-in defaults",
                  file_size + 1);
         fclose(fp);
-        return apply_builtin_default_config(state);
+        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
 
     /* Read entire file in one operation */
@@ -1749,7 +1881,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         log_error("Failed to read config file (expected %ld, got %zu), using built-in defaults",
                  file_size, bytes_read);
         free(content);
-        return apply_builtin_default_config(state);
+        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
 
     /* Parse VIBE */
@@ -1757,7 +1889,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
     if (!parser) {
         log_error("Failed to create VIBE parser, using built-in defaults");
         free(content);
-        return apply_builtin_default_config(state);
+        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
 
     VibeValue *root = vibe_parse_string(parser, content);
@@ -1780,18 +1912,32 @@ bool config_load(struct neowall_state *state, const char *config_path) {
             log_error("Failed to parse VIBE config, using built-in defaults");
         }
         vibe_parser_free(parser);
-        return apply_builtin_default_config(state);
+        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
 
     if (root->type != VIBE_TYPE_OBJECT) {
-        log_error("Config root must be an object, using built-in defaults");
+        log_error("Config root must be an object%s",
+                  allow_builtin_fallback ? ", using built-in defaults" : "");
         vibe_value_free(root);
         vibe_parser_free(parser);
-        return apply_builtin_default_config(state);
+        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
+    }
+
+    /* This is the transaction boundary for syntax/type/semantic validation:
+     * do not store a global or call output_apply_config() until the complete
+     * parsed model has passed. In particular, a malformed later output block
+     * can no longer leave earlier outputs running a new configuration. */
+    bool validated_has_config = false;
+    if (!validate_config_tree(root, &validated_has_config)) {
+        vibe_value_free(root);
+        vibe_parser_free(parser);
+        log_error("Configuration rejected; live configuration is unchanged");
+        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
 
     /* Track if we successfully applied any configuration */
     bool config_applied = false;
+    bool application_failed = false;
 
     /* Parse top-level (global) options. These live at the root of the config,
      * not inside a default/output block, because they configure the daemon
@@ -1809,6 +1955,27 @@ bool config_load(struct neowall_state *state, const char *config_path) {
             log_info("Mouse interaction: %s",
                      mouse_val->as_boolean ? "enabled (default)"
                                            : "disabled (no pointer events, iMouse stays at center)");
+        }
+    }
+
+    /* term_raw_input: when true, a focused terminal wallpaper receives every
+     * key verbatim including the signal/EOF/suspend control keys. Default
+     * false, which drops Ctrl-C/D/\\/Z so a stray keypress can't tear down the
+     * app running as your wallpaper. Daemon-global, top-level only. */
+    VibeValue *raw_val = vibe_object_get(root->as_object, "term_raw_input");
+    if (raw_val) {
+        if (raw_val->type != VIBE_TYPE_BOOLEAN) {
+            log_error("Top-level 'term_raw_input' must be a boolean (true or false), "
+                      "got type: %d — ignoring, keeping default (filtered)",
+                      raw_val->type);
+        } else {
+            atomic_store_explicit(&state->term_raw_input,
+                                  raw_val->as_boolean,
+                                  memory_order_release);
+            log_info("Terminal raw input: %s",
+                     raw_val->as_boolean
+                         ? "enabled (Ctrl-C/D/\\/Z reach the wallpaper app)"
+                         : "disabled (default — signal/EOF keys dropped)");
         }
     }
 
@@ -1861,7 +2028,11 @@ bool config_load(struct neowall_state *state, const char *config_path) {
                  * output's own config rather than taking ownership, so the
                  * copies we just made here must be freed afterwards or they
                  * leak once per output per config load. */
-                output_apply_config(output, &config_copy);
+                if (!output_apply_config(output, &config_copy)) {
+                    log_error("Failed to apply default config to output '%s'",
+                              output->connector_name[0] ? output->connector_name : output->model);
+                    application_failed = true;
+                }
                 config_free_wallpaper(&config_copy);
                 output = output->next;
             }
@@ -1924,6 +2095,7 @@ bool config_load(struct neowall_state *state, const char *config_path) {
                         bool apply_result = output_apply_config(target, &output_config);
                         if (!apply_result) {
                             log_error("Failed to apply config to output '%s'", output_name);
+                            application_failed = true;
                         } else {
                             log_info("Applied configuration to output '%s'", output_name);
                             config_applied = true;
@@ -1971,7 +2143,13 @@ bool config_load(struct neowall_state *state, const char *config_path) {
             state->compositor_backend->data, state);
     }
 
-    if (config_applied) {
+    if (application_failed) {
+        log_error("Configuration was valid, but one or more resources failed to apply");
+        log_error("No built-in fallback will be applied after an application failure");
+        return false;
+    }
+
+    if (config_applied || (validated_has_config && !allow_builtin_fallback)) {
         log_info("========================================");
         log_info("[OK] Configuration loaded successfully from %s", config_path);
 
@@ -2021,6 +2199,14 @@ bool config_load(struct neowall_state *state, const char *config_path) {
         log_error("The config file was parsed but contains no valid settings");
         log_error("Using built-in default configuration");
         log_error("========================================");
-        return apply_builtin_default_config(state);
+        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
+}
+
+bool config_load(struct neowall_state *state, const char *config_path) {
+    return config_load_internal(state, config_path, true);
+}
+
+bool config_reload(struct neowall_state *state, const char *config_path) {
+    return config_load_internal(state, config_path, false);
 }

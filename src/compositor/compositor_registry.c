@@ -313,13 +313,16 @@ static struct compositor_backend *select_wayland_backend(struct neowall_state *s
             break;
 
         default:
-            /* For unknown compositors, try wlr-layer-shell if available, else fallback */
+            /* A bare wl_surface has no role and cannot be mapped. Only select a
+             * backend when the compositor advertises a protocol that gives the
+             * wallpaper surface a real, visible role. */
             if (info->has_layer_shell) {
                 preferred_backend = "wlr-layer-shell";
                 log_info("Unknown compositor with layer shell support, using wlr-layer-shell");
             } else {
-                preferred_backend = "fallback";
-                log_info("Unknown compositor, using fallback backend");
+                log_error("Unsupported Wayland compositor '%s': no wallpaper surface role is available", info->name);
+                log_error("NeoWall requires wlr-layer-shell (for example Hyprland, Sway, River, Wayfire, or compatible KWin)");
+                return NULL;
             }
             break;
     }
@@ -355,39 +358,10 @@ static struct compositor_backend *select_wayland_backend(struct neowall_state *s
         }
     }
 
-    /* Preferred backend failed, try fallback */
-    if (strcmp(preferred_backend, "fallback") != 0) {
-        log_info("Preferred backend unavailable, trying fallback...");
-
-        for (size_t i = 0; i < backend_count; i++) {
-            if (strcmp(backend_registry[i].name, "fallback") == 0) {
-                void *backend_data = backend_registry[i].ops->init(state);
-                if (!backend_data) {
-                    log_error("Failed to initialize fallback backend");
-                    break;
-                }
-
-                struct compositor_backend *backend = calloc(1, sizeof(struct compositor_backend));
-                if (!backend) {
-                    log_error("Failed to allocate backend structure");
-                    backend_registry[i].ops->cleanup(backend_data);
-                    return NULL;
-                }
-
-                backend->name = backend_registry[i].name;
-                backend->description = backend_registry[i].description;
-                backend->priority = backend_registry[i].priority;
-                backend->ops = backend_registry[i].ops;
-                backend->data = backend_data;
-                backend->capabilities = backend_registry[i].ops->get_capabilities(backend_data);
-
-                log_info("Selected backend: %s", backend->name);
-                return backend;
-            }
-        }
-    }
-
-    log_error("No suitable backend found for compositor: %s", info->name);
+    /* Do not fall back to a raw wl_surface/subsurface. Such a surface has no
+     * top-level or layer role, so a conforming compositor cannot map it. */
+    log_error("Backend '%s' is unavailable on %s", preferred_backend, info->name);
+    log_error("Unsupported compositor: NeoWall needs a backend with a real Wayland surface role (currently wlr-layer-shell)");
     return NULL;
 }
 #endif /* HAVE_WAYLAND_BACKEND */
@@ -542,7 +516,8 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     compositor_backend_wlr_layer_shell_init(state);
     compositor_backend_kde_plasma_init(state);
     compositor_backend_gnome_shell_init(state);
-    compositor_backend_fallback_init(state);
+    /* The generic fallback remains buildable for development, but is not
+     * registered: its raw/subsurface surfaces have no mappable top-level role. */
 
     /* Select best backend */
     struct compositor_backend *backend = select_wayland_backend(state, &info);

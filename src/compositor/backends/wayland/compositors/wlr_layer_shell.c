@@ -57,7 +57,10 @@
 typedef struct {
     struct neowall_state *state;
     struct zwlr_layer_shell_v1 *layer_shell;
+    uint32_t layer_shell_name;
+    struct wl_registry *registry;
     struct wl_seat *seat;
+    uint32_t seat_name;
     struct wl_pointer *pointer;
     struct wl_keyboard *keyboard;
     bool initialized;
@@ -67,9 +70,9 @@ typedef struct {
     /* Pointer tracking for terminal-wallpaper input forwarding. The pointer
      * `enter` binds these to the output under the cursor; motion updates the
      * surface-local pixel position; button/axis forward mouse reports. */
-    struct output_state *ptr_output;  /* output the pointer is currently over */
-    int  ptr_x, ptr_y;                /* surface-local pixel position */
-    bool ptr_left_down;               /* left button currently held (for drag) */
+    struct output_state *ptr_output;  /* ref-held output currently under pointer */
+    int  ptr_x, ptr_y;                /* buffer-pixel position */
+    uint8_t ptr_buttons;              /* terminal buttons 0..2 currently held */
 
     /* Keyboard focus + xkb state for terminal-wallpaper typing. kbd_output is
      * the terminal surface that currently holds keyboard focus (via ON_DEMAND
@@ -143,6 +146,44 @@ static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
  * POINTER EVENT HANDLERS
  * ============================================================================ */
 
+static void set_ptr_output(wlr_backend_data_t *backend, struct output_state *output) {
+    if (!backend || backend->ptr_output == output) return;
+    if (output) output_ref(output);
+    struct output_state *old = backend->ptr_output;
+    backend->ptr_output = output;
+    if (old) output_unref(old);
+}
+
+static void set_kbd_output(wlr_backend_data_t *backend, struct output_state *output) {
+    if (!backend || backend->kbd_output == output) return;
+    if (output) output_ref(output);
+    struct output_state *old = backend->kbd_output;
+    backend->kbd_output = output;
+    if (old) output_unref(old);
+}
+
+static void clear_input_focus(wlr_backend_data_t *backend) {
+    if (!backend) return;
+    backend->ptr_buttons = 0;
+    set_ptr_output(backend, NULL);
+    set_kbd_output(backend, NULL);
+}
+
+/* Wayland pointer coordinates are surface-logical. Rendering and terminal
+ * hit-testing use buffer pixels, including fractional-scale buffers. */
+static void pointer_to_buffer(const struct output_state *output,
+                              double logical_x, double logical_y,
+                              int *buffer_x, int *buffer_y) {
+    int logical_w = output && output->logical_width > 0 ? output->logical_width : 0;
+    int logical_h = output && output->logical_height > 0 ? output->logical_height : 0;
+    if (output && output->xdg_logical_width > 0) logical_w = output->xdg_logical_width;
+    if (output && output->xdg_logical_height > 0) logical_h = output->xdg_logical_height;
+    *buffer_x = output && logical_w > 0 && output->width > 0
+        ? (int)(logical_x * output->width / logical_w) : (int)logical_x;
+    *buffer_y = output && logical_h > 0 && output->height > 0
+        ? (int)(logical_y * output->height / logical_h) : (int)logical_y;
+}
+
 /* Destroy the wl_pointer together with its cursor-shape device. The shape
  * device wraps this specific pointer object; keeping it across a pointer
  * rebind would reference a dead proxy. */
@@ -171,17 +212,22 @@ static void pointer_handle_enter(void *data, struct wl_pointer *pointer,
     /* Record which output the pointer entered + its surface-local position, so
      * motion/button/axis can forward mouse reports to a terminal wallpaper. */
     if (backend && backend->state && surface) {
+        struct output_state *entered = NULL;
         pthread_rwlock_rdlock(&backend->state->output_list_lock);
         for (struct output_state *o = backend->state->outputs; o; o = o->next) {
             if (o->compositor_surface &&
                 (struct wl_surface *)o->compositor_surface->native_surface == surface) {
-                backend->ptr_output = o;
+                entered = o;
+                output_ref(entered);
                 break;
             }
         }
         pthread_rwlock_unlock(&backend->state->output_list_lock);
-        backend->ptr_x = (int)x;
-        backend->ptr_y = (int)y;
+        set_ptr_output(backend, entered);
+        if (entered) {
+            pointer_to_buffer(entered, x, y, &backend->ptr_x, &backend->ptr_y);
+            output_unref(entered);
+        }
     }
 
     /* Set the cursor when pointer enters the wallpaper surface.
@@ -293,8 +339,8 @@ static void pointer_handle_leave(void *data, struct wl_pointer *pointer,
     log_debug("Wayland pointer left surface");
 
     if (backend) {
-        backend->ptr_output = NULL;
-        backend->ptr_left_down = false;
+        set_ptr_output(backend, NULL);
+        backend->ptr_buttons = 0;
     }
 }
 
@@ -326,27 +372,25 @@ static void pointer_handle_motion(void *data, struct wl_pointer *pointer,
         last_motion_log = now;
     }
 
-    /* Update mouse position in all outputs */
-    if (backend && backend->state) {
-        pthread_rwlock_rdlock(&backend->state->output_list_lock);
-        struct output_state *output = backend->state->outputs;
-        while (output) {
-            output->mouse_x = (float)x;
-            output->mouse_y = (float)y;
-            output = output->next;
-        }
-        pthread_rwlock_unlock(&backend->state->output_list_lock);
-    }
-
-    /* Forward to a terminal wallpaper under the cursor. term_mouse() itself
-     * gates on the app's mouse mode: bare motion only reaches drag/any-motion
-     * apps; a held-button drag reports as button 0 with the motion bit. */
+    /* Surface-local coordinates belong only to the entered output. Convert
+     * them to that output's render-buffer space (important on HiDPI) rather
+     * than copying one output's local coordinates to every monitor. */
     if (backend && backend->ptr_output) {
-        backend->ptr_x = (int)x;
-        backend->ptr_y = (int)y;
-        int button = backend->ptr_left_down ? 0 : 3; /* 3 = no button (any-motion) */
-        output_terminal_mouse(backend->ptr_output, (int)x, (int)y,
-                              button, true, /*motion=*/true);
+        pointer_to_buffer(backend->ptr_output, x, y,
+                          &backend->ptr_x, &backend->ptr_y);
+        backend->ptr_output->mouse_x = (float)backend->ptr_x;
+        backend->ptr_output->mouse_y = (float)backend->ptr_y;
+
+        /* The current terminal API cannot query 1002 vs 1003, so emit motion
+         * only for a real drag. This keeps 1002 correct and tracks all three
+         * standard buttons instead of pretending every drag is left-button. */
+        if (backend->ptr_buttons) {
+            int drag_button = (backend->ptr_buttons & 1u) ? 0 :
+                              (backend->ptr_buttons & 2u) ? 1 : 2;
+            output_terminal_mouse(backend->ptr_output,
+                                  backend->ptr_x, backend->ptr_y,
+                                  drag_button, true, /*motion=*/true);
+        }
     }
 }
 
@@ -370,15 +414,18 @@ static void pointer_handle_button(void *data, struct wl_pointer *pointer,
         case 0x111: tbtn = 2; break; /* BTN_RIGHT  */
         default:    tbtn = 0; break;
     }
-    if (button == 0x110) backend->ptr_left_down = pressed;
+    if (backend && tbtn >= 0 && tbtn < 3) {
+        uint8_t mask = (uint8_t)(1u << tbtn);
+        if (pressed) backend->ptr_buttons |= mask;
+        else backend->ptr_buttons &= (uint8_t)~mask;
+    }
 
-    /* Forward to the terminal under the cursor. On release, legacy encoding
-     * uses button 3; SGR keeps the real button with an 'm' final (handled in
-     * term_mouse via the pressed flag). */
+    /* Always preserve the physical button. term_mouse() selects legacy's
+     * generic release code itself, while SGR requires the actual button with
+     * an 'm' final. */
     if (backend && backend->ptr_output) {
-        int reported = pressed ? tbtn : 3;
         output_terminal_mouse(backend->ptr_output, backend->ptr_x, backend->ptr_y,
-                              reported, pressed, /*motion=*/false);
+                              tbtn, pressed, /*motion=*/false);
     }
 }
 
@@ -546,7 +593,7 @@ static void kb_handle_enter(void *data, struct wl_keyboard *kb, uint32_t serial,
                             struct wl_surface *surface, struct wl_array *keys) {
     wlr_backend_data_t *b = data;
     (void)kb; (void)serial; (void)keys;
-    b->kbd_output = output_for_surface(b, surface);
+    set_kbd_output(b, output_for_surface(b, surface));
     if (b->kbd_output) log_debug("Keyboard focus entered a terminal wallpaper");
 }
 
@@ -554,7 +601,7 @@ static void kb_handle_leave(void *data, struct wl_keyboard *kb, uint32_t serial,
                             struct wl_surface *surface) {
     wlr_backend_data_t *b = data;
     (void)kb; (void)serial; (void)surface;
-    b->kbd_output = NULL;
+    set_kbd_output(b, NULL);
 }
 
 static void kb_handle_key(void *data, struct wl_keyboard *kb, uint32_t serial,
@@ -572,7 +619,24 @@ static void kb_handle_key(void *data, struct wl_keyboard *kb, uint32_t serial,
                                              XKB_STATE_MODS_EFFECTIVE) > 0;
     char seq[32];
     int n = keysym_to_vt(b->xkb_state, sym, keycode, ctrl, alt, seq, sizeof(seq));
-    if (n > 0) output_terminal_key(b->kbd_output, seq, (size_t)n);
+    if (n <= 0) return;
+
+    /* Guard the wallpaper against a stray control key tearing down the app.
+     * Unless the user opted into raw input, drop the control bytes that make
+     * the child's line discipline generate a signal or EOF:
+     *   0x03 Ctrl-C  SIGINT      0x1c Ctrl-\  SIGQUIT
+     *   0x04 Ctrl-D  EOF (exits shells/REPLs)
+     *   0x1a Ctrl-Z  SIGTSTP (suspends — the wallpaper would freeze)
+     * Everything else (text, arrows, function keys, Tab, Enter, other Ctrl
+     * combos a TUI actually wants) still passes through untouched. */
+    bool raw = b->state &&
+        atomic_load_explicit(&b->state->term_raw_input, memory_order_acquire);
+    if (!raw && n == 1 &&
+        (seq[0] == 0x03 || seq[0] == 0x04 || seq[0] == 0x1a || seq[0] == 0x1c)) {
+        return;
+    }
+
+    output_terminal_key(b->kbd_output, seq, (size_t)n);
 }
 
 static void kb_handle_modifiers(void *data, struct wl_keyboard *kb, uint32_t serial,
@@ -629,6 +693,7 @@ static void seat_handle_capabilities(void *data, struct wl_seat *seat,
             /* Capability re-advertise after a config that disabled pointer:
              * drop our binding so events stop flowing. */
             destroy_pointer(backend);
+            set_ptr_output(backend, NULL);
             log_info("Wayland pointer released (mouse_interaction=false)");
         }
     } else {
@@ -650,6 +715,7 @@ static void seat_handle_capabilities(void *data, struct wl_seat *seat,
             log_info("Wayland keyboard capability enabled (terminal typing)");
         }
     } else if (backend->keyboard) {
+        set_kbd_output(backend, NULL);
         wl_keyboard_destroy(backend->keyboard);
         backend->keyboard = NULL;
     }
@@ -680,11 +746,13 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
         backend_data->layer_shell = wl_registry_bind(registry, name,
                                                      &zwlr_layer_shell_v1_interface,
                                                      version < 4 ? version : 4);
+        backend_data->layer_shell_name = name;
         log_info("Bound to wlr-layer-shell");
     } else if (strcmp(interface, wl_seat_interface.name) == 0) {
         backend_data->seat = wl_registry_bind(registry, name,
                                               &wl_seat_interface,
                                               version < 5 ? version : 5);
+        backend_data->seat_name = name;
         wl_seat_add_listener(backend_data->seat, &seat_listener, backend_data);
         log_info("Bound to wl_seat for input events");
     }
@@ -692,9 +760,31 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 
 static void registry_handle_global_remove(void *data, struct wl_registry *registry,
                                          uint32_t name) {
-    (void)data;
+    wlr_backend_data_t *backend = data;
     (void)registry;
-    (void)name;
+    if (!backend) return;
+
+    if (name == backend->seat_name) {
+        clear_input_focus(backend);
+        destroy_pointer(backend);
+#ifdef NEOWALL_HAVE_XKB
+        if (backend->keyboard) {
+            wl_keyboard_destroy(backend->keyboard);
+            backend->keyboard = NULL;
+        }
+#endif
+        if (backend->seat) wl_seat_destroy(backend->seat);
+        backend->seat = NULL;
+        backend->seat_name = 0;
+        backend->has_pointer_cap = false;
+        log_warn("Wayland seat global removed; input focus cleared");
+    } else if (name == backend->layer_shell_name) {
+        clear_input_focus(backend);
+        if (backend->layer_shell) zwlr_layer_shell_v1_destroy(backend->layer_shell);
+        backend->layer_shell = NULL;
+        backend->layer_shell_name = 0;
+        log_warn("wlr-layer-shell global removed");
+    }
 }
 
 static const struct wl_registry_listener registry_listener = {
@@ -705,6 +795,8 @@ static const struct wl_registry_listener registry_listener = {
 /* ============================================================================
  * BACKEND OPERATIONS
  * ============================================================================ */
+
+static void wlr_cleanup(void *data);
 
 static void *wlr_backend_init(struct neowall_state *state) {
     wayland_t *wl = wayland_get();
@@ -732,14 +824,18 @@ static void *wlr_backend_init(struct neowall_state *state) {
         return NULL;
     }
 
+    backend_data->registry = registry;
     wl_registry_add_listener(registry, &registry_listener, backend_data);
-    wl_display_roundtrip(wl->display);
-    wl_registry_destroy(registry);
+    if (wl_display_roundtrip(wl->display) < 0) {
+        log_error("Wayland roundtrip failed during wlr backend initialization");
+        wlr_cleanup(backend_data);
+        return NULL;
+    }
 
     /* Check if layer shell is available */
     if (!backend_data->layer_shell) {
         log_error("zwlr_layer_shell_v1 not available");
-        free(backend_data);
+        wlr_cleanup(backend_data);
         return NULL;
     }
 
@@ -757,6 +853,7 @@ static void wlr_cleanup(void *data) {
     log_debug("Cleaning up wlr-layer-shell backend");
 
     wlr_backend_data_t *backend_data = data;
+    clear_input_focus(backend_data);
 
     if (backend_data->pointer) {
         destroy_pointer(backend_data);
@@ -779,6 +876,11 @@ static void wlr_cleanup(void *data) {
 
     if (backend_data->layer_shell) {
         zwlr_layer_shell_v1_destroy(backend_data->layer_shell);
+        backend_data->layer_shell = NULL;
+    }
+    if (backend_data->registry) {
+        wl_registry_destroy(backend_data->registry);
+        backend_data->registry = NULL;
     }
 
     free(backend_data);
@@ -1311,10 +1413,17 @@ static void wlr_on_output_added(void *data, void *output) {
 }
 
 static void wlr_on_output_removed(void *data, void *output) {
-    (void)data;
-    (void)output;
-
-    log_debug("Output removed from wlr backend");
+    wlr_backend_data_t *backend = data;
+    if (!backend) return;
+    struct wl_output *removed = output;
+    if (backend->ptr_output && backend->ptr_output->native_output == removed) {
+        backend->ptr_buttons = 0;
+        set_ptr_output(backend, NULL);
+    }
+    if (backend->kbd_output && backend->kbd_output->native_output == removed) {
+        set_kbd_output(backend, NULL);
+    }
+    log_debug("Output removed from wlr backend; matching input focus cleared");
 }
 
 static void wlr_damage_surface(struct compositor_surface *surface,
@@ -1391,25 +1500,17 @@ static bool wlr_dispatch_events(void *data) {
     return wl_display_dispatch_pending(wl->display) >= 0;
 }
 
-static bool wlr_flush(void *data) {
+static compositor_flush_result_t wlr_flush(void *data) {
     wlr_backend_data_t *backend = data;
     wayland_t *wl = wayland_get();
     if (!backend || !wl || !wl->display) {
-        return false;
+        return COMPOSITOR_FLUSH_FATAL;
     }
 
-    struct wl_display *display = wl->display;
-
-    if (wl_display_flush(display) < 0) {
-        /* EAGAIN is not a failure - just means buffer is full */
-        if (errno == EAGAIN) {
-            return true;
-        }
-        /* EPIPE means compositor disconnected */
-        return false;
+    if (wl_display_flush(wl->display) >= 0) {
+        return COMPOSITOR_FLUSH_OK;
     }
-
-    return true;
+    return errno == EAGAIN ? COMPOSITOR_FLUSH_BLOCKED : COMPOSITOR_FLUSH_FATAL;
 }
 
 static void wlr_cancel_read(void *data) {

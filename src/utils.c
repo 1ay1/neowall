@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <inttypes.h>  /* PRIu64 */
+#include <limits.h>
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
@@ -375,6 +376,32 @@ const char *get_state_file_path(void) {
     return state_path;
 }
 
+static bool parse_disk_long(const char *text, long max, long *out) {
+    long value;
+    if (!neowall_parse_index(text, &value) || value > max) return false;
+    *out = value;
+    return true;
+}
+
+/* Open a same-directory temporary file suitable for atomic rename. */
+static FILE *open_atomic_temp(const char *path, char *tmp, size_t tmp_size) {
+    int n = snprintf(tmp, tmp_size, "%s.tmp.XXXXXX", path);
+    if (n < 0 || (size_t)n >= tmp_size) return NULL;
+    int fd = mkstemp(tmp);
+    if (fd < 0) return NULL;
+    FILE *fp = fdopen(fd, "w");
+    if (!fp) { close(fd); unlink(tmp); }
+    return fp;
+}
+
+static bool publish_atomic(FILE *fp, const char *tmp, const char *path) {
+    bool ok = fflush(fp) == 0 && fsync(fileno(fp)) == 0;
+    if (fclose(fp) != 0) ok = false;
+    if (ok && rename(tmp, path) == 0) return true;
+    unlink(tmp);
+    return false;
+}
+
 /* Structure to hold output state data */
 typedef struct {
     char output_name[256];
@@ -386,16 +413,14 @@ typedef struct {
     long timestamp;
 } output_state_entry_t;
 
+/* Serializes every read-modify-rename transaction on the singleton state file. */
+static pthread_mutex_t state_file_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 /* Write current wallpaper state for multi-monitor support */
 bool write_wallpaper_state(const char *output_name, const char *wallpaper_path, 
                            const char *mode, int cycle_index, int cycle_total,
                            const char *status) {
-    /* CRITICAL: This function is called from multiple contexts (main thread, render path)
-     * We need to use file locking to prevent concurrent writes from corrupting the file.
-     * However, we don't have direct access to neowall_state here, so we use a static mutex.
-     * This is safe because the state file is a singleton resource. */
-    
-    static pthread_mutex_t state_file_mutex = PTHREAD_MUTEX_INITIALIZER;
+    /* Serialize concurrent read-modify-rename transactions. */
     
     const char *state_path = get_state_file_path();
     
@@ -465,16 +490,22 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
                     memcpy(current_entry.mode, line + 5, len);
                     current_entry.mode[len] = '\0';
                 } else if (strncmp(line, "cycle_index=", 12) == 0) {
-                    current_entry.cycle_index = atoi(line + 12);
+                    long value;
+                    if (parse_disk_long(line + 12, INT_MAX, &value))
+                        current_entry.cycle_index = (int)value;
                 } else if (strncmp(line, "cycle_total=", 12) == 0) {
-                    current_entry.cycle_total = atoi(line + 12);
+                    long value;
+                    if (parse_disk_long(line + 12, INT_MAX, &value))
+                        current_entry.cycle_total = (int)value;
                 } else if (strncmp(line, "status=", 7) == 0) {
                     size_t len = strlen(line + 7);
                     if (len > sizeof(current_entry.status) - 1) len = sizeof(current_entry.status) - 1;
                     memcpy(current_entry.status, line + 7, len);
                     current_entry.status[len] = '\0';
                 } else if (strncmp(line, "timestamp=", 10) == 0) {
-                    current_entry.timestamp = atol(line + 10);
+                    long value;
+                    if (parse_disk_long(line + 10, LONG_MAX, &value))
+                        current_entry.timestamp = value;
                 }
             }
         }
@@ -525,8 +556,10 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
         state_count++;
     }
     
-    /* Write all states back to file */
-    FILE *fp_write = fopen(state_path, "w");
+    /* Write a complete replacement then atomically publish it. Readers see
+     * either the old complete snapshot or the new one, never truncation. */
+    char tmp_path[MAX_PATH_LENGTH];
+    FILE *fp_write = open_atomic_temp(state_path, tmp_path, sizeof(tmp_path));
     if (!fp_write) {
         log_error("Failed to write state file %s: %s", state_path, strerror(errno));
         pthread_mutex_unlock(&state_file_mutex);
@@ -545,9 +578,138 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
         fprintf(fp_write, "\n");
     }
     
-    fclose(fp_write);
+    bool published = publish_atomic(fp_write, tmp_path, state_path);
+    if (!published) log_error("Failed to publish state file %s: %s", state_path, strerror(errno));
     pthread_mutex_unlock(&state_file_mutex);
-    return true;
+    return published;
+}
+
+static int load_state_entries(const char *path, output_state_entry_t *states, int capacity) {
+    FILE *fp = fopen(path, "r");
+    if (!fp) return errno == ENOENT ? 0 : -1;
+
+    char line[MAX_PATH_LENGTH];
+    output_state_entry_t entry = {0};
+    bool reading = false;
+    int count = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        line[strcspn(line, "\n")] = '\0';
+        if (strcmp(line, "[output]") == 0) {
+            if (reading && entry.output_name[0] && count < capacity) states[count++] = entry;
+            memset(&entry, 0, sizeof(entry));
+            reading = true;
+        } else if (reading && strncmp(line, "name=", 5) == 0) {
+            size_t n = strnlen(line + 5, sizeof(entry.output_name) - 1);
+            memcpy(entry.output_name, line + 5, n);
+            entry.output_name[n] = '\0';
+        } else if (reading && strncmp(line, "wallpaper=", 10) == 0) {
+            size_t n = strnlen(line + 10, sizeof(entry.wallpaper_path) - 1);
+            memcpy(entry.wallpaper_path, line + 10, n);
+            entry.wallpaper_path[n] = '\0';
+        } else if (reading && strncmp(line, "mode=", 5) == 0) {
+            size_t n = strnlen(line + 5, sizeof(entry.mode) - 1);
+            memcpy(entry.mode, line + 5, n);
+            entry.mode[n] = '\0';
+        } else if (reading && strncmp(line, "cycle_index=", 12) == 0) {
+            long value;
+            if (parse_disk_long(line + 12, INT_MAX, &value)) entry.cycle_index = (int)value;
+        } else if (reading && strncmp(line, "cycle_total=", 12) == 0) {
+            long value;
+            if (parse_disk_long(line + 12, INT_MAX, &value)) entry.cycle_total = (int)value;
+        } else if (reading && strncmp(line, "status=", 7) == 0) {
+            size_t n = strnlen(line + 7, sizeof(entry.status) - 1);
+            memcpy(entry.status, line + 7, n);
+            entry.status[n] = '\0';
+        } else if (reading && strncmp(line, "timestamp=", 10) == 0) {
+            long value;
+            if (parse_disk_long(line + 10, LONG_MAX, &value)) entry.timestamp = value;
+        }
+    }
+    if (reading && entry.output_name[0] && count < capacity) states[count++] = entry;
+    bool failed = ferror(fp);
+    fclose(fp);
+    return failed ? -1 : count;
+}
+
+static bool publish_state_entries(const char *path,
+                                  const output_state_entry_t *states, int count) {
+    char tmp_path[MAX_PATH_LENGTH];
+    FILE *fp = open_atomic_temp(path, tmp_path, sizeof(tmp_path));
+    if (!fp) return false;
+    for (int i = 0; i < count; i++) {
+        fprintf(fp, "[output]\nname=%s\nwallpaper=%s\nmode=%s\n",
+                states[i].output_name, states[i].wallpaper_path, states[i].mode);
+        fprintf(fp, "cycle_index=%d\ncycle_total=%d\nstatus=%s\ntimestamp=%ld\n\n",
+                states[i].cycle_index, states[i].cycle_total,
+                states[i].status, states[i].timestamp);
+    }
+    return publish_atomic(fp, tmp_path, path);
+}
+
+static bool state_name_retained(const char *name,
+                                const char *const *names, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        if (names[i] && strcmp(name, names[i]) == 0) return true;
+    }
+    return false;
+}
+
+bool prune_wallpaper_state(const char *const *output_names, size_t output_count) {
+    if (output_count > 0 && !output_names) return false;
+    const char *path = get_state_file_path();
+    if (!path || !path[0]) return false;
+
+    pthread_mutex_lock(&state_file_mutex);
+    output_state_entry_t states[MAX_OUTPUTS];
+    int count = load_state_entries(path, states, MAX_OUTPUTS);
+    if (count == 0 && access(path, F_OK) != 0 && errno == ENOENT) {
+        pthread_mutex_unlock(&state_file_mutex);
+        return true;
+    }
+    if (count < 0) {
+        pthread_mutex_unlock(&state_file_mutex);
+        return false;
+    }
+
+    int kept = 0;
+    for (int i = 0; i < count; i++) {
+        if (state_name_retained(states[i].output_name, output_names, output_count)) {
+            if (kept != i) states[kept] = states[i];
+            kept++;
+        }
+    }
+    bool ok = kept == count || publish_state_entries(path, states, kept);
+    pthread_mutex_unlock(&state_file_mutex);
+    return ok;
+}
+
+bool remove_wallpaper_state(const char *output_name) {
+    if (!output_name || !output_name[0]) return false;
+    const char *path = get_state_file_path();
+    if (!path || !path[0]) return false;
+
+    pthread_mutex_lock(&state_file_mutex);
+    output_state_entry_t states[MAX_OUTPUTS];
+    int count = load_state_entries(path, states, MAX_OUTPUTS);
+    if (count == 0 && access(path, F_OK) != 0 && errno == ENOENT) {
+        pthread_mutex_unlock(&state_file_mutex);
+        return true;
+    }
+    if (count < 0) {
+        pthread_mutex_unlock(&state_file_mutex);
+        return false;
+    }
+
+    int kept = 0;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(states[i].output_name, output_name) != 0) {
+            if (kept != i) states[kept] = states[i];
+            kept++;
+        }
+    }
+    bool ok = kept == count || publish_state_entries(path, states, kept);
+    pthread_mutex_unlock(&state_file_mutex);
+    return ok;
 }
 
 /* Restore cycle index from state file for the given output */
@@ -583,7 +745,9 @@ int restore_cycle_index_from_state(const char *output_name) {
                 in_matching_output = true;
             }
         } else if (in_matching_output && strncmp(line, "cycle_index=", 12) == 0) {
-            cycle_index = atoi(line + 12);
+            long value;
+            if (parse_disk_long(line + 12, INT_MAX, &value)) cycle_index = (int)value;
+            else in_matching_output = false;
             /* Found it, can stop reading */
             break;
         }
@@ -661,16 +825,22 @@ bool read_wallpaper_state(void) {
                 memcpy(current_entry.mode, line + 5, len);
                 current_entry.mode[len] = '\0';
             } else if (strncmp(line, "cycle_index=", 12) == 0) {
-                current_entry.cycle_index = atoi(line + 12);
+                long value;
+                if (parse_disk_long(line + 12, INT_MAX, &value))
+                    current_entry.cycle_index = (int)value;
             } else if (strncmp(line, "cycle_total=", 12) == 0) {
-                current_entry.cycle_total = atoi(line + 12);
+                long value;
+                if (parse_disk_long(line + 12, INT_MAX, &value))
+                    current_entry.cycle_total = (int)value;
             } else if (strncmp(line, "status=", 7) == 0) {
                 size_t len = strlen(line + 7);
                 if (len > sizeof(current_entry.status) - 1) len = sizeof(current_entry.status) - 1;
                 memcpy(current_entry.status, line + 7, len);
                 current_entry.status[len] = '\0';
             } else if (strncmp(line, "timestamp=", 10) == 0) {
-                current_entry.timestamp = atol(line + 10);
+                long value;
+                if (parse_disk_long(line + 10, LONG_MAX, &value))
+                    current_entry.timestamp = value;
             }
         }
     }
@@ -723,8 +893,8 @@ bool write_cycle_list(const char *output_name, char **paths, size_t count, size_
         mkdir(dir_path, 0755);
     }
     
-    /* For now, we overwrite - could be extended to support multiple outputs */
-    FILE *fp = fopen(list_path, "w");
+    char tmp_path[MAX_PATH_LENGTH];
+    FILE *fp = open_atomic_temp(list_path, tmp_path, sizeof(tmp_path));
     if (!fp) {
         log_error("Failed to write cycle list: %s", strerror(errno));
         return false;
@@ -745,7 +915,10 @@ bool write_cycle_list(const char *output_name, char **paths, size_t count, size_
         fprintf(fp, "\n");
     }
     
-    fclose(fp);
+    if (!publish_atomic(fp, tmp_path, list_path)) {
+        log_error("Failed to publish cycle list: %s", strerror(errno));
+        return false;
+    }
     return true;
 }
 
@@ -781,11 +954,19 @@ bool read_cycle_list(void) {
             memcpy(output_name, line + 7, len);
             output_name[len] = '\0';
         } else if (strncmp(line, "count=", 6) == 0) {
-            count = (size_t)atoi(line + 6);
+            long value;
+            if (parse_disk_long(line + 6, LONG_MAX, &value)) count = (size_t)value;
         } else if (strncmp(line, "current=", 8) == 0 && line[8] != 't') {
-            current = (size_t)atoi(line + 8);
+            long value;
+            if (parse_disk_long(line + 8, LONG_MAX, &value)) current = (size_t)value;
         } else if (line[0] == '[' && line[1] >= '0' && line[1] <= '9') {
-            current_index = atoi(line + 1);
+            char *end = strchr(line + 1, ']');
+            long value;
+            current_index = -1;
+            if (end) {
+                *end = '\0';
+                if (parse_disk_long(line + 1, INT_MAX, &value)) current_index = (int)value;
+            }
         } else if (strncmp(line, "path=", 5) == 0 && current_index >= 0) {
             const char *path = line + 5;
             /* Extract just the filename for cleaner display */

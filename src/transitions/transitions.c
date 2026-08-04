@@ -127,6 +127,7 @@ bool transition_begin(transition_context_t *ctx, struct output_state *output, GL
     glClear(GL_COLOR_BUFFER_BIT);
 
     glUseProgram(program);
+    output->gl_state.active_program = program;
 
     ctx->pos_attrib = glGetAttribLocation(program, "position");
     ctx->tex_attrib = glGetAttribLocation(program, "texcoord");
@@ -135,6 +136,7 @@ bool transition_begin(transition_context_t *ctx, struct output_state *output, GL
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    output->gl_state.blend_enabled = true;
     ctx->blend_enabled = true;
 
     return true;
@@ -256,6 +258,16 @@ void transition_end(transition_context_t *ctx) {
 
     if (ctx->blend_enabled) glDisable(GL_BLEND);
     glUseProgram(0);
+
+    /* transition helpers deliberately mutate shared-context state. Keep the
+     * legacy bookkeeping truthful for any code inspecting it; normal draws
+     * still establish all required bindings explicitly. Both texture units
+     * are unbound above, and GL_TEXTURE0 is active on return. */
+    if (ctx->output) {
+        ctx->output->gl_state.bound_texture = 0;
+        ctx->output->gl_state.active_program = 0;
+        ctx->output->gl_state.blend_enabled = false;
+    }
 
     GLenum error = glGetError();
     if (error != GL_NO_ERROR && !ctx->error_occurred) {

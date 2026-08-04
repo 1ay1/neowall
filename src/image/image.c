@@ -11,6 +11,23 @@
 #include "neowall/neowall.h"
 #include "neowall/constants.h"
 
+/* Reject decompression bombs and dimensions that are unreasonable for a
+ * wallpaper. 100M RGBA pixels is already ~400 MiB before codec scratch data. */
+#define IMAGE_MAX_PIXELS ((size_t)100000000)
+
+static bool image_buffer_size(uint32_t width, uint32_t height, size_t channels,
+                              size_t *bytes_out) {
+    if (!bytes_out || width == 0 || height == 0 || channels == 0) {
+        return false;
+    }
+    size_t pixels = (size_t)width * (size_t)height;
+    if (pixels > IMAGE_MAX_PIXELS || pixels > SIZE_MAX / channels) {
+        return false;
+    }
+    *bytes_out = pixels * channels;
+    return true;
+}
+
 /* Forward declarations */
 static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 
                                                    int32_t display_height, int mode);
@@ -199,8 +216,16 @@ struct image_data *image_load_png(const char *path) {
 
     /* Allocate pixel buffer */
     size_t row_bytes = png_get_rowbytes(png_ptr, info_ptr);
-    /* Height and row_bytes are constrained by PNG format, overflow not possible */
-    img->pixels = malloc(row_bytes * height);
+    size_t pixel_bytes = 0;
+    if (!image_buffer_size(width, height, 4, &pixel_bytes) ||
+        row_bytes > SIZE_MAX / height || row_bytes * height > pixel_bytes) {
+        log_error("PNG dimensions are invalid or too large: %ux%u", width, height);
+        free(img);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return NULL;
+    }
+    img->pixels = malloc(row_bytes * (size_t)height);
     if (!img->pixels) {
         log_error("Failed to allocate pixel buffer: %s", strerror(errno));
         free(img);
@@ -342,16 +367,15 @@ struct image_data *image_load_jpeg(const char *path) {
     img->format = FORMAT_JPEG;
     snprintf(img->path, sizeof(img->path), "%s", path);
 
-    /* Allocate pixel buffer (RGBA) - check for overflow */
-    size_t pixel_count = (size_t)width * (size_t)height;
-    if (pixel_count > SIZE_MAX / 4) {
-        log_error("Image too large (potential overflow): %dx%d", width, height);
+    size_t rgba_bytes = 0;
+    if (!image_buffer_size(width, height, 4, &rgba_bytes)) {
+        log_error("JPEG dimensions are invalid or too large: %ux%u", width, height);
         free(img);
         jpeg_destroy_decompress(&cinfo);
         fclose(fp);
         return NULL;
     }
-    img->pixels = malloc(pixel_count * 4);
+    img->pixels = malloc(rgba_bytes);
     if (!img->pixels) {
         log_error("Failed to allocate pixel buffer: %s", strerror(errno));
         free(img);
@@ -360,9 +384,7 @@ struct image_data *image_load_jpeg(const char *path) {
         return NULL;
     }
 
-    /* Allocate temporary RGB row buffer */
-    /* JPEG width is int type, constrained by format (max 65535 typically) */
-    size_t row_stride = width * 3;
+    size_t row_stride = (size_t)width * 3;
     unsigned char *row_buffer = malloc(row_stride);
     if (!row_buffer) {
         log_error("Failed to allocate row buffer: %s", strerror(errno));
@@ -380,9 +402,9 @@ struct image_data *image_load_jpeg(const char *path) {
         jpeg_read_scanlines(&cinfo, &row_ptr, 1);
 
         /* Convert RGB to RGBA */
-        for (uint32_t x = 0; x < width; x++) {
-            uint32_t src_idx = x * 3;
-            uint32_t dst_idx = (row * width + x) * 4;
+        for (size_t x = 0; x < (size_t)width; x++) {
+            size_t src_idx = x * 3;
+            size_t dst_idx = ((size_t)row * (size_t)width + x) * 4;
 
             img->pixels[dst_idx + 0] = row_buffer[src_idx + 0]; /* R */
             img->pixels[dst_idx + 1] = row_buffer[src_idx + 1]; /* G */
@@ -474,6 +496,13 @@ static void calculate_optimal_dimensions(uint32_t img_width, uint32_t img_height
                                          int32_t display_width, int32_t display_height,
                                          enum wallpaper_mode mode,
                                          uint32_t *out_width, uint32_t *out_height) {
+    if (!out_width || !out_height || img_width == 0 || img_height == 0 ||
+        display_width <= 0 || display_height <= 0) {
+        if (out_width) *out_width = 0;
+        if (out_height) *out_height = 0;
+        return;
+    }
+
     float img_aspect = (float)img_width / (float)img_height;
     float display_aspect = (float)display_width / (float)display_height;
     
@@ -595,17 +624,17 @@ static struct image_data *image_center_pad(struct image_data *img, uint32_t pad_
 
 /* Tile image to fill exact dimensions by repeating the source image */
 static struct image_data *image_tile_to_size(struct image_data *img, uint32_t target_width, uint32_t target_height) {
-    if (!img || !img->pixels) {
+    if (!img || !img->pixels || img->width == 0 || img->height == 0 ||
+        target_width == 0 || target_height == 0) {
         return img;
     }
-    
     /* No tiling needed if already exact size or larger */
     if (img->width >= target_width && img->height >= target_height) {
         return img;
     }
-    
+
     log_debug("Tiling image from %ux%u to fill %ux%u",
-             img->width, img->height, target_width, target_height);
+              img->width, img->height, target_width, target_height);
     
     /* Allocate new pixel buffer for tiled result */
     size_t new_size = (size_t)target_width * target_height * 4; /* RGBA */
@@ -693,16 +722,22 @@ static struct image_data *image_center_crop(struct image_data *img, uint32_t cro
 /* Scale image to optimal size for display mode */
 static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 
                                                    int32_t display_height, int mode) {
-    if (!img || !img->pixels) {
+    if (!img || !img->pixels || img->width == 0 || img->height == 0 ||
+        display_width <= 0 || display_height <= 0) {
         return img;
     }
-    
+
     /* Calculate optimal dimensions for this display mode. Initialised here so
      * the static analyzer can see both are always defined even if a future
      * mode is added to calculate_optimal_dimensions without setting them. */
     uint32_t target_width = img->width, target_height = img->height;
     calculate_optimal_dimensions(img->width, img->height, display_width, display_height,
                                  mode, &target_width, &target_height);
+    if (target_width == 0 || target_height == 0) {
+        log_error("Refusing to scale image to zero dimensions for %dx%d display", display_width,
+                  display_height);
+        return img;
+    }
     
     /* Only scale if dimensions changed */
     if (target_width == img->width && target_height == img->height) {
@@ -771,12 +806,18 @@ static struct image_data *image_scale_to_display(struct image_data *img, int32_t
 
 /* High-quality bilinear image scaling */
 static struct image_data *image_scale_bilinear(struct image_data *img, uint32_t new_width, uint32_t new_height) {
-    if (!img || !img->pixels) {
+    if (!img || !img->pixels || img->width == 0 || img->height == 0 ||
+        new_width == 0 || new_height == 0) {
         return img;
     }
-    
+
+    size_t new_size = 0;
+    if (!image_buffer_size(new_width, new_height, 4, &new_size)) {
+        log_error("Refusing invalid or oversized scale target %ux%u", new_width, new_height);
+        return img;
+    }
+
     /* Allocate new pixel buffer */
-    size_t new_size = (size_t)new_width * new_height * 4;
     uint8_t *new_pixels = malloc(new_size);
     if (!new_pixels) {
         log_error("Failed to allocate scaled image buffer");

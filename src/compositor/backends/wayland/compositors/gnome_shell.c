@@ -395,18 +395,17 @@ static bool gnome_dispatch_events(void *data) {
     return wl_display_dispatch_pending(wl->display) >= 0;
 }
 
-static bool gnome_flush(void *data) {
+static compositor_flush_result_t gnome_flush(void *data) {
     gnome_backend_data_t *backend = data;
     wayland_t *wl = wayland_get();
     if (!backend || !wl || !wl->display) {
-        return false;
+        return COMPOSITOR_FLUSH_FATAL;
     }
 
-    int ret = wl_display_flush(wl->display);
-    if (ret < 0 && errno != EAGAIN) {
-        return false;
+    if (wl_display_flush(wl->display) >= 0) {
+        return COMPOSITOR_FLUSH_OK;
     }
-    return true;
+    return errno == EAGAIN ? COMPOSITOR_FLUSH_BLOCKED : COMPOSITOR_FLUSH_FATAL;
 }
 
 static void gnome_cancel_read(void *data) {

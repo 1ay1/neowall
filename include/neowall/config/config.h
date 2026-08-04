@@ -10,8 +10,10 @@ struct neowall_state;
 struct wallpaper_config;
 struct output_state;
 
-/* Configuration parsing */
+/* Initial load may create/apply built-in defaults on failure. Reload is strict:
+ * read/parse/type/semantic failures leave the live configuration unchanged. */
 bool config_load(struct neowall_state *state, const char *config_path);
+bool config_reload(struct neowall_state *state, const char *config_path);
 
 /* Apply the configured wallpaper to a SINGLE output, with the same
  * default -> output-specific precedence as config_load(). Used to bring a

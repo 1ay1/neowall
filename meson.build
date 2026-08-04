@@ -61,14 +61,13 @@ endif
 wayland_backend_option = get_option('wayland_backend')
 x11_backend_option = get_option('x11_backend')
 
-# Wayland dependencies
-wayland_client_dep = dependency('wayland-client', required: false)
-wayland_egl_dep = dependency('wayland-egl', required: false)
-wayland_cursor_dep = dependency('wayland-cursor', required: false)
-wayland_protocols_dep = dependency('wayland-protocols', required: false)
+# Wayland dependencies. Protocol C sources are checked in, so the protocol XML
+# package is not a build dependency.
+wayland_client_dep = dependency('wayland-client', required: wayland_backend_option)
+wayland_egl_dep = dependency('wayland-egl', required: wayland_backend_option)
+wayland_cursor_dep = dependency('wayland-cursor', required: wayland_backend_option)
 
-# We use pre-generated protocol files, so only need client libs at runtime
-has_wayland_deps = wayland_client_dep.found() and wayland_egl_dep.found() and wayland_cursor_dep.found() and wayland_protocols_dep.found()
+has_wayland_deps = wayland_client_dep.found() and wayland_egl_dep.found() and wayland_cursor_dep.found()
 
 # xkbcommon: keymap + keysym translation for terminal-wallpaper keyboard input.
 # Optional — without it the terminal is display+mouse only (no typing).
@@ -86,12 +85,12 @@ elif has_wayland_deps
   message('Wayland backend available')
 else
   has_wayland = false
-  message('Wayland backend not available (requires wayland-client, wayland-egl, and wayland-protocols)')
+  message('Wayland backend not available (requires wayland-client, wayland-egl, and wayland-cursor)')
 endif
 
 # X11 dependencies
-x11_dep = dependency('x11', required: false)
-xrandr_dep = dependency('xrandr', required: false)
+x11_dep = dependency('x11', required: x11_backend_option)
+xrandr_dep = dependency('xrandr', required: x11_backend_option)
 
 has_x11_deps = x11_dep.found() and xrandr_dep.found()
 
@@ -284,9 +283,11 @@ terminal_option = get_option('terminal')
 terminal_sources = []
 has_terminal = false
 if not terminal_option.disabled()
-  # forkpty lives in libutil on glibc; probe for it.
+  fontconfig_dep = dependency('fontconfig', required: false)
+  # forkpty lives in libutil on glibc; an explicitly enabled feature must fail
+  # configuration when it is unavailable.
   util_dep = cc.find_library('util', required: terminal_option)
-  if util_dep.found() or terminal_option.enabled()
+  if util_dep.found()
     has_terminal = true
     add_project_arguments('-DNEOWALL_HAVE_TERMINAL=1', language: 'c')
     terminal_sources = files(
@@ -306,8 +307,10 @@ if not terminal_option.disabled()
             'src/terminal/cbdt.c'),
       include_directories: [inc_dirs, inc_dirs_build,
                             include_directories('src/terminal')],
+      dependencies: fontconfig_dep,
       c_args: cc.get_supported_arguments(
-        '-Wno-error', '-w'),
+        '-Wno-error', '-w') +
+        (fontconfig_dep.found() ? ['-DNEOWALL_HAVE_FONTCONFIG=1'] : []),
       override_options: ['warning_level=0', 'werror=false'],
     )
   endif
@@ -386,6 +389,9 @@ endif
 
 if has_terminal
   deps += [util_dep]
+  if fontconfig_dep.found()
+    deps += [fontconfig_dep]
+  endif
 endif
 
 # =============================================================================
@@ -451,8 +457,16 @@ install_data('packaging/neowall.desktop',
 install_data('packaging/neowall.svg',
   install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps')
 
-# systemd user unit (started by the user's graphical session)
-install_data('packaging/systemd/neowall.service',
+# systemd user unit (started by the user's graphical session). Configure the
+# executable path so non-/usr prefixes work too.
+service_conf = configuration_data()
+service_conf.set('BINDIR', get_option('prefix') / get_option('bindir'))
+configured_service = configure_file(
+  input: 'packaging/systemd/neowall.service',
+  output: 'neowall.service',
+  configuration: service_conf,
+)
+install_data(configured_service,
   install_dir: get_option('prefix') / 'lib' / 'systemd' / 'user')
 
 # =============================================================================
@@ -664,7 +678,7 @@ if has_terminal
     include_directories: [inc_dirs, inc_dirs_build,
                           include_directories('src/terminal')],
     link_with: [terminal_glyph_lib],
-    dependencies: [m_dep],
+    dependencies: [m_dep] + (fontconfig_dep.found() ? [fontconfig_dep] : []),
     build_by_default: false,
   )
   test('glyph_atlas', test_glyph_exe)

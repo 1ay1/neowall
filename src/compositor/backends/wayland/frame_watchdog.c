@@ -241,6 +241,11 @@ void frame_watchdog_cleanup(void) {
         watched_output_t *next = watched->next;
         if (watched->callback) {
             wl_callback_destroy(watched->callback);
+            watched->callback = NULL;
+        }
+        if (watched->throttle_cb) {
+            wl_callback_destroy(watched->throttle_cb);
+            watched->throttle_cb = NULL;
         }
         free(watched);
         watched = next;

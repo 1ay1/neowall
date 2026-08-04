@@ -249,10 +249,6 @@ static void render_fps_watermark(struct output_state *output) {
     }
 }
 
-/* Global cache for default iChannel textures (generated once, reused forever) */
-static GLuint cached_default_channel_textures[5] = {0, 0, 0, 0, 0};
-static bool default_channels_initialized = false;
-
 /* Fullscreen quad vertices (position + texcoord) for image rendering */
 static const float quad_vertices[] = {
     /* positions */  /* texcoords */
@@ -290,33 +286,31 @@ static inline void cache_transition_uniforms(GLuint program, struct output_state
     output->transition_uniforms.resolution = glGetUniformLocation(program, "resolution");
 }
 
-/* Helper: Use program with state tracking to avoid redundant glUseProgram calls */
-static inline void use_program_cached(struct output_state *output, GLuint program) {
-    if (output->gl_state.active_program != program) {
-        glUseProgram(program);
-        output->gl_state.active_program = program;
-    }
+/*
+ * GL object bindings belong to the shared EGL context, not to an output or
+ * draw surface. Other outputs, multipass rendering, transitions, and overlays
+ * may all change them between calls. Always establish the state needed by a
+ * draw instead of trusting output->gl_state, whose per-output view cannot be
+ * authoritative for a shared context.
+ */
+static inline void use_program(struct output_state *output, GLuint program) {
+    glUseProgram(program);
+    output->gl_state.active_program = program;
 }
 
-/* Helper: Bind texture with state tracking to avoid redundant glBindTexture calls */
-static inline void bind_texture_cached(struct output_state *output, GLuint texture) {
-    if (output->gl_state.bound_texture != texture) {
-        glBindTexture(GL_TEXTURE_2D, texture);
-        output->gl_state.bound_texture = texture;
-    }
+static inline void bind_texture(struct output_state *output, GLuint texture) {
+    glBindTexture(GL_TEXTURE_2D, texture);
+    output->gl_state.bound_texture = texture;
 }
 
-/* Helper: Enable/disable blending with state tracking */
 static inline void set_blend_state(struct output_state *output, bool enable) {
-    if (output->gl_state.blend_enabled != enable) {
-        if (enable) {
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        } else {
-            glDisable(GL_BLEND);
-        }
-        output->gl_state.blend_enabled = enable;
+    if (enable) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    } else {
+        glDisable(GL_BLEND);
     }
+    output->gl_state.blend_enabled = enable;
 }
 
 /* Initialize rendering for an output */
@@ -758,22 +752,28 @@ bool render_load_channel_textures(struct output_state *output, struct wallpaper_
                 }
             }
         } else {
-            /* Use cached default textures (generate once, reuse forever) */
-            if (!default_channels_initialized) {
-                cached_default_channel_textures[0] = texture_create_rgba_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                cached_default_channel_textures[1] = texture_create_gray_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                cached_default_channel_textures[2] = texture_create_blue_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                cached_default_channel_textures[3] = texture_create_wood(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                cached_default_channel_textures[4] = texture_create_abstract(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                default_channels_initialized = true;
-            }
-
-            /* Reuse cached texture */
-            if (i < 5) {
-                texture = cached_default_channel_textures[i];
-            } else {
-                /* For channels beyond 5, use channel 0's texture */
-                texture = cached_default_channel_textures[0];
+            /* Every slot owns its texture. Do not alias defaults between slots
+             * or outputs: channel arrays are independently destroyed and may
+             * also replace one slot during a live shader update. */
+            switch (i) {
+                case 0:
+                    texture = texture_create_rgba_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+                    break;
+                case 1:
+                    texture = texture_create_gray_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+                    break;
+                case 2:
+                    texture = texture_create_blue_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+                    break;
+                case 3:
+                    texture = texture_create_wood(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+                    break;
+                case 4:
+                    texture = texture_create_abstract(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+                    break;
+                default:
+                    texture = texture_create_rgba_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+                    break;
             }
         }
 
@@ -1015,8 +1015,8 @@ bool render_frame_shader(struct output_state *output) {
     return true;
 }
 
-/* Render a frame for an output
- * Optimized: Uses cached uniforms, state tracking, and persistent VBO */
+/* Render a frame for an output.
+ * GL context state is established explicitly because all outputs share it. */
 bool render_frame(struct output_state *output) {
     if (!output) {
         log_error("Invalid output for render_frame");
@@ -1026,23 +1026,14 @@ bool render_frame(struct output_state *output) {
     /* CRITICAL: Ensure EGL context is current before any GL operations */
     if (output->state && output->state->egl_display != EGL_NO_DISPLAY &&
         output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-        bool was_current = eglGetCurrentContext() == output->state->egl_context &&
-                           eglGetCurrentSurface(EGL_DRAW) == output->compositor_surface->egl_surface;
         if (!ensure_egl_current(output)) {
             log_error("Failed to make EGL context current for rendering");
             return false;
         }
 
-        /* Invalidate GL state cache only when the draw surface actually
-         * changed. All outputs share one EGL context but have different
-         * surfaces; cached bindings (textures, programs) are per-output and
-         * go stale across a surface switch. On the common single-output
-         * path the surface never changes, so the cache stays warm. */
-        if (!was_current) {
-            output->gl_state.bound_texture = 0;
-            output->gl_state.active_program = 0;
-            output->gl_state.blend_enabled = false;
-        }
+        /* GL bindings are context state, so no per-output cache can remain
+         * valid across a surface/output switch. The draw path below always
+         * establishes its required program, texture, and blend state. */
     }
 
     /* Handle shader wallpapers */
@@ -1169,8 +1160,8 @@ bool render_frame(struct output_state *output) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    /* Use shader program with state tracking */
-    use_program_cached(output, output->program);
+    /* Establish the program explicitly; the EGL context is shared. */
+    use_program(output, output->program);
 
     /* Use cached attribute locations - no glGetAttribLocation calls */
     GLint pos_attrib = output->program_uniforms.position;
@@ -1216,7 +1207,7 @@ bool render_frame(struct output_state *output) {
         last_log_time = now;
     }
 
-    bind_texture_cached(output, output->texture);
+    bind_texture(output, output->texture);
 
     /* Check if bind succeeded */
     GLenum bind_error = glGetError();
@@ -1245,7 +1236,7 @@ bool render_frame(struct output_state *output) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
-    /* Enable blending with state tracking (needed for images with transparency) */
+    /* Establish blending explicitly (needed for images with transparency). */
     set_blend_state(output, true);
 
     /* Disable alpha channel writes - force opaque output */

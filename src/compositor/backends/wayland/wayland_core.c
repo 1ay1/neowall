@@ -256,7 +256,7 @@ static bool output_apply_render_size(struct output_state *output,
 
     output->width = physical_w;
     output->height = physical_h;
-    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
+    output_notify_geometry_change(output);
 
     if (out_changed) {
         *out_changed = true;
@@ -316,6 +316,7 @@ void wayland_apply_fractional_scale(struct output_state *output) {
 
     output->width = dev_w;
     output->height = dev_h;
+    output_notify_geometry_change(output);
 
     struct wl_surface *wl_surface = (struct wl_surface *)cs->native_surface;
 
@@ -335,8 +336,6 @@ void wayland_apply_fractional_scale(struct output_state *output) {
     if (wl_surface) {
         wl_surface_commit(wl_surface);
     }
-
-    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
 
     log_info("Output %s: fractional render buffer %dx%d (logical %dx%d @ %.3fx via viewport)",
              output_readable_name(output), dev_w, dev_h, logical_w, logical_h,
@@ -565,6 +564,32 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
     /* Note: wlr-layer-shell binding now handled by compositor abstraction layer */
 }
 
+static void release_output_proxies(struct neowall_state *state,
+                                   struct output_state *output) {
+    if (!output) return;
+
+    /* Let the backend clear any focus/ref it holds before proxies and the list
+     * owner go away. This hook is also useful to non-Wayland backends, but the
+     * handles passed here are the wl_output being removed. */
+    if (state && state->compositor_backend && state->compositor_backend->ops &&
+        state->compositor_backend->ops->on_output_removed) {
+        state->compositor_backend->ops->on_output_removed(
+            state->compositor_backend->data, output->native_output);
+    }
+
+    /* Destroy listener-bearing proxies while output_state is still alive.
+     * wl_proxy_destroy removes queued events for the proxy, so no callback can
+     * subsequently run with this output as its freed listener data. */
+    if (output->xdg_output) {
+        zxdg_output_v1_destroy((struct zxdg_output_v1 *)output->xdg_output);
+        output->xdg_output = NULL;
+    }
+    if (output->native_output) {
+        wl_output_destroy((struct wl_output *)output->native_output);
+        output->native_output = NULL;
+    }
+}
+
 static void registry_handle_global_remove(void *data, struct wl_registry *registry,
                                           uint32_t name) {
     struct neowall_state *state = data;
@@ -586,7 +611,14 @@ static void registry_handle_global_remove(void *data, struct wl_registry *regist
 
             /* Unlock before destroying (destroy might take time) */
             pthread_rwlock_unlock(&state->output_list_lock);
+            const char *identifier = output->connector_name[0]
+                ? output->connector_name : output->model;
+            if (identifier[0] && !remove_wallpaper_state(identifier)) {
+                log_warn("Failed to remove persisted state for Wayland output %s",
+                         identifier);
+            }
             frame_watchdog_remove(output);
+            release_output_proxies(state, output);
             output_unref(output);
             return;
         }
@@ -793,6 +825,7 @@ void wayland_cleanup(void) {
         while (state->outputs) {
             struct output_state *next = state->outputs->next;
             frame_watchdog_remove(state->outputs);
+            release_output_proxies(state, state->outputs);
             output_unref(state->outputs);
             state->outputs = next;
         }
@@ -833,6 +866,14 @@ void wayland_cleanup(void) {
     if (wl->presentation) {
         wp_presentation_destroy(wl->presentation);
         wl->presentation = NULL;
+    }
+    if (wl->tearing_control_manager) {
+        wp_tearing_control_manager_v1_destroy(wl->tearing_control_manager);
+        wl->tearing_control_manager = NULL;
+    }
+    if (wl->xdg_output_manager) {
+        zxdg_output_manager_v1_destroy(wl->xdg_output_manager);
+        wl->xdg_output_manager = NULL;
     }
     wl->presentation_clock_ok = false;
 
@@ -977,6 +1018,13 @@ bool output_configure_compositor_surface(struct output_state *output) {
         log_error("Output %s has no native output yet, cannot configure surface",
                   output->model[0] ? output->model : "unknown");
         return false;
+    }
+
+    if (output->compositor_surface) {
+        /* Hotplug/config paths may ask again after the surface was already
+         * created. Reuse it; creating a second role for the same output leaks
+         * the old surface and can trigger a layer-shell protocol error. */
+        return true;
     }
 
     log_debug("Configuring compositor surface for output %s (native_output=%p, configured=%d)",

@@ -246,9 +246,9 @@ struct output_state *output_create(struct neowall_state *state,
     out->scale = 1;
     out->transform = COMPOSITOR_TRANSFORM_NORMAL;
     out->configured = false;
-    atomic_store_explicit(&out->needs_redraw, true, memory_order_release);
-    atomic_store(&out->occluded, false);
-    atomic_store_explicit(&out->refcount, 1, memory_order_release);  /* the list's reference */
+    atomic_init(&out->needs_redraw, true);
+    atomic_init(&out->occluded, false);
+    atomic_init(&out->refcount, 1);  /* the output list's reference */
     out->state = state;
     out->connector_name[0] = '\0';
 
@@ -256,14 +256,19 @@ struct output_state *output_create(struct neowall_state *state,
     out->preload_texture = 0;
     out->preload_image = NULL;
     out->preload_path[0] = '\0';
-    atomic_store(&out->preload_ready, false);
+    atomic_init(&out->preload_ready, false);
 
     /* Initialize background preload thread state */
     pthread_mutex_init(&out->preload_mutex, NULL);
     out->preload_decoded_image = NULL;
-    atomic_store(&out->preload_thread_active, false);
-    atomic_store(&out->preload_should_stop, false);
-    atomic_store(&out->preload_upload_pending, false);
+    atomic_init(&out->preload_thread_active, false);
+    atomic_init(&out->preload_thread_join_pending, false);
+    atomic_init(&out->preload_should_stop, false);
+    atomic_init(&out->preprocessing_generation, 1);
+    atomic_init(&out->geometry_change_pending, false);
+    out->terminal_auto_cols = false;
+    out->terminal_auto_rows = false;
+    atomic_init(&out->preload_upload_pending, false);
 
     /* Compositor surface will be created later in output_configure_compositor_surface() */
     out->compositor_surface = NULL;
@@ -367,10 +372,11 @@ void output_destroy(struct output_state *output) {
      * (libpng/libjpeg are not async-cancel-safe) and we never detached the
      * thread, so a join here is correct. preload_should_stop tells the thread
      * to abandon its work if the result is no longer needed. */
-    if (atomic_load(&output->preload_thread_active)) {
+    if (atomic_load(&output->preload_thread_join_pending)) {
         atomic_store(&output->preload_should_stop, true);
         pthread_join(output->preload_thread, NULL);
         atomic_store(&output->preload_thread_active, false);
+        atomic_store(&output->preload_thread_join_pending, false);
     }
 
     /* Close frame timer (independent of preload state; do it outside the
@@ -507,6 +513,7 @@ struct preload_thread_args {
     int32_t width;
     int32_t height;
     enum wallpaper_mode mode;
+    uint64_t generation;
 };
 
 static void *preload_thread_func(void *arg) {
@@ -539,7 +546,8 @@ static void *preload_thread_func(void *arg) {
 
     /* If caller asked us to stop while we were decoding, throw the result away
      * rather than handing it off. */
-    if (atomic_load(&output->preload_should_stop)) {
+    if (atomic_load(&output->preload_should_stop) ||
+        args->generation != atomic_load(&output->preprocessing_generation)) {
         image_free(decoded_image);
         atomic_store(&output->preload_thread_active, false);
         free(args);
@@ -558,6 +566,10 @@ static void *preload_thread_func(void *arg) {
     }
 
     output->preload_decoded_image = decoded_image;
+    output->preload_generation = args->generation;
+    output->preload_width = args->width;
+    output->preload_height = args->height;
+    output->preload_mode = args->mode;
     snprintf(output->preload_path, sizeof(output->preload_path), "%s", args->path);
 
     pthread_mutex_unlock(&output->preload_mutex);
@@ -580,6 +592,13 @@ void output_preload_next_wallpaper(struct output_state *output) {
     if (!output->config->cycle || output->config->cycle_count <= 1 ||
         output->config->type != WALLPAPER_IMAGE) {
         return;
+    }
+
+    /* Reap a previously completed joinable thread before reusing its handle. */
+    if (atomic_load(&output->preload_thread_join_pending) &&
+        !atomic_load(&output->preload_thread_active)) {
+        pthread_join(output->preload_thread, NULL);
+        atomic_store(&output->preload_thread_join_pending, false);
     }
 
     /* Don't start new preload if thread is already running */
@@ -620,25 +639,121 @@ void output_preload_next_wallpaper(struct output_state *output) {
     args->width = output->width;
     args->height = output->height;
     args->mode = output->config->mode;
+    args->generation = atomic_load(&output->preprocessing_generation);
 
     pthread_mutex_unlock(&output->state->state_mutex);
 
+    char preload_path[MAX_PATH_LENGTH];
+    snprintf(preload_path, sizeof(preload_path), "%s", args->path);
     log_debug("Starting background preload for output %s: %s",
-              output->model[0] ? output->model : "unknown", args->path);
+              output->model[0] ? output->model : "unknown", preload_path);
 
     /* Launch background thread. We keep it joinable so output_destroy can wait
      * for it deterministically (we never call pthread_cancel — image codecs
      * aren't async-cancel-safe). */
     atomic_store(&output->preload_should_stop, false);
     atomic_store(&output->preload_thread_active, true);
+    atomic_store(&output->preload_thread_join_pending, true);
     if (pthread_create(&output->preload_thread, NULL, preload_thread_func, args) != 0) {
         log_error("Failed to create preload thread");
         atomic_store(&output->preload_thread_active, false);
+        atomic_store(&output->preload_thread_join_pending, false);
         free(args);
         return;
     }
 
-    log_debug("Background preload thread started for: %s", args->path);
+    log_debug("Background preload thread started for: %s", preload_path);
+}
+
+/* Callback-safe half of geometry handling. Bumping the generation immediately
+ * makes any in-flight decoder discard its result; teardown and GL replacement
+ * are deliberately left to the event-loop/render thread. */
+void output_notify_geometry_change(struct output_state *output) {
+    if (!output) return;
+    atomic_fetch_add_explicit(&output->preprocessing_generation, 1,
+                              memory_order_acq_rel);
+    atomic_store_explicit(&output->preload_should_stop, true, memory_order_release);
+    atomic_store_explicit(&output->geometry_change_pending, true, memory_order_release);
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
+}
+
+void output_process_geometry_change(struct output_state *output) {
+    if (!output || !atomic_exchange_explicit(&output->geometry_change_pending, false,
+                                              memory_order_acq_rel)) {
+        return;
+    }
+
+    /* Reap/cancel CPU preloads before clearing their handoff slots. */
+    if (atomic_load(&output->preload_thread_join_pending)) {
+        atomic_store(&output->preload_should_stop, true);
+        pthread_join(output->preload_thread, NULL);
+        atomic_store(&output->preload_thread_active, false);
+        atomic_store(&output->preload_thread_join_pending, false);
+    }
+    pthread_mutex_lock(&output->preload_mutex);
+    if (output->preload_decoded_image) {
+        image_free(output->preload_decoded_image);
+        output->preload_decoded_image = NULL;
+    }
+    atomic_store(&output->preload_upload_pending, false);
+    pthread_mutex_unlock(&output->preload_mutex);
+
+    /* This runs only after the event loop made this output's context current. */
+    if (output->preload_texture) {
+        render_destroy_texture(output->preload_texture);
+        output->preload_texture = 0;
+    }
+    if (output->preload_image) {
+        image_free(output->preload_image);
+        output->preload_image = NULL;
+    }
+    atomic_store(&output->preload_ready, false);
+    output->preload_path[0] = '\0';
+
+    if (output->config && output->config->type == WALLPAPER_IMAGE &&
+        output->config->path[0] && output->width > 0 && output->height > 0) {
+        /* Build both CPU image and GPU texture before touching the visible pair.
+         * A decode/upload failure therefore leaves the old wallpaper intact. */
+        struct image_data *replacement = image_load(output->config->path,
+                                                     output->width, output->height,
+                                                     output->config->mode);
+        if (replacement) {
+            GLuint texture = render_create_texture(replacement);
+            if (texture) {
+                struct image_data *old_image = output->current_image;
+                GLuint old_texture = output->texture;
+                output->current_image = replacement;
+                output->texture = texture;
+                output->gl_state.bound_texture = 0;
+                if (old_texture) render_destroy_texture(old_texture);
+                if (old_image) image_free(old_image);
+                log_info("Reprocessed wallpaper for output %s at %dx%d",
+                         output->model[0] ? output->model : "unknown",
+                         output->width, output->height);
+            } else {
+                image_free(replacement);
+                log_error("Keeping old wallpaper after resize texture upload failed");
+            }
+        } else {
+            log_error("Keeping old wallpaper after resize preprocessing failed: %s",
+                      output->config->path);
+        }
+        output_preload_next_wallpaper(output);
+    } else if (output->config && output->config->type == WALLPAPER_TERMINAL &&
+               output->multipass_shader) {
+        int cell_h = output->config->term_font_size > 0 ? output->config->term_font_size : 18;
+        if (cell_h < 6) cell_h = 6;
+        if (cell_h > 96) cell_h = 96;
+        int cell_w = (cell_h + 1) / 2;
+        if (cell_w < 3) cell_w = 3;
+        int cols = output->terminal_auto_cols ? output->width / cell_w : output->config->term_cols;
+        int rows = output->terminal_auto_rows ? output->height / cell_h : output->config->term_rows;
+        if (cols < 1) cols = 1;
+        if (rows < 1) rows = 1;
+        multipass_resize_terminal(output->multipass_shader, cols, rows);
+        if (output->terminal_auto_cols) output->config->term_cols = cols;
+        if (output->terminal_auto_rows) output->config->term_rows = rows;
+    }
 }
 
 void output_set_wallpaper(struct output_state *output, const char *path) {
@@ -678,10 +793,11 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
          * happily upload it on the next frame and overwrite the texture we're
          * about to install. Also wait for any still-running decode to finish
          * so it can't race with us. */
-        if (atomic_load(&output->preload_thread_active)) {
+        if (atomic_load(&output->preload_thread_join_pending)) {
             atomic_store(&output->preload_should_stop, true);
             pthread_join(output->preload_thread, NULL);
             atomic_store(&output->preload_thread_active, false);
+            atomic_store(&output->preload_thread_join_pending, false);
         }
         pthread_mutex_lock(&output->preload_mutex);
         if (output->preload_decoded_image) {
@@ -1135,14 +1251,29 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
         return nw_err(NW_ERR_GL, "eglMakeCurrent failed for terminal set");
     }
 
-    if (output->multipass_shader) {
-        multipass_destroy(output->multipass_shader);
-        output->multipass_shader = NULL;
+    /* Idempotency guard against a double-spawn.  Several paths can drive this
+     * function for the SAME output+command — output_apply_config on the
+     * surface-ready event, output_apply_deferred_config, and a config reload —
+     * and if two of them run before the first has published its shader, or a
+     * reload re-applies an unchanged terminal block, we would spawn a second
+     * child. Bail out when a terminal wallpaper with this exact command is
+     * already live and its child is still running: nothing to do. A DIFFERENT
+     * command still swaps normally (the command-change path below), and a
+     * dead child still respawns (that is the intended "restart on exit"). */
+    if (output->config->type == WALLPAPER_TERMINAL &&
+        output->multipass_shader != NULL &&
+        !multipass_terminal_child_exited(output->multipass_shader) &&
+        strcmp(output->config->term_cmd, cmd) == 0) {
+        log_debug("Terminal wallpaper '%s' already running on output %s; "
+                  "skipping redundant respawn", cmd,
+                  output->model[0] ? output->model : "unknown");
+        return nw_ok();
     }
-    if (output->live_shader_program != 0) {
-        shader_destroy_program(output->live_shader_program);
-        output->live_shader_program = 0;
-    }
+
+    /* Build the replacement off to the side.  In particular, do not tear down
+     * the current terminal here: multipass_destroy() also kills its PTY child,
+     * so every load/attach/GL/compile failure must leave it running. */
+    multipass_shader_t *candidate = NULL;
 
     /* Styling shader (optional) or the built-in crisp pass-through. */
     char *shader_source = NULL;
@@ -1154,9 +1285,9 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
         }
     }
     const char *src = shader_source ? shader_source : kTermCrispShader;
-    output->multipass_shader = multipass_create(src);
+    candidate = multipass_create(src);
     free(shader_source);
-    if (!output->multipass_shader) {
+    if (!candidate) {
         return nw_err(NW_ERR_PARSE, "terminal multipass_create failed");
     }
 
@@ -1168,74 +1299,90 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
     if (cell_h > 96) cell_h = 96;
     int cell_w = (cell_h + 1) / 2;
     if (cell_w < 3) cell_w = 3;
+    bool auto_cols = cols <= 0;
+    bool auto_rows = rows <= 0;
     int gc = cols > 0 ? cols : output->width / cell_w;
     int gr = rows > 0 ? rows : output->height / cell_h;
     if (gc < 1) gc = 80;
     if (gr < 1) gr = 24;
 
-    /* Carry optional terminal config onto the shader so attach_terminal can
-     * pass it through to the emulator (cwd/env/font faces/default colours). */
-    if (output->config->term_cwd[0])
-        output->multipass_shader->term_cwd = strdup(output->config->term_cwd);
-    if (output->config->term_env[0])
-        output->multipass_shader->term_env = strdup(output->config->term_env);
-    if (output->config->term_font_bold[0])
-        output->multipass_shader->term_font_bold = strdup(output->config->term_font_bold);
-    if (output->config->term_font_italic[0])
-        output->multipass_shader->term_font_italic = strdup(output->config->term_font_italic);
+    /* Snapshot the optional config onto the candidate.  output_set_terminal is
+     * also called with pointers into output->config during deferred re-apply;
+     * none of these reads may depend on swapping the live shader first. */
+#define DUP_TERM_FIELD(dst, src) do {                                          \
+        if ((src)[0]) {                                                        \
+            (dst) = strdup(src);                                               \
+            if (!(dst)) {                                                      \
+                multipass_destroy(candidate);                                  \
+                return nw_err(NW_ERR_OOM, "terminal option allocation failed"); \
+            }                                                                  \
+        }                                                                      \
+    } while (0)
+    DUP_TERM_FIELD(candidate->term_cwd, output->config->term_cwd);
+    DUP_TERM_FIELD(candidate->term_env, output->config->term_env);
+    DUP_TERM_FIELD(candidate->term_font_bold, output->config->term_font_bold);
+    DUP_TERM_FIELD(candidate->term_font_italic, output->config->term_font_italic);
+#undef DUP_TERM_FIELD
     if (output->config->term_fg >= 0) {
-        output->multipass_shader->term_fg = output->config->term_fg;
-        output->multipass_shader->term_has_fg = true;
+        candidate->term_fg = output->config->term_fg;
+        candidate->term_has_fg = true;
     }
     if (output->config->term_bg >= 0) {
-        output->multipass_shader->term_bg = output->config->term_bg;
-        output->multipass_shader->term_has_bg = true;
+        candidate->term_bg = output->config->term_bg;
+        candidate->term_has_bg = true;
     }
 
     /* nwTermFX intensities. A -1 config sentinel means "use the built-in
      * default": a subtle bloom so bright/bold cells glow, and the retro CRT
      * bits (scanline/curve/chroma) off unless the user opts in. */
-    output->multipass_shader->term_fx[0] =
+    candidate->term_fx[0] =
         output->config->term_bloom    >= 0.0f ? output->config->term_bloom    : 0.35f;
-    output->multipass_shader->term_fx[1] =
+    candidate->term_fx[1] =
         output->config->term_scanline >= 0.0f ? output->config->term_scanline : 0.0f;
-    output->multipass_shader->term_fx[2] =
+    candidate->term_fx[2] =
         output->config->term_crt      >= 0.0f ? output->config->term_crt      : 0.0f;
-    output->multipass_shader->term_fx[3] =
+    candidate->term_fx[3] =
         output->config->term_chroma   >= 0.0f ? output->config->term_chroma   : 0.0f;
     /* Change-driven fade defaults ON at a gentle level — it makes graphs and
      * updating numbers glide, which is the biggest "feels alive" win. */
-    output->multipass_shader->term_fade =
+    candidate->term_fade =
         output->config->term_fade     >= 0.0f ? output->config->term_fade     : 0.5f;
 
     /* Attach the terminal BEFORE init_gl (init creates the cell/atlas textures
      * sized to the grid) and before compile (nwTerm uniforms must resolve). */
-    nw_result tr = multipass_attach_terminal(output->multipass_shader, cmd,
+    nw_result tr = multipass_attach_terminal(candidate, cmd,
                                              gc, gr, cell_w, cell_h,
                                              (font_path && font_path[0]) ? font_path : NULL);
     if (nw_is_err(tr)) {
-        multipass_destroy(output->multipass_shader);
-        output->multipass_shader = NULL;
+        multipass_destroy(candidate);
         return tr;
     }
 
-    if (!multipass_init_gl(output->multipass_shader, output->width, output->height)) {
-        multipass_destroy(output->multipass_shader);
-        output->multipass_shader = NULL;
+    if (!multipass_init_gl(candidate, output->width, output->height)) {
+        multipass_destroy(candidate);
         return nw_err(NW_ERR_GL, "multipass_init_gl failed (terminal)");
     }
-    if (!multipass_compile_all(output->multipass_shader)) {
-        char *errors = multipass_get_all_errors(output->multipass_shader);
+    if (!multipass_compile_all(candidate)) {
+        char *errors = multipass_get_all_errors(candidate);
         log_error("Terminal shader failed to compile:\n%s", errors ? errors : "(none)");
         free(errors);
-        multipass_destroy(output->multipass_shader);
-        output->multipass_shader = NULL;
+        multipass_destroy(candidate);
         return nw_err(NW_ERR_PARSE, "terminal shader failed to compile");
     }
 
     int target_fps = shader_fps_resolve(output->config->shader_fps);
-    multipass_set_adaptive_resolution(output->multipass_shader, true,
+    multipass_set_adaptive_resolution(candidate, true,
                                       (float)target_fps, 0.25f, 1.0f);
+
+    /* Candidate is now complete.  Publish it atomically from the output's point
+     * of view, then retire the old terminal child and GL resources. */
+    multipass_shader_t *old = output->multipass_shader;
+    output->multipass_shader = candidate;
+    if (old) multipass_destroy(old);
+    if (output->live_shader_program != 0) {
+        shader_destroy_program(output->live_shader_program);
+        output->live_shader_program = 0;
+    }
 
     output->shader_start_time = get_time_ms();
     output->frames_rendered = 0;
@@ -1249,6 +1396,8 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
     else output->config->shader_path[0] = '\0';
     output->config->term_cols = gc;
     output->config->term_rows = gr;
+    output->terminal_auto_cols = auto_cols;
+    output->terminal_auto_rows = auto_rows;
     pthread_mutex_unlock(&output->state->state_mutex);
 
     /* The surface was created before the config resolved as a terminal, so it
@@ -1310,6 +1459,22 @@ bool output_same_span_group(const struct output_state *a, const struct output_st
     const struct wallpaper_config *ca = a->config;
     const struct wallpaper_config *cb = b->config;
 
+    /* Spanning is opt-in.  Merely choosing the same shader/image on independent
+     * outputs must not couple their clocks, cycling, or virtual coordinates. */
+    if (!ca->span || !cb->span) {
+        return false;
+    }
+
+    bool a_named = ca->span_group[0] != '\0';
+    bool b_named = cb->span_group[0] != '\0';
+    if (a_named || b_named) {
+        /* Named groups are the explicit authority and may intentionally start
+         * on different entries; the existing group-sync path aligns them. */
+        return a_named && b_named && ca->type == cb->type &&
+               strcmp(ca->span_group, cb->span_group) == 0;
+    }
+
+    /* Anonymous span=true groups retain source-based compatibility semantics. */
     if (ca->type != cb->type || ca->cycle != cb->cycle) {
         return false;
     }
@@ -1931,41 +2096,48 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
              config->transition,
              config->duration);
 
-    /* Free old config data */
-    config_free_wallpaper(output->config);
-
-    /* Copy new config (simple memcpy since no hot-reload) */
-    memcpy(output->config, config, sizeof(struct wallpaper_config));
-
-    /* Deep copy channel_paths array if present */
-    output->config->channel_paths = NULL;
-    output->config->channel_count = 0;
+    /* Build a complete owned copy before touching the live config. */
+    struct wallpaper_config *copy = calloc(1, sizeof(*copy));
+    if (!copy) {
+        return false;
+    }
+    memcpy(copy, config, sizeof(*copy));
+    copy->channel_paths = NULL;
+    copy->channel_count = 0;
+    copy->cycle_paths = NULL;
+    copy->cycle_count = 0;
     if (config->channel_paths && config->channel_count > 0) {
-        output->config->channel_paths = calloc(config->channel_count, sizeof(char *));
-        if (output->config->channel_paths) {
-            output->config->channel_count = config->channel_count;
-            for (size_t i = 0; i < config->channel_count; i++) {
-                if (config->channel_paths[i]) {
-                    output->config->channel_paths[i] = strdup(config->channel_paths[i]);
-                }
+        copy->channel_paths = calloc(config->channel_count, sizeof(char *));
+        if (!copy->channel_paths) goto copy_failed;
+        copy->channel_count = config->channel_count;
+        for (size_t i = 0; i < config->channel_count; i++) {
+            if (config->channel_paths[i] &&
+                !(copy->channel_paths[i] = strdup(config->channel_paths[i]))) {
+                goto copy_failed;
             }
         }
     }
 
     /* Deep copy cycle_paths array if present */
-    output->config->cycle_paths = NULL;
-    output->config->cycle_count = 0;
     if (config->cycle && config->cycle_paths && config->cycle_count > 0) {
-        output->config->cycle_paths = calloc(config->cycle_count, sizeof(char *));
-        if (output->config->cycle_paths) {
-            output->config->cycle_count = config->cycle_count;
-            for (size_t i = 0; i < config->cycle_count; i++) {
-                if (config->cycle_paths[i]) {
-                    output->config->cycle_paths[i] = strdup(config->cycle_paths[i]);
-                }
+        copy->cycle_paths = calloc(config->cycle_count, sizeof(char *));
+        if (!copy->cycle_paths) goto copy_failed;
+        copy->cycle_count = config->cycle_count;
+        for (size_t i = 0; i < config->cycle_count; i++) {
+            if (config->cycle_paths[i] &&
+                !(copy->cycle_paths[i] = strdup(config->cycle_paths[i]))) {
+                goto copy_failed;
             }
         }
 
+        /* Restore cycle index after installing the transactional copy below. */
+    }
+
+    struct wallpaper_config *old_config = output->config;
+    output->config = copy;
+    atomic_fetch_add(&output->preprocessing_generation, 1);
+
+    if (output->config->cycle && output->config->cycle_count > 0) {
         /* Restore cycle index from state file for this specific output.
          * Skipped under shuffle: the saved index refers to a different
          * (previous) random permutation of the directory, so resuming at
@@ -2006,6 +2178,8 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     if (!output->compositor_surface || !output->configured) {
         log_debug("Output %s not yet configured, deferring wallpaper load",
                   output->model[0] ? output->model : "unknown");
+        config_free_wallpaper(old_config);
+        free(old_config);
         return true;
     }
 
@@ -2029,23 +2203,29 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
             log_info("Loading single shader: %s", initial_shader);
         }
 
-        if (initial_shader) {
-            output_set_shader(output, initial_shader);
-        } else {
+        if (initial_shader && nw_is_err(output_set_shader(output, initial_shader))) {
+            log_error("Failed to apply shader config to output %s", output->model);
+            goto apply_failed;
+        } else if (!initial_shader) {
             log_error("No shader configured for output %s", output->model);
-            return false;
+            goto apply_failed;
         }
     } else if (output->config->type == WALLPAPER_TERMINAL) {
         /* Terminal mode: spawn the configured command as the wallpaper. */
         if (output->config->term_cmd[0] != '\0') {
             log_info("Loading terminal wallpaper: %s", output->config->term_cmd);
-            output_set_terminal(output, output->config->term_cmd,
+            nw_result terminal_result = output_set_terminal(output, output->config->term_cmd,
                                 output->config->shader_path[0] ? output->config->shader_path : NULL,
                                 output->config->term_font[0] ? output->config->term_font : NULL,
                                 output->config->term_cols, output->config->term_rows);
+            if (nw_is_err(terminal_result)) {
+                log_error("Failed to apply terminal config to output %s: %s", output->model,
+                          terminal_result.context ? terminal_result.context : "unknown error");
+                goto apply_failed;
+            }
         } else {
             log_error("No terminal command configured for output %s", output->model);
-            return false;
+            goto apply_failed;
         }
     } else {
         /* Image mode */
@@ -2066,7 +2246,7 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
             output_set_wallpaper(output, initial_path);
         } else {
             log_error("No image path configured for output %s", output->model);
-            return false;
+            goto apply_failed;
         }
     }
 
@@ -2077,7 +2257,26 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
 
     log_info("Successfully applied config to output %s", output->model);
+    config_free_wallpaper(old_config);
+    free(old_config);
     return true;
+
+apply_failed:
+    output->config = old_config;
+    atomic_fetch_add(&output->preprocessing_generation, 1);
+    output_configure_vsync(output);
+    output_configure_frame_timer(output);
+    config_free_wallpaper(copy);
+    free(copy);
+    log_error("Restored previous config for output %s after apply failure",
+              output->model[0] ? output->model : "unknown");
+    return false;
+
+copy_failed:
+    config_free_wallpaper(copy);
+    free(copy);
+    log_error("Failed to deep-copy output configuration");
+    return false;
 }
 void output_apply_deferred_config(struct output_state *output) {
     if (!output) {
@@ -2199,6 +2398,15 @@ bool output_terminal_key(struct output_state *output, const void *bytes, size_t 
 /* Upload preloaded image to GPU and return texture ID */
 GLuint output_upload_preload_texture(struct output_state *output) {
     if (!output || !output->preload_decoded_image) {
+        return 0;
+    }
+    if (output->preload_generation != atomic_load(&output->preprocessing_generation) ||
+        output->preload_width != output->width || output->preload_height != output->height ||
+        output->preload_mode != output->config->mode) {
+        image_free(output->preload_decoded_image);
+        output->preload_decoded_image = NULL;
+        atomic_store(&output->preload_upload_pending, false);
+        log_debug("Discarded stale preloaded image after geometry/config change");
         return 0;
     }
 

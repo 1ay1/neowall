@@ -127,6 +127,13 @@ default {
 #                  whatever is underneath the wallpaper.
 # mouse_interaction true
 
+# Whether a focused terminal wallpaper receives the control keys that would
+# tear it down. false (default) drops Ctrl-C (SIGINT), Ctrl-D (EOF),
+# Ctrl-\ (SIGQUIT) and Ctrl-Z (SIGTSTP) so a stray keypress can't kill or
+# freeze the app running as your wallpaper. All other keys still pass through.
+# Set true only for a genuinely interactive shell wallpaper.
+# term_raw_input false
+
 # ============================================================================
 # PER-MONITOR CONFIGURATION
 # ============================================================================

@@ -74,6 +74,12 @@ struct neowall_state {
                                        * no pointer events and iMouse stays at center. Read by
                                        * the Wayland seat-capabilities handler and X11 backend.
                                        * Atomic so config reload (future) is safe. */
+    atomic_bool_t term_raw_input;     /* Global: forward EVERY key (incl. Ctrl-C/D/\\/Z) verbatim
+                                       * to a focused terminal wallpaper. Default false, so the
+                                       * signal/EOF/suspend control keys are dropped and a stray
+                                       * Ctrl-C can't kill the app running as your wallpaper.
+                                       * Set term_raw_input true for a genuinely interactive
+                                       * shell wallpaper. Read by the keyboard handler. */
     pthread_mutex_t state_mutex;     /* Protects output list and config data */
     pthread_rwlock_t output_list_lock; /* Read-write lock for output linked list traversal */
     pthread_mutex_t state_file_lock; /* Mutex for state file I/O operations */
@@ -167,6 +173,10 @@ const char *neowall_secure_runtime_dir(void);
 bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
                            const char *mode, int cycle_index, int cycle_total,
                            const char *status);
+/* Atomically remove one output, or retain only the supplied physical output
+ * names. An absent state file/name is a successful no-op. */
+bool remove_wallpaper_state(const char *output_name);
+bool prune_wallpaper_state(const char *const *output_names, size_t output_count);
 bool read_wallpaper_state(void);
 int restore_cycle_index_from_state(const char *output_name);
 bool write_cycle_list(const char *output_name, char **paths, size_t count, size_t current_index);

@@ -168,9 +168,16 @@ unsigned long long term_dirty_epoch(const terminal *t);
 /* Screen model (headless, no PTY) — for tests and direct feeding           */
 /* ------------------------------------------------------------------------ */
 
+#define TERM_SCREEN_MIN_COLS 1
+#define TERM_SCREEN_MIN_ROWS 1
+#define TERM_SCREEN_MAX_COLS 1024
+#define TERM_SCREEN_MAX_ROWS 512
+
 term_screen *term_screen_create(int cols, int rows);
 void         term_screen_destroy(term_screen *s);
-void         term_screen_resize(term_screen *s, int cols, int rows);
+/* Resize transactionally. Returns false on allocation failure and leaves the
+ * old grid and geometry untouched. Requested dimensions are clamped. */
+bool         term_screen_resize(term_screen *s, int cols, int rows);
 
 /* Feed raw bytes (possibly a partial escape sequence) into the parser. State
  * carries across calls, so a sequence split across two feeds is handled. */

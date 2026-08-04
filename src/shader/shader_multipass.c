@@ -413,6 +413,18 @@ bool multipass_terminal_animating(const multipass_shader_t *shader,
 #endif
 }
 
+bool multipass_terminal_child_exited(const multipass_shader_t *shader) {
+#ifdef NEOWALL_HAVE_TERMINAL
+    /* No terminal attached counts as "exited": the caller uses this to decide
+     * whether a live child already exists, and none does. */
+    if (!shader || !shader->term) return true;
+    return term_render_child_exited(shader->term);
+#else
+    (void)shader;
+    return true;
+#endif
+}
+
 void multipass_terminal_shutdown(multipass_shader_t *shader) {
 #ifdef NEOWALL_HAVE_TERMINAL
     /* Kill the terminal child + its process group NOW, without touching any GL
@@ -1663,6 +1675,35 @@ void multipass_set_span(multipass_shader_t *shader, int virt_width, int virt_hei
     shader->span_off_y = spans ? off_y : 0;
 }
 
+bool multipass_resize_terminal(multipass_shader_t *shader, int cols, int rows) {
+#ifdef NEOWALL_HAVE_TERMINAL
+    if (!shader || !shader->term || cols <= 0 || rows <= 0) return false;
+    if (term_render_cols(shader->term) == cols && term_render_rows(shader->term) == rows) {
+        return true;
+    }
+    nw_result r = term_render_resize(shader->term, cols, rows);
+    if (nw_is_err(r)) {
+        log_error("Terminal resize failed: %s", r.context ? r.context : nw_status_str(r.status));
+        return false;
+    }
+    if (shader->term_cell_texture) {
+        glBindTexture(GL_TEXTURE_2D, shader->term_cell_texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32UI, cols, rows, 0,
+                     GL_RGBA_INTEGER, GL_UNSIGNED_INT, NULL);
+    }
+    if (shader->term_change_texture) {
+        glBindTexture(GL_TEXTURE_2D, shader->term_change_texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, cols, rows, 0,
+                     GL_RED_INTEGER, GL_UNSIGNED_INT, NULL);
+    }
+    log_info("Resized terminal wallpaper grid to %dx%d", cols, rows);
+    return true;
+#else
+    (void)shader; (void)cols; (void)rows;
+    return false;
+#endif
+}
+
 void multipass_resize(multipass_shader_t *shader, int width, int height) {
     if (!shader || !shader->is_initialized) return;
 
@@ -2791,6 +2832,17 @@ GLuint multipass_get_buffer_texture(const multipass_shader_t *shader,
 bool multipass_last_damage(const multipass_shader_t *shader, bool crisp,
                            int surf_w, int surf_h,
                            int *x, int *y, int *w, int *h) {
+#ifndef NEOWALL_HAVE_TERMINAL
+    (void)shader;
+    (void)crisp;
+    (void)surf_w;
+    (void)surf_h;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    return false;
+#else
     if (!shader || !shader->term || !crisp) return false;
     if (shader->has_buffers || shader->pass_count != 1) return false;
     if (surf_w <= 0 || surf_h <= 0) return false;
@@ -2822,6 +2874,7 @@ bool multipass_last_damage(const multipass_shader_t *shader, bool crisp,
     if (w) *w = surf_w;
     if (h) *h = band_h;
     return true;
+#endif
 }
 
 /* ============================================

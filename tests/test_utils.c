@@ -30,6 +30,12 @@ void format_bytes(uint64_t bytes, char *buf, size_t size);
 bool expand_path(const char *path, char *expanded, size_t size);
 const char *neowall_secure_runtime_dir(void);
 bool neowall_parse_index(const char *s, long *out);
+bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
+                           const char *mode, int cycle_index, int cycle_total,
+                           const char *status);
+int restore_cycle_index_from_state(const char *output_name);
+bool remove_wallpaper_state(const char *output_name);
+bool prune_wallpaper_state(const char *const *output_names, size_t output_count);
 
 static int failures = 0;
 static int checks = 0;
@@ -209,6 +215,36 @@ static void test_secure_runtime_dir(void) {
     rmdir(base);
 }
 
+static void test_persisted_state_pruning(void) {
+    char base[256];
+    snprintf(base, sizeof(base), "/tmp/nw-state-test-%d-%ld",
+             (int)getpid(), (long)time(NULL));
+    CHECK(mkdir(base, 0700) == 0);
+    setenv("XDG_STATE_HOME", base, 1);
+
+    CHECK(write_wallpaper_state("DP-1", "/one.png", "fill", 1, 3, "active"));
+    CHECK(write_wallpaper_state("HDMI-1", "/two.png", "fit", 2, 4, "active"));
+    CHECK(remove_wallpaper_state("DP-1"));
+    CHECK(restore_cycle_index_from_state("DP-1") == 0);
+    CHECK(restore_cycle_index_from_state("HDMI-1") == 2);
+
+    CHECK(write_wallpaper_state("DP-2", "/three.png", "fill", 3, 5, "active"));
+    const char *keep[] = {"DP-2"};
+    CHECK(prune_wallpaper_state(keep, 1));
+    CHECK(restore_cycle_index_from_state("HDMI-1") == 0);
+    CHECK(restore_cycle_index_from_state("DP-2") == 3);
+    CHECK(remove_wallpaper_state("missing"));
+
+    char state_dir[300];
+    char state_file[320];
+    snprintf(state_dir, sizeof(state_dir), "%s/neowall", base);
+    snprintf(state_file, sizeof(state_file), "%s/state", state_dir);
+    unlink(state_file);
+    rmdir(state_dir);
+    rmdir(base);
+    unsetenv("XDG_STATE_HOME");
+}
+
 int main(void) {
     test_lerp();
     test_clamp();
@@ -217,6 +253,7 @@ int main(void) {
     test_expand_path();
     test_parse_index();
     test_secure_runtime_dir();
+    test_persisted_state_pruning();
 
     if (failures == 0) {
         printf("ok - %d checks passed\n", checks);

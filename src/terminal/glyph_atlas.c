@@ -14,6 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef NEOWALL_HAVE_FONTCONFIG
+#include <fontconfig/fontconfig.h>
+#endif
+
 /* Vendored single-header rasteriser. Only THIS translation unit defines the
  * implementation. See vendor/stb_truetype.h header for the public-domain
  * notice; it is trusted-input-only (we feed it a system font or a
@@ -98,6 +102,42 @@ static uint8_t *read_file(const char *path, size_t *out_len) {
     *out_len = (size_t)sz;
     return buf;
 }
+
+#ifdef NEOWALL_HAVE_FONTCONFIG
+/* Fontconfig keeps process-global caches after the final pattern is destroyed.
+ * Release them during normal process teardown so sanitizer runs and short-lived
+ * clients do not report library-owned leaks. All atlases are already dead by
+ * this point; the daemon never re-enters Fontconfig after exit teardown starts. */
+__attribute__((destructor)) static void fontconfig_process_cleanup(void) {
+    FcFini();
+}
+
+/* Resolve installed fonts through Fontconfig's library API. No subprocess,
+ * shell, or fc-match binary is required. Caller owns the returned path. */
+static char *fontconfig_match(const char *family, bool monospace, bool color) {
+    FcPattern *pat = FcPatternCreate();
+    if (!pat) return NULL;
+    if (family) FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)family);
+    if (monospace) FcPatternAddInteger(pat, FC_SPACING, FC_MONO);
+#ifdef FC_COLOR
+    if (color) FcPatternAddBool(pat, FC_COLOR, FcTrue);
+#else
+    (void)color;
+#endif
+    FcConfigSubstitute(NULL, pat, FcMatchPattern);
+    FcDefaultSubstitute(pat);
+    FcResult result = FcResultNoMatch;
+    FcPattern *match = FcFontMatch(NULL, pat, &result);
+    FcPatternDestroy(pat);
+    if (!match) return NULL;
+    FcChar8 *file = NULL;
+    char *path = NULL;
+    if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file)
+        path = strdup((const char *)file);
+    FcPatternDestroy(match);
+    return path;
+}
+#endif
 
 /* ---- atlas geometry ---- */
 #define ATLAS_W 2048
@@ -400,9 +440,15 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
         if (!face_init(&a->regular, copy, font_len, true, cell_h)) { free(a); return NULL; }
     } else {
         size_t len = 0; uint8_t *loaded = NULL;
-        for (int i = 0; kDefaultFontPaths[i]; i++) {
+#ifdef NEOWALL_HAVE_FONTCONFIG
+        char *system_path = fontconfig_match("monospace", true, false);
+        if (system_path) {
+            loaded = read_file(system_path, &len);
+            free(system_path);
+        }
+#endif
+        for (int i = 0; !loaded && kDefaultFontPaths[i]; i++) {
             loaded = read_file(kDefaultFontPaths[i], &len);
-            if (loaded) break;
         }
         if (!loaded) { free(a); return NULL; }
         /* face_init already freed `loaded` if it rejected the font. */
@@ -414,6 +460,15 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
     face_init_path(&a->italic, italic_path, cell_h);
 
     /* --- fallback chain for glyphs the primary lacks (CJK/symbols) --- */
+#ifdef NEOWALL_HAVE_FONTCONFIG
+    const char *fallback_families[] = {"Noto Sans Mono CJK", "Noto Sans Symbols 2", "sans-serif", NULL};
+    for (int i = 0; fallback_families[i] && a->fallback_count < MAX_FALLBACK; i++) {
+        char *path = fontconfig_match(fallback_families[i], false, false);
+        if (path && face_init_path(&a->fallback[a->fallback_count], path, cell_h))
+            a->fallback_count++;
+        free(path);
+    }
+#endif
     for (int i = 0; kFallbackFontPaths[i] && a->fallback_count < MAX_FALLBACK; i++) {
         if (face_init_path(&a->fallback[a->fallback_count], kFallbackFontPaths[i], cell_h))
             a->fallback_count++;
@@ -421,7 +476,20 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
 
     /* --- color emoji font (CBDT/CBLC or sbix), via the self-contained reader
      * since stb_truetype rejects outline-less fonts. First present one wins. */
-    for (int i = 0; kColorEmojiFontPaths[i]; i++) {
+#ifdef NEOWALL_HAVE_FONTCONFIG
+    char *emoji_path = fontconfig_match("emoji", false, true);
+    if (emoji_path) {
+        size_t elen = 0;
+        uint8_t *edata = read_file(emoji_path, &elen);
+        if (edata) {
+            cbdt_font *cf = cbdt_open(edata, elen);
+            if (cf) { a->emoji = cf; a->emoji_data = edata; }
+            else free(edata);
+        }
+        free(emoji_path);
+    }
+#endif
+    for (int i = 0; !a->emoji && kColorEmojiFontPaths[i]; i++) {
         size_t elen = 0;
         uint8_t *edata = read_file(kColorEmojiFontPaths[i], &elen);
         if (!edata) continue;

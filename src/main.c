@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <fcntl.h>
 #include <time.h>
 #include <sys/signalfd.h>
@@ -77,21 +78,31 @@ static bool write_set_index_file(int index) {
     return true;
 }
 
-/* Read the requested index from the file (called by daemon) */
+/* Claim the current mailbox entry by renaming it before reading. A writer may
+ * publish a newer entry immediately afterwards; unlinking our private name can
+ * therefore never delete that newer payload. Concurrent commands intentionally
+ * coalesce to the last payload that was published before a signal is handled. */
 int read_set_index_file(void) {
     const char *path = get_set_index_file_path();
-    FILE *fp = fopen(path, "r");
-    if (!fp) {
+    char claimed[MAX_PATH_LENGTH];
+    int n = snprintf(claimed, sizeof(claimed), "%s.take-%d", path, (int)getpid());
+    if (n < 0 || (size_t)n >= sizeof(claimed) || rename(path, claimed) != 0) {
         return -1;
     }
-    int index = -1;
-    if (fscanf(fp, "%d", &index) != 1) {
-        index = -1;
+    FILE *fp = fopen(claimed, "r");
+    if (!fp) {
+        unlink(claimed);
+        return -1;
     }
+    char line[64];
+    long parsed = -1;
+    bool valid = fgets(line, sizeof(line), fp) != NULL;
     fclose(fp);
-    /* Remove the file after reading */
-    unlink(path);
-    return index;
+    unlink(claimed);
+    if (!valid) return -1;
+    line[strcspn(line, "\r\n")] = '\0';
+    if (!neowall_parse_index(line, &parsed) || parsed > INT_MAX) return -1;
+    return (int)parsed;
 }
 
 /* Get path to the set-terminal command file. Mirrors get_set_index_file_path. */
@@ -158,20 +169,26 @@ static bool write_set_terminal_file(const char *cmd) {
     return true;
 }
 
-/* Read the requested terminal command from the file (called by daemon).
- * Copies up to out_len-1 bytes into out (always NUL-terminated), strips a
- * trailing newline, removes the file. Returns true on success. */
+/* Claim and read one exact terminal request. See read_set_index_file(): the
+ * private rename is the request identity, so consuming it cannot unlink a
+ * newer concurrently-published command. */
 bool read_set_terminal_file(char *out, size_t out_len) {
     if (!out || out_len == 0) return false;
     out[0] = '\0';
     const char *path = get_set_terminal_file_path();
-    FILE *fp = fopen(path, "r");
+    char claimed[MAX_PATH_LENGTH];
+    int n = snprintf(claimed, sizeof(claimed), "%s.take-%d", path, (int)getpid());
+    if (n < 0 || (size_t)n >= sizeof(claimed) || rename(path, claimed) != 0) {
+        return false;
+    }
+    FILE *fp = fopen(claimed, "r");
     if (!fp) {
+        unlink(claimed);
         return false;
     }
     char *line = fgets(out, (int)out_len, fp);
     fclose(fp);
-    unlink(path);
+    unlink(claimed);
     if (!line) {
         out[0] = '\0';
         return false;
@@ -185,11 +202,13 @@ bool read_set_terminal_file(char *out, size_t out_len) {
 }
 
 static struct neowall_state *global_state = NULL;
+static int pid_lock_fd = -1;
 
 /* Forward declarations */
 static void handle_crash(int signum);
 static const char *get_pid_file_path(void);
 static void remove_pid_file(void);
+static bool remove_stale_pid_file(void);
 static bool can_cycle_wallpaper(void);
 
 /* Command descriptor structure */
@@ -243,107 +262,89 @@ static const char *get_pid_file_path(void) {
     return pid_path;
 }
 
-/* Write PID file atomically.
- *
- * Race-free against concurrent neowall invocations: O_CREAT|O_EXCL ensures
- * only one process can create the file. If creation fails because the file
- * already exists, the caller is expected to look at the existing PID, decide
- * whether it's stale, and try again. */
-static bool write_pid_file(void) {
-    const char *pid_path = get_pid_file_path();
-    int fd = open(pid_path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
-    if (fd < 0) {
-        if (errno != EEXIST) {
-            log_error("Failed to create PID file %s: %s", pid_path, strerror(errno));
-        }
-        return false;
-    }
-
-    char buf[32];
-    int n = snprintf(buf, sizeof(buf), "%d\n", (int)getpid());
-    if (n <= 0 || write(fd, buf, (size_t)n) != n) {
-        log_error("Failed to write PID to %s: %s", pid_path, strerror(errno));
-        close(fd);
-        unlink(pid_path);
-        return false;
-    }
-    close(fd);
-
-    log_debug("Created PID file: %s", pid_path);
-    return true;
-}
-
-/* Rewrite the PID file in-place (no O_EXCL). Used by the daemonize grandchild
- * to record its own PID after the parent has already created the file. */
+/* Rewrite the PID through the already-locked descriptor. The open file
+ * description (and flock) survives both daemonization forks and remains held
+ * until shutdown, making singleton ownership independent of PID reuse. */
 static bool update_pid_file(void) {
     const char *pid_path = get_pid_file_path();
-    int fd = open(pid_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-    if (fd < 0) {
-        log_error("Failed to update PID file %s: %s", pid_path, strerror(errno));
+    int fd = pid_lock_fd;
+    if (fd < 0 || ftruncate(fd, 0) != 0 || lseek(fd, 0, SEEK_SET) < 0) {
+        log_error("Failed to update locked PID file %s: %s", pid_path, strerror(errno));
         return false;
     }
     char buf[32];
     int n = snprintf(buf, sizeof(buf), "%d\n", (int)getpid());
-    bool ok = (n > 0 && write(fd, buf, (size_t)n) == n);
-    close(fd);
-    if (!ok) {
-        log_error("Failed to write PID to %s: %s", pid_path, strerror(errno));
-    }
+    bool ok = n > 0 && write(fd, buf, (size_t)n) == n && fsync(fd) == 0;
+    if (!ok) log_error("Failed to write PID to %s: %s", pid_path, strerror(errno));
     return ok;
 }
 
-/* Remove PID file */
+/* Unlink path only while holding a lock on the exact inode currently named by
+ * it. This prevents a client observing an old PID and unlinking a replacement
+ * daemon's locked PID file. */
+static bool unlink_locked_pid_inode(int fd) {
+    const char *pid_path = get_pid_file_path();
+    struct stat opened, named;
+    if (fd < 0 || fstat(fd, &opened) != 0 || lstat(pid_path, &named) != 0 ||
+        opened.st_dev != named.st_dev || opened.st_ino != named.st_ino) {
+        return false;
+    }
+    return unlink(pid_path) == 0 || errno == ENOENT;
+}
+
+/* Client-side stale cleanup is permitted only after acquiring the stale
+ * inode's lock and verifying that the pathname still names that inode. */
+static bool remove_stale_pid_file(void) {
+    const char *pid_path = get_pid_file_path();
+    int fd = open(pid_path, O_RDWR | O_CLOEXEC);
+    if (fd < 0) return errno == ENOENT;
+    bool removed = false;
+    if (flock(fd, LOCK_EX | LOCK_NB) == 0)
+        removed = unlink_locked_pid_inode(fd);
+    close(fd);
+    return removed;
+}
+
+/* Remove PID file and release singleton ownership. */
 static void remove_pid_file(void) {
     const char *pid_path = get_pid_file_path();
-    if (unlink(pid_path) == 0) {
+    if (pid_lock_fd >= 0) {
+        (void)unlink_locked_pid_inode(pid_lock_fd);
+        close(pid_lock_fd);
+        pid_lock_fd = -1;
         log_debug("Removed PID file: %s", pid_path);
     }
 }
 
-/* Try to atomically claim the PID file. Returns true if we now own it.
- *
- * If the file already exists and points to a live process, returns false
- * (another daemon is running). If it points to a dead process or contains
- * garbage, unlinks it and tries once more. This collapses the old
- * is_daemon_running() + write_pid_file() TOCTOU into a single race-free
- * sequence. */
+/* Claim and exclusively lock the PID file. flock is attached to the open file
+ * description and therefore survives the daemonization forks. A stale file is
+ * harmless: only the held lock denotes a live daemon. */
 static bool try_take_pid_file(pid_t *existing_pid_out) {
     const char *pid_path = get_pid_file_path();
-
-    for (int attempt = 0; attempt < 2; attempt++) {
-        if (write_pid_file()) {
-            return true;
-        }
-        /* EEXIST: someone else owns the file. Check who. */
-        FILE *fp = fopen(pid_path, "r");
-        if (!fp) {
-            /* Vanished between failing O_EXCL and our open — retry. */
-            continue;
-        }
-        pid_t pid = 0;
-        int got = fscanf(fp, "%d", &pid);
-        fclose(fp);
-        if (got != 1 || pid <= 0) {
-            log_debug("PID file %s contains garbage, removing", pid_path);
-            unlink(pid_path);
-            continue;
-        }
-        if (kill(pid, 0) == 0) {
-            /* Live. We're not the daemon. */
-            if (existing_pid_out) *existing_pid_out = pid;
-            return false;
-        }
-        if (errno == ESRCH) {
-            log_debug("Stale PID file found (PID %d not running), removing", pid);
-            unlink(pid_path);
-            continue;
-        }
-        /* EPERM or similar — process exists, just not ours to signal. */
-        if (existing_pid_out) *existing_pid_out = pid;
+    int fd = open(pid_path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) {
+        log_error("Failed to open PID file %s: %s", pid_path, strerror(errno));
         return false;
     }
-    log_error("Failed to claim PID file after retries");
-    return false;
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        FILE *fp = fdopen(dup(fd), "r");
+        long parsed = 0;
+        char line[64];
+        if (fp && fgets(line, sizeof(line), fp)) {
+            line[strcspn(line, "\r\n")] = '\0';
+            if (neowall_parse_index(line, &parsed) && parsed <= INT_MAX && existing_pid_out)
+                *existing_pid_out = (pid_t)parsed;
+        }
+        if (fp) fclose(fp);
+        close(fd);
+        return false;
+    }
+    pid_lock_fd = fd;
+    if (!update_pid_file()) {
+        remove_pid_file();
+        return false;
+    }
+    return true;
 }
 
 /* Check if daemon is already running (read-only — may return stale info if
@@ -374,7 +375,7 @@ static bool kill_daemon(void) {
     if (kill(pid, 0) == -1) {
         if (errno == ESRCH) {
             printf("NeoWall daemon (PID %d) is not running. Cleaning up stale PID file.\n", pid);
-            remove_pid_file();
+            remove_stale_pid_file();
             return false;
         }
     }
@@ -392,7 +393,7 @@ static bool kill_daemon(void) {
     while (attempts < 50) {  /* Wait up to 5 seconds */
         if (kill(pid, 0) == -1 && errno == ESRCH) {
             printf("NeoWall daemon stopped successfully.\n");
-            remove_pid_file();
+            remove_stale_pid_file();
             return true;
         }
         nanosleep(&sleep_time, NULL);
@@ -403,7 +404,7 @@ static bool kill_daemon(void) {
     printf("Daemon didn't stop gracefully, forcing...\n");
     if (kill(pid, SIGKILL) == 0) {
         printf("NeoWall daemon killed.\n");
-        remove_pid_file();
+        remove_stale_pid_file();
         return true;
     }
 
@@ -502,7 +503,7 @@ static bool send_daemon_signal(int signal, const char *action, bool check_cycle)
     if (kill(pid, 0) == -1) {
         if (errno == ESRCH) {
             printf("NeoWall daemon (PID %d) is not running.\n", pid);
-            remove_pid_file();
+            remove_stale_pid_file();
             return false;
         }
     }
@@ -656,11 +657,11 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
 
         case SIGHUP:
             log_info("Received SIGHUP, reloading configuration from %s", state->config_path);
-            /* Reload re-runs config_load on the daemon's known config_path.
-             * config_load is best-effort: on failure it falls through to the
-             * built-in default, so a broken config never wedges the daemon. */
-            if (!config_load(state, state->config_path)) {
-                log_error("Reload failed; built-in defaults remain in effect");
+            /* Reload is last-known-good: the complete file is validated before
+             * any global or output config is applied, and failures never invoke
+             * the startup-only built-in fallback. */
+            if (!config_reload(state, state->config_path)) {
+                log_error("Reload failed; previous configuration remains in effect");
             } else {
                 log_info("Configuration reloaded");
             }
@@ -690,12 +691,16 @@ void handle_signal_from_fd(struct neowall_state *state, int signum) {
                  * apply it (which kills the old child + spawns the new). */
                 char buf[512];
                 if (read_set_terminal_file(buf, sizeof(buf))) {
+                    /* Publish payload + generation flag as one mutex-protected
+                     * transaction. The renderer exchanges the flag while
+                     * holding this same lock, so it can never clear generation
+                     * N after copying generation N+1's payload. */
                     pthread_mutex_lock(&state->state_mutex);
                     snprintf(state->pending_terminal_cmd,
                              sizeof(state->pending_terminal_cmd), "%s", buf);
-                    pthread_mutex_unlock(&state->state_mutex);
                     atomic_store_explicit(&state->set_terminal_requested, true,
                                           memory_order_release);
+                    pthread_mutex_unlock(&state->state_mutex);
                     log_info("Received SIGRTMIN+3, swapping terminal wallpaper to: %s", buf);
                 } else {
                     log_error("Received SIGRTMIN+3 but no valid terminal command file found");
@@ -857,9 +862,9 @@ static bool daemonize(void) {
         close(devnull);
     }
 
-    /* Write PID file */
+    /* Publish the final daemon PID while retaining the inherited lock. */
     if (!update_pid_file()) {
-        log_error("Failed to write PID file, but continuing anyway");
+        return false;
     }
 
     return true;
@@ -979,7 +984,7 @@ int main(int argc, char *argv[]) {
             /* Check if process exists */
             if (kill(pid, 0) == -1 && errno == ESRCH) {
                 printf("NeoWall daemon (PID %d) is not running.\n", pid);
-                remove_pid_file();
+                remove_stale_pid_file();
                 return EXIT_FAILURE;
             }
 
@@ -1063,7 +1068,7 @@ int main(int argc, char *argv[]) {
 
             if (kill(pid, 0) == -1 && errno == ESRCH) {
                 printf("NeoWall daemon (PID %d) is not running.\n", pid);
-                remove_pid_file();
+                remove_stale_pid_file();
                 return EXIT_FAILURE;
             }
 
@@ -1207,6 +1212,7 @@ int main(int argc, char *argv[]) {
     atomic_init(&state.set_terminal_requested, false);
     state.pending_terminal_cmd[0] = '\0';
     atomic_init(&state.mouse_interaction, true);  /* default: pointer enabled, override from config */
+    atomic_init(&state.term_raw_input, false);    /* default: drop signal/EOF keys so a stray Ctrl-C can't kill the wallpaper app */
     state.timer_fd = -1;
     state.wakeup_fd = -1;
     /* snprintf guarantees NUL-termination and silences GCC -O2
@@ -1221,6 +1227,7 @@ int main(int argc, char *argv[]) {
     state.signal_fd = setup_signalfd();
     if (state.signal_fd < 0) {
         log_error("Failed to set up signal handling");
+        remove_pid_file();
         return EXIT_FAILURE;
     }
 
@@ -1231,6 +1238,7 @@ int main(int argc, char *argv[]) {
         log_error("Failed to initialize compositor backend");
         log_error("Ensure you're running under a Wayland compositor or X11 window manager");
         close(state.signal_fd);
+        remove_pid_file();
         return EXIT_FAILURE;
     }
 
@@ -1242,6 +1250,7 @@ int main(int argc, char *argv[]) {
         log_error("Failed to initialize EGL");
         compositor_backend_cleanup(state.compositor_backend);
         close(state.signal_fd);
+        remove_pid_file();
         return EXIT_FAILURE;
     }
 
@@ -1251,6 +1260,7 @@ int main(int argc, char *argv[]) {
         egl_core_cleanup(&state);
         compositor_backend_cleanup(state.compositor_backend);
         close(state.signal_fd);
+        remove_pid_file();
         return EXIT_FAILURE;
     }
 

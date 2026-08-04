@@ -571,18 +571,17 @@ static bool kde_dispatch_events(void *data) {
     return wl_display_dispatch_pending(wl->display) >= 0;
 }
 
-static bool kde_flush(void *data) {
+static compositor_flush_result_t kde_flush(void *data) {
     (void)data;
     wayland_t *wl = wayland_get();
     if (!wl || !wl->display) {
-        return false;
+        return COMPOSITOR_FLUSH_FATAL;
     }
 
-    int ret = wl_display_flush(wl->display);
-    if (ret < 0 && errno != EAGAIN) {
-        return false;
+    if (wl_display_flush(wl->display) >= 0) {
+        return COMPOSITOR_FLUSH_OK;
     }
-    return true;
+    return errno == EAGAIN ? COMPOSITOR_FLUSH_BLOCKED : COMPOSITOR_FLUSH_FATAL;
 }
 
 static void kde_cancel_read(void *data) {

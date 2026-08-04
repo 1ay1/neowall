@@ -29,10 +29,10 @@
 
 /* ------------------------------------------------------------------------ */
 
-#define TERM_MIN_COLS 1
-#define TERM_MIN_ROWS 1
-#define TERM_MAX_COLS 1024
-#define TERM_MAX_ROWS 512
+#define TERM_MIN_COLS TERM_SCREEN_MIN_COLS
+#define TERM_MIN_ROWS TERM_SCREEN_MIN_ROWS
+#define TERM_MAX_COLS TERM_SCREEN_MAX_COLS
+#define TERM_MAX_ROWS TERM_SCREEN_MAX_ROWS
 #define TAB_WIDTH_DEFAULT 8
 
 typedef struct {
@@ -116,7 +116,24 @@ static term_cell *cell_at(term_screen *s, int x, int y) {
     return &s->cells[(size_t)y * s->cols + x];
 }
 
+static void clear_wide_pair_at(term_screen *s, int x, int y) {
+    if (x < 0 || x >= s->cols || y < 0 || y >= s->rows) return;
+    term_cell b = blank_cell(s);
+    term_cell *c = cell_at(s, x, y);
+    if (c->attr & TERM_ATTR_WIDE_TAIL) {
+        *c = b;
+        if (x > 0) *cell_at(s, x - 1, y) = b;
+    } else if (x + 1 < s->cols &&
+               (cell_at(s, x + 1, y)->attr & TERM_ATTR_WIDE_TAIL)) {
+        *c = b;
+        *cell_at(s, x + 1, y) = b;
+    }
+}
+
 static void row_fill_blank(term_screen *s, int y, int x0, int x1) {
+    /* Erasing either half of a wide glyph must erase the pair. */
+    if (x0 >= 0 && x0 < s->cols) clear_wide_pair_at(s, x0, y);
+    if (x1 >= 0 && x1 < s->cols) clear_wide_pair_at(s, x1, y);
     term_cell b = blank_cell(s);
     for (int x = x0; x <= x1 && x < s->cols; x++) {
         if (x < 0) continue;
@@ -216,6 +233,11 @@ static void put_glyph(term_screen *s, uint32_t cp) {
             s->cur.x = s->cols - 2 >= 0 ? s->cols - 2 : 0;
         }
     }
+
+    /* Replacing either half of an existing wide glyph invalidates both cells. */
+    clear_wide_pair_at(s, s->cur.x, s->cur.y);
+    if (w == 2 && s->cur.x + 1 < s->cols)
+        clear_wide_pair_at(s, s->cur.x + 1, s->cur.y);
 
     term_cell *c = cell_at(s, s->cur.x, s->cur.y);
     c->cp = cp;
@@ -725,15 +747,16 @@ size_t term_screen_take_reply(term_screen *s, char *out, size_t cap) {
 /* Resize: reallocate grids, preserving the top-left overlap of the primary
  * screen. Simple and correct; full reflow (rewrapping soft-wrapped lines) is a
  * later refinement. */
-void term_screen_resize(term_screen *s, int cols, int rows) {
+bool term_screen_resize(term_screen *s, int cols, int rows) {
+    if (!s) return false;
     cols = clampi(cols, TERM_MIN_COLS, TERM_MAX_COLS);
     rows = clampi(rows, TERM_MIN_ROWS, TERM_MAX_ROWS);
-    if (cols == s->cols && rows == s->rows) return;
+    if (cols == s->cols && rows == s->rows) return true;
 
     term_cell *np = calloc((size_t)cols * rows, sizeof(term_cell));
     term_cell *na = calloc((size_t)cols * rows, sizeof(term_cell));
     bool *nt = calloc((size_t)cols, sizeof(bool));
-    if (!np || !na || !nt) { free(np); free(na); free(nt); return; }
+    if (!np || !na || !nt) { free(np); free(na); free(nt); return false; }
 
     int copy_rows = rows < s->rows ? rows : s->rows;
     int copy_cols = cols < s->cols ? cols : s->cols;
@@ -750,6 +773,25 @@ void term_screen_resize(term_screen *s, int cols, int rows) {
     s->cur.x = clampi(s->cur.x, 0, cols - 1);
     s->cur.y = clampi(s->cur.y, 0, rows - 1);
     reset_tabstops(s);
+    /* A shrink can retain a wide tail while its head remains immediately
+     * before it, or retain a head while dropping its tail. Clear the complete
+     * pair in either case on both grids. */
+    for (int y = 0; y < rows; y++) {
+        term_cell *grids[] = {
+            &s->primary[(size_t)y * cols],
+            &s->alternate[(size_t)y * cols],
+        };
+        for (size_t g = 0; g < sizeof(grids) / sizeof(grids[0]); g++) {
+            term_cell *row = grids[g];
+            if (row[cols - 1].attr & TERM_ATTR_WIDE_TAIL) {
+                row[cols - 1] = blank_cell(s);
+                if (cols > 1) row[cols - 2] = blank_cell(s);
+            } else if (char_width(row[cols - 1].cp) == 2) {
+                row[cols - 1] = blank_cell(s);
+            }
+        }
+    }
+    return true;
 }
 
 char *term_screen_dump_text(const term_screen *s) {

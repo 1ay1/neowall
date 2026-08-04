@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <limits.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
@@ -630,12 +632,120 @@ static void x11_backend_cleanup(void *backend_data) {
  * SURFACE CREATION
  * ============================================================================ */
 
+/* X11 window/pixmap dimensions are CARD16 values. Keeping all size-dependent
+ * allocations behind one validator also prevents signed-to-unsigned surprises
+ * and width * height * bytes-per-pixel overflow. */
+static bool x11_valid_surface_size(int32_t width, int32_t height) {
+    return width > 0 && height > 0 &&
+           (uint32_t)width <= UINT16_MAX && (uint32_t)height <= UINT16_MAX;
+}
+
+static void x11_destroy_readback(Display *dpy, Pixmap pixmap, XImage *ximage) {
+    if (ximage) {
+        /* XDestroyImage owns and frees image->data when it is non-NULL. */
+        XDestroyImage(ximage);
+    }
+    if (pixmap) {
+        XFreePixmap(dpy, pixmap);
+    }
+}
+
+/* Build all size-dependent readback objects without touching the live surface.
+ * XCreateImage first computes the server-compatible stride; its data is then
+ * allocated to that exact size and transferred to XDestroyImage ownership. */
+static bool x11_allocate_readback(x11_backend_data_t *backend,
+                                  int32_t width, int32_t height,
+                                  Pixmap *pixmap_out, XImage **ximage_out,
+                                  unsigned char **pixels_out) {
+    *pixmap_out = 0;
+    *ximage_out = NULL;
+    *pixels_out = NULL;
+
+    if (!x11_valid_surface_size(width, height)) {
+        log_error("Invalid X11 surface size: %dx%d", width, height);
+        return false;
+    }
+
+    Display *dpy = backend->x_display;
+    Pixmap pixmap = XCreatePixmap(dpy, backend->root_window,
+                                  (unsigned int)width, (unsigned int)height,
+                                  (unsigned int)DefaultDepth(dpy, backend->screen));
+    if (!pixmap) {
+        log_error("Failed to create %dx%d root pixmap", width, height);
+        return false;
+    }
+
+    XImage *ximage = XCreateImage(dpy, DefaultVisual(dpy, backend->screen),
+                                  (unsigned int)DefaultDepth(dpy, backend->screen),
+                                  ZPixmap, 0, NULL,
+                                  (unsigned int)width, (unsigned int)height,
+                                  32, 0);
+    if (!ximage) {
+        log_error("Failed to create %dx%d XImage", width, height);
+        XFreePixmap(dpy, pixmap);
+        return false;
+    }
+
+    size_t row_bytes = (size_t)width * 4u;
+    if (ximage->bits_per_pixel != 32 || ximage->bytes_per_line < 0 ||
+        (size_t)ximage->bytes_per_line != row_bytes ||
+        (size_t)ximage->bytes_per_line > SIZE_MAX / (size_t)height) {
+        log_error("Unsupported or overflowing XImage layout for %dx%d", width, height);
+        XDestroyImage(ximage); /* data is still NULL */
+        XFreePixmap(dpy, pixmap);
+        return false;
+    }
+
+    size_t image_bytes = (size_t)ximage->bytes_per_line * (size_t)height;
+    unsigned char *pixels = malloc(image_bytes);
+    if (!pixels) {
+        log_error("Failed to allocate %zu-byte X11 pixel buffer", image_bytes);
+        XDestroyImage(ximage); /* data is still NULL */
+        XFreePixmap(dpy, pixmap);
+        return false;
+    }
+    ximage->data = (char *)pixels;
+
+    *pixmap_out = pixmap;
+    *ximage_out = ximage;
+    *pixels_out = pixels;
+    return true;
+}
+
+static bool x11_replace_readback(struct compositor_surface *surface,
+                                 x11_backend_data_t *backend,
+                                 x11_surface_data_t *surf_data,
+                                 int32_t width, int32_t height) {
+    Pixmap new_pixmap;
+    XImage *new_ximage;
+    unsigned char *new_pixels;
+    if (!x11_allocate_readback(backend, width, height,
+                               &new_pixmap, &new_ximage, &new_pixels)) {
+        return false;
+    }
+
+    Pixmap old_pixmap = surf_data->root_pixmap;
+    XImage *old_ximage = surf_data->ximage;
+    surf_data->root_pixmap = new_pixmap;
+    surf_data->ximage = new_ximage;
+    surf_data->pixel_buffer = new_pixels;
+
+    if (backend->published_root_pixmap == old_pixmap) {
+        x11_unpublish_root_pixmap(backend);
+    }
+    x11_destroy_readback(backend->x_display, old_pixmap, old_ximage);
+    surface->width = width;
+    surface->height = height;
+    surface->committed = false;
+    return true;
+}
+
 static struct compositor_surface *x11_create_surface(void *backend_data,
                                                      const compositor_surface_config_t *config) {
     x11_backend_data_t *backend = backend_data;
 
-    if (!backend || !backend->initialized) {
-        log_error("X11 backend not initialized");
+    if (!backend || !backend->initialized || !config) {
+        log_error("X11 backend not initialized or surface config missing");
         return NULL;
     }
 
@@ -668,39 +778,33 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
     int pos_x = config->x;
     int pos_y = config->y;
 
+    if (!x11_valid_surface_size(width, height)) {
+        log_error("Invalid X11 wallpaper geometry: %dx%d", width, height);
+        free(surf_data);
+        free(surface);
+        return NULL;
+    }
+
     log_debug("Creating X11 wallpaper window: %dx%d at +%d+%d", width, height, pos_x, pos_y);
 
-    /* Create pixmap for root window background (for Conky pseudo-transparency) */
-    surf_data->root_pixmap = XCreatePixmap(backend->x_display, backend->root_window,
-                                           width, height,
-                                           DefaultDepth(backend->x_display, backend->screen));
-    if (!surf_data->root_pixmap) {
-        log_error("Failed to create root pixmap for wallpaper");
+    if (!x11_allocate_readback(backend, width, height,
+                               &surf_data->root_pixmap, &surf_data->ximage,
+                               &surf_data->pixel_buffer)) {
         free(surf_data);
         free(surface);
         return NULL;
     }
 
-    /* Create graphics context for copying rendered content */
-    surf_data->gc = XCreateGC(backend->x_display, backend->root_window, 0, NULL);
-
-    /* Allocate pixel buffer for glReadPixels */
-    surf_data->pixel_buffer = malloc(width * height * 4);  /* RGBA */
-    if (!surf_data->pixel_buffer) {
-        log_error("Failed to allocate pixel buffer");
-        XFreePixmap(backend->x_display, surf_data->root_pixmap);
-        XFreeGC(backend->x_display, surf_data->gc);
+    /* Create graphics context for copying rendered content. */
+    surf_data->gc = XCreateGC(backend->x_display, surf_data->root_pixmap, 0, NULL);
+    if (!surf_data->gc) {
+        log_error("Failed to create X11 graphics context");
+        x11_destroy_readback(backend->x_display, surf_data->root_pixmap,
+                             surf_data->ximage);
         free(surf_data);
         free(surface);
         return NULL;
     }
-
-    /* Create XImage for putting pixels to pixmap */
-    surf_data->ximage = XCreateImage(backend->x_display,
-                                     DefaultVisual(backend->x_display, backend->screen),
-                                     DefaultDepth(backend->x_display, backend->screen),
-                                     ZPixmap, 0, (char *)surf_data->pixel_buffer,
-                                     width, height, 32, 0);
 
     /* Create a fullscreen window at the bottom of the stack */
     XSetWindowAttributes attrs;
@@ -725,6 +829,9 @@ static struct compositor_surface *x11_create_surface(void *backend_data,
 
     if (!surf_data->x_window) {
         log_error("Failed to create X11 wallpaper window");
+        XFreeGC(backend->x_display, surf_data->gc);
+        x11_destroy_readback(backend->x_display, surf_data->root_pixmap,
+                             surf_data->ximage);
         free(surf_data);
         free(surface);
         return NULL;
@@ -826,34 +933,26 @@ static void x11_destroy_surface(struct compositor_surface *surface) {
             surf_data->egl_surface = EGL_NO_SURFACE;
         }
 
-        /* Clean up graphics context and pixmap */
+        /* Destroy the wallpaper window first, then its client/server-side
+         * support objects in strict reverse creation order. */
+        if (surf_data->x_window && backend && backend->x_display) {
+            XDestroyWindow(backend->x_display, surf_data->x_window);
+        }
+
         if (backend && backend->x_display) {
             if (surf_data->gc) {
                 XFreeGC(backend->x_display, surf_data->gc);
             }
-            if (surf_data->root_pixmap) {
-                /* Withdraw the advertisement first: after XFreePixmap the XID is
-                 * invalid, and nothing republishes until the replacement surface's
-                 * first rendered commit. */
-                if (backend->published_root_pixmap == surf_data->root_pixmap) {
-                    x11_unpublish_root_pixmap(backend);
-                }
-                XFreePixmap(backend->x_display, surf_data->root_pixmap);
+            if (surf_data->root_pixmap &&
+                backend->published_root_pixmap == surf_data->root_pixmap) {
+                x11_unpublish_root_pixmap(backend);
             }
-            if (surf_data->ximage) {
-                surf_data->ximage->data = NULL;  /* Don't let XDestroyImage free our buffer */
-                XDestroyImage(surf_data->ximage);
-            }
-        }
-
-        if (surf_data->pixel_buffer) {
-            free(surf_data->pixel_buffer);
-        }
-
-        /* Destroy the wallpaper window */
-        if (surf_data->x_window && backend && backend->x_display) {
-            XDestroyWindow(backend->x_display, surf_data->x_window);
+            x11_destroy_readback(backend->x_display, surf_data->root_pixmap,
+                                 surf_data->ximage);
             XFlush(backend->x_display);
+        } else if (surf_data->ximage) {
+            /* XDestroyImage is local and remains responsible for image data. */
+            XDestroyImage(surf_data->ximage);
         }
 
         free(surf_data);
@@ -882,20 +981,35 @@ static bool x11_configure_surface(struct compositor_surface *surface,
 
     log_debug("Configuring X11 surface");
 
-    /* Update configuration */
-    surface->config = *config;
-
-    /* Resize window if dimensions changed */
-    if (config->width > 0 && config->height > 0) {
-        if (surface->width != config->width || surface->height != config->height) {
-            XResizeWindow(backend->x_display, surf_data->x_window,
-                         config->width, config->height);
-            surface->width = config->width;
-            surface->height = config->height;
-
-            log_debug("Resized X11 window to %dx%d", config->width, config->height);
-        }
+    /* Move/resize the monitor window as one X request so RandR geometry
+     * reconciliation cannot expose an intermediate position/size pair. */
+    int32_t target_x = config->x;
+    int32_t target_y = config->y;
+    int32_t target_w = config->width > 0 ? config->width : surface->width;
+    int32_t target_h = config->height > 0 ? config->height : surface->height;
+    if (!x11_valid_surface_size(target_w, target_h)) {
+        log_error("Invalid X11 configure size: %dx%d", target_w, target_h);
+        return false;
     }
+
+    bool size_changed = surface->width != target_w || surface->height != target_h;
+    if (size_changed &&
+        !x11_replace_readback(surface, backend, surf_data, target_w, target_h)) {
+        return false;
+    }
+
+    if (surface->x != target_x || surface->y != target_y || size_changed) {
+        XMoveResizeWindow(backend->x_display, surf_data->x_window,
+                          target_x, target_y,
+                          (unsigned int)target_w, (unsigned int)target_h);
+        surface->x = target_x;
+        surface->y = target_y;
+        log_debug("Moved/resized X11 window to %dx%d at +%d+%d",
+                  target_w, target_h, target_x, target_y);
+    }
+
+    /* Commit configuration only after every replacement allocation succeeds. */
+    surface->config = *config;
 
     /* Ensure window stays at bottom of stack */
     XLowerWindow(backend->x_display, surf_data->x_window);
@@ -1248,6 +1362,17 @@ static bool x11_create_egl_window(struct compositor_surface *surface,
     x11_surface_data_t *surf_data = surface->backend_data;
 
     if (!surf_data || !surface->backend) return false;
+    x11_backend_data_t *backend =
+        surface->backend ? (x11_backend_data_t *)surface->backend->data : NULL;
+    if (!backend || !backend->x_display || !x11_valid_surface_size(width, height)) {
+        log_error("Invalid X11 EGL window size: %dx%d", width, height);
+        return false;
+    }
+
+    if ((surface->width != width || surface->height != height) &&
+        !x11_replace_readback(surface, backend, surf_data, width, height)) {
+        return false;
+    }
 
     log_debug("Creating EGL surface for X11 window");
 
@@ -1292,9 +1417,18 @@ static bool x11_resize_egl_window(struct compositor_surface *surface,
     x11_backend_data_t *backend = surface->backend ? (x11_backend_data_t *)surface->backend->data : NULL;
     if (!backend || !backend->x_display) return false;
 
-    /* Resize the X11 window */
+    if (!x11_valid_surface_size(width, height)) {
+        log_error("Invalid X11 resize size: %dx%d", width, height);
+        return false;
+    }
+
+    if ((surface->width != width || surface->height != height) &&
+        !x11_replace_readback(surface, backend, surf_data, width, height)) {
+        return false;
+    }
+
     XResizeWindow(backend->x_display, surf_data->x_window,
-                 (unsigned int)width, (unsigned int)height);
+                  (unsigned int)width, (unsigned int)height);
     XFlush(backend->x_display);
 
     return true;
@@ -1496,6 +1630,8 @@ static struct output_state *x11_make_output(struct neowall_state *state,
     out->logical_height = mon->height;
     out->scale = 1;
     out->configured = true;
+    atomic_init(&out->needs_redraw, true);
+    atomic_init(&out->occluded, false);
     atomic_init(&out->refcount, 1);  /* the output list's reference */
 
     out->config = calloc(1, sizeof(struct wallpaper_config));
@@ -1526,12 +1662,16 @@ static struct output_state *x11_make_output(struct neowall_state *state,
     out->preload_texture = 0;
     out->preload_image = NULL;
     out->preload_path[0] = '\0';
-    atomic_store(&out->preload_ready, false);
+    atomic_init(&out->preload_ready, false);
 
     pthread_mutex_init(&out->preload_mutex, NULL);
     out->preload_decoded_image = NULL;
-    atomic_store(&out->preload_thread_active, false);
-    atomic_store(&out->preload_upload_pending, false);
+    atomic_init(&out->preload_thread_active, false);
+    atomic_init(&out->preload_thread_join_pending, false);
+    atomic_init(&out->preload_should_stop, false);
+    atomic_init(&out->preprocessing_generation, 1);
+    atomic_init(&out->geometry_change_pending, false);
+    atomic_init(&out->preload_upload_pending, false);
 
     out->fps_last_log_time = 0;
     out->fps_frame_count = 0;
@@ -1635,6 +1775,11 @@ static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
  * HOTPLUG RECONCILE (RRScreenChangeNotify)
  * ============================================================================ */
 
+/* True if an output represents this physical connector. */
+static bool x11_mon_same_name(const struct output_state *o, const x11_monitor_t *m) {
+    return strncmp(o->connector_name, m->name, sizeof(o->connector_name)) == 0;
+}
+
 /* True if an output's geometry matches a freshly-enumerated monitor. */
 static bool x11_mon_matches(const struct output_state *o, const x11_monitor_t *m) {
     if (strncmp(o->connector_name, m->name, sizeof(o->connector_name)) != 0) {
@@ -1683,16 +1828,15 @@ static void x11_reconcile_outputs(x11_backend_data_t *backend) {
     x11_monitor_t mons[MAX_OUTPUTS];
     int n = x11_enumerate_monitors(backend, mons, MAX_OUTPUTS);
 
-    /* Pass 1: collect outputs whose monitor no longer matches (removed or
-     * geometry-changed). Take a transient ref so the unlink+teardown below is
-     * safe even if another thread also holds the output. */
+    /* Pass 1: collect outputs whose physical connector vanished. Geometry
+     * changes are reconciled in place below so live GL/render state survives. */
     struct output_state *stale[MAX_OUTPUTS];
     int n_stale = 0;
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o && n_stale < MAX_OUTPUTS; o = o->next) {
         bool found = false;
         for (int i = 0; i < n; i++) {
-            if (x11_mon_matches(o, &mons[i])) { found = true; break; }
+            if (x11_mon_same_name(o, &mons[i])) { found = true; break; }
         }
         if (!found) {
             output_ref(o);
@@ -1717,16 +1861,59 @@ static void x11_reconcile_outputs(x11_backend_data_t *backend) {
             unlinked = true;
         }
         pthread_rwlock_unlock(&state->output_list_lock);
-        if (unlinked) output_unref(o);  /* drop the list's reference */
+        if (unlinked) {
+            if (!remove_wallpaper_state(o->connector_name)) {
+                log_warn("Hotplug: failed to remove persisted state for %s",
+                         o->connector_name);
+            }
+            output_unref(o);  /* drop the list's reference */
+        }
         output_unref(o);                /* drop our transient ref */
     }
 
-    /* Pass 2: add outputs for monitors that have no matching output yet. */
+    /* Pass 2: resize/reposition surviving physical outputs in place. */
+    for (int i = 0; i < n; i++) {
+        struct output_state *out = NULL;
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        for (struct output_state *o = state->outputs; o; o = o->next) {
+            if (x11_mon_same_name(o, &mons[i])) {
+                output_ref(o);
+                out = o;
+                break;
+            }
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
+        if (!out) continue;
+
+        if (!x11_mon_matches(out, &mons[i])) {
+            compositor_surface_config_t config = out->compositor_surface->config;
+            config.x = mons[i].x;
+            config.y = mons[i].y;
+            config.width = mons[i].width;
+            config.height = mons[i].height;
+            if (compositor_surface_configure(out->compositor_surface, &config)) {
+                out->x_offset = mons[i].x;
+                out->y_offset = mons[i].y;
+                out->width = out->pixel_width = out->logical_width = mons[i].width;
+                out->height = out->pixel_height = out->logical_height = mons[i].height;
+                output_notify_geometry_change(out);
+                log_info("Hotplug: resized output %s to %dx%d at +%d+%d",
+                         out->connector_name, out->width, out->height,
+                         out->x_offset, out->y_offset);
+            } else {
+                log_warn("Hotplug: failed to reconcile geometry for %s",
+                         out->connector_name);
+            }
+        }
+        output_unref(out);
+    }
+
+    /* Pass 3: add outputs for monitors that have no physical output yet. */
     for (int i = 0; i < n; i++) {
         bool present = false;
         pthread_rwlock_rdlock(&state->output_list_lock);
         for (struct output_state *o = state->outputs; o; o = o->next) {
-            if (x11_mon_matches(o, &mons[i])) { present = true; break; }
+            if (x11_mon_same_name(o, &mons[i])) { present = true; break; }
         }
         pthread_rwlock_unlock(&state->output_list_lock);
         if (present) continue;
@@ -2087,14 +2274,14 @@ static bool x11_dispatch_events(void *backend_data) {
 }
 
 
-static bool x11_flush(void *backend_data) {
+static compositor_flush_result_t x11_flush(void *backend_data) {
     x11_backend_data_t *backend = backend_data;
     if (!backend || !backend->x_display) {
-        return false;
+        return COMPOSITOR_FLUSH_FATAL;
     }
 
     XFlush(backend->x_display);
-    return true;
+    return COMPOSITOR_FLUSH_OK;
 }
 
 static void x11_cancel_read(void *backend_data) {

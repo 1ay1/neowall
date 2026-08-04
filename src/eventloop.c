@@ -155,9 +155,22 @@ static void render_outputs(struct neowall_state *state) {
 
     uint64_t current_time = get_time_ms();
 
-    /* Check if there are any pending next requests - cycle ALL outputs with matching configs */
+    /* Snapshot pending commands. A terminal request is claimed while holding
+     * the same mutex producers use to publish its payload. Clearing the flag
+     * here (rather than after the long render pass) means a newer request
+     * arriving during rendering remains pending for the next pass. */
     int next_count = atomic_load_explicit(&state->next_requested, memory_order_acquire);
-    int set_index = atomic_load_explicit(&state->set_index_requested, memory_order_acquire);
+    int set_index = atomic_exchange_explicit(&state->set_index_requested, -1,
+                                             memory_order_acq_rel);
+    bool terminal_requested = false;
+    char terminal_cmd[512] = {0};
+    pthread_mutex_lock(&state->state_mutex);
+    terminal_requested = atomic_exchange_explicit(&state->set_terminal_requested, false,
+                                                  memory_order_acq_rel);
+    if (terminal_requested) {
+        snprintf(terminal_cmd, sizeof(terminal_cmd), "%s", state->pending_terminal_cmd);
+    }
+    pthread_mutex_unlock(&state->state_mutex);
     bool processed_next = false;
     bool processed_set_index = false;
     bool has_cycleable_output = false;
@@ -220,38 +233,21 @@ static void render_outputs(struct neowall_state *state) {
          * index, a hotplug part-way through a cycle — so converge them here. */
         outputs_sync_span_group(outputs_snapshot, output_n, idx);
 
-        /* Handle set-index request - set ALL outputs with same config to the specified index */
-        if (set_index >= 0 && !processed_set_index && output->config->cycle && output->config->cycle_count > 0) {
-            int set_count = 0;
-            for (size_t j = idx; j < output_n; j++) {
-                struct output_state *sync_output = outputs_snapshot[j];
-                bool same_config = (sync_output->config->cycle &&
-                                   sync_output->config->cycle_count == output->config->cycle_count);
-                if (same_config && sync_output->config->cycle_paths && output->config->cycle_paths) {
-                    for (size_t i = 0; i < output->config->cycle_count && same_config; i++) {
-                        if (strcmp(sync_output->config->cycle_paths[i], output->config->cycle_paths[i]) != 0) {
-                            same_config = false;
-                        }
-                    }
-                }
-                if (same_config) {
-                    if ((size_t)set_index < sync_output->config->cycle_count) {
-                        log_debug("Setting wallpaper index %d for output %s (synchronized)",
-                                 set_index, sync_output->model[0] ? sync_output->model : "unknown");
-                        output_set_cycle_index(sync_output, (size_t)set_index);
-                        set_count++;
-                    } else {
-                        log_error("Index %d out of bounds for output %s (max: %zu)",
-                                 set_index, sync_output->model[0] ? sync_output->model : "unknown",
-                                 sync_output->config->cycle_count - 1);
-                    }
-                }
+        /* Handle set-index on every eligible output. Distinct cycle lists are
+         * independent; limiting the operation to the first matching list made
+         * multi-monitor configurations silently ignore later outputs. */
+        if (set_index >= 0 && output->config->cycle && output->config->cycle_count > 0) {
+            if ((size_t)set_index < output->config->cycle_count) {
+                log_debug("Setting wallpaper index %d for output %s",
+                          set_index, output->model[0] ? output->model : "unknown");
+                output_set_cycle_index(output, (size_t)set_index);
+                processed_set_index = true;
+                current_time = get_time_ms();
+            } else {
+                log_debug("Index %d is not eligible for output %s (count: %zu)",
+                          set_index, output->model[0] ? output->model : "unknown",
+                          output->config->cycle_count);
             }
-            current_time = get_time_ms();
-            processed_set_index = true;
-            log_info("Set wallpaper index %d on %d output(s) with matching configuration",
-                     set_index, set_count);
-            atomic_store_explicit(&state->set_index_requested, -1, memory_order_release);
         }
 
         /* Handle set-terminal request — swap the live terminal-wallpaper
@@ -259,12 +255,8 @@ static void render_outputs(struct neowall_state *state) {
          * (killing the old terminal child and its whole process group before
          * spawning the new one), so no orphan is possible. We apply it to every
          * output that currently hosts a terminal wallpaper. */
-        if (atomic_load_explicit(&state->set_terminal_requested, memory_order_acquire) &&
-            output->config->type == WALLPAPER_TERMINAL) {
-            char cmd[512];
-            pthread_mutex_lock(&state->state_mutex);
-            snprintf(cmd, sizeof(cmd), "%s", state->pending_terminal_cmd);
-            pthread_mutex_unlock(&state->state_mutex);
+        if (terminal_requested && output->config->type == WALLPAPER_TERMINAL) {
+            const char *cmd = terminal_cmd;
 
             if (cmd[0] != '\0') {
                 log_info("Swapping terminal wallpaper on output %s: '%s'",
@@ -286,14 +278,22 @@ static void render_outputs(struct neowall_state *state) {
             }
         }
 
-        /* Handle next wallpaper request - cycle ALL outputs with same config for synchronization */
-        if (next_count > 0 && !processed_next && output->config->cycle && output->config->cycle_count > 0) {
-            size_t cycled_count = output_cycle_group(outputs_snapshot, output_n, output);
-            current_time = get_time_ms();
-            processed_next = true;
-            log_info("Cycled %zu output(s) with matching configuration (%d requests remaining)",
-                     cycled_count, next_count - 1);
-            atomic_fetch_sub_explicit(&state->next_requested, 1, memory_order_acq_rel);
+        /* Handle one next request for every distinct span/cycle group. */
+        if (next_count > 0 && output->config->cycle && output->config->cycle_count > 0) {
+            bool group_already_cycled = false;
+            for (size_t previous = 0; previous < idx; previous++) {
+                if (outputs_snapshot[previous]->config->cycle &&
+                    output_same_span_group(outputs_snapshot[previous], output)) {
+                    group_already_cycled = true;
+                    break;
+                }
+            }
+            if (!group_already_cycled) {
+                size_t cycled_count = output_cycle_group(outputs_snapshot, output_n, output);
+                current_time = get_time_ms();
+                processed_next = true;
+                log_info("Cycled %zu output(s) in cycle group", cycled_count);
+            }
         }
 
         /* Check if we should cycle wallpaper (timer-driven) */
@@ -344,6 +344,11 @@ static void render_outputs(struct neowall_state *state) {
                      output->model, eglGetError());
             continue;
         }
+
+        /* Geometry callbacks only publish atomics. Once this output's EGL
+         * context is current, reconcile all geometry-dependent CPU/GL state
+         * before accepting a preload or drawing the next frame. */
+        output_process_geometry_change(output);
 
         /* Recalculate time for accurate transition timing */
         current_time = get_time_ms();
@@ -433,10 +438,14 @@ static void render_outputs(struct neowall_state *state) {
         swap_vec_push(&swaps, si);
     }
 
-    /* === PHASE 3: damage + swap + commit (still no locks held) ============= */
-    /* The terminal-swap request was consumed for every terminal output in the
-     * loop above; clear it now so it fires exactly once. */
-    atomic_store_explicit(&state->set_terminal_requested, false, memory_order_release);
+    /* One queued `next` advances every distinct group exactly once. */
+    if (processed_next) {
+        atomic_fetch_sub_explicit(&state->next_requested, 1, memory_order_acq_rel);
+    }
+    if (set_index >= 0) {
+        log_info("Set wallpaper index %d on all eligible outputs%s", set_index,
+                 processed_set_index ? "" : " (none eligible)");
+    }
     for (size_t i = 0; i < swaps.len; i++) {
         struct output_state *output = swaps.data[i].output;
         if (!swaps.data[i].render_success) {
@@ -779,6 +788,7 @@ void event_loop_run(struct neowall_state *state) {
     /* Base file descriptors - always polled (BASE_FD_COUNT/MAX_POLL_FDS are
      * declared at file scope as an enum). */
     struct pollfd fds[MAX_POLL_FDS];
+    bool compositor_flush_blocked = false;
     fds[0].fd = compositor_fd;  /* -1 if no compositor, valid fd for Wayland/X11 */
     fds[0].events = compositor_fd >= 0 ? POLLIN : 0;  /* Don't poll invalid fd */
     fds[1].fd = state->timer_fd;
@@ -811,9 +821,15 @@ void event_loop_run(struct neowall_state *state) {
         ops->dispatch_events(backend_data);
     }
 
-    /* Flush compositor requests */
+    /* Flush compositor requests. A full Wayland socket is retried by the main
+     * loop with POLLOUT enabled rather than being mistaken for disconnect. */
     if (ops && ops->flush) {
-        ops->flush(backend_data);
+        compositor_flush_result_t flush_result = ops->flush(backend_data);
+        if (flush_result == COMPOSITOR_FLUSH_FATAL) {
+            log_error("Failed to flush compositor requests");
+            return;
+        }
+        compositor_flush_blocked = flush_result == COMPOSITOR_FLUSH_BLOCKED;
     }
 
     /* Set initial timer for cycling */
@@ -858,16 +874,23 @@ void event_loop_run(struct neowall_state *state) {
             }
         }
 
-        /* Flush compositor requests before polling */
+        /* Flush compositor requests before polling. EAGAIN is backpressure,
+         * not a disconnect: retain the prepared read, poll for both directions,
+         * and retry after the socket becomes writable. */
         if (ops && ops->flush) {
-            if (!ops->flush(backend_data)) {
+            compositor_flush_result_t flush_result = ops->flush(backend_data);
+            if (flush_result == COMPOSITOR_FLUSH_FATAL) {
                 log_error("Failed to flush compositor requests");
                 if (ops->cancel_read) {
                     ops->cancel_read(backend_data);
                 }
                 break;
             }
+            compositor_flush_blocked = flush_result == COMPOSITOR_FLUSH_BLOCKED;
         }
+        fds[0].events = compositor_fd >= 0
+                            ? (short)(POLLIN | (compositor_flush_blocked ? POLLOUT : 0))
+                            : 0;
 
         /* Cap the poll timeout at 1s so signals (Ctrl+C, `neowall kill`, etc.)
          * are serviced promptly. An infinite timeout would block until a
@@ -1038,10 +1061,22 @@ void event_loop_run(struct neowall_state *state) {
                     }
                 }
             } else {
-                /* No events on compositor fd - cancel prepared read */
+                /* No readable compositor event: balance prepare_events() before
+                 * handling POLLOUT or any unrelated wakeup. */
                 if (ops && ops->cancel_read) {
                     ops->cancel_read(backend_data);
                 }
+            }
+
+            if ((fds[0].revents & POLLOUT) && compositor_flush_blocked &&
+                ops && ops->flush) {
+                compositor_flush_result_t flush_result = ops->flush(backend_data);
+                if (flush_result == COMPOSITOR_FLUSH_FATAL) {
+                    log_error("Failed to flush compositor requests after POLLOUT");
+                    atomic_store_explicit(&state->running, false, memory_order_release);
+                    break;
+                }
+                compositor_flush_blocked = flush_result == COMPOSITOR_FLUSH_BLOCKED;
             }
 
             /* Check timerfd - time to cycle wallpaper */

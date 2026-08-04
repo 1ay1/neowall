@@ -169,6 +169,12 @@ struct compositor_surface {
     void *user_data;                    /* User data for callbacks */
 };
 
+typedef enum compositor_flush_result {
+    COMPOSITOR_FLUSH_OK = 0,
+    COMPOSITOR_FLUSH_BLOCKED,
+    COMPOSITOR_FLUSH_FATAL,
+} compositor_flush_result_t;
+
 /* ============================================================================
  * COMPOSITOR BACKEND OPERATIONS
  * ============================================================================ */
@@ -396,13 +402,13 @@ typedef struct compositor_backend_ops {
     bool (*dispatch_events)(void *backend_data);
     
     /**
-     * Flush outgoing requests to compositor
-     * Sends all buffered requests to the compositor.
-     * 
-     * @param backend_data Data returned from init()
-     * @return true on success, false on failure (EAGAIN/EPIPE are failures)
+     * Flush outgoing requests to compositor.
+     *
+     * A blocked result means the connection is healthy but its socket send
+     * buffer is full. The event loop must include POLLOUT for get_fd() and
+     * retry flush when writable. Fatal means the connection cannot continue.
      */
-    bool (*flush)(void *backend_data);
+    enum compositor_flush_result (*flush)(void *backend_data);
     
     /**
      * Cancel prepared event read

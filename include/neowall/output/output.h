@@ -72,6 +72,8 @@ struct wallpaper_config {
     bool show_fps;                      /* Show FPS watermark on screen (default false) */
     bool pause_on_fullscreen;           /* Pause rendering when output is occluded by fullscreen window */
     float pause_coverage_threshold;     /* Fraction (0.0-1.0) of wallpaper region that must be covered by tiled windows to count as occluded. Default 0.8 */
+    bool span;                          /* Explicitly span compatible sources across outputs (default false) */
+    char span_group[64];                /* Optional explicit span group name (empty = source-based group) */
     bool cycle;                         /* Enable wallpaper cycling */
     bool shuffle;                       /* Randomise cycle order on load + on every wrap (issue #47).
                                          * Applies to both image and shader directory cycles. */
@@ -208,7 +210,16 @@ struct output_state {
     /* Background thread for async image loading */
     pthread_t preload_thread;           /* Background preload thread */
     atomic_bool_t preload_thread_active; /* Is background thread running? */
+    atomic_bool_t preload_thread_join_pending; /* A completed/running joinable thread must be joined */
     atomic_bool_t preload_should_stop;   /* Cooperative cancellation flag for preload thread */
+    atomic_uint_fast64_t preprocessing_generation; /* Invalidates geometry/config-dependent images */
+    atomic_bool_t geometry_change_pending; /* Callback-safe request; GL work is deferred to event loop */
+    bool terminal_auto_cols;
+    bool terminal_auto_rows;
+    uint64_t preload_generation;
+    int32_t preload_width;
+    int32_t preload_height;
+    enum wallpaper_mode preload_mode;
     pthread_mutex_t preload_mutex;      /* Protects preload_image during thread handoff */
     struct image_data *preload_decoded_image; /* Image decoded in background, ready for GPU upload */
     atomic_bool_t preload_upload_pending; /* Background thread finished, main thread should upload */
@@ -335,6 +346,11 @@ void output_unref(struct output_state *output);
 bool output_configure_compositor_surface(struct output_state *output);
 bool output_create_egl_surface(struct output_state *output);
 void output_set_wallpaper(struct output_state *output, const char *path);
+/* Notify the output core that its physical render dimensions changed. Safe in
+ * compositor callbacks: only atomics are touched; image/GL replacement occurs
+ * later from output_process_geometry_change() on the render thread. */
+void output_notify_geometry_change(struct output_state *output);
+void output_process_geometry_change(struct output_state *output);
 /* Load `shader_path` and make it this output's live wallpaper.
  *
  * Returns NW_OK once the shader is running, or when the load was deferred

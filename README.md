@@ -231,7 +231,7 @@ If you want video wallpapers, use mpvpaper — neowall is deliberately not that.
 ## Caveats, honestly
 
 - **KDE Plasma**: native desktop icons may hide while neowall owns the background layer. Use a dock or `plasma-desktop`'s widgets.
-- **GNOME**: works through the fallback path; Mutter doesn't expose layer-shell, so z-order behavior is less guaranteed than on wlroots compositors.
+- **GNOME/Mutter and other compositors without layer-shell**: unsupported. Wayland does not allow a client to map a visible wallpaper from a bare `wl_surface`; neowall exits with an actionable error instead of silently selecting a non-visible fallback.
 - **No video**: by design.
 
 ## Hacking
