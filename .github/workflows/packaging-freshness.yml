@@ -166,8 +166,14 @@ jobs:
           echo "drift detected:$stale"
 
           TITLE="Packaging out of date for $TAG"
-          # One rolling issue, not one per day.
-          EXISTING=$(gh issue list --state open --label packaging --search "$TITLE" --json number --jq '.[0].number' 2>/dev/null || echo "")
+          # One rolling issue, not one per day. Match by TITLE only — do NOT
+          # constrain to the `packaging` label: older duplicates were filed
+          # unlabelled, and label-scoped search silently missed them, which is
+          # how #69-73 piled up. `--search` also fuzzy-matches, so pin the
+          # exact title in jq to avoid latching onto a different release's issue.
+          EXISTING=$(gh issue list --state open --search "in:title $TITLE" \
+            --json number,title \
+            --jq "map(select(.title == \"$TITLE\")) | .[0].number" 2>/dev/null || echo "")
           BODY="The daily packaging-freshness check found downstream packages lagging the latest release (\`$TAG\`).
           $stale
 
@@ -175,9 +181,15 @@ jobs:
           \`gh workflow run release.yml -f version=$VERSION\`, or push the
           refreshed PKGBUILDs by hand.
 
-          If this keeps happening, check that the \`AUR_SSH_PRIVATE_KEY\`
-          repository secret is present and still valid — the publish job skips
-          silently when it is unset.
+          **Before suspecting the key:** the AUR git backend periodically goes
+          into maintenance. The release job's \`Verify the AUR accepts the key\`
+          step distinguishes the cases — a **warning** there (\"AUR is in
+          maintenance\" / \"could not reach the AUR\") means the key is fine and
+          this issue will clear itself on the next run once the AUR is back.
+          Only an **error** (\"AUR rejected the SSH key\") means the
+          \`AUR_SSH_PRIVATE_KEY\` secret is missing/unregistered — re-add the
+          private half whose public key is registered at
+          https://aur.archlinux.org/account/ .
 
           _Filed automatically by .github/workflows/packaging-freshness.yml_"
 

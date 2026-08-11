@@ -630,16 +630,38 @@ jobs:
         id: auth
         run: |
           # The AUR answers `ssh aur@aur.archlinux.org help` for an authorized
-          # key. If the public half was never registered on the AUR account the
-          # key is useless — say so loudly, but do NOT fail the release: the
-          # binaries are already published and the daily freshness watchdog
-          # will keep reminding us until someone registers it.
-          if ssh -o BatchMode=yes -o ConnectTimeout=20 aur@aur.archlinux.org help >/dev/null 2>&1; then
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          else
+          # key. We must tell THREE outcomes apart, because two of them are NOT
+          # our fault and must not be reported as a bad key:
+          #
+          #   ok           -> key accepted, publish.
+          #   maintenance  -> key accepted but the AUR git backend is down for
+          #                   maintenance. The `help` forced-command still
+          #                   answers (auth succeeded) but returns the banner
+          #                   "The AUR is down due to maintenance". Pushing
+          #                   would fail with a spurious `publickey` error, so
+          #                   defer with a WARNING, never an error.
+          #   rejected     -> `Permission denied (publickey)`: the public half
+          #                   isn't registered / the key really is wrong.
+          #
+          # In none of these cases do we fail the release: the binaries are
+          # already published and the daily freshness watchdog keeps nagging
+          # until the AUR is actually current.
+          OUT=$(ssh -o BatchMode=yes -o ConnectTimeout=20 aur@aur.archlinux.org help 2>&1) || true
+          echo "AUR responded: $OUT"
+          if printf '%s' "$OUT" | grep -qi 'maintenance'; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::AUR is in maintenance — key is fine, deferring publish. Re-run \`release.yml\` (workflow_dispatch, version=${{ steps.version.outputs.VERSION }}) once the AUR is back."
+          elif printf '%s' "$OUT" | grep -qi 'permission denied'; then
             echo "ok=false" >> "$GITHUB_OUTPUT"
             echo "::error::AUR rejected the SSH key in AUR_SSH_PRIVATE_KEY."
             echo "::error::Register its PUBLIC half at https://aur.archlinux.org/account/ -> SSH keys."
+          elif printf '%s' "$OUT" | grep -qiE 'interactive shell is disabled|welcome to the aur|specify command'; then
+            # The friendly banner only shows to an AUTHORIZED key.
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            # Couldn't reach the AUR at all (DNS/timeout/unknown). Not our key.
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Could not reach the AUR (network/outage) — deferring publish. Not a key problem."
           fi
 
       - name: Wait for the release binary tarball to be downloadable
