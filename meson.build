@@ -631,6 +631,20 @@ test_exif_exe = executable('test_image_exif',
 
 test('image_exif', test_exif_exe)
 
+# Image scaling/fitting regressions: image_center_pad heap overflow on
+# mixed-axis sources, and every wallpaper mode reaching exact display size
+# (the renderer draws a fullscreen quad and depends on that invariant).
+# Includes src/image/image.c directly for its static helpers, so it needs the
+# codec deps and utils.c/exif.c for logging + EXIF symbols.
+test_image_scale_exe = executable('test_image_scale',
+  files('tests/test_image_scale.c', 'src/utils.c', 'src/image/exif.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [libpng_dep, libjpeg_dep, m_dep, thread_dep],
+  build_by_default: false,
+)
+
+test('image_scale', test_image_scale_exe)
+
 # Fisher-Yates shuffle for cycle paths (issue #47). Pure data; links
 # src/config/shuffle.c only.
 test_shuffle_exe = executable('test_shuffle',

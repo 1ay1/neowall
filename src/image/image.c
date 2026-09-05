@@ -571,22 +571,33 @@ static void calculate_optimal_dimensions(uint32_t img_width, uint32_t img_height
     }
 }
 
-/* Pad image to exact dimensions with transparent borders (center positioning) */
+/* Pad image to exact dimensions with opaque black borders (center positioning).
+ *
+ * Any axis of the source that is LARGER than the pad target is centre-cropped
+ * on that axis rather than overflowing the destination. The previous guard was
+ * `width >= pad_width && height >= pad_height`, which only bailed when BOTH
+ * axes were oversized — a wider-but-shorter image (e.g. 1200x298 padded to
+ * 400x300) fell through to a copy loop that wrote img->width*4 bytes at a
+ * pad_width*4 stride and ran off the end of the heap block. */
 static struct image_data *image_center_pad(struct image_data *img, uint32_t pad_width, uint32_t pad_height) {
-    if (!img || !img->pixels) {
+    if (!img || !img->pixels || pad_width == 0 || pad_height == 0) {
         return img;
     }
-    
-    /* No padding needed if already exact size or larger */
-    if (img->width >= pad_width && img->height >= pad_height) {
+
+    /* Nothing to do only when the size already matches exactly. */
+    if (img->width == pad_width && img->height == pad_height) {
         return img;
     }
-    
+
     log_debug("Center-padding image from %ux%u to %ux%u",
              img->width, img->height, pad_width, pad_height);
-    
+
     /* Allocate new pixel buffer filled with opaque black (R=0, G=0, B=0, A=255) */
-    size_t new_size = (size_t)pad_width * pad_height * 4; /* RGBA */
+    size_t new_size = 0;
+    if (!image_buffer_size(pad_width, pad_height, 4, &new_size)) {
+        log_error("Refusing to pad to invalid or oversized %ux%u", pad_width, pad_height);
+        return img;
+    }
     uint8_t *new_pixels = malloc(new_size);
     if (!new_pixels) {
         log_error("Failed to allocate memory for padded image");
@@ -601,16 +612,19 @@ static struct image_data *image_center_pad(struct image_data *img, uint32_t pad_
         new_pixels[i + 3] = 255; /* A - opaque */
     }
     
-    /* Calculate position to center the image */
-    uint32_t offset_x = (pad_width > img->width) ? (pad_width - img->width) / 2 : 0;
-    uint32_t offset_y = (pad_height > img->height) ? (pad_height - img->height) / 2 : 0;
-    
-    /* Copy original image to center of new buffer */
-    for (uint32_t y = 0; y < img->height; y++) {
-        uint32_t dst_y = offset_y + y;
-        uint32_t src_offset = y * img->width * 4;
-        uint32_t dst_offset = (dst_y * pad_width + offset_x) * 4;
-        memcpy(new_pixels + dst_offset, img->pixels + src_offset, img->width * 4);
+    /* Copy at most what fits on each axis; centre both the source window (when
+     * the source is bigger) and the destination window (when it is smaller). */
+    uint32_t copy_w = (img->width  < pad_width)  ? img->width  : pad_width;
+    uint32_t copy_h = (img->height < pad_height) ? img->height : pad_height;
+    uint32_t dst_x = (pad_width  - copy_w) / 2;
+    uint32_t dst_y0 = (pad_height - copy_h) / 2;
+    uint32_t src_x = (img->width  - copy_w) / 2;
+    uint32_t src_y0 = (img->height - copy_h) / 2;
+
+    for (uint32_t y = 0; y < copy_h; y++) {
+        size_t src_offset = ((size_t)(src_y0 + y) * img->width + src_x) * 4;
+        size_t dst_offset = ((size_t)(dst_y0 + y) * pad_width + dst_x) * 4;
+        memcpy(new_pixels + dst_offset, img->pixels + src_offset, (size_t)copy_w * 4);
     }
     
     /* Replace old pixels with padded ones */
@@ -739,55 +753,61 @@ static struct image_data *image_scale_to_display(struct image_data *img, int32_t
         return img;
     }
     
-    /* Only scale if dimensions changed */
-    if (target_width == img->width && target_height == img->height) {
-        log_debug("Image %ux%u already optimal for display %dx%d (mode=%d)",
-                 img->width, img->height, display_width, display_height, mode);
-        return img;
-    }
-    
+    /* Scale first (when a scale is actually needed), then ALWAYS fall through to
+     * the exact-size adjustment below.
+     *
+     * Both of the early `return img` paths that used to live here were bugs: the
+     * renderer draws every image mode as a plain fullscreen quad and relies on
+     * the pixels already being exactly display-sized (see
+     * calculate_vertex_coords_for_image() in render/render.c). Returning early
+     * skipped the crop/pad/tile step, so those images got stretched by the quad.
+     * MODE_CENTER was hit worst: calculate_optimal_dimensions() returns the
+     * source dims for it, so the "already optimal" check fired every time and
+     * its crop/pad arm was dead code — `mode center` never showed 1:1 pixels. */
+    bool needs_scale = (target_width != img->width || target_height != img->height);
+
     /* Only downscale for modes other than FILL/STRETCH (which need to fill display) */
-    if (mode != MODE_FILL && mode != MODE_STRETCH) {
+    if (needs_scale && mode != MODE_FILL && mode != MODE_STRETCH) {
         if (target_width > img->width || target_height > img->height) {
-            log_debug("Keeping original size %ux%u (would upscale to %ux%u)",
+            log_debug("Not upscaling %ux%u to %ux%u; will crop/pad to exact size instead",
                      img->width, img->height, target_width, target_height);
+            needs_scale = false;
+        }
+    }
+
+    if (needs_scale) {
+        log_debug("Scaling image from %ux%u to %ux%u for %dx%d display (mode=%d)",
+                 img->width, img->height, target_width, target_height,
+                 display_width, display_height, mode);
+
+        img = image_scale_bilinear(img, target_width, target_height);
+
+        if (!img || !img->pixels) {
             return img;
         }
     }
     
-    log_debug("Scaling image from %ux%u to %ux%u for %dx%d display (mode=%d)",
-             img->width, img->height, target_width, target_height, 
-             display_width, display_height, mode);
-    
-    img = image_scale_bilinear(img, target_width, target_height);
-    
-    if (!img || !img->pixels) {
-        return img;
-    }
-    
-    /* Adjust image to exact display size for seamless transitions
-     * All modes except TILE need to be exact display size for consistent rendering */
+    /* Adjust image to exact display size for seamless transitions.
+     * Every mode ends up exactly display-sized; TILE repeats the source to get
+     * there, the rest crop and/or pad. */
     switch (mode) {
         case MODE_FILL:
             /* Already scaled to fill, now crop excess to exact display size */
             img = image_center_crop(img, display_width, display_height);
+            /* A non-uniform source may still be short on one axis. */
+            img = image_center_pad(img, display_width, display_height);
             break;
             
         case MODE_FIT:
             /* Scaled to fit inside, now pad to exact display size with black borders */
-            if (img->width < (uint32_t)display_width || img->height < (uint32_t)display_height) {
-                img = image_center_pad(img, display_width, display_height);
-            }
+            img = image_center_pad(img, display_width, display_height);
             break;
             
         case MODE_CENTER:
-            /* No scaling (1:1 pixels), crop if larger or pad if smaller to exact display size */
-            if (img->width > (uint32_t)display_width || img->height > (uint32_t)display_height) {
-                img = image_center_crop(img, display_width, display_height);
-            } else if (img->width < (uint32_t)display_width || img->height < (uint32_t)display_height) {
-                img = image_center_pad(img, display_width, display_height);
-            }
-            /* else: already exact size, perfect! */
+            /* No scaling (1:1 pixels): crop the overflow and/or pad the shortfall.
+             * image_center_pad handles both axes independently, so one call is
+             * enough even for mixed cases (wider but shorter than the display). */
+            img = image_center_pad(img, display_width, display_height);
             break;
             
         case MODE_STRETCH:
@@ -798,6 +818,8 @@ static struct image_data *image_scale_to_display(struct image_data *img, int32_t
             /* Physically tile the image to exact display size for seamless transitions
              * This makes transitions work perfectly while maintaining tile appearance */
             img = image_tile_to_size(img, display_width, display_height);
+            /* Tiling only grows an image; crop/pad anything still off-size. */
+            img = image_center_pad(img, display_width, display_height);
             break;
     }
     
