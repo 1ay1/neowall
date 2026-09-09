@@ -1,0 +1,13 @@
+# garden.neowall — channel bindings for the growing garden.
+#
+# Buffer A is the pollen/firefly layer and feeds back into itself so the motes
+# leave slow-fading trails. The Image pass reads it as ch1 and composites it
+# over the sky, soil, grass and plants.
+#
+# Audio is optional: iAudioBeat only adds a subtle pulse to open blooms, so the
+# shader looks correct with no capture source at all.
+
+shader garden.glsl
+
+bufferA { ch0 self }
+image   { ch1 bufferA }

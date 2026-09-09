@@ -260,11 +260,99 @@ yourself; the bind keyword tells the daemon what live value to feed them each fr
   `disk_read`, `disk_write`, `load`, `cpu_temp`, `gpu`, `gpu_temp`, `uptime`,
   `procs`, `battery`, `time_of_day`, `sun`, `audio`, `bass`, `mid`, `treble`,
   `beat`, `keys`, `mouse`. A bare float literal binds a constant.
+- **`state <bufferX>`** marks the pass holding values to persist across runs
+  (see "Persistent state" below).
+- **A `self` binding wins over content guessing.** Pass classification is a
+  keyword heuristic over the source; a manifest binding a channel to `self` is
+  ground truth, so that pass is always treated as a feedback buffer and never
+  throttled below full rate.
 - **Avoid `*/` inside block comments.** A path like `card*/device` written in a
   comment closes the comment early.
 - **Channel numbering.** `iChannel0`..`iChannel3` are your manifest-bound channels.
   The reactive audio texture is bound separately on unit 4 and is always reachable as
   `iAudio` — you never spend a user channel on it.
+
+---
+
+## Authoring workflow
+
+### Preview without disturbing anything
+
+```bash
+neowall preview myshader.glsl
+```
+
+Runs one shader in the foreground next to your real wallpaper. It does not touch
+your config, the saved wallpaper state, or the daemon's pid file, so the running
+daemon keeps working and `neowall reload/next/kill` keep finding it. Ctrl-C to
+stop.
+
+### Hot reload while you edit
+
+```bash
+neowall watch myshader.glsl
+```
+
+Recompiles on every save and prints GLSL errors inline, with line numbers. A
+failed compile is a non-event: the shader is validated on a throwaway copy
+*before* anything is swapped, so the last good version keeps rendering while you
+fix the typo.
+
+### Time travel (day-scale shaders)
+
+A shader driven by `iDate`/`iTimeOfDay`/`iSun` can evolve over days, which makes
+it untestable in real time — verifying that something happens on day 6 would
+mean waiting six days. Move the shader clock instead:
+
+```bash
+neowall preview garden.glsl --date=+6d          # jump ahead six days
+neowall preview garden.glsl --date=-2h          # or back two hours
+neowall preview garden.glsl --timelapse=30d/20s # 30 days in 20 seconds
+```
+
+`--date` takes a signed duration (`s`, `m`, `h`, `d`, `w` suffixes; bare numbers
+are seconds). `--timelapse` takes `SPAN/DURATION`. Both affect ONLY the
+shader-visible clock — cycling, timers and log timestamps stay on real time.
+
+### Persistent state
+
+A feedback buffer gives a shader memory only while the process runs. For a
+wallpaper with real continuity — a garden that remembers how it grew — use the
+persistent state block:
+
+```glsl
+uniform vec4  iState[4];   // 16 floats, meaning is yours to define
+uniform float iStateAge;   // REAL seconds since they were written (0 on first run)
+```
+
+To write state back, name the pass holding it in the manifest:
+
+```
+state bufferA
+```
+
+That pass's first four RGBA texels are read back (at most once a second, so it
+never stalls the frame) and saved under `$XDG_STATE_HOME/neowall/shader-state/`,
+keyed by shader path. On the next run they arrive in `iState`, with `iStateAge`
+telling you how long you were away so you can decide how much the world should
+have moved on.
+
+First run reads as all zeros with `iStateAge` 0 — the same case you already
+handle — so a shader using state still works if the file is missing.
+
+### Declaring a version floor
+
+The wrapper declares every reactive uniform unconditionally, so a shader using a
+newer uniform on an older daemon compiles fine and silently receives nothing.
+State the floor explicitly and get a clear error instead:
+
+```glsl
+#pragma neowall requires 0.6
+```
+
+`neowall current` also prints which binary the daemon is actually running, and
+warns when it differs from the CLI — the usual cause of "I upgraded but nothing
+changed".
 
 ### Rendering text: the bitmap font atlas
 

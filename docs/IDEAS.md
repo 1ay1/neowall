@@ -227,5 +227,25 @@ Features from this backlog that have landed. Move items here as they ship.
 - GLSL standard library injected into every shader (noise, palettes, SDFs, audio).
 - `.neowall` manifest format (channels, multipass buffers, named uniform binds).
 - Ten bundled reactive example shaders, including the `system_deck` dashboard.
+- **Live hot-swap / save-to-reload** — `neowall watch <shader>` recompiles on
+  every save, prints GLSL errors inline, and validates on a throwaway copy so a
+  broken save keeps the last good shader on screen.
+- **`neowall preview <shader>`** — run a shader in the foreground beside your
+  real wallpaper without touching the config, saved state, or the daemon's pid
+  file.
+- **Shader time travel** — `--date=+6d` and `--timelapse=30d/20s` move the
+  shader-visible clock (`iDate`/`iTimeOfDay`/`iSun`/`iDayFraction`) without
+  touching the system clock, making day-scale shaders testable at all.
+- **Persistent shader state** — `iState[4]`/`iStateAge` plus a manifest
+  `state <bufferX>` binding, saved under `$XDG_STATE_HOME` and keyed by shader
+  path, so a wallpaper can accumulate across restarts rather than only across
+  frames. This is the plumbing the "garden that grows over days" needs.
+- **Version floor** — `#pragma neowall requires X.Y` turns "silently receives
+  nothing on an old daemon" into a clear refusal; `neowall current` reports the
+  running daemon's binary and warns on drift from the CLI.
+- `garden.glsl` — a calendar-driven garden whose plants run multi-day life
+  cycles, reacting to CPU (wind), temperature (drought), RAM (foliage) and
+  battery (light).
 
-_Nothing from Tiers 1–5 has shipped yet — that is the open work._
+_Tiers 1–5 remain largely open; the authoring platform work above (Tier 5) has
+landed, which makes the rest substantially cheaper to build._
