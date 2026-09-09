@@ -576,8 +576,28 @@ void adaptive_update(adaptive_state_t *state, double current_time) {
             frame_time_ms = wall_ms;
         }
         
-        /* Submit to history */
-        adaptive_submit_frame_time(state, frame_time_ms);
+        /* Discard startup and resume outliers instead of treating them as
+         * performance data.
+         *
+         * The first frames after a shader loads include surface configuration,
+         * EGL setup and shader compilation, and an occluded or idle wallpaper
+         * can sit parked for minutes before the next frame. Feeding those
+         * multi-hundred-millisecond gaps to the controller reads as a
+         * catastrophic performance collapse: it trips EMERGENCY on frame one,
+         * which latches half-rate buffer updates and halves quality for a
+         * shader that then runs a perfect 60 FPS forever after.
+         *
+         * A frame slower than this is not a slow frame, it is a gap. */
+        if (state->warmup_frames < ADAPTIVE_WARMUP_FRAMES) {
+            state->warmup_frames++;
+        } else if (frame_time_ms > ADAPTIVE_GAP_MS) {
+            /* Treat as a discontinuity: keep the clock moving, drop the sample. */
+            state->last_frame_time = current_time;
+            return;
+        } else {
+            /* Submit to history */
+            adaptive_submit_frame_time(state, frame_time_ms);
+        }
     }
     state->last_frame_time = current_time;
     
@@ -650,26 +670,26 @@ void adaptive_update(adaptive_state_t *state, double current_time) {
      * VELOCITY & ACCELERATION: Predictive component
      * ======================================================================== */
     {
-        /* Compute velocity (rate of change in frame time) */
-        static float prev_decision_ms = 0.0f;
-        static double prev_update_time = 0.0;
-        
-        if (prev_update_time > 0.0) {
-            float dt = (float)(current_time - prev_update_time);
+        /* These were function-scope statics, which is wrong: adaptive_state_t
+         * is per-output, so two monitors running shaders shared one velocity
+         * history and each one's frame times polluted the other's prediction
+         * (and the readings were nonsense the moment a second output existed).
+         * They live in the state now. */
+        if (state->prev_update_time > 0.0) {
+            float dt = (float)(current_time - state->prev_update_time);
             if (dt > 0.001f) {
-                float new_velocity = (decision_ms - prev_decision_ms) / dt;
+                float new_velocity = (decision_ms - state->prev_decision_ms) / dt;
                 /* EMA smooth the velocity */
                 state->frame_time_velocity = lerpf(state->frame_time_velocity, new_velocity, 0.2f);
-                
+
                 /* Compute acceleration */
-                static float prev_velocity = 0.0f;
-                float new_accel = (state->frame_time_velocity - prev_velocity) / dt;
+                float new_accel = (state->frame_time_velocity - state->prev_velocity) / dt;
                 state->frame_time_accel = lerpf(state->frame_time_accel, new_accel, 0.15f);
-                prev_velocity = state->frame_time_velocity;
+                state->prev_velocity = state->frame_time_velocity;
             }
         }
-        prev_decision_ms = decision_ms;
-        prev_update_time = current_time;
+        state->prev_decision_ms = decision_ms;
+        state->prev_update_time = current_time;
     }
     
     /* Predictive frame time: current + velocity * lookahead */

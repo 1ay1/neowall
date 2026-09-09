@@ -250,6 +250,10 @@ void wayland_occlusion_update(struct neowall_state *state) {
             atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
             log_info("Output %s un-occluded, rendering", name);
         } else if (!was && nowocc) {
+            /* Note when the wallpaper stopped being visible. The renderer uses
+             * this window to rebase a long-running shader clock, where a
+             * discontinuity cannot be seen. */
+            o->shader_hidden_since = get_time_ms();
             const char *why = cb_says_occluded
                 ? "compositor stopped frame callbacks"
                 : toplevel_says_occluded

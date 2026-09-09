@@ -425,7 +425,14 @@ void multipass_optimizer_begin_frame(multipass_optimizer_t *opt,
     
     static_detector_t *sd = &opt->static_detect;
     
-    /* Check for static scene */
+    /* Check for static scene.
+     *
+     * NOTE: "nothing moved" here means only that iTime and the mouse did not
+     * move. A reactive shader is driven by CPU load, audio, temperature and
+     * input energy, none of which this sees, so it must never be the sole
+     * reason a pass is skipped for such a shader — see
+     * multipass_optimizer_set_reactive() below, which suppresses static
+     * detection entirely when the shader reads live system data. */
     float time_delta = fabsf(time - sd->last_time);
     float mouse_delta = fabsf(mouse_x - sd->last_mouse_x) + 
                         fabsf(mouse_y - sd->last_mouse_y);
@@ -434,6 +441,12 @@ void multipass_optimizer_begin_frame(multipass_optimizer_t *opt,
     bool is_static = (time_delta < sd->time_epsilon &&
                       mouse_delta < sd->mouse_epsilon &&
                       !click_changed);
+
+    /* A shader reading live system data is never static: its inputs change
+     * without iTime or the mouse changing at all. */
+    if (opt->shader_is_reactive) {
+        is_static = false;
+    }
     
     if (is_static) {
         sd->consecutive_static_frames++;
@@ -464,7 +477,20 @@ bool multipass_optimizer_should_render_pass(multipass_optimizer_t *opt, int pass
     
     /* Image pass always renders */
     if (pass->is_image_pass) return true;
-    
+
+    /* A feedback or simulation pass integrates its own previous frame, so its
+     * output is a function of HOW MANY times it ran, not just of the current
+     * inputs. Skipping it does not save a redundant redraw, it removes a step
+     * from the integration: trails fade in uneven jumps, accumulators lose
+     * time, and the result visibly stutters even at a solid 60 FPS.
+     *
+     * These passes are cheap by construction (that is why they are feedback
+     * buffers), so they always run. can_skip_when_static already encodes this
+     * for the static path; the half-rate path below must respect it too. */
+    bool integrates_over_time = (pass->content_type == BUFFER_CONTENT_FEEDBACK ||
+                                 pass->content_type == BUFFER_CONTENT_SIMULATION);
+    if (integrates_over_time) return true;
+
     /* Check static scene skip */
     if (opt->static_skip_enabled && 
         opt->static_detect.scene_is_static && 

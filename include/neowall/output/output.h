@@ -277,6 +277,12 @@ struct output_state {
                                          * 0 when running. On resume, shader_start_time is
                                          * advanced by (now - shader_paused_at) so animation
                                          * continues from the same frame. Main-thread only. */
+    uint64_t shader_hidden_since;       /* Wall-clock ms when this output stopped being
+                                         * visible (occluded/paused), 0 while visible. Marks
+                                         * a window in which the shader clock can be rebased
+                                         * without anyone seeing the discontinuity — iTime is
+                                         * a float32 and loses frame resolution after ~a day
+                                         * of uptime. Main-thread only. */
     uint64_t shader_fade_start_time;    /* Time when shader fade started (for cross-fade) */
     char pending_shader_path[OUTPUT_MAX_PATH_LENGTH];  /* Next shader to load after fade-out */
     float transition_progress;

@@ -40,6 +40,16 @@
 /* Thermal monitoring update interval (seconds) */
 #define ADAPTIVE_THERMAL_INTERVAL 2.0
 
+/* Frames ignored after a shader starts before frame timing is trusted. Covers
+ * surface configuration, EGL setup and first-use shader compilation, none of
+ * which say anything about steady-state performance. */
+#define ADAPTIVE_WARMUP_FRAMES 30
+
+/* A frame interval longer than this is a GAP (occlusion, pause, compositor
+ * stall), not a slow frame, and must not be fed to the controller as evidence
+ * of poor performance. ~4 frames at 30 FPS. */
+#define ADAPTIVE_GAP_MS 133.0f
+
 typedef enum {
     ADAPTIVE_MODE_QUALITY,      /* Prioritize resolution, slower scaling */
     ADAPTIVE_MODE_BALANCED,     /* Default - balance quality and performance */
@@ -140,6 +150,16 @@ typedef struct {
     /* Emergency state */
     bool in_emergency;              /* Currently in emergency mode */
     int emergency_frames;           /* Frames spent in emergency */
+
+    /* Frames skipped after (re)start before timing is believed. Startup frames
+     * include EGL/surface setup and shader compilation, so they are not
+     * performance data. */
+    int warmup_frames;
+
+    /* Velocity/acceleration tracking (per output; previously file statics). */
+    float  prev_decision_ms;
+    double prev_update_time;
+    float  prev_velocity;
     
     /* GPU timing */
     GLuint timer_queries[ADAPTIVE_GPU_QUERY_COUNT];

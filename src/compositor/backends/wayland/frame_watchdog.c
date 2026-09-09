@@ -183,6 +183,9 @@ void frame_watchdog_update(struct neowall_state *state) {
             atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
             log_info("Output %s un-occluded, rendering", name);
         } else if (!was && nowocc) {
+            /* See occlusion.c: marks a window where the shader clock may be
+             * rebased unseen. */
+            o->shader_hidden_since = get_time_ms();
             log_info("Output %s occluded (compositor stopped frame callbacks), pausing", name);
         }
     }

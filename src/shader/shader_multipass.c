@@ -925,6 +925,42 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
                                        shader->pass_count,
                                        shader->image_pass_index);
 
+    /* Flag shaders driven by live system data.
+     *
+     * The static-scene detector only watches iTime and the mouse. A shader
+     * reading CPU load, audio, temperature, battery or input energy changes
+     * when NONE of those move, so without this the optimizer can decide the
+     * scene is static and gate its passes while its real inputs are changing
+     * every sample — which looks exactly like stutter. */
+    {
+        static const char *reactive_tokens[] = {
+            "iCpu", "iRam", "iSwap", "iNet", "iDisk", "iLoad", "iGpu",
+            "iTemp", "iThermal", "iNv", "iBattery", "iCharging",
+            "iTimeOfDay", "iSun", "iDayFraction", "iUptime", "iProcs",
+            "iKeyEnergy", "iMouseEnergy", "iActivity", "iPulse",
+            "iAudio", "iState", "iTerm"
+        };
+        bool reactive = false;
+        for (int i = 0; !reactive && i < shader->pass_count; i++) {
+            const char *src = shader->passes[i].source;
+            if (!src) continue;
+            for (size_t t = 0; t < sizeof(reactive_tokens)/sizeof(reactive_tokens[0]); t++) {
+                if (strstr(src, reactive_tokens[t])) { reactive = true; break; }
+            }
+        }
+        if (!reactive && shader->common_source) {
+            for (size_t t = 0; t < sizeof(reactive_tokens)/sizeof(reactive_tokens[0]); t++) {
+                if (strstr(shader->common_source, reactive_tokens[t])) {
+                    reactive = true; break;
+                }
+            }
+        }
+        shader->multipass_opt.shader_is_reactive = reactive;
+        if (reactive) {
+            log_info("Optimizer: shader reads live system data - static-scene skipping disabled");
+        }
+    }
+
     return shader;
 }
 
@@ -2213,14 +2249,33 @@ void multipass_render(multipass_shader_t *shader,
                      "(FPS: %.1f / %.1f = %.0f%%)",
                      current_fps, target_fps, fps_ratio * 100.0f);
         }
-        /* NORMAL MODE: Disable aggressive optimizations when performance is good */
-        else if (fps_ratio > 0.98f && stability > 0.7f && 
-                 shader->multipass_opt.half_rate_enabled) {
-            shader->multipass_opt.half_rate_enabled = false;
-            shader->multipass_opt.global_quality = 0.8f;  /* Restore quality */
-            log_info("Optimizer: NORMAL MODE - performance recovered "
-                     "(FPS: %.1f, stability: %.0f%%)",
-                     current_fps, stability * 100.0f);
+        /* NORMAL MODE: Disable aggressive optimizations when performance is good.
+         *
+         * Recovery deliberately does NOT require the stability score. Stability
+         * is only accumulated on the normal decision path, which is skipped
+         * while the controller is in emergency, so gating recovery on it made
+         * the degraded mode a one-way latch: a single bogus startup frame
+         * dropped the shader to half-rate buffers and 50% quality, and it stayed
+         * there forever while rendering a perfect 60 FPS.
+         *
+         * Sustained FPS at target IS the recovery signal. Require it for a few
+         * consecutive checks so we do not flap on one good sample. */
+        else if (shader->multipass_opt.half_rate_enabled &&
+                 !adaptive_emergency && !adaptive_thermal &&
+                 fps_ratio > 0.95f) {
+            shader->multipass_opt.recovery_frames++;
+            if (shader->multipass_opt.recovery_frames >= MULTIPASS_RECOVERY_FRAMES) {
+                shader->multipass_opt.half_rate_enabled = false;
+                shader->multipass_opt.global_quality = 0.8f;  /* Restore quality */
+                shader->multipass_opt.recovery_frames = 0;
+                log_info("Optimizer: NORMAL MODE - performance recovered "
+                         "(FPS: %.1f, stability: %.0f%%)",
+                         current_fps, stability * 100.0f);
+            }
+        }
+        else if (fps_ratio <= 0.95f) {
+            /* Lost the streak; require a fresh run of good frames. */
+            shader->multipass_opt.recovery_frames = 0;
         }
     }
 

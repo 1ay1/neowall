@@ -141,7 +141,12 @@ typedef struct {
     /* Global settings */
     bool enabled;
     bool half_rate_enabled;         /* Use half-rate buffer updates */
+    int  recovery_frames;           /* Consecutive good-FPS checks while degraded */
     bool static_skip_enabled;       /* Skip rendering when static */
+    /* True when any pass samples live system data (CPU/audio/temp/input/state).
+     * Such a shader changes without iTime or the mouse moving, so the static
+     * detector cannot see its inputs and must not gate its passes. */
+    bool shader_is_reactive;
     bool smart_resolution_enabled;  /* Use per-buffer resolution */
     float global_quality;           /* 0.0-1.0, affects all scales */
     
@@ -205,6 +210,10 @@ void multipass_optimizer_set_pass_update_rate(multipass_optimizer_t *opt, int pa
 
 /* Analyze a single pass source code to determine optimal settings */
 pass_optimization_t multipass_optimizer_analyze_source(const char *source, bool is_image_pass);
+
+/* Consecutive good-FPS checks required before leaving a degraded (half-rate)
+ * mode. Small enough to recover promptly, large enough not to flap. */
+#define MULTIPASS_RECOVERY_FRAMES 3
 
 /* Force a pass to be treated as a feedback buffer, overriding the textual
  * heuristic.

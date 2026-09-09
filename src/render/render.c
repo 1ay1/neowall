@@ -966,6 +966,36 @@ bool render_frame_shader(struct output_state *output) {
     float shader_speed = output->config->shader_speed > 0.0f ? output->config->shader_speed : 1.0f;
     current_time *= shader_speed;
 
+    /* Keep iTime small enough that float32 still resolves a frame.
+     *
+     * iTime is a float32 uniform and loses absolute precision as it grows:
+     * ~0.24 ms granularity after an hour, ~7.8 ms after a day, against a
+     * 16.7 ms frame at 60 FPS. Left alone, a wallpaper running for days
+     * degrades smooth motion into a visible stairstep.
+     *
+     * Wrapping it would introduce a phase jump for every fractional frequency
+     * a shader uses (sin(0.9*iTime) and friends), so the epoch is instead
+     * pushed forward only when the shader is NOT on screen -- while occluded
+     * or paused -- where a discontinuity is invisible by definition. A visible
+     * shader's clock is never touched.
+     *
+     * needs_redraw is set when the output is actually rendering; an occluded
+     * output stops here long before this point, so reaching this branch with a
+     * large elapsed time means we were parked and just came back. */
+    if (current_time > SHADER_TIME_REBASE_SECONDS &&
+        output->shader_hidden_since > 0) {
+        /* Rebase to zero and drop the hidden marker; the jump lands entirely
+         * inside the invisible window. Spanned outputs rebase as a group
+         * elsewhere, so leave them alone rather than desync the bezel. */
+        if (!output->spanned) {
+            output->shader_start_time = get_time_ms();
+            output->shader_hidden_since = 0;
+            current_time = 0.0;
+            log_debug("Rebased shader clock for output %s (float32 precision guard)",
+                      output_get_identifier(output));
+        }
+    }
+
     /* Get mouse position (or use center if not tracked) */
     float mouse_x = output->mouse_x >= 0 ? output->mouse_x : (float)width / 2.0f;
     float mouse_y = output->mouse_y >= 0 ? output->mouse_y : (float)height / 2.0f;
