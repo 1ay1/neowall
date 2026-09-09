@@ -71,6 +71,13 @@ static const char *neowall_reactive_uniforms =
     "uniform float iAudioActive;    // 1.0 if audio capture is live\n"
     "uniform sampler2D iAudio;      // row0 = spectrum, row1 = waveform (512 wide)\n"
     "\n"
+    "// Persistent state: survives restarts and wallpaper switches, unlike a\n"
+    "// feedback buffer which is lost the moment the process exits. Read it to\n"
+    "// resume where you left off; iStateAge is how many REAL seconds passed\n"
+    "// while you were gone (0 on the very first run).\n"
+    "uniform vec4  iState[4];       // 16 floats you choose the meaning of\n"
+    "uniform float iStateAge;       // seconds since iState was written\n"
+    "\n"
     "// User uniforms (manifest-driven) live here; declared dynamically.\n";
 
 /* The GLSL helper library. Pure functions, no state. */

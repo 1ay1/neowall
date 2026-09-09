@@ -1088,6 +1088,15 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
 
     log_info("Loaded shader source: %zu bytes from %s", strlen(shader_source), shader_path);
 
+    /* Honour `#pragma neowall requires X.Y` before doing any GL work. Without
+     * this the shader would compile happily against an old daemon and simply
+     * receive nothing for uniforms it was written against — an invisible
+     * failure that looks like a broken shader rather than an old binary. */
+    if (!shader_check_required_version(shader_source, shader_path)) {
+        free(shader_source);
+        return nw_err(NW_ERR_UNSUPPORTED, "shader requires a newer neowall");
+    }
+
     /* Create multipass shader from source */
     output->multipass_shader = multipass_create(shader_source);
     free(shader_source);
@@ -1096,6 +1105,10 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
         log_error("Failed to create multipass shader from: %s", shader_path);
         return nw_err(NW_ERR_PARSE, "multipass_create failed");
     }
+
+    /* Bind persistent state (iState/iStateAge) keyed by the shader path, so a
+     * shader that accumulates across sessions resumes instead of restarting. */
+    multipass_attach_state(output->multipass_shader, shader_path);
 
     /* Apply a .neowall manifest if present: explicit channel bindings + custom
      * reactive uniforms. Must run before compile (uniforms are injected into the

@@ -19,6 +19,7 @@
 #include "neowall/shader/render_optimizer.h"
 #include "neowall/shader/multipass_optimizer.h"
 #include "neowall/shader/reactive.h"
+#include "neowall/shader/shader_state.h"
 
 /* Maximum number of passes supported (BufferA-D + Image) */
 #define MULTIPASS_MAX_BUFFERS 4
@@ -136,6 +137,8 @@ typedef struct {
     GLint iTermCursorPrev;      /* vec4: prevX, prevY, moveTime, unused */
     GLint iTermFX;              /* vec4: bloom, scanline, crt-curve, chromatic */
     GLint iTermFade;           /* vec2: change-fade intensity, now(ms) */
+    GLint iState;               /* vec4[4]: persisted shader state (see iStateAge) */
+    GLint iStateAge;            /* seconds since the state was last written */
     bool cached;                /* True if locations have been cached */
 } uniform_locations_t;
 
@@ -244,6 +247,16 @@ typedef struct {
     float date_cached[4];                    /* iDate vec4, refreshed when the second ticks */
     long long date_cached_sec;               /* time() value date_cached was built for */
     reactive_snapshot_t frame_reactive;      /* one reactive snapshot per frame */
+
+    /* Persistent state (iState/iStateAge). Loaded once when the shader is
+     * created and fed to every pass; see shader_state.h. `state_path` is the
+     * key it was loaded under, owned here. */
+    nw_shader_state_t persistent_state;
+    char *state_path;
+    /* Pass whose first 4 texels hold the state to persist, or -1. Set by a
+     * manifest `state <passname>` binding. */
+    int    state_pass_index;
+    double state_last_save;   /* wall seconds at the last readback */
 
     /* User uniforms declared by a .neowall manifest (Tier 2/3). Declared into
      * the wrapper at compile time and set each frame in multipass_set_uniforms. */
@@ -760,5 +773,28 @@ void multipass_terminal_shutdown(multipass_shader_t *shader);
 
 /* Write raw (already-encoded) key bytes to the attached terminal's child. */
 bool multipass_terminal_write(multipass_shader_t *shader, const void *bytes, size_t len);
+
+/* Bind persistent state to a shader, keyed by its file path.
+ *
+ * Loads any previously saved iState[]/iStateAge for that path (all zeros and
+ * age 0 on a first run) so the shader can resume where the last session left
+ * off. Call after multipass_create and before the first render. */
+void multipass_attach_state(multipass_shader_t *shader, const char *shader_path);
+
+/* Persist the shader's current iState values under its attached path. No-op if
+ * no state was attached. */
+bool multipass_save_state(multipass_shader_t *shader);
+
+/* Check a shader for `#pragma neowall requires <version>` (e.g. 0.6 or 0.6.1).
+ *
+ * A shader that uses a newer reactive uniform on an older daemon fails
+ * SILENTLY: the wrapper declares every uniform unconditionally, so it compiles
+ * fine and simply receives nothing — a garden whose plants never grow, with no
+ * error anywhere. This lets a shader state its floor and get a clear message
+ * instead of mysterious inertness.
+ *
+ * Returns true if the shader runs on this build. On failure, logs what is
+ * required vs. what is running. A shader with no pragma always returns true. */
+bool shader_check_required_version(const char *source, const char *shader_path);
 
 #endif /* SHADER_MULTIPASS_H */
