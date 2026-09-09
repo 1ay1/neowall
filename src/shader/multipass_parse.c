@@ -16,9 +16,17 @@
 
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+
+#include "version.h"
+
+/* Longest comment line examined when looking for a "Buffer A"/"Image" pass
+ * marker. Markers are short; anything past this is prose and is truncated
+ * rather than scanned. */
+#define MP_MARKER_LINE_MAX 256
 
 /* ============================================
  * Shared string-scan helpers (see multipass_internal.h)
@@ -197,7 +205,13 @@ multipass_parse_result_t *multipass_parse_shader(const char *source) {
         const char *line_start = line_starts[pass_index];
         const char *func_end = main_ends[pass_index];
 
-        /* Look back up to 5 lines for a pass marker in a comment. */
+        /* Look back up to 5 lines for a pass marker in a comment.
+         *
+         * The marker search is bounded to the comment line itself. strstr()
+         * would otherwise scan from the comment all the way to EOF, so any
+         * later mention of "Buffer A" anywhere in the file — in prose, in a
+         * header block, in an unrelated pass — would misclassify this pass.
+         * That made a stray word in a comment silently rewire the pipeline. */
         multipass_type_t detected_type = PASS_TYPE_NONE;
         const char *check = line_start;
         int lines_back = 0;
@@ -209,11 +223,18 @@ multipass_parse_result_t *multipass_parse_shader(const char *source) {
             while (*line_content && isspace((unsigned char)*line_content)) line_content++;
 
             if (line_content[0] == '/' && (line_content[1] == '/' || line_content[1] == '*')) {
-                if (strstr(check, "Buffer A") || strstr(check, "BufferA")) { detected_type = PASS_TYPE_BUFFER_A; break; }
-                if (strstr(check, "Buffer B") || strstr(check, "BufferB")) { detected_type = PASS_TYPE_BUFFER_B; break; }
-                if (strstr(check, "Buffer C") || strstr(check, "BufferC")) { detected_type = PASS_TYPE_BUFFER_C; break; }
-                if (strstr(check, "Buffer D") || strstr(check, "BufferD")) { detected_type = PASS_TYPE_BUFFER_D; break; }
-                if (strstr(check, "// Image") || strstr(check, "/* Image")) { detected_type = PASS_TYPE_IMAGE; break; }
+                /* Copy just this line so every strstr below is line-local. */
+                size_t line_len = strcspn(check, "\n");
+                if (line_len > MP_MARKER_LINE_MAX - 1) line_len = MP_MARKER_LINE_MAX - 1;
+                char line_buf[MP_MARKER_LINE_MAX];
+                memcpy(line_buf, check, line_len);
+                line_buf[line_len] = '\0';
+
+                if (strstr(line_buf, "Buffer A") || strstr(line_buf, "BufferA")) { detected_type = PASS_TYPE_BUFFER_A; break; }
+                if (strstr(line_buf, "Buffer B") || strstr(line_buf, "BufferB")) { detected_type = PASS_TYPE_BUFFER_B; break; }
+                if (strstr(line_buf, "Buffer C") || strstr(line_buf, "BufferC")) { detected_type = PASS_TYPE_BUFFER_C; break; }
+                if (strstr(line_buf, "Buffer D") || strstr(line_buf, "BufferD")) { detected_type = PASS_TYPE_BUFFER_D; break; }
+                if (strstr(line_buf, "// Image") || strstr(line_buf, "/* Image")) { detected_type = PASS_TYPE_IMAGE; break; }
             }
             lines_back++;
         }
@@ -294,3 +315,65 @@ void multipass_free_parse_result(multipass_parse_result_t *result) {
     free(result->error_message);
     free(result);
 }
+
+bool shader_check_required_version(const char *source, const char *shader_path) {
+    if (!source) return true;
+
+    /* Look for: #pragma neowall requires <major>[.<minor>[.<patch>]]
+     *
+     * Scanned line by line so the directive is only honoured at the start of a
+     * line, the way a real preprocessor directive must appear — a mention
+     * inside a comment or a string is not a requirement. */
+    const char *line = source;
+    while (line && *line) {
+        const char *eol = strchr(line, '\n');
+        size_t line_len = eol ? (size_t)(eol - line) : strlen(line);
+
+        char buf[256];
+        if (line_len < sizeof(buf)) {
+            memcpy(buf, line, line_len);
+            buf[line_len] = '\0';
+
+            const char *p = buf;
+            while (*p == ' ' || *p == '\t') p++;
+
+            if (strncmp(p, "#pragma", 7) == 0) {
+                p += 7;
+                while (*p == ' ' || *p == '\t') p++;
+                if (strncmp(p, "neowall", 7) == 0) {
+                    p += 7;
+                    while (*p == ' ' || *p == '\t') p++;
+                    if (strncmp(p, "requires", 8) == 0) {
+                        p += 8;
+                        while (*p == ' ' || *p == '\t') p++;
+
+                        int major = 0, minor = 0, patch = 0;
+                        int fields = sscanf(p, "%d.%d.%d", &major, &minor, &patch);
+                        if (fields < 1) {
+                            log_warn("Shader %s: malformed '#pragma neowall requires' (ignored)",
+                                     shader_path ? shader_path : "<memory>");
+                            return true;
+                        }
+
+                        int required = major * 10000 + minor * 100 + patch;
+                        if (required > NEOWALL_VERSION_NUMBER) {
+                            log_error("Shader %s requires neowall %d.%d.%d, but this is %s",
+                                      shader_path ? shader_path : "<memory>",
+                                      major, minor, patch, NEOWALL_VERSION_STRING);
+                            log_error("Newer reactive uniforms would read as 0 instead of failing, "
+                                      "so this shader is refused rather than rendered wrong.");
+                            return false;
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+
+        if (!eol) break;
+        line = eol + 1;
+    }
+
+    return true;
+}
+

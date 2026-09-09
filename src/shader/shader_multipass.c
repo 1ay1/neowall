@@ -18,6 +18,7 @@
 #include "neowall/shader/reactive.h"
 #include "neowall/shader/program_cache.h"
 #include "neowall/textures.h"
+#include "neowall/clock.h"
 #ifdef NEOWALL_HAVE_TERMINAL
 #include "term_render.h"
 #endif
@@ -470,214 +471,6 @@ multipass_channel_t multipass_default_channel(channel_source_t source) {
  * shader_multipass.h. Kept here as a signpost.
  * ============================================ */
 
-#if 0 /* moved to multipass_parse.c — retained under #if 0 to keep the diff
-         compact; will be physically deleted in a follow-up commit */
-
-multipass_parse_result_t *multipass_parse_shader(const char *source) {
-    multipass_parse_result_t *result = calloc(1, sizeof(multipass_parse_result_t));
-    if (!result) return NULL;
-
-    if (!source) {
-        result->error_message = str_dup("Source is NULL");
-        return result;
-    }
-
-    int main_count = multipass_count_main_functions(source);
-
-    if (main_count <= 1) {
-        /* Single pass shader */
-        result->is_multipass = false;
-        result->pass_count = 1;
-        result->pass_sources[0] = str_dup(source);
-        result->pass_types[0] = PASS_TYPE_IMAGE;
-        return result;
-    }
-
-    result->is_multipass = true;
-    log_info("Detected multipass shader with %d mainImage functions", main_count);
-
-    /* Extract common code (everything before first mainImage) */
-    result->common_source = multipass_extract_common(source);
-
-    /*
-     * MULTIPASS EXTRACTION STRATEGY:
-     *
-     * For shaders with multiple mainImage functions, we need to:
-     * 1. Extract each mainImage function separately
-     * 2. Include helper functions that appear BETWEEN mainImage functions
-     *    with the passes that need them (but NOT other mainImage functions)
-     *
-     * Example: If shader has mainImage1, helperFunc, mainImage2, helperFunc2, mainImage3
-     * - Pass 0: mainImage1 only
-     * - Pass 1: helperFunc + mainImage2
-     * - Pass 2: helperFunc + helperFunc2 + mainImage3
-     */
-
-    /* First, find all mainImage positions and their function boundaries */
-    const char *main_starts[MULTIPASS_MAX_PASSES];  /* Start of "void mainImage" */
-    const char *main_ends[MULTIPASS_MAX_PASSES];    /* End of mainImage function body */
-    const char *line_starts[MULTIPASS_MAX_PASSES];  /* Start of line containing mainImage */
-    int found_count = 0;
-    
-    (void)main_starts; /* Currently unused but kept for future use */
-
-    const char *p = source;
-    while (found_count < MULTIPASS_MAX_PASSES) {
-        const char *main_start = find_pattern(p, "void mainImage");
-        if (!main_start) break;
-
-        /* Find start of the line */
-        const char *line_start = main_start;
-        while (line_start > source && *(line_start - 1) != '\n') {
-            line_start--;
-        }
-
-        main_starts[found_count] = main_start;
-        line_starts[found_count] = line_start;
-        main_ends[found_count] = find_function_end(main_start);
-        found_count++;
-        p = main_ends[found_count - 1];
-    }
-
-    /* Now extract each pass with proper helper function inclusion */
-    for (int pass_index = 0; pass_index < found_count; pass_index++) {
-        const char *line_start = line_starts[pass_index];
-        const char *func_end = main_ends[pass_index];
-
-        /* Check for pass marker in preceding lines */
-        multipass_type_t detected_type = PASS_TYPE_NONE;
-        const char *check = line_start;
-        int lines_back = 0;
-        while (check > source && lines_back < 5) {
-            /* Go to previous line */
-            check--;
-            while (check > source && *(check - 1) != '\n') check--;
-
-            /* Check this line for markers - be more specific to avoid false positives */
-            /* Only check comment lines */
-            const char *line_content = check;
-            while (*line_content && isspace(*line_content)) line_content++;
-
-            if (line_content[0] == '/' && (line_content[1] == '/' || line_content[1] == '*')) {
-                if (strstr(check, "Buffer A") || strstr(check, "BufferA")) {
-                    detected_type = PASS_TYPE_BUFFER_A;
-                    break;
-                } else if (strstr(check, "Buffer B") || strstr(check, "BufferB")) {
-                    detected_type = PASS_TYPE_BUFFER_B;
-                    break;
-                } else if (strstr(check, "Buffer C") || strstr(check, "BufferC")) {
-                    detected_type = PASS_TYPE_BUFFER_C;
-                    break;
-                } else if (strstr(check, "Buffer D") || strstr(check, "BufferD")) {
-                    detected_type = PASS_TYPE_BUFFER_D;
-                    break;
-                } else if (strstr(check, "// Image") || strstr(check, "/* Image")) {
-                    detected_type = PASS_TYPE_IMAGE;
-                    break;
-                }
-            }
-
-            lines_back++;
-        }
-
-        /*
-         * Default assignment based on order if no marker found:
-         * - For 2 passes: Buffer A, Image
-         * - For 3 passes: Buffer A, Buffer B, Image
-         * - For 4 passes: Buffer A, Buffer B, Buffer C, Image
-         * - etc.
-         * The LAST pass is always Image, all others are Buffers A, B, C, D
-         */
-        if (detected_type == PASS_TYPE_NONE) {
-            if (pass_index == found_count - 1) {
-                detected_type = PASS_TYPE_IMAGE;  /* Last pass is always Image */
-            } else {
-                /* Assign buffers A, B, C, D in order */
-                detected_type = PASS_TYPE_BUFFER_A + pass_index;
-                if (detected_type > PASS_TYPE_BUFFER_D) {
-                    detected_type = PASS_TYPE_BUFFER_D;  /* Cap at Buffer D */
-                }
-            }
-        }
-
-        log_info("Pass %d assigned type: %s", pass_index, multipass_type_name(detected_type));
-
-        /*
-         * For passes after the first one, include ALL helper functions defined
-         * between the FIRST mainImage end and THIS mainImage start.
-         * This ensures functions like makeBloom() (defined between pass 0 and 1)
-         * are available to pass 2 as well.
-         */
-        if (pass_index > 0) {
-            /* Get ALL helper code from end of FIRST mainImage to start of THIS mainImage */
-            const char *helpers_start = main_ends[0];  /* After first mainImage */
-            const char *helpers_end = line_start;
-
-            /* We need to EXCLUDE other mainImage functions from the helpers */
-            /* Build a string with only the helper functions */
-            size_t max_helpers_len = (helpers_end > helpers_start) ? (helpers_end - helpers_start) : 0;
-            char *helpers_only = NULL;
-            size_t helpers_only_len = 0;
-
-            if (max_helpers_len > 0) {
-                helpers_only = malloc(max_helpers_len + 1);
-                if (helpers_only) {
-                    helpers_only[0] = '\0';
-                    helpers_only_len = 0;
-
-                    /* Copy code between each mainImage, skipping the mainImage functions themselves */
-                    for (int prev = 0; prev < pass_index; prev++) {
-                        const char *seg_start = main_ends[prev];
-                        const char *seg_end = line_starts[prev + 1];
-
-                        if (seg_end > seg_start) {
-                            size_t seg_len = seg_end - seg_start;
-                            memcpy(helpers_only + helpers_only_len, seg_start, seg_len);
-                            helpers_only_len += seg_len;
-                        }
-                    }
-                    helpers_only[helpers_only_len] = '\0';
-                }
-            }
-
-            /* Calculate sizes for final combined source */
-            size_t main_len = func_end - line_start;
-            size_t total_len = helpers_only_len + main_len + 16;
-
-            char *combined = malloc(total_len);
-            if (combined) {
-                combined[0] = '\0';
-
-                /* Add accumulated helper functions */
-                if (helpers_only && helpers_only_len > 0) {
-                    strcat(combined, helpers_only);
-                }
-
-                /* Add this mainImage function */
-                strncat(combined, line_start, main_len);
-
-                result->pass_sources[pass_index] = combined;
-            } else {
-                result->pass_sources[pass_index] = extract_substring(line_start, func_end);
-            }
-
-            free(helpers_only);
-        } else {
-            /* First pass - just extract the mainImage function */
-            result->pass_sources[pass_index] = extract_substring(line_start, func_end);
-        }
-
-        result->pass_types[pass_index] = detected_type;
-
-        log_info("Extracted pass %d: %s", pass_index, multipass_type_name(detected_type));
-    }
-
-    result->pass_count = found_count;
-
-    return result;
-}
-
-#endif /* moved to multipass_parse.c */
 
 /* ============================================
  * Shader wrapper for each pass
@@ -859,6 +652,7 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
                             str_dup(parse_result->common_source) : NULL;
     shader->pass_count = parse_result->pass_count;
     shader->image_pass_index = -1;
+    shader->state_pass_index = -1;   /* no state pass until a manifest names one */
     shader->has_buffers = false;
     shader->resolution_scale = 1.0f;   /* Start at full resolution */
     shader->min_resolution_scale = 0.25f;
@@ -1467,6 +1261,8 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iDayFraction  = glGetUniformLocation(prog, "iDayFraction");
     u->iKeyEnergy    = glGetUniformLocation(prog, "iKeyEnergy");
     u->iMouseEnergy  = glGetUniformLocation(prog, "iMouseEnergy");
+    u->iState        = glGetUniformLocation(prog, "iState");
+    u->iStateAge     = glGetUniformLocation(prog, "iStateAge");
     u->iAudioLevel   = glGetUniformLocation(prog, "iAudioLevel");
     u->iAudioBass    = glGetUniformLocation(prog, "iAudioBass");
     u->iAudioMid     = glGetUniformLocation(prog, "iAudioMid");
@@ -1823,7 +1619,27 @@ void multipass_destroy(multipass_shader_t *shader) {
     render_optimizer_destroy(&shader->optimizer);
 
     free(shader->common_source);
+    free(shader->state_path);
     free(shader);
+}
+
+void multipass_attach_state(multipass_shader_t *shader, const char *shader_path) {
+    if (!shader || !shader_path || !*shader_path) return;
+
+    free(shader->state_path);
+    shader->state_path = str_dup(shader_path);
+
+    nw_shader_state_load(shader_path, &shader->persistent_state);
+
+    if (shader->persistent_state.saved_at > 0) {
+        log_info("Shader state: resumed %s (%.0fs since last run)",
+                 shader_path, (double)nw_shader_state_age(&shader->persistent_state));
+    }
+}
+
+bool multipass_save_state(multipass_shader_t *shader) {
+    if (!shader || !shader->state_path) return false;
+    return nw_shader_state_save(shader->state_path, &shader->persistent_state);
 }
 
 /* ============================================
@@ -1887,9 +1703,11 @@ void multipass_set_uniforms(multipass_shader_t *shader,
 
     /* Date - cached per wall-clock second (localtime() is surprisingly
      * expensive: TZ lookup + conversion). Only rebuilt when the second
-     * ticks; multiple passes in the same frame always hit the cache. */
+     * ticks; multiple passes in the same frame always hit the cache.
+     *
+     * Reads the shader-visible clock so a preview/timelapse moves iDate. */
     if (u->iDate >= 0) {
-        time_t t = time(NULL);
+        time_t t = nw_clock_now();
         if ((long long)t != shader->date_cached_sec) {
             struct tm tm_buf;
             if (localtime_r(&t, &tm_buf)) {
@@ -1965,6 +1783,15 @@ void multipass_set_uniforms(multipass_shader_t *shader,
     if (u->iDayFraction >= 0) glUniform1f(u->iDayFraction, r.day_fraction);
     if (u->iKeyEnergy >= 0)   glUniform1f(u->iKeyEnergy, r.key_energy);
     if (u->iMouseEnergy >= 0) glUniform1f(u->iMouseEnergy, r.mouse_energy);
+
+    /* Persistent state: constant for the life of the shader, but cheap enough
+     * to set per frame and it keeps the upload path uniform. */
+    if (u->iState >= 0) {
+        glUniform4fv(u->iState, NW_STATE_VEC4S, shader->persistent_state.values);
+    }
+    if (u->iStateAge >= 0) {
+        glUniform1f(u->iStateAge, nw_shader_state_age(&shader->persistent_state));
+    }
     if (u->iAudioLevel >= 0)  glUniform1f(u->iAudioLevel, r.audio_level);
     if (u->iAudioBass >= 0)   glUniform1f(u->iAudioBass, r.audio_bass);
     if (u->iAudioMid >= 0)    glUniform1f(u->iAudioMid, r.audio_mid);
@@ -2589,6 +2416,37 @@ void multipass_render(multipass_shader_t *shader,
     } else {
         log_error("No Image pass found! (image_pass_index=%d, pass_count=%d)",
                   shader->image_pass_index, shader->pass_count);
+    }
+
+    /* Persist iState from the state pass, if the shader declared one.
+     *
+     * A shader writes its 16 floats as the first 4 texels of the pass named by
+     * `state_pass_index`; we read them back here. Throttled to once a second
+     * because glReadPixels stalls the pipeline: state that accumulates over
+     * days does not need per-frame durability, and a lost second is invisible
+     * while a per-frame sync would be very visible. */
+    if (shader->state_pass_index >= 0 && shader->state_path) {
+        double now = shader->last_frame_wall;
+        if (now - shader->state_last_save >= 1.0) {
+            multipass_pass_t *sp = &shader->passes[shader->state_pass_index];
+            if (sp->fbo) {
+                GLint prev_fbo = 0;
+                glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+                glBindFramebuffer(GL_FRAMEBUFFER, sp->fbo);
+
+                /* 4 RGBA texels == 16 floats == the whole iState block. */
+                float texels[NW_STATE_FLOATS];
+                glReadPixels(0, 0, NW_STATE_VEC4S, 1, GL_RGBA, GL_FLOAT, texels);
+
+                glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev_fbo);
+
+                if (memcmp(texels, shader->persistent_state.values, sizeof(texels)) != 0) {
+                    memcpy(shader->persistent_state.values, texels, sizeof(texels));
+                    multipass_save_state(shader);
+                }
+            }
+            shader->state_last_save = now;
+        }
     }
 
     /* Cleanup vertex state (attribute state lives in the VAO; just unbind) */

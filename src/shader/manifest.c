@@ -4,6 +4,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "neowall/shader/manifest.h"
+#include "neowall/shader/multipass_optimizer.h"
 #include "neowall/config/vibe.h"
 #include "neowall/neowall.h"
 
@@ -209,6 +210,65 @@ bool manifest_apply(multipass_shader_t *shader, const char *shader_path) {
                 multipass_add_user_uniform(shader, name, UNIFORM_BIND_CONST, (float)v->as_integer);
             }
         }
+    }
+
+    /* --- state <pass>: which pass holds the values to persist across runs ---
+     *
+     * The named pass writes iState's 16 floats as its first 4 RGBA texels; the
+     * renderer reads them back (throttled) and saves them keyed by shader path.
+     * That is what lets a wallpaper accumulate across reboots rather than only
+     * across frames. */
+    {
+        VibeValue *sv = vibe_object_get(root->as_object, "state");
+        if (sv && sv->type == VIBE_TYPE_STRING) {
+            multipass_type_t want = PASS_TYPE_NONE;
+            if (!strcasecmp(sv->as_string, "bufferA")) want = PASS_TYPE_BUFFER_A;
+            else if (!strcasecmp(sv->as_string, "bufferB")) want = PASS_TYPE_BUFFER_B;
+            else if (!strcasecmp(sv->as_string, "bufferC")) want = PASS_TYPE_BUFFER_C;
+            else if (!strcasecmp(sv->as_string, "bufferD")) want = PASS_TYPE_BUFFER_D;
+
+            if (want == PASS_TYPE_NONE) {
+                log_info("Manifest: 'state %s' must name bufferA..bufferD; ignored",
+                         sv->as_string);
+            } else {
+                int found = -1;
+                for (int i = 0; i < shader->pass_count; i++) {
+                    if (shader->passes[i].type == want) { found = i; break; }
+                }
+                if (found < 0) {
+                    log_info("Manifest: 'state %s' names a pass this shader does not define",
+                             sv->as_string);
+                } else {
+                    shader->state_pass_index = found;
+                    log_info("Manifest: persisting iState from %s", sv->as_string);
+                }
+            }
+        }
+    }
+
+    /* Structure beats inference: any pass the manifest bound to `self` reads
+     * its own previous frame, so it IS a feedback buffer no matter what the
+     * keyword heuristic guessed from the text. Re-tag those passes now that the
+     * bindings are known (manifest_apply runs after the initial analysis).
+     *
+     * Without this a pass with an unlucky local name could be classified as
+     * edge-detect and throttled to half rate, which visibly drops the trails a
+     * feedback buffer exists to accumulate. */
+    for (int i = 0; i < shader->pass_count; i++) {
+        bool self_bound = false;
+        for (int c = 0; c < MULTIPASS_MAX_CHANNELS; c++) {
+            if (shader->passes[i].channels[c].source == CHANNEL_SOURCE_SELF) {
+                self_bound = true;
+                break;
+            }
+        }
+        if (!self_bound) continue;
+        if (i == shader->image_pass_index) continue;   /* image pass is never throttled */
+        if (shader->multipass_opt.passes[i].content_type == BUFFER_CONTENT_FEEDBACK) continue;
+
+        log_info("Manifest: pass %d binds self -> reclassifying %s as feedback",
+                 i, buffer_content_type_name(shader->multipass_opt.passes[i].content_type));
+        multipass_optimizer_force_feedback(&shader->multipass_opt.passes[i]);
     }
 
     vibe_value_free(root);

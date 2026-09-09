@@ -206,6 +206,16 @@ void multipass_optimizer_set_pass_update_rate(multipass_optimizer_t *opt, int pa
 /* Analyze a single pass source code to determine optimal settings */
 pass_optimization_t multipass_optimizer_analyze_source(const char *source, bool is_image_pass);
 
+/* Force a pass to be treated as a feedback buffer, overriding the textual
+ * heuristic.
+ *
+ * Classification is a keyword guess, but a manifest binding a channel to
+ * `self` is ground truth: the pass reads its own previous frame, so it IS
+ * feedback regardless of what words appear in the source. Structure wins over
+ * inference — without this a local named `edge` could outscore the real signal
+ * and get a feedback buffer throttled to half rate, dropping its trails. */
+void multipass_optimizer_force_feedback(pass_optimization_t *pass);
+
 /* Analyze all passes in a shader (pass sources array, null-terminated) */
 void multipass_optimizer_analyze_shader(multipass_optimizer_t *opt,
                                         const char **pass_sources,

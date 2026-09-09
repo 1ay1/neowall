@@ -4,6 +4,8 @@
  */
 
 #include "neowall/shader/multipass_optimizer.h"
+#include <ctype.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,24 +19,78 @@ extern void log_debug(const char *fmt, ...);
  * Internal Helpers
  * ============================================================================ */
 
-/* Count occurrences of pattern in source */
+/* True if c can appear inside a GLSL identifier. */
+static bool ident_char(char c) {
+    return isalnum((unsigned char)c) || c == '_';
+}
+
+/* Strip line and block comments and the contents of string literals, replacing
+ * them with spaces so offsets stay stable.
+ *
+ * Content classification scores raw keyword hits, so without this a shader's
+ * own prose votes on how it gets rendered: a header comment describing an
+ * "edge-detect" technique, or the word "blur" in a TODO, silently reclassified
+ * the pass and changed its update rate. Only real code should score.
+ *
+ * Returns a malloc'd copy the caller frees, or NULL on allocation failure. */
+static char *strip_comments(const char *source) {
+    if (!source) return NULL;
+    size_t n = strlen(source);
+    char *out = malloc(n + 1);
+    if (!out) return NULL;
+
+    size_t i = 0, o = 0;
+    while (i < n) {
+        if (source[i] == '/' && i + 1 < n && source[i + 1] == '/') {
+            while (i < n && source[i] != '\n') { out[o++] = ' '; i++; }
+        } else if (source[i] == '/' && i + 1 < n && source[i + 1] == '*') {
+            out[o++] = ' '; out[o++] = ' '; i += 2;
+            while (i < n && !(source[i] == '*' && i + 1 < n && source[i + 1] == '/')) {
+                out[o++] = (source[i] == '\n') ? '\n' : ' ';
+                i++;
+            }
+            if (i < n) { out[o++] = ' '; out[o++] = ' '; i += 2; }
+        } else if (source[i] == '"') {
+            out[o++] = ' '; i++;
+            while (i < n && source[i] != '"') {
+                if (source[i] == '\\' && i + 1 < n) { out[o++] = ' '; i++; }
+                out[o++] = ' ';
+                i++;
+            }
+            if (i < n) { out[o++] = ' '; i++; }
+        } else {
+            out[o++] = source[i++];
+        }
+    }
+    out[o] = '\0';
+    return out;
+}
+
+/* Count occurrences of pattern in source as a WHOLE identifier.
+ *
+ * Substring counting made unrelated locals vote: a `float edge = ...` in a
+ * pollen buffer scored as edge-detection, and `edgeFade`/`myBlur` hit too.
+ * Requiring identifier boundaries keeps the score tied to real usage. */
 static int count_pattern(const char *source, const char *pattern) {
     if (!source || !pattern) return 0;
-    
+
     int count = 0;
     const char *p = source;
     size_t len = strlen(pattern);
-    
+    if (len == 0) return 0;
+
     while ((p = strstr(p, pattern)) != NULL) {
-        count++;
+        bool left_ok  = (p == source) || !ident_char(p[-1]);
+        bool right_ok = !ident_char(p[len]);
+        if (left_ok && right_ok) count++;
         p += len;
     }
     return count;
 }
 
-/* Check if source contains pattern */
+/* Check if source contains pattern as a whole identifier. */
 static int contains(const char *source, const char *pattern) {
-    return source && pattern && strstr(source, pattern) != NULL;
+    return count_pattern(source, pattern) > 0;
 }
 
 /* Clamp integer to range */
@@ -181,70 +237,76 @@ pass_optimization_t multipass_optimizer_analyze_source(const char *source, bool 
         result.analyzed = true;
         return result;
     }
-    
+
+    /* Score against code only. Comments and string literals are blanked so a
+     * shader's own prose cannot vote on how it is rendered. Fall back to the
+     * raw source if the copy could not be allocated. */
+    char *stripped = strip_comments(source);
+    const char *scan = stripped ? stripped : source;
+
     /* Score different content types based on source analysis */
-    
+
     /* BLUR indicators */
-    result.blur_score += count_pattern(source, "blur") * 25;
-    result.blur_score += count_pattern(source, "Blur") * 25;
-    result.blur_score += count_pattern(source, "gaussian") * 30;
-    result.blur_score += count_pattern(source, "Gaussian") * 30;
-    result.blur_score += count_pattern(source, "glow") * 20;
-    result.blur_score += count_pattern(source, "bloom") * 20;
-    result.blur_score += count_pattern(source, "smooth") * 10;
-    result.blur_score += count_pattern(source, "average") * 10;
+    result.blur_score += count_pattern(scan, "blur") * 25;
+    result.blur_score += count_pattern(scan, "Blur") * 25;
+    result.blur_score += count_pattern(scan, "gaussian") * 30;
+    result.blur_score += count_pattern(scan, "Gaussian") * 30;
+    result.blur_score += count_pattern(scan, "glow") * 20;
+    result.blur_score += count_pattern(scan, "bloom") * 20;
+    result.blur_score += count_pattern(scan, "smooth") * 10;
+    result.blur_score += count_pattern(scan, "average") * 10;
     /* Blur typically samples multiple nearby texels */
-    if (count_pattern(source, "texture") > 8) result.blur_score += 15;
+    if (count_pattern(scan, "texture") > 8) result.blur_score += 15;
     
     /* NOISE indicators */
-    result.noise_score += count_pattern(source, "noise") * 20;
-    result.noise_score += count_pattern(source, "Noise") * 20;
-    result.noise_score += count_pattern(source, "hash") * 15;
-    result.noise_score += count_pattern(source, "rand") * 15;
-    result.noise_score += count_pattern(source, "random") * 15;
-    result.noise_score += count_pattern(source, "fract(sin") * 30;
-    result.noise_score += count_pattern(source, "fbm") * 25;
-    result.noise_score += count_pattern(source, "FBM") * 25;
-    result.noise_score += count_pattern(source, "perlin") * 25;
-    result.noise_score += count_pattern(source, "simplex") * 25;
-    result.noise_score += count_pattern(source, "worley") * 20;
-    result.noise_score += count_pattern(source, "voronoi") * 20;
+    result.noise_score += count_pattern(scan, "noise") * 20;
+    result.noise_score += count_pattern(scan, "Noise") * 20;
+    result.noise_score += count_pattern(scan, "hash") * 15;
+    result.noise_score += count_pattern(scan, "rand") * 15;
+    result.noise_score += count_pattern(scan, "random") * 15;
+    result.noise_score += count_pattern(scan, "fract(sin") * 30;
+    result.noise_score += count_pattern(scan, "fbm") * 25;
+    result.noise_score += count_pattern(scan, "FBM") * 25;
+    result.noise_score += count_pattern(scan, "perlin") * 25;
+    result.noise_score += count_pattern(scan, "simplex") * 25;
+    result.noise_score += count_pattern(scan, "worley") * 20;
+    result.noise_score += count_pattern(scan, "voronoi") * 20;
     
     /* FEEDBACK indicators (self-referencing) */
-    result.feedback_score += count_pattern(source, "iChannel0") * 10;
-    result.feedback_score += count_pattern(source, "previous") * 20;
-    result.feedback_score += count_pattern(source, "feedback") * 30;
-    result.feedback_score += count_pattern(source, "accumulate") * 20;
-    result.feedback_score += count_pattern(source, "temporal") * 15;
-    if (contains(source, "mix") && contains(source, "iChannel0")) {
+    result.feedback_score += count_pattern(scan, "iChannel0") * 10;
+    result.feedback_score += count_pattern(scan, "previous") * 20;
+    result.feedback_score += count_pattern(scan, "feedback") * 30;
+    result.feedback_score += count_pattern(scan, "accumulate") * 20;
+    result.feedback_score += count_pattern(scan, "temporal") * 15;
+    if (contains(scan, "mix") && contains(scan, "iChannel0")) {
         result.feedback_score += 25;  /* Temporal blending pattern */
     }
     
     /* EDGE DETECTION indicators (need high precision) */
-    result.edge_score += count_pattern(source, "edge") * 20;
-    result.edge_score += count_pattern(source, "Edge") * 20;
-    result.edge_score += count_pattern(source, "sobel") * 30;
-    result.edge_score += count_pattern(source, "Sobel") * 30;
-    result.edge_score += count_pattern(source, "laplacian") * 25;
-    result.edge_score += count_pattern(source, "gradient") * 15;
-    result.edge_score += count_pattern(source, "sharpen") * 20;
-    result.edge_score += count_pattern(source, "detail") * 10;
+    result.edge_score += count_pattern(scan, "edge") * 20;
+    result.edge_score += count_pattern(scan, "Edge") * 20;
+    result.edge_score += count_pattern(scan, "sobel") * 30;
+    result.edge_score += count_pattern(scan, "Sobel") * 30;
+    result.edge_score += count_pattern(scan, "laplacian") * 25;
+    result.edge_score += count_pattern(scan, "gradient") * 15;
+    result.edge_score += count_pattern(scan, "sharpen") * 20;
+    result.edge_score += count_pattern(scan, "detail") * 10;
     
     /* RAYMARCHING indicators */
-    result.raymarch_score += count_pattern(source, "raymarch") * 30;
-    result.raymarch_score += count_pattern(source, "raytrace") * 25;
-    result.raymarch_score += count_pattern(source, "sdf") * 20;
-    result.raymarch_score += count_pattern(source, "SDF") * 20;
-    result.raymarch_score += count_pattern(source, "distance") * 5;
-    result.raymarch_score += count_pattern(source, "march") * 15;
-    result.raymarch_score += count_pattern(source, "sphere") * 5;
-    result.raymarch_score += count_pattern(source, "box") * 5;
+    result.raymarch_score += count_pattern(scan, "raymarch") * 30;
+    result.raymarch_score += count_pattern(scan, "raytrace") * 25;
+    result.raymarch_score += count_pattern(scan, "sdf") * 20;
+    result.raymarch_score += count_pattern(scan, "SDF") * 20;
+    result.raymarch_score += count_pattern(scan, "distance") * 5;
+    result.raymarch_score += count_pattern(scan, "march") * 15;
+    result.raymarch_score += count_pattern(scan, "sphere") * 5;
+    result.raymarch_score += count_pattern(scan, "box") * 5;
     /* Heavy for loops suggest raymarching */
-    if (count_pattern(source, "for") > 2) result.raymarch_score += 10;
+    if (count_pattern(scan, "for") > 2) result.raymarch_score += 10;
     
     /* Detect dependency flags */
-    result.uses_mouse = contains(source, "iMouse");
-    result.uses_time = contains(source, "iTime") || contains(source, "iFrame");
+    result.uses_mouse = contains(scan, "iMouse");
+    result.uses_time = contains(scan, "iTime") || contains(scan, "iFrame");
     result.uses_previous_frame = result.feedback_score > 20;
     
     /* Determine content type based on highest score */
@@ -301,9 +363,25 @@ pass_optimization_t multipass_optimizer_analyze_source(const char *source, bool 
     /* Feedback buffers should NOT be skipped when static (state accumulates) */
     result.can_skip_when_static = (result.content_type != BUFFER_CONTENT_FEEDBACK &&
                                    result.content_type != BUFFER_CONTENT_SIMULATION);
-    
+
+    free(stripped);
+
     result.analyzed = true;
     return result;
+}
+
+void multipass_optimizer_force_feedback(pass_optimization_t *pass) {
+    if (!pass) return;
+
+    pass->content_type = BUFFER_CONTENT_FEEDBACK;
+    pass->uses_previous_frame = true;
+    pass->recommended_scale = buffer_content_default_scale(BUFFER_CONTENT_FEEDBACK);
+    pass->update_divisor = buffer_content_default_update_rate(BUFFER_CONTENT_FEEDBACK);
+    pass->can_skip_when_static = false;
+    pass->min_width = 256;
+    pass->min_height = 256;
+    pass->max_width = 0;
+    pass->max_height = 0;
 }
 
 void multipass_optimizer_analyze_shader(multipass_optimizer_t *opt,
