@@ -18,6 +18,7 @@
 #endif
 
 #include "neowall/shader/reactive.h"
+#include "neowall/clock.h"
 #include "neowall/neowall.h"
 
 #include <stdio.h>
@@ -397,7 +398,10 @@ static void sample_gpu(reactive_snapshot_t *s) {
 }
 
 static void sample_time(reactive_snapshot_t *s) {
-    time_t t = time(NULL);
+    /* Shader-visible clock, so `neowall preview --date/--timelapse` moves
+     * iTimeOfDay/iSun/iDayFraction together with iDate. Identical to
+     * time(NULL) unless a preview is active. */
+    time_t t = nw_clock_now();
     struct tm tmv;
     localtime_r(&t, &tmv);
     float secs = tmv.tm_hour * 3600.0f + tmv.tm_min * 60.0f + tmv.tm_sec;
