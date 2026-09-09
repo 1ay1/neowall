@@ -119,9 +119,12 @@ static bool parse_cpu_line(const char *line, cpu_times_t *out) {
 
 static void sample_cpu(reactive_snapshot_t *s) {
     static cpu_times_t prev_total = {0};
-    static cpu_times_t prev_core[8] = {{0}};
+    static cpu_times_t prev_core[REACTIVE_MAX_CPU_CORES] = {{0}};
 
-    char buf[4096];
+    /* /proc/stat's cpu block is (1 + ncores) lines of ~80 bytes. Size the read
+     * buffer so REACTIVE_MAX_CPU_CORES lines always fit, with slack for the
+     * lines that follow (intr, ctxt, ...) which we stop before anyway. */
+    char buf[REACTIVE_MAX_CPU_CORES * 96 + 1024];
     if (read_file("/proc/stat", buf, sizeof(buf)) <= 0) return;
 
     char *line = buf;
@@ -141,7 +144,7 @@ static void sample_cpu(reactive_snapshot_t *s) {
                     if (dt > 0) s->cpu = clampf(1.0f - (float)di / (float)dt, 0.0f, 1.0f);
                     prev_total = cur;
                     first = false;
-                } else if (!is_agg && core < 8) {
+                } else if (!is_agg && core < REACTIVE_MAX_CPU_CORES) {
                     unsigned long long dt = cur.total - prev_core[core].total;
                     unsigned long long di = cur.idle - prev_core[core].idle;
                     if (dt > 0) s->cpu_per[core] = clampf(1.0f - (float)di / (float)dt, 0.0f, 1.0f);

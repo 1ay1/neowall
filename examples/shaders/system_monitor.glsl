@@ -50,7 +50,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         int cores = max(iCpuCoreCount, 1);
         float bx = uv.x * float(cores);
         int idx = int(bx);
-        if (idx < cores && idx < 8) {
+        if (idx < cores && idx < 64) {
             float v = iCpuCores[idx];
             float fillY = (uv.y - 0.94) / 0.06;   // 0..1 within the strip
             float on = step(fillY, v);

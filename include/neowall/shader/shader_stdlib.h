@@ -24,7 +24,7 @@
 static const char *neowall_reactive_uniforms =
     "// --- neowall reactive uniforms (live system + audio) ---\n"
     "uniform float iCpu;            // total CPU load 0..1\n"
-    "uniform float iCpuCores[8];    // per-core load 0..1\n"
+    "uniform float iCpuCores[64];   // per-core load 0..1\n"
     "uniform int   iCpuCoreCount;\n"
     "uniform float iCpuMax;         // hottest single core 0..1\n"
     "uniform float iCpuSpread;      // core-load imbalance 0..1\n"

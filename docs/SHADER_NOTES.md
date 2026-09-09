@@ -84,7 +84,7 @@ All standard Shadertoy uniforms are also present and behave identically: `iResol
 ### CPU & Load
 
 - `iCpu` — overall CPU utilization, 0..1
-- `iCpuCores[8]` — per-core utilization, 0..1
+- `iCpuCores[64]` — per-core utilization, 0..1
 - `iCpuCoreCount` — number of valid entries in `iCpuCores`
 - `iCpuTemp` — CPU package temperature, normalized 0..1 (0 = 20 C, 1 = 100 C)
 - `iCpuTempC` — CPU package temperature in raw degrees Celsius
@@ -419,8 +419,8 @@ it is absent the file was never found. Note a bare-number key (`bufferA { 0 self
 a hard parse error (the VIBE parser needs an identifier key) — use `ch0`, not `0`.
 
 **Per-core meters show fewer cores than expected.**
-`iCpuCores` is capped at 8 entries; `iCpuCoreCount` tells you how many are valid.
-Iterate to `iCpuCoreCount`, never a hard-coded 8.
+`iCpuCores` is capped at 64 entries; `iCpuCoreCount` tells you how many are valid.
+Iterate to `iCpuCoreCount`, never a hard-coded 64.
 
 ---
 

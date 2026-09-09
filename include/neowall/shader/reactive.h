@@ -23,12 +23,17 @@
 /* Number of FFT bins exposed to shaders (texture width). Power of two. */
 #define REACTIVE_AUDIO_BINS 512
 
+/* Maximum number of per-core CPU utilisation entries tracked and exposed to
+ * shaders via iCpuCores[]. Machines with more logical cores are clamped to
+ * this many; cpu_cores/iCpuCoreCount reports the number actually filled. */
+#define REACTIVE_MAX_CPU_CORES 64
+
 /* A frame-coherent snapshot of every reactive signal. Plain floats, copied by
  * value into the render path so the shader sees a consistent set each frame. */
 typedef struct {
     /* --- load (0..1, smoothed) --- */
     float cpu;          /* total CPU utilisation */
-    float cpu_per[8];   /* up to 8 per-core utilisations (0 if absent) */
+    float cpu_per[REACTIVE_MAX_CPU_CORES]; /* up to REACTIVE_MAX_CPU_CORES per-core utilisations (0 if absent) */
     int   cpu_cores;    /* number of valid entries in cpu_per */
     float cpu_max;      /* hottest single core 0..1 (spots one pegged thread) */
     float cpu_spread;   /* core-load imbalance 0..1 (0 even, 1 one core pegged) */
