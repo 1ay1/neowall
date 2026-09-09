@@ -63,7 +63,7 @@ System
 | Uniform | Meaning |
 |---------|---------|
 | `iCpu` | total CPU load 0..1 |
-| `iCpuCores[8]`, `iCpuCoreCount` | per-core load |
+| `iCpuCores[64]`, `iCpuCoreCount` | per-core load |
 | `iCpuTemp`, `iCpuTempC` | CPU temp 0..1 (over 30..95°C) and raw °C |
 | `iGpu` | GPU utilisation 0..1 (amdgpu; 0 if unavailable) |
 | `iGpuTemp`, `iGpuTempC` | GPU temp 0..1 and raw °C |

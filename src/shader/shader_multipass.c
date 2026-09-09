@@ -1927,7 +1927,7 @@ void multipass_set_uniforms(multipass_shader_t *shader,
     #define r (*rp)
     if (u->iCpu >= 0)         glUniform1f(u->iCpu, r.cpu);
     if (u->iCpuCoreCount >= 0) glUniform1i(u->iCpuCoreCount, r.cpu_cores);
-    if (u->iCpuCores >= 0)    glUniform1fv(u->iCpuCores, 8, r.cpu_per);
+    if (u->iCpuCores >= 0)    glUniform1fv(u->iCpuCores, REACTIVE_MAX_CPU_CORES, r.cpu_per);
     if (u->iCpuMax >= 0)      glUniform1f(u->iCpuMax, r.cpu_max);
     if (u->iCpuSpread >= 0)   glUniform1f(u->iCpuSpread, r.cpu_spread);
     if (u->iRam >= 0)         glUniform1f(u->iRam, r.ram);

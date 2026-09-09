@@ -182,7 +182,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         if (uv.y < 0.34 && uv.y > 0.06 && uv.x > 0.12 && uv.x < 0.88) {
             float bx = (uv.x - 0.12) / 0.76 * float(cores);
             int idx = int(bx);
-            if (idx >= 0 && idx < cores && idx < 8) {
+            if (idx >= 0 && idx < cores && idx < 64) {
                 float v = iCpuCores[idx];
                 float fy = (uv.y - 0.06) / 0.28;        // 0..1 in the band
                 float lit = step(fy, v);
