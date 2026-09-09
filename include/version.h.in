@@ -12,6 +12,17 @@
 #define NEOWALL_VERSION_STRING "@VERSION@"
 #define NEOWALL_VERSION_FULL   "NeoWall v@VERSION@"
 
+/* Numeric components, for comparisons (e.g. a shader's `#pragma neowall
+ * requires 0.6`). Meson splits the project version so these stay in sync with
+ * the string above automatically. */
+#define NEOWALL_VERSION_MAJOR @VERSION_MAJOR@
+#define NEOWALL_VERSION_MINOR @VERSION_MINOR@
+#define NEOWALL_VERSION_PATCH @VERSION_PATCH@
+
+/* Single comparable integer: 0.6.1 -> 601. */
+#define NEOWALL_VERSION_NUMBER \
+    (NEOWALL_VERSION_MAJOR * 10000 + NEOWALL_VERSION_MINOR * 100 + NEOWALL_VERSION_PATCH)
+
 /* Project metadata */
 #define NEOWALL_PROJECT_NAME    "NeoWall"
 #define NEOWALL_PROJECT_DESC    "A reliable Wayland wallpaper daemon with Multi-Version EGL/OpenGL ES Support"

@@ -146,11 +146,16 @@ endif
 # Generate version.h from version.h.in
 # =============================================================================
 
+version_parts = meson.project_version().split('.')
+
 version_h = configure_file(
   input: 'include/version.h.in',
   output: 'version.h',
   configuration: {
     'VERSION': meson.project_version(),
+    'VERSION_MAJOR': version_parts[0],
+    'VERSION_MINOR': version_parts.length() > 1 ? version_parts[1] : '0',
+    'VERSION_PATCH': version_parts.length() > 2 ? version_parts[2] : '0',
   },
 )
 
@@ -201,6 +206,8 @@ core_sources = files(
   'src/main.c',
   'src/eventloop.c',
   'src/utils.c',
+  'src/clock.c',
+  'src/watch.c',
 )
 
 # EGL sources (desktop OpenGL 3.3)
@@ -211,6 +218,7 @@ egl_sources = files(
 # Shader engine sources
 shader_sources = files(
   'src/shader/shader_core.c',
+  'src/shader/shader_state.c',
   'src/shader/shader_error_log.c',
   'src/shader/shader_multipass.c',
   'src/shader/program_cache.c',
@@ -537,6 +545,19 @@ test_compat_exe = executable('test_shadertoy_compat',
 )
 
 test('shadertoy_compat', test_compat_exe)
+
+# Shader-authoring plumbing: pass-marker detection, the virtual shader clock,
+# and the `#pragma neowall requires` floor. All GL-free, so they run in CI.
+test_authoring_exe = executable('test_shader_authoring',
+  files('tests/test_shader_authoring.c',
+        'src/shader/multipass_parse.c',
+        'src/clock.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep, thread_dep],
+  build_by_default: false,
+)
+
+test('shader_authoring', test_authoring_exe)
 
 # VIBE config parser is filesystem/GL-free in its string-parse path.
 test_vibe_exe = executable('test_vibe',

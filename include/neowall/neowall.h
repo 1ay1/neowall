@@ -114,6 +114,10 @@ struct neowall_state {
     int wakeup_fd;              /* eventfd for waking poll on internal events */
     int signal_fd;              /* signalfd for race-free signal handling */
 
+    /* ===== SHADER HOT-RELOAD (`neowall watch`) ===== */
+    int  watch_fd;                          /* inotify fd, -1 when not watching */
+    char watch_path[MAX_PATH_LENGTH];       /* shader being watched ('' = none) */
+
     /* ===== STATISTICS ===== */
     uint64_t frames_rendered;
     uint64_t errors_count;
@@ -130,6 +134,9 @@ void detect_gl_capabilities(struct neowall_state *state);
 /* Main loop */
 void event_loop_run(struct neowall_state *state);
 void event_loop_stop(struct neowall_state *state);
+
+/* Wake the loop and mark every output for a redraw. */
+void event_loop_request_redraw(struct neowall_state *state);
 
 /* Utility functions */
 uint64_t get_time_ms(void);

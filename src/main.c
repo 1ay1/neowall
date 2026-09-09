@@ -1,3 +1,9 @@
+/* _POSIX_C_SOURCE is set by the build; realpath() additionally needs the XSI
+ * declaration from stdlib.h, which _DEFAULT_SOURCE exposes on glibc. */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +19,8 @@
 #include <sys/signalfd.h>
 #include <limits.h>
 #include "neowall/neowall.h"
+#include "neowall/clock.h"
+#include "neowall/watch.h"
 #include "neowall/config/config_access.h"
 #include "neowall/constants.h"
 #include "neowall/compositor/compositor.h"
@@ -532,14 +540,70 @@ static bool send_daemon_signal(int signal, const char *action, bool check_cycle)
     return true;
 }
 
+/* Print which binary the running daemon is actually executing, and shout if it
+ * differs from this CLI.
+ *
+ * A stale daemon is a silent failure mode: `neowall reload` succeeds, the
+ * config is re-read, and a shader using newer uniforms renders as if nothing
+ * is wrong — only frozen. Surfacing the running binary makes "you upgraded but
+ * never restarted" a one-line diagnosis instead of an hour with /proc.
+ *
+ * Best-effort and silent when the daemon is not running or /proc is absent. */
+static void report_daemon_version(void) {
+    printf("  CLI:       v%s\n", NEOWALL_VERSION_STRING);
+
+    const char *pid_path = get_pid_file_path();
+    FILE *fp = pid_path ? fopen(pid_path, "r") : NULL;
+    if (!fp) return;
+
+    long pid = 0;
+    int scanned = fscanf(fp, "%ld", &pid);
+    fclose(fp);
+    if (scanned != 1 || pid <= 0) return;
+
+    if (kill((pid_t)pid, 0) != 0) return;   /* not running */
+
+    char exe_link[64];
+    char exe_path[MAX_PATH_LENGTH];
+    snprintf(exe_link, sizeof(exe_link), "/proc/%ld/exe", pid);
+
+    ssize_t len = readlink(exe_link, exe_path, sizeof(exe_path) - 1);
+    if (len <= 0) return;
+    exe_path[len] = '\0';
+
+    printf("  Daemon:    PID %ld (%s)\n", pid, exe_path);
+
+    /* Compare against our own binary. Different paths are not automatically
+     * wrong (an installed daemon plus a dev CLI is a normal combination), but
+     * it is exactly the situation where a shader silently misbehaves. */
+    char self_path[MAX_PATH_LENGTH];
+    ssize_t self_len = readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
+    if (self_len <= 0) return;
+    self_path[self_len] = '\0';
+
+    if (strcmp(exe_path, self_path) != 0) {
+        printf("\n  Note: the daemon is running a different binary than this CLI.\n");
+        printf("        If a shader looks frozen or ignores new features, restart it:\n");
+        printf("          neowall kill && neowall\n");
+    }
+}
+
 static void print_usage(const char *program_name) {
     printf("NeoWall v%s - GPU-accelerated wallpapers for Wayland. Take the red pill. 🔴\n\n", NEOWALL_VERSION_STRING);
     printf("Usage: %s [OPTIONS]\n", program_name);
-    printf("       %s set <index>   Set wallpaper by index (0-based)\n\n", program_name);
+    printf("       %s set <index>   Set wallpaper by index (0-based)\n", program_name);
+    printf("       %s preview <shader.glsl>\n", program_name);
+    printf("                         Run one shader in the foreground without\n");
+    printf("                         changing your config or stopping the daemon\n");
+    printf("       %s watch <shader.glsl>\n", program_name);
+    printf("                         Like preview, but recompile on every save and\n");
+    printf("                         print errors inline (keeps the last good shader)\n\n");
     printf("Options:\n");
     printf("  -c, --config PATH     Path to configuration file\n");
     printf("  -f, --foreground      Run in foreground (for debugging)\n");
     printf("  -v, --verbose         Enable verbose logging\n");
+    printf("      --date OFFSET     Shift the shader clock (+6d, -2h, 90m, 3600)\n");
+    printf("      --timelapse SPEC  Compress shader time (SPAN/DURATION, e.g. 30d/20s)\n");
     printf("  -h, --help            Show this help message\n");
     printf("  -V, --version         Show version information\n");
     printf("\n");
@@ -916,12 +980,41 @@ int main(int argc, char *argv[]) {
     char config_path[MAX_PATH_LENGTH] = {0};
     bool daemon_mode = true;  /* Default to daemon mode */
     bool verbose = false;
+    bool clock_shifted = false;   /* --date/--timelapse moved the shader clock */
+    const char *preview_shader = NULL;   /* `preview <shader>`: run this, not the config */
+    bool watch_mode = false;             /* `watch <shader>`: recompile on save */
     int opt;
 
     /* ========================================================================
      * Command Dispatch - Table-driven lookup (Command Pattern)
      * ======================================================================== */
-    if (argc >= 2 && argv[1][0] != '-') {
+    /* Preview is handled before the daemon-command table: it is not an IPC
+     * command but a run mode, and it consumes its own argument.
+     *
+     *   neowall preview garden.glsl --date=+6d
+     *   neowall preview garden.glsl --timelapse=30d/20s
+     *
+     * Runs in the foreground alongside your real wallpaper without touching
+     * the config, the saved state, or the daemon's pid file. */
+    if (argc >= 2 && (strcmp(argv[1], "preview") == 0 || strcmp(argv[1], "watch") == 0)) {
+        bool is_watch = (argv[1][0] == 'w');
+        if (argc < 3 || argv[2][0] == '-') {
+            fprintf(stderr, "Usage: %s %s <shader.glsl> [--date=+6d] [--timelapse=30d/20s]\n",
+                    argv[0], is_watch ? "watch" : "preview");
+            return EXIT_FAILURE;
+        }
+        preview_shader = argv[2];
+        watch_mode = is_watch;
+
+        /* Drop the subcommand and its argument so the option parser sees only
+         * flags. getopt scans from index 1, so argv[0] must stay a program
+         * name. */
+        argv[2] = argv[0];
+        argv += 2;
+        argc -= 2;
+    }
+
+    if (!preview_shader && argc >= 2 && argv[1][0] != '-') {
         const char *cmd = argv[1];
 
         /* Special case: kill command */
@@ -1092,7 +1185,9 @@ int main(int argc, char *argv[]) {
                 /* Command found - execute it */
                 if (daemon_commands[i].needs_state_check) {
                     /* Commands like "current" that read state */
-                    return read_wallpaper_state() ? EXIT_SUCCESS : EXIT_FAILURE;
+                    bool ok = read_wallpaper_state();
+                    report_daemon_version();
+                    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
                 } else {
                     /* Commands that send signals to daemon */
                     return send_daemon_signal(daemon_commands[i].signal,
@@ -1121,6 +1216,8 @@ int main(int argc, char *argv[]) {
         {"verbose",    no_argument,       0, 'v'},
         {"help",       no_argument,       0, 'h'},
         {"version",    no_argument,       0, 'V'},
+        {"date",       required_argument, 0, 'D'},
+        {"timelapse",  required_argument, 0, 'T'},
         {0, 0, 0, 0}
     };
 
@@ -1137,6 +1234,32 @@ int main(int argc, char *argv[]) {
                 /* Verbose mode - enable debug logging */
                 verbose = true;
                 break;
+            case 'D': {
+                /* Shift the shader-visible clock. Lets a day-scale shader be
+                 * inspected at an arbitrary point in its cycle instead of
+                 * waiting for the calendar to get there. */
+                long secs = 0;
+                if (!nw_clock_parse_offset(optarg, &secs)) {
+                    fprintf(stderr, "Invalid --date offset: %s\n", optarg);
+                    fprintf(stderr, "Expected a signed duration like +6d, -2h, 90m or 3600.\n");
+                    return EXIT_FAILURE;
+                }
+                nw_clock_set_offset(secs);
+                clock_shifted = true;
+                break;
+            }
+            case 'T': {
+                /* Compress a span of shader time into a span of real time. */
+                double scale = 1.0;
+                if (!nw_clock_parse_timelapse(optarg, &scale)) {
+                    fprintf(stderr, "Invalid --timelapse spec: %s\n", optarg);
+                    fprintf(stderr, "Expected SPAN/DURATION, e.g. 30d/20s.\n");
+                    return EXIT_FAILURE;
+                }
+                nw_clock_set_scale(scale);
+                clock_shifted = true;
+                break;
+            }
             case 'h':
                 print_usage(argv[0]);
                 return EXIT_SUCCESS;
@@ -1155,10 +1278,57 @@ int main(int argc, char *argv[]) {
     }
     log_info("NeoWall v%s starting...", NEOWALL_VERSION_STRING);
 
+    if (clock_shifted) {
+        time_t vnow = nw_clock_now();
+        char stamp[64];
+        struct tm tmv;
+        if (localtime_r(&vnow, &tmv) &&
+            strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", &tmv)) {
+            log_info("Shader clock: virtual (now=%s, offset=%lds, scale=%.4gx)",
+                     stamp, nw_clock_offset(), nw_clock_scale());
+        }
+        log_info("Shader clock is NOT real time - iDate/iTimeOfDay/iSun are shifted");
+    }
+
     /* Ensure config directory exists */
     if (!create_config_directory()) {
         log_error("Failed to create configuration directory");
         return EXIT_FAILURE;
+    }
+
+    /* Preview mode: synthesise a throwaway config pointing at the shader, so
+     * the whole normal load/render path is exercised unchanged. Never touches
+     * the user's config. Foreground is implied: a preview you cannot Ctrl-C is
+     * not a preview. */
+    char preview_config[MAX_PATH_LENGTH] = {0};
+    if (preview_shader) {
+        char resolved[MAX_PATH_LENGTH];
+        if (!realpath(preview_shader, resolved)) {
+            fprintf(stderr, "Cannot open shader: %s\n", preview_shader);
+            return EXIT_FAILURE;
+        }
+
+        const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+        if (runtime_dir) {
+            snprintf(preview_config, sizeof(preview_config),
+                     "%s/neowall-preview-%d.vibe", runtime_dir, (int)getpid());
+        } else {
+            snprintf(preview_config, sizeof(preview_config),
+                     "/tmp/neowall-preview-%d.vibe", (int)getpid());
+        }
+
+        FILE *pf = fopen(preview_config, "w");
+        if (!pf) {
+            fprintf(stderr, "Cannot create preview config: %s\n", preview_config);
+            return EXIT_FAILURE;
+        }
+        fprintf(pf, "# Generated by `neowall preview`; safe to delete.\n");
+        fprintf(pf, "default {\n  shader %s\n}\n", resolved);
+        fclose(pf);
+
+        snprintf(config_path, sizeof(config_path), "%s", preview_config);
+        daemon_mode = false;
+        printf("Previewing %s (Ctrl-C to stop)\n", resolved);
     }
 
     /* Determine config file path */
@@ -1177,14 +1347,20 @@ int main(int argc, char *argv[]) {
     /* Atomically claim the PID file. This races correctly against another
      * concurrent `neowall` invocation: only one O_CREAT|O_EXCL succeeds. We
      * claim BEFORE forking so the grandchild can't be beaten to the file by
-     * a sibling invocation during the fork dance. */
+     * a sibling invocation during the fork dance.
+     *
+     * Preview is exempt: it is a transient foreground instance meant to run
+     * alongside your real wallpaper. Claiming the pid file would either refuse
+     * to start or, worse, delete the running daemon's file on exit and leave
+     * `neowall reload/next/kill` unable to find it. */
     pid_t existing_pid = 0;
-    if (!try_take_pid_file(&existing_pid)) {
+    if (!preview_shader && !try_take_pid_file(&existing_pid)) {
         const char *pid_path = get_pid_file_path();
         log_error("NeoWall is already running (PID %d)", existing_pid);
         fprintf(stderr, "Error: NeoWall is already running (PID %d)\n", existing_pid);
         fprintf(stderr, "PID file: %s\n", pid_path);
         fprintf(stderr, "Use 'neowall kill' to stop the running instance.\n");
+        fprintf(stderr, "To try a shader without stopping it: neowall preview <shader.glsl>\n");
         return EXIT_FAILURE;
     }
 
@@ -1229,6 +1405,21 @@ int main(int argc, char *argv[]) {
         log_error("Failed to set up signal handling");
         remove_pid_file();
         return EXIT_FAILURE;
+    }
+
+    /* Start the shader watcher for `neowall watch`. Failure is non-fatal: the
+     * shader still renders, it just will not hot-reload. */
+    state.watch_fd = -1;
+    state.watch_path[0] = '\0';
+    if (watch_mode && preview_shader) {
+        char resolved[MAX_PATH_LENGTH];
+        if (realpath(preview_shader, resolved)) {
+            snprintf(state.watch_path, sizeof(state.watch_path), "%s", resolved);
+            state.watch_fd = watch_init(resolved);
+        }
+        if (state.watch_fd < 0) {
+            log_warn("watch: hot-reload unavailable; running as a plain preview");
+        }
     }
 
     /* Initialize compositor backend (auto-detects Wayland/X11) */
@@ -1309,6 +1500,13 @@ int main(int argc, char *argv[]) {
 
     /* Remove PID file */
     remove_pid_file();
+
+    /* Drop the throwaway preview config. */
+    if (preview_config[0] != '\0') {
+        unlink(preview_config);
+    }
+
+    watch_cleanup(state.watch_fd);
 
     /* Cancel alarm - we finished cleanup in time */
     alarm(0);

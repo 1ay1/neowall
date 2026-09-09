@@ -9,6 +9,7 @@
 #include <sys/eventfd.h>
 #include <sys/signalfd.h>
 #include "neowall/neowall.h"
+#include "neowall/watch.h"
 #include "neowall/shader/shader_multipass.h"
 #include "neowall/config/config_access.h"
 #include "neowall/config/config.h"
@@ -33,7 +34,7 @@ static struct neowall_state *event_loop_state = NULL;
 /* Poll-set sizing. File-scope (was a function-scoped #define which leaked
  * into following translation units — see audit fix #36). */
 enum {
-    BASE_FD_COUNT = 4,
+    BASE_FD_COUNT = 5,
     MAX_POLL_FDS  = BASE_FD_COUNT + MAX_OUTPUTS,
 };
 
@@ -797,6 +798,10 @@ void event_loop_run(struct neowall_state *state) {
     fds[2].events = POLLIN;
     fds[3].fd = state->signal_fd;
     fds[3].events = POLLIN;
+    /* Shader hot-reload watch (`neowall watch`); -1 when not watching, which
+     * poll() ignores. */
+    fds[4].fd = state->watch_fd;
+    fds[4].events = state->watch_fd >= 0 ? POLLIN : 0;
 
     int num_fds = BASE_FD_COUNT;  /* Will be increased dynamically for frame timers */
 
@@ -1109,6 +1114,14 @@ void event_loop_run(struct neowall_state *state) {
                 if (s == sizeof(fdsi)) {
                     log_debug("Received signal %d via signalfd", fdsi.ssi_signo);
                     handle_signal_from_fd(state, fdsi.ssi_signo);
+                }
+            }
+
+            /* Check watch fd - a watched shader file was saved. Always drain
+             * even if the name does not match, or poll() would spin. */
+            if (state->watch_fd >= 0 && (fds[4].revents & POLLIN)) {
+                if (watch_consume(state->watch_fd) && state->watch_path[0]) {
+                    watch_reload(state, state->watch_path);
                 }
             }
 

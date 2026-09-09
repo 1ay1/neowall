@@ -14,6 +14,7 @@
 #include "neowall/shader/platform_compat.h"
 #include "neowall/shader/shader.h"
 #include "neowall/shader/shader_error_log.h"
+#include "neowall/shader/shader_multipass.h"
 
 /* Maximum path length */
 #ifndef MAX_PATH_LENGTH
