@@ -9,6 +9,7 @@
 #include "neowall/result.h"        /* For nw_result */
 #include "neowall/image/image.h"   /* For struct image_data and enum image_format */
 #include "neowall/shader/shader_multipass.h"  /* For multipass_shader_t */
+#include "neowall/shader/shader_clock.h"      /* For shader_clock_tracker */
 #include "neowall/output/span.h"   /* For struct span_view */
 
 /* Constants */
@@ -284,6 +285,9 @@ struct output_state {
                                          * a float32 and loses frame resolution after ~a day
                                          * of uptime. Main-thread only. */
     uint64_t shader_fade_start_time;    /* Time when shader fade started (for cross-fade) */
+    shader_clock_tracker clock_tracker; /* Watches iTime for backward steps so a
+                                         * visible "jumps back in time" glitch is
+                                         * reported with its cause. Main-thread only. */
     char pending_shader_path[OUTPUT_MAX_PATH_LENGTH];  /* Next shader to load after fade-out */
     float transition_progress;
     uint64_t frames_rendered;

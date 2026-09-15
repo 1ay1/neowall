@@ -20,6 +20,7 @@
 #include "neowall/transitions.h"
 #include "neowall/shader/shader.h"
 #include "neowall/shader/shader_multipass.h"
+#include "neowall/shader/shader_clock.h"
 #include "neowall/textures.h"
 #include "neowall/compositor/compositor.h"
 
@@ -981,18 +982,70 @@ bool render_frame_shader(struct output_state *output) {
      *
      * needs_redraw is set when the output is actually rendering; an occluded
      * output stops here long before this point, so reaching this branch with a
-     * large elapsed time means we were parked and just came back. */
-    if (current_time > SHADER_TIME_REBASE_SECONDS &&
-        output->shader_hidden_since > 0) {
+     * large elapsed time means we were parked and just came back.
+     *
+     * Both conditions are re-checked against live state rather than trusting
+     * the marker alone: shader_hidden_since is cleared on un-occlude, but if a
+     * future path ever forgets to clear it, a stale marker would let the clock
+     * snap to zero while the user is watching -- which is precisely the visible
+     * "jumps back in time" regression this guard is meant to avoid. Requiring
+     * the output to be occluded *right now* makes that impossible.
+     *
+     * The policy itself lives in shader_clock.c so it can be exhaustively
+     * unit-tested without GL or a compositor; see tests/test_shader_clock.c. */
+    shader_clock_state clock_st = {
+        .elapsed_seconds = current_time,
+        .hidden_since_ms = output->shader_hidden_since,
+        .occluded_now = atomic_load_explicit(&output->occluded, memory_order_acquire),
+        .paused_now = output->shader_paused_at > 0,
+        .spanned = output->spanned,
+    };
+    bool did_rebase = false;
+
+    if (shader_clock_should_rebase(&clock_st, SHADER_TIME_REBASE_SECONDS)) {
         /* Rebase to zero and drop the hidden marker; the jump lands entirely
          * inside the invisible window. Spanned outputs rebase as a group
-         * elsewhere, so leave them alone rather than desync the bezel. */
-        if (!output->spanned) {
+         * elsewhere, so leave their clock alone rather than desync the bezel --
+         * but still consume the marker, or the condition stays armed and is
+         * retested on every frame for the rest of the process's life. */
+        if (!shader_clock_defers_to_group(&clock_st)) {
             output->shader_start_time = get_time_ms();
-            output->shader_hidden_since = 0;
             current_time = 0.0;
+            did_rebase = true;
             log_debug("Rebased shader clock for output %s (float32 precision guard)",
                       output_get_identifier(output));
+        }
+        output->shader_hidden_since = 0;
+    }
+
+    /* Watch the value actually handed to the shader. iTime must never move
+     * backwards while the wallpaper is on screen; if it does, the user sees the
+     * animation snap to an earlier state. Reporting the OUTPUT (rather than
+     * auditing each site that can move the epoch) catches causes we have not
+     * thought of, including ones outside this function. */
+    double prev_time = output->clock_tracker.last_time;
+    shader_clock_event clock_ev =
+        shader_clock_track(&output->clock_tracker, current_time, epoch_ms, did_rebase);
+
+    if (clock_ev != SHADER_CLOCK_OK) {
+        /* An expected rebase is debug-level noise; anything else is a real bug
+         * and is logged at warn so it shows up without -v. */
+        const char *id = output_get_identifier(output);
+        if (clock_ev == SHADER_CLOCK_JUMP_REBASE) {
+            log_debug("shader clock %s on %s: iTime %.3f -> %.3f",
+                      shader_clock_event_name(clock_ev), id,
+                      prev_time, current_time);
+        } else {
+            log_warn("shader clock JUMPED BACKWARD on %s (%s): iTime %.3f -> %.3f, "
+                     "epoch=%llu ms, occluded=%d paused=%d spanned=%d "
+                     "hidden_since=%llu frames=%llu total_jumps=%llu",
+                     id, shader_clock_event_name(clock_ev), prev_time, current_time,
+                     (unsigned long long)epoch_ms,
+                     (int)clock_st.occluded_now, (int)clock_st.paused_now,
+                     (int)clock_st.spanned,
+                     (unsigned long long)clock_st.hidden_since_ms,
+                     (unsigned long long)output->clock_tracker.frames,
+                     (unsigned long long)output->clock_tracker.jumps);
         }
     }
 

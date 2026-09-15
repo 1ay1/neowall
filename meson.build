@@ -225,6 +225,7 @@ shader_sources = files(
   'src/shader/multipass_parse.c',
   'src/shader/shadertoy_compat.c',
   'src/shader/glsl_shadow.c',
+  'src/shader/shader_clock.c',
   'src/shader/adaptive_scale.c',
   'src/shader/render_optimizer.c',
   'src/shader/multipass_optimizer.c',
@@ -571,6 +572,17 @@ test_glsl_shadow_exe = executable('test_glsl_shadow',
 )
 
 test('glsl_shadow', test_glsl_shadow_exe)
+
+# Shader-clock rebase policy: the clock may only jump while nobody can see it.
+# Guards the "wallpaper jumps back in time" regression. No GL, no compositor.
+test_shader_clock_exe = executable('test_shader_clock',
+  files('tests/test_shader_clock.c',
+        'src/shader/shader_clock.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('shader_clock', test_shader_clock_exe)
 
 # VIBE config parser is filesystem/GL-free in its string-parse path.
 test_vibe_exe = executable('test_vibe',

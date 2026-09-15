@@ -248,6 +248,10 @@ void wayland_occlusion_update(struct neowall_state *state) {
         const char *name = o->connector_name[0] ? o->connector_name : o->model;
         if (was && !nowocc) {
             atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+            /* Visible again: close the rebase window. The renderer may only
+             * jump the shader clock while this is non-zero, so leaving it set
+             * would let a rebase land in full view of the user. */
+            o->shader_hidden_since = 0;
             log_info("Output %s un-occluded, rendering", name);
         } else if (!was && nowocc) {
             /* Note when the wallpaper stopped being visible. The renderer uses

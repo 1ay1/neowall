@@ -181,6 +181,8 @@ void frame_watchdog_update(struct neowall_state *state) {
         const char *name = o->connector_name[0] ? o->connector_name : o->model;
         if (was && !nowocc) {
             atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+            /* Visible again: close the rebase window (see occlusion.c). */
+            o->shader_hidden_since = 0;
             log_info("Output %s un-occluded, rendering", name);
         } else if (!was && nowocc) {
             /* See occlusion.c: marks a window where the shader clock may be
