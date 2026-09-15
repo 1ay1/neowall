@@ -1,5 +1,5 @@
 name: 🐛 Bug Report
-description: Report a bug or crash in Staticwall
+description: Report a bug or crash in NeoWall
 title: "[Bug]: "
 labels: ["bug", "needs-triage"]
 body:
@@ -15,7 +15,7 @@ body:
     attributes:
       label: Bug Description
       description: A clear description of what went wrong
-      placeholder: "Staticwall crashed when I tried to..."
+      placeholder: "NeoWall crashed when I tried to..."
     validations:
       required: true
 
@@ -25,7 +25,7 @@ body:
       label: Steps to Reproduce
       description: How can we reproduce this issue?
       placeholder: |
-        1. Start staticwall with `staticwall -d`
+        1. Start neowall with `neowall`
         2. Change wallpaper to...
         3. See error
     validations:
@@ -45,7 +45,7 @@ body:
     attributes:
       label: Actual Behavior
       description: What actually happened?
-      placeholder: "Staticwall crashed / froze / displayed wrong wallpaper"
+      placeholder: "NeoWall crashed / froze / displayed wrong wallpaper"
     validations:
       required: true
 
@@ -54,8 +54,8 @@ body:
     attributes:
       label: Logs
       description: |
-        Run with verbose logging: `staticwall -v`
-        Or check logs: `journalctl --user -u staticwall.service -n 50`
+        Run in the foreground with verbose logging: `neowall -f -v`
+        Or check logs: `journalctl --user -u neowall.service -n 50`
       render: shell
       placeholder: |
         Paste relevant logs here...
@@ -63,8 +63,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Staticwall Version
-      description: Run `staticwall --version`
+      label: NeoWall Version
+      description: Run `neowall --version`
       placeholder: "v0.1.0"
     validations:
       required: true
@@ -117,7 +117,7 @@ body:
     id: config
     attributes:
       label: Configuration File
-      description: Share your `~/.config/staticwall/config.vibe` (remove sensitive paths if needed)
+      description: Share your `~/.config/neowall/config.vibe` (remove sensitive paths if needed)
       render: vibe
       placeholder: |
         default {
@@ -130,8 +130,9 @@ body:
     attributes:
       label: Installation Method
       options:
-        - Built from source (make)
-        - AUR (staticwall-git)
+        - Built from source (meson)
+        - AUR (neowall-git)
+        - AUR (neowall-bin)
         - Package manager
         - Other
 
@@ -153,9 +154,9 @@ body:
       options:
         - label: I have searched existing issues for duplicates
           required: true
-        - label: I have included the output of `staticwall --version`
+        - label: I have included the output of `neowall --version`
           required: true
-        - label: I have included relevant logs from `staticwall -v`
+        - label: I have included relevant logs from `neowall -f -v`
           required: true
         - label: I have included my configuration file
           required: false

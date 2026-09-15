@@ -1,5 +1,5 @@
 #!/bin/bash
-# Generate Wayland protocol bindings for Staticwall
+# Generate Wayland protocol bindings for NeoWall
 
 set -e
 

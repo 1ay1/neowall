@@ -1,5 +1,5 @@
-# Code Owners for Staticwall
-# "Sets wallpapers until it... doesn't" - and these folks make sure it does
+# Code Owners for NeoWall
+# Run GLSL shaders as your Linux wallpaper.
 
 # Default owners for everything
 *       @1ay1
@@ -9,7 +9,8 @@
 /include/ @1ay1
 
 # Build system
-/Makefile @1ay1
+/meson.build @1ay1
+/meson_options.txt @1ay1
 
 # Documentation
 /docs/  @1ay1
@@ -24,6 +25,3 @@ CONTRIBUTING.md @1ay1
 
 # Protocol definitions (auto-generated, but still worth reviewing)
 /protocols/ @1ay1
-
-# Assets and media
-/assets/ @1ay1

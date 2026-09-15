@@ -1,5 +1,5 @@
 name: ✨ Feature Request
-description: Suggest a new feature or enhancement for Staticwall
+description: Suggest a new feature or enhancement for NeoWall
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
@@ -8,7 +8,7 @@ body:
       value: |
         Thanks for suggesting a feature!
 
-        Remember: Staticwall sets wallpapers until it doesn't. Let's make sure it keeps doing that (with style).
+        Remember: NeoWall runs GLSL shaders as your wallpaper. Let's keep it fast, minimal and dependency-light.
 
   - type: textarea
     id: problem
@@ -82,7 +82,7 @@ body:
       label: Use Case
       description: How would you use this feature? What's your workflow?
       placeholder: |
-        I use Staticwall with a 3-monitor setup where...
+        I use NeoWall with a 3-monitor setup where...
         This feature would help me...
 
   - type: checkboxes
@@ -108,7 +108,7 @@ body:
       options:
         - label: I have searched existing issues and discussions
           required: true
-        - label: This feature aligns with Staticwall's goals (reliable, minimal, Wayland-focused)
+        - label: This feature aligns with NeoWall's goals (reliable, minimal, Wayland + X11)
           required: true
         - label: I have clearly described the problem and proposed solution
           required: true

@@ -6,7 +6,6 @@ build*/
 *.a
 *.so
 *.so.*
-staticwall
 REFACTORING_PLAN.md
 .cache
 compile_commands.json
