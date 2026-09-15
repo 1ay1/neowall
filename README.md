@@ -123,9 +123,9 @@ neowall current  # print what's playing
 | Vibe | A few |
 |------|-------|
 | Synthwave | `retro_wave` · `synthwave` · `neonwave_sunrise` |
-| Nature | `ocean_waves` · `aurora` · `sunrise` |
+| Nature | `moon_ocean` · `living_aurora` · `sunrise` |
 | Cyber | `matrix_rain` · `matrix_real` · `glowing_triangles` |
-| Abstract | `fractal_land` · `plasma` · `mandelbrot` |
+| Abstract | `fractal_land` · `plasma_touch` · `mandelbrot` |
 | Space | `star_next` · `starship_reentry` |
 
 Pair it with [**GLEditor**](https://github.com/1ay1/gleditor) for a live-preview shader workflow that one-clicks into neowall.

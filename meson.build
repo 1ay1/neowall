@@ -584,6 +584,13 @@ test_shader_clock_exe = executable('test_shader_clock',
 
 test('shader_clock', test_shader_clock_exe)
 
+# Documentation drift: every shader the README advertises must actually ship.
+# Guards issue #79, where the README sent users to shaders that did not exist.
+test('documented_shaders',
+  find_program('tests/verify-documented-shaders.sh'),
+  args: [meson.project_source_root()],
+)
+
 # VIBE config parser is filesystem/GL-free in its string-parse path.
 test_vibe_exe = executable('test_vibe',
   files('tests/test_vibe.c', 'src/config/vibe_impl.c'),
