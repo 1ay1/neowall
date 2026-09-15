@@ -100,8 +100,13 @@ static void output_configure_vsync(struct output_state *output) {
     }
 
     /* Configure vsync based on user preference:
-     * - vsync=true:  Enable vsync, sync to monitor refresh rate (ignores shader_fps)
-     * - vsync=false: Disable vsync, use tearing control for custom FPS (default) */
+     * - vsync=true:  eglSwapBuffers blocks until the refresh boundary, which is
+     *                what paces rendering (the event loop deliberately runs
+     *                free and closes the frame timer in this mode -- see
+     *                output_configure_frame_timer and the vsync branch in
+     *                eventloop.c). The swap interval MUST be 1 here or nothing
+     *                limits the frame rate at all.
+     * - vsync=false: a timerfd paces to shader_fps and tearing is permitted. */
     int swap_interval = output->config->vsync ? 1 : 0;
 
     if (!eglSwapInterval(output->state->egl_display, swap_interval)) {
@@ -121,6 +126,13 @@ static void output_configure_vsync(struct output_state *output) {
                      1000.0f / output->config->shader_fps);
         }
     }
+
+    /* Keep the compositor's presentation hint in agreement with the EGL swap
+     * interval. The surface is created before a config is attached to the
+     * output, so the hint chosen at creation time can be stale by now; setting
+     * eglSwapInterval(1) while the surface still says "async" leaves the
+     * compositor free to scan out early and the wallpaper still jerks. */
+    compositor_surface_set_vsync(output->compositor_surface, output->config->vsync);
 }
 
 /* Helper function to configure high-precision frame timer for vsync-off mode

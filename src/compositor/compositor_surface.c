@@ -313,6 +313,11 @@ compositor_surface_config_t compositor_surface_config_default(void *native_outpu
         .width = 0,  /* Auto */
         .height = 0, /* Auto */
         .output = native_output,
+        /* Wallpapers have no latency requirement that would justify tearing, and
+         * async presentation lets the present rate drift off the refresh rate,
+         * which reads as jerky motion even at a nominal 60 FPS. Callers that
+         * genuinely want tearing opt out explicitly. */
+        .vsync = true,
     };
 
     return config;
@@ -392,6 +397,19 @@ void compositor_surface_set_scale(struct compositor_surface *surface, int32_t sc
     }
 
     surface->scale = scale;
+}
+
+void compositor_surface_set_vsync(struct compositor_surface *surface, bool vsync) {
+    if (!surface) {
+        return;
+    }
+
+    surface->config.vsync = vsync;
+
+    struct compositor_backend *backend = surface->backend;
+    if (backend && backend->ops && backend->ops->set_vsync) {
+        backend->ops->set_vsync(surface, vsync);
+    }
 }
 
 bool compositor_surface_set_keyboard_interactivity(struct compositor_surface *surface,

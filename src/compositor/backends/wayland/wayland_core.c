@@ -1044,6 +1044,11 @@ bool output_configure_compositor_surface(struct output_state *output) {
         .width = 0,   /* Auto-size from compositor */
         .height = 0,  /* Auto-size from compositor */
         .output = output->native_output,
+        /* Follow the wallpaper's `vsync` setting. Tearing buys latency that a
+         * wallpaper cannot use, while async presentation lets the present rate
+         * drift off the refresh rate and makes motion jerk at a nominal 60 FPS.
+         * Default to vsync-locked when no config has been attached yet. */
+        .vsync = output->config ? output->config->vsync : true,
     };
 
     output->compositor_surface = compositor_surface_create(state->compositor_backend, &config);

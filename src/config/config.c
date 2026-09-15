@@ -439,7 +439,11 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->transition_duration = 0.3f;  /* 0.3 seconds default transition */
     config->shader_speed = 1.0f;
     config->shader_fps = 60;  /* Default 60 FPS for shaders */
-    config->vsync = false;  /* Default: vsync off, use custom FPS with tearing control */
+    /* Default: vsync ON. A wallpaper has no latency requirement that would
+     * justify tearing, and async presentation lets the present rate drift off
+     * the display's refresh rate -- motion then jerks visibly even while the
+     * FPS counter reads a healthy 60. Set `vsync false` to allow tearing. */
+    config->vsync = true;
     config->show_fps = false;  /* Default: no FPS watermark */
     config->pause_on_fullscreen = true;  /* Default: pause rendering when occluded */
     config->pause_coverage_threshold = 0.8f;  /* Default: 80% tiled coverage = occluded */

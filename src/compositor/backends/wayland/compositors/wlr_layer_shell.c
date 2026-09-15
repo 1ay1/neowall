@@ -1061,7 +1061,18 @@ static struct compositor_surface *wlr_create_surface(void *data,
 
     zwlr_layer_surface_v1_set_keyboard_interactivity(surface_data->layer_surface, kb_mode);
 
-    /* Enable tearing control for immediate presentation (bypasses compositor vsync) */
+    /* Presentation hint. ASYNC lets the compositor scan out a frame the moment
+     * it arrives (tearing, but no waiting); VSYNC pins presentation to the
+     * refresh boundary.
+     *
+     * This MUST follow the user's `vsync` setting. Forcing ASYNC unconditionally
+     * makes a wallpaper present at whatever rate the GPU happens to finish --
+     * measured swinging between 60 and 131 FPS on a 3440x1440 display -- so the
+     * frame interval is never the shader's dt and motion visibly jerks even
+     * while the FPS counter reads a healthy 60. A wallpaper has no latency
+     * requirement that would justify tearing, so honouring vsync is also the
+     * better default.
+     */
     if (wl && wl->tearing_control_manager) {
         struct wp_tearing_control_v1 *tearing = wp_tearing_control_manager_v1_get_tearing_control(
             wl->tearing_control_manager,
@@ -1070,12 +1081,19 @@ static struct compositor_surface *wlr_create_surface(void *data,
         surface->tearing_control = tearing;
 
         if (tearing) {
-            /* Set presentation hint to async (immediate/tearing allowed) */
+            bool want_tearing = !config->vsync;
+
             wp_tearing_control_v1_set_presentation_hint(
                 tearing,
-                WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC
+                want_tearing ? WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC
+                             : WP_TEARING_CONTROL_V1_PRESENTATION_HINT_VSYNC
             );
-            log_info("Enabled tearing control for immediate presentation (bypasses compositor FPS limits)");
+
+            if (want_tearing) {
+                log_info("Tearing control: async presentation (vsync off)");
+            } else {
+                log_info("Tearing control: vsync-locked presentation (smooth pacing)");
+            }
         } else {
             log_error("Failed to create tearing control object");
         }
@@ -1445,6 +1463,27 @@ static void wlr_set_scale(struct compositor_surface *surface, int32_t scale) {
     wl_surface_set_buffer_scale(wl_surface, scale);
 }
 
+/* Re-hint presentation on a live surface. The surface is created before the
+ * output's config is attached, so the hint chosen at creation time is a guess;
+ * this applies the real setting once it is known. */
+static void wlr_set_vsync(struct compositor_surface *surface, bool vsync) {
+    if (!surface || !surface->tearing_control) {
+        return;
+    }
+
+    struct wp_tearing_control_v1 *tearing =
+        (struct wp_tearing_control_v1 *)surface->tearing_control;
+
+    wp_tearing_control_v1_set_presentation_hint(
+        tearing,
+        vsync ? WP_TEARING_CONTROL_V1_PRESENTATION_HINT_VSYNC
+              : WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC
+    );
+
+    log_debug("Tearing control: %s presentation",
+              vsync ? "vsync-locked" : "async");
+}
+
 /* ============================================================================
  * EVENT HANDLING OPERATIONS
  * ============================================================================ */
@@ -1585,6 +1624,7 @@ static const compositor_backend_ops_t wlr_backend_ops = {
     .on_output_removed = wlr_on_output_removed,
     .damage_surface = wlr_damage_surface,
     .set_scale = wlr_set_scale,
+    .set_vsync = wlr_set_vsync,
     /* Event handling operations */
     .get_fd = wlr_get_fd,
     .prepare_events = wlr_prepare_events,

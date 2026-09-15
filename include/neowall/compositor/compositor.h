@@ -116,6 +116,11 @@ typedef struct {
     int32_t width;                      /* Desired width (0 = auto) */
     int32_t height;                     /* Desired height (0 = auto) */
     void *output;                       /* Target output handle (NULL = all outputs) */
+    bool vsync;                         /* Present locked to the refresh boundary. False allows
+                                         * tearing (async presentation) for latency-sensitive
+                                         * content. A wallpaper wants this TRUE: async lets the
+                                         * present rate drift off the refresh rate, so motion
+                                         * jerks even at a nominal 60 FPS. */
 } compositor_surface_config_t;
 
 /* ============================================================================
@@ -315,6 +320,11 @@ typedef struct compositor_backend_ops {
      * @param scale Scale factor (1 = normal, 2 = HiDPI, etc.)
      */
     void (*set_scale)(struct compositor_surface *surface, int32_t scale);
+
+    /* Update the presentation hint (vsync-locked vs async/tearing) on an
+     * already-created surface. Optional: backends without tearing control leave
+     * this NULL. */
+    void (*set_vsync)(struct compositor_surface *surface, bool vsync);
 
     /**
      * Change keyboard interactivity on a LIVE surface (optional)
@@ -691,6 +701,17 @@ bool compositor_surface_resize_egl(struct compositor_surface *surface,
  * @param scale Scale factor (typically 1, 2, 3, etc.)
  */
 void compositor_surface_set_scale(struct compositor_surface *surface, int32_t scale);
+
+/* Update the compositor's presentation hint for this surface.
+ *
+ * `vsync` true pins presentation to the refresh boundary; false permits async
+ * (tearing) scan-out. This must track the EGL swap interval: a surface left
+ * hinting "async" while EGL is set to swap-interval 1 still lets the compositor
+ * present early, which reads as jerky motion at a nominal 60 FPS.
+ *
+ * Safe to call repeatedly, and on backends or compositors without tearing
+ * control (where it is a no-op). */
+void compositor_surface_set_vsync(struct compositor_surface *surface, bool vsync);
 
 /**
  * Change keyboard interactivity on an already-created surface.

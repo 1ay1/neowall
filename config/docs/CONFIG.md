@@ -111,6 +111,36 @@ shader_speed 0.1   # Very slow
 
 Only affects shaders, not images.
 
+#### `vsync` - Frame Pacing
+
+How frames are presented to the display:
+
+```vibe
+vsync true    # Sync to the monitor's refresh rate (default)
+vsync false   # Free-run at shader_fps, tearing allowed
+```
+
+With `vsync true` neowall presents on the refresh boundary, so every frame is
+shown for exactly one refresh interval. This is what you want for a wallpaper:
+the interval between the frames you actually see matches the time step the
+shader animated by, and motion is smooth.
+
+With `vsync false` frames are presented the moment they are finished. The render
+rate is then paced by `shader_fps` rather than the display. Because the present
+rate no longer divides evenly into the refresh rate, motion can look jerky even
+while the FPS counter reads a healthy 60 — so only turn this off if you
+specifically want tearing (for example to render above the refresh rate).
+
+#### `shader_fps` - Target Frame Rate
+
+```vibe
+shader_fps 60   # Default
+shader_fps 30   # Half rate, lower GPU load
+```
+
+Only consulted when `vsync false`; with vsync on, the display's refresh rate
+sets the pace. Lowering it is an effective way to cut GPU usage on a laptop.
+
 ### Image Options
 
 #### `path` - Image File or Directory
