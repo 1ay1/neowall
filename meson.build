@@ -224,6 +224,7 @@ shader_sources = files(
   'src/shader/program_cache.c',
   'src/shader/multipass_parse.c',
   'src/shader/shadertoy_compat.c',
+  'src/shader/glsl_shadow.c',
   'src/shader/adaptive_scale.c',
   'src/shader/render_optimizer.c',
   'src/shader/multipass_optimizer.c',
@@ -558,6 +559,18 @@ test_authoring_exe = executable('test_shader_authoring',
 )
 
 test('shader_authoring', test_authoring_exe)
+
+# The GLSL namespace-collision guard (issue #82): the user-definition scanner,
+# plus the invariant that every unprefixed std-lib name is suppressible.
+# Pure string work, no GL, so it runs headless in CI.
+test_glsl_shadow_exe = executable('test_glsl_shadow',
+  files('tests/test_glsl_shadow.c',
+        'src/shader/glsl_shadow.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('glsl_shadow', test_glsl_shadow_exe)
 
 # VIBE config parser is filesystem/GL-free in its string-parse path.
 test_vibe_exe = executable('test_vibe',

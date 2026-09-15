@@ -93,7 +93,7 @@ static const char *neowall_glsl_stdlib =
     "\n"
     "// ---- audio sampling helpers ----\n"
     "// Energy in a normalised frequency band [lo,hi] in 0..1 of the spectrum.\n"
-    "float audioBand(float lo, float hi) {\n"
+    "float nwAudioBand(float lo, float hi) {\n"
     "    lo = clamp(lo, 0.0, 1.0); hi = clamp(hi, 0.0, 1.0);\n"
     "    float acc = 0.0; float n = 0.0;\n"
     "    const int STEPS = 16;\n"
@@ -103,9 +103,9 @@ static const char *neowall_glsl_stdlib =
     "    }\n"
     "    return n > 0.0 ? acc / n : 0.0;\n"
     "}\n"
-    "float spectrum(float x) { return texture(iAudio, vec2(clamp(x,0.0,1.0), 0.25)).r; }\n"
-    "float waveform(float x) { return texture(iAudio, vec2(clamp(x,0.0,1.0), 0.75)).r; }\n"
-    "float beat() { return iAudioBeat; }\n"
+    "float nwSpectrum(float x) { return texture(iAudio, vec2(clamp(x,0.0,1.0), 0.25)).r; }\n"
+    "float nwWaveform(float x) { return texture(iAudio, vec2(clamp(x,0.0,1.0), 0.75)).r; }\n"
+    "float nwBeat() { return iAudioBeat; }\n"
     "\n"
     "// ---- hashing ----\n"
     "float nwHash11(float p){ p=fract(p*0.1031); p*=p+33.33; p*=p+p; return fract(p); }\n"
@@ -174,32 +174,33 @@ static const char *neowall_glsl_stdlib =
  * literal limit; the two are concatenated at injection time). */
 static const char *neowall_glsl_stdlib2 =
     "// ---- 2D SDFs + ops ----\n"
-    "float sdCircle(vec2 p,float r){ return length(p)-r; }\n"
-    "float sdBox(vec2 p,vec2 b){ vec2 d=abs(p)-b; return length(max(d,0.0))+min(max(d.x,d.y),0.0); }\n"
-    "float sdSegment(vec2 p,vec2 a,vec2 b){ vec2 pa=p-a,ba=b-a; float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0); return length(pa-ba*h); }\n"
-    "float sdHex(vec2 p,float r){ const vec3 k=vec3(-0.866025,0.5,0.577350); p=abs(p); p-=2.0*min(dot(k.xy,p),0.0)*k.xy; p-=vec2(clamp(p.x,-k.z*r,k.z*r),r); return length(p)*sign(p.y); }\n"
-    "float opSmoothUnion(float a,float b,float k){ float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0); return mix(b,a,h)-k*h*(1.0-h); }\n"
-    "float opSmoothSub(float a,float b,float k){ float h=clamp(0.5-0.5*(b+a)/k,0.0,1.0); return mix(b,-a,h)+k*h*(1.0-h); }\n"
+    "float nwSdCircle(vec2 p,float r){ return length(p)-r; }\n"
+    "float nwSdBox(vec2 p,vec2 b){ vec2 d=abs(p)-b; return length(max(d,0.0))+min(max(d.x,d.y),0.0); }\n"
+    "float nwSdSegment(vec2 p,vec2 a,vec2 b){ vec2 pa=p-a,ba=b-a; float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0); return length(pa-ba*h); }\n"
+    "float nwSdHex(vec2 p,float r){ const vec3 k=vec3(-0.866025,0.5,0.577350); p=abs(p); p-=2.0*min(dot(k.xy,p),0.0)*k.xy; p-=vec2(clamp(p.x,-k.z*r,k.z*r),r); return length(p)*sign(p.y); }\n"
+    "float nwOpSmoothUnion(float a,float b,float k){ float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0); return mix(b,a,h)-k*h*(1.0-h); }\n"
+    "float nwOpSmoothSub(float a,float b,float k){ float h=clamp(0.5-0.5*(b+a)/k,0.0,1.0); return mix(b,-a,h)+k*h*(1.0-h); }\n"
     "\n"
     "// ---- 3D SDFs (for raymarchers) ----\n"
-    "float sdSphere(vec3 p,float r){ return length(p)-r; }\n"
-    "float sdBox(vec3 p,vec3 b){ vec3 d=abs(p)-b; return length(max(d,0.0))+min(max(d.x,max(d.y,d.z)),0.0); }\n"
-    "float sdTorus(vec3 p,vec2 t){ vec2 q=vec2(length(p.xz)-t.x,p.y); return length(q)-t.y; }\n"
+    "float nwSdSphere(vec3 p,float r){ return length(p)-r; }\n"
+    "float nwSdBox(vec3 p,vec3 b){ vec3 d=abs(p)-b; return length(max(d,0.0))+min(max(d.x,max(d.y,d.z)),0.0); }\n"
+    "float nwSdTorus(vec3 p,vec2 t){ vec2 q=vec2(length(p.xz)-t.x,p.y); return length(q)-t.y; }\n"
     "mat2 nwRot(float a){ float c=cos(a),s=sin(a); return mat2(c,-s,s,c); }\n"
     "\n"
     "// ---- handy reactive shaping ----\n"
     "// pulse(x): smooth 0..1 emphasis curve, good for load->intensity mapping.\n"
-    "float pulse(float x){ x=clamp(x,0.0,1.0); return x*x*(3.0-2.0*x); }\n"
+    "float nwPulse(float x){ x=clamp(x,0.0,1.0); return x*x*(3.0-2.0*x); }\n"
     "// dayNightMix: 0 at night, 1 at noon, using iSun.\n"
-    "float dayNight(){ return pulse(iSun); }\n"
+    "float nwDayNight(){ return nwPulse(iSun); }\n"
     "// warmCool: a color temperature shift driven by time of day.\n"
-    "vec3 timeOfDayTint(){ return mix(vec3(0.35,0.45,0.85), vec3(1.05,0.95,0.7), dayNight()); }\n"
+    "vec3 nwTimeOfDayTint(){ return mix(vec3(0.35,0.45,0.85), vec3(1.05,0.95,0.7), nwDayNight()); }\n"
     "\n"
-    "// No unprefixed aliases: GLSL has no way to detect whether the user\n"
-    "// already defined fbm()/hsv2rgb()/etc., so a `#define hsv2rgb nwHsv2rgb`\n"
-    "// turns the user's `vec3 hsv2rgb(...)` into a duplicate definition of\n"
-    "// nwHsv2rgb at preprocess time. Call nwFbm/nwPalette/nwHsv2rgb/nwRot\n"
-    "// directly, or define your own short helper.\n"
+    "// Friendly unprefixed aliases (sdBox, pulse, beat, ...) are NOT emitted\n"
+    "// here. They are appended by the host at injection time, and only for\n"
+    "// names the shader has not defined itself -- see neowall_stdlib_aliases\n"
+    "// in shader_stdlib.h and glsl_shadow.h. That is why everything above is\n"
+    "// nw*-prefixed and calls only other nw* names: the canonical library can\n"
+    "// never be disturbed by whatever the user chooses to define.\n"
     "// ============================================================\n"
     "\n";
 
@@ -484,5 +485,70 @@ static const char *neowall_glsl_stdlib7 =
     "    return col;\n"
     "}\n"
     "\n";
+
+/* ---------------------------------------------------------------- *
+ * Friendly aliases
+ *
+ * Unmodified Shadertoy shaders expect short, unprefixed helper names. We want
+ * to offer them, but a name like `sdBox` is also exactly what a raymarching
+ * shader is most likely to define for itself -- and in GLSL a duplicate
+ * definition is a hard compile error (issue #82).
+ *
+ * So the aliases are DATA, not baked into the library text above. At injection
+ * time the host scans the user's source (glsl_shadow.h) and emits only the
+ * aliases whose names the shader left free. If you define `sdBox`, you get
+ * your `sdBox`, with every neowall overload of that name withheld; the
+ * canonical `nwSdBox` remains available either way.
+ *
+ * Each alias is emitted as a thin forwarding function rather than a `#define`
+ * on purpose: a macro would rewrite the *user's own* later definition of that
+ * token and reintroduce the very redefinition error we are avoiding.
+ *
+ * INVARIANT, enforced by tests/test_glsl_shadow.c: every unprefixed function
+ * defined anywhere in this header must appear in this table. Add a helper
+ * without adding its alias here and the test fails -- which is what keeps a
+ * future edit from silently re-opening #82.
+ */
+typedef struct {
+    const char *name; /* the unprefixed name the shader may also define */
+    const char *decl; /* GLSL emitted when the name is free */
+} neowall_stdlib_alias;
+
+static const neowall_stdlib_alias neowall_stdlib_aliases[] = {
+    /* audio */
+    {"audioBand",
+     "float audioBand(float lo,float hi){ return nwAudioBand(lo,hi); }\n"},
+    {"spectrum", "float spectrum(float x){ return nwSpectrum(x); }\n"},
+    {"waveform", "float waveform(float x){ return nwWaveform(x); }\n"},
+    {"beat", "float beat(){ return nwBeat(); }\n"},
+
+    /* 2D SDFs + ops */
+    {"sdCircle", "float sdCircle(vec2 p,float r){ return nwSdCircle(p,r); }\n"},
+    {"sdSegment",
+     "float sdSegment(vec2 p,vec2 a,vec2 b){ return nwSdSegment(p,a,b); }\n"},
+    {"sdHex", "float sdHex(vec2 p,float r){ return nwSdHex(p,r); }\n"},
+    {"opSmoothUnion",
+     "float opSmoothUnion(float a,float b,float k){ return nwOpSmoothUnion(a,b,k); }\n"},
+    {"opSmoothSub",
+     "float opSmoothSub(float a,float b,float k){ return nwOpSmoothSub(a,b,k); }\n"},
+
+    /* 3D SDFs */
+    {"sdSphere", "float sdSphere(vec3 p,float r){ return nwSdSphere(p,r); }\n"},
+    {"sdTorus", "float sdTorus(vec3 p,vec2 t){ return nwSdTorus(p,t); }\n"},
+
+    /* sdBox is overloaded; a shader defining either signature takes both. */
+    {"sdBox",
+     "float sdBox(vec2 p,vec2 b){ return nwSdBox(p,b); }\n"
+     "float sdBox(vec3 p,vec3 b){ return nwSdBox(p,b); }\n"},
+
+    /* reactive shaping */
+    {"pulse", "float pulse(float x){ return nwPulse(x); }\n"},
+    {"dayNight", "float dayNight(){ return nwDayNight(); }\n"},
+    {"timeOfDayTint", "vec3 timeOfDayTint(){ return nwTimeOfDayTint(); }\n"},
+};
+
+#define NEOWALL_STDLIB_ALIAS_COUNT \
+    (sizeof(neowall_stdlib_aliases) / sizeof(neowall_stdlib_aliases[0]))
+
 
 #endif /* NEOWALL_SHADER_STDLIB_H */
