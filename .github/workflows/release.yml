@@ -278,7 +278,8 @@ jobs:
             --url "https://github.com/1ay1/neowall" \
             --license MIT --maintainer "1ay1 <noreply@github.com>" \
             --architecture x86_64 \
-            --depends "wayland-libs" --depends "mesa-libGL" --depends "mesa-libEGL" \
+            --depends "libwayland-client" --depends "libwayland-egl" \
+            --depends "libwayland-cursor" --depends "mesa-libGL" --depends "mesa-libEGL" \
             --depends "libpng" --depends "libjpeg-turbo" \
             --depends "libX11" --depends "libXrandr" \
             --depends "libxkbcommon" \
