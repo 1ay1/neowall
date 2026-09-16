@@ -1020,7 +1020,7 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
             "iTemp", "iThermal", "iNv", "iBattery", "iCharging",
             "iTimeOfDay", "iSun", "iDayFraction", "iUptime", "iProcs",
             "iKeyEnergy", "iMouseEnergy", "iActivity", "iPulse",
-            "iAudio", "iState", "iTerm"
+            "iAudio", "iState", "iTerm", "iWindow", "iFocusedWindow"
         };
         bool reactive = false;
         for (int i = 0; !reactive && i < shader->pass_count; i++) {
@@ -1381,6 +1381,9 @@ static void cache_uniform_locations(multipass_pass_t *pass) {
     u->iMouseEnergy  = glGetUniformLocation(prog, "iMouseEnergy");
     u->iState        = glGetUniformLocation(prog, "iState");
     u->iStateAge     = glGetUniformLocation(prog, "iStateAge");
+    u->iWindows      = glGetUniformLocation(prog, "iWindows");
+    u->iWindowCount  = glGetUniformLocation(prog, "iWindowCount");
+    u->iFocusedWindow = glGetUniformLocation(prog, "iFocusedWindow");
     u->iAudioLevel   = glGetUniformLocation(prog, "iAudioLevel");
     u->iAudioBass    = glGetUniformLocation(prog, "iAudioBass");
     u->iAudioMid     = glGetUniformLocation(prog, "iAudioMid");
@@ -1909,6 +1912,19 @@ void multipass_set_uniforms(multipass_shader_t *shader,
     }
     if (u->iStateAge >= 0) {
         glUniform1f(u->iStateAge, nw_shader_state_age(&shader->persistent_state));
+    }
+
+    /* Window geometry. Always upload the count, even when zero: a shader that
+     * loops `i < iWindowCount` must see 0 rather than whatever the previous
+     * program left in that location. */
+    if (u->iWindowCount >= 0) {
+        glUniform1i(u->iWindowCount, shader->frame_window_count);
+    }
+    if (u->iWindows >= 0 && shader->frame_window_count > 0) {
+        glUniform4fv(u->iWindows, shader->frame_window_count, shader->frame_windows);
+    }
+    if (u->iFocusedWindow >= 0) {
+        glUniform4fv(u->iFocusedWindow, 1, shader->frame_focused_window);
     }
     if (u->iAudioLevel >= 0)  glUniform1f(u->iAudioLevel, r.audio_level);
     if (u->iAudioBass >= 0)   glUniform1f(u->iAudioBass, r.audio_bass);
@@ -2641,6 +2657,27 @@ void multipass_render(multipass_shader_t *shader,
 /* ============================================
  * Adaptive Resolution API (delegates to adaptive_scale module)
  * ============================================ */
+
+void multipass_set_windows(multipass_shader_t *shader,
+                           const float *rects, int count,
+                           const float *focused) {
+    if (!shader) return;
+
+    if (count < 0) count = 0;
+    if (count > NW_SHADER_MAX_WINDOWS) count = NW_SHADER_MAX_WINDOWS;
+    if (!rects) count = 0;
+
+    if (count > 0) {
+        memcpy(shader->frame_windows, rects, (size_t)count * 4 * sizeof(float));
+    }
+    shader->frame_window_count = count;
+
+    if (focused) {
+        memcpy(shader->frame_focused_window, focused, 4 * sizeof(float));
+    } else {
+        memset(shader->frame_focused_window, 0, sizeof(shader->frame_focused_window));
+    }
+}
 
 void multipass_set_resolution_scale(multipass_shader_t *shader, float scale) {
     if (!shader) return;

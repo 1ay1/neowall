@@ -265,6 +265,45 @@ reflections in about 60.
 
 ---
 
+## 3c. Window Awareness — the wallpaper can see your desktop
+
+NeoWall reports where your windows are, in pixels, relative to the output:
+
+```glsl
+uniform vec4  iWindows[NW_MAX_WINDOWS];  // xy = position, zw = size (y DOWN)
+uniform int   iWindowCount;              // how many are valid
+uniform vec4  iFocusedWindow;            // fullscreen/active one; zero if none
+```
+
+Only windows on the **visible workspace of that monitor** are reported, clipped
+to the output. Helpers do the y-flip for you, so pass `fragCoord` directly:
+
+| Helper | Returns |
+|--------|---------|
+| `nwWinNearest(fragCoord)` | Pixels to the nearest window edge; negative inside one. |
+| `nwWinDist(fragCoord, win)` | Signed distance to one specific rect. |
+| `nwWinCovered(fragCoord)` | 1.0 where a window covers this pixel. |
+| `nwWinGlow(fragCoord, radius)` | Soft falloff out from every window — light leaking onto the desktop. |
+| `nwWinBusy()` | Fraction of the screen your windows occupy, 0..1. |
+
+```glsl
+// Warm light pooling out from behind every window
+col += vec3(1.0, 0.8, 0.5) * nwWinGlow(fragCoord, 200.0);
+```
+
+**Portability.** This needs geometry from the compositor, which today means
+**Hyprland** (via its IPC socket). Everywhere else `iWindowCount` is `0` and
+the helpers return neutral values, so a shader using them stays correct — it
+simply sees an empty desktop. Guard on `iWindowCount` if you want a different
+look on unsupported compositors.
+
+The data is read from the snapshot the occlusion system already refreshes every
+500ms, so this costs a lock and a memcpy per frame, not an IPC round-trip.
+
+See [`examples/shaders/window_light.glsl`](../examples/shaders/window_light.glsl).
+
+---
+
 ## 4. Manifests
 
 A shader `foo.glsl` may have a sidecar `foo.neowall` manifest that wires up channels,

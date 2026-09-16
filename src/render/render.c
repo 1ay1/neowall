@@ -23,6 +23,11 @@
 #include "neowall/shader/shader_clock.h"
 #include "neowall/textures.h"
 #include "neowall/compositor/compositor.h"
+#ifdef HAVE_WAYLAND_BACKEND
+/* For iWindows[]: window rects come from the Hyprland IPC snapshot that the
+ * occlusion path already maintains. */
+#include "hyprland_coverage.h"
+#endif
 
 /* Helper function to get the preferred output identifier
  * Prefers connector_name (e.g., "HDMI-A-2", "DP-1") over model name
@@ -1052,6 +1057,34 @@ bool render_frame_shader(struct output_state *output) {
     /* Get mouse position (or use center if not tracked) */
     float mouse_x = output->mouse_x >= 0 ? output->mouse_x : (float)width / 2.0f;
     float mouse_y = output->mouse_y >= 0 ? output->mouse_y : (float)height / 2.0f;
+
+    /* Publish the window layout for iWindows[]. This reads the snapshot the
+     * occlusion path already refreshes on its own 500ms throttle, so it costs
+     * a lock and a memcpy rather than an IPC round-trip -- important, because
+     * this runs every frame on a daemon that stays up for weeks.
+     *
+     * Compositors that expose no geometry report zero windows, which shaders
+     * are required to treat as an empty desktop rather than an error. */
+    {
+        float rects[NW_SHADER_MAX_WINDOWS * 4];
+        float focused[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        int n = 0;
+#ifdef HAVE_WAYLAND_BACKEND
+        nw_window_rect wins[NW_SHADER_MAX_WINDOWS];
+        n = hyprland_output_windows(output, wins, NW_SHADER_MAX_WINDOWS);
+        for (int i = 0; i < n; i++) {
+            rects[i*4 + 0] = wins[i].x;
+            rects[i*4 + 1] = wins[i].y;
+            rects[i*4 + 2] = wins[i].w;
+            rects[i*4 + 3] = wins[i].h;
+            if (wins[i].focused) {
+                focused[0] = wins[i].x; focused[1] = wins[i].y;
+                focused[2] = wins[i].w; focused[3] = wins[i].h;
+            }
+        }
+#endif
+        multipass_set_windows(output->multipass_shader, rects, n, focused);
+    }
 
     /* Render all passes using multipass system */
     multipass_render(output->multipass_shader,

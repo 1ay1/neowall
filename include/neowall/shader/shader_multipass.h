@@ -26,6 +26,11 @@
 #define MULTIPASS_MAX_PASSES  5
 #define MULTIPASS_MAX_CHANNELS 4
 
+/* Window rects exposed to shaders as iWindows[]. Must match NW_MAX_WINDOWS in
+ * the injected GLSL prelude (shader_stdlib.h) -- a mismatch would either
+ * truncate the upload or read past the uniform array. */
+#define NW_SHADER_MAX_WINDOWS 16
+
 /* Pass types matching Shadertoy */
 typedef enum {
     PASS_TYPE_NONE = 0,
@@ -139,6 +144,9 @@ typedef struct {
     GLint iTermFade;           /* vec2: change-fade intensity, now(ms) */
     GLint iState;               /* vec4[4]: persisted shader state (see iStateAge) */
     GLint iStateAge;            /* seconds since the state was last written */
+    GLint iWindows;             /* vec4[16]: window rects, output-local px, y-down */
+    GLint iWindowCount;         /* how many entries of iWindows are valid */
+    GLint iFocusedWindow;       /* the fullscreen/active window; zero if none */
     bool cached;                /* True if locations have been cached */
 } uniform_locations_t;
 
@@ -247,6 +255,14 @@ typedef struct {
     float date_cached[4];                    /* iDate vec4, refreshed when the second ticks */
     long long date_cached_sec;               /* time() value date_cached was built for */
     reactive_snapshot_t frame_reactive;      /* one reactive snapshot per frame */
+
+    /* Window geometry for the output this shader is drawn on, refreshed once
+     * per frame alongside frame_reactive so every pass sees the same layout.
+     * Filled by the caller, which is the only party that knows the output;
+     * count stays 0 on compositors that expose no geometry. */
+    float frame_windows[NW_SHADER_MAX_WINDOWS * 4];  /* x,y,w,h per window */
+    float frame_focused_window[4];
+    int   frame_window_count;
 
     /* Persistent state (iState/iStateAge). Loaded once when the shader is
      * created and fed to every pass; see shader_state.h. `state_path` is the
@@ -503,6 +519,19 @@ void multipass_reset(multipass_shader_t *shader);
  * @param shader Multipass shader
  * @param scale Resolution scale (1.0 = full, 0.5 = half, 0.25 = quarter)
  */
+/* Publish this frame's window layout to the shader (iWindows/iWindowCount/
+ * iFocusedWindow).
+ *
+ * `rects` is 4 floats per window -- x, y, w, h in output-local pixels with y
+ * pointing down -- and `count` is clamped to NW_SHADER_MAX_WINDOWS. Passing
+ * count 0 is the correct way to say "this compositor exposes no geometry";
+ * shaders then see an empty desktop rather than stale rectangles.
+ *
+ * `focused` may be NULL, in which case iFocusedWindow is zeroed. */
+void multipass_set_windows(multipass_shader_t *shader,
+                           const float *rects, int count,
+                           const float *focused);
+
 void multipass_set_resolution_scale(multipass_shader_t *shader, float scale);
 
 /**

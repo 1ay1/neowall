@@ -334,10 +334,20 @@ static void test_uniform_block_defines_no_functions(void) {
 
     glsl_shadow_set *s = glsl_shadow_create();
     CHECK(glsl_shadow_scan(s, with[0])); /* the reactive block */
-    CHECK_MSG(glsl_shadow_count(s) == 0,
+
+    /* NW_-prefixed macros are configuration constants (NW_MAX_WINDOWS sizes
+     * the iWindows array), not helpers, and are namespaced anyway. Anything
+     * else appearing here would be a function escaping the std-lib audit. */
+    size_t leaked = 0;
+    for (size_t i = 0; i < glsl_shadow_count(s); i++) {
+        const char *nm = glsl_shadow_at(s, i);
+        if (strncmp(nm, "NW_", 3) == 0) continue;
+        leaked++;
+        fprintf(stderr, "  uniform block defines: %s\n", nm);
+    }
+    CHECK_MSG(leaked == 0,
               "reactive uniform block defines %zu function-like name(s); "
-              "they would escape the std-lib namespace audit",
-              glsl_shadow_count(s));
+              "they would escape the std-lib namespace audit", leaked);
     glsl_shadow_free(s);
 }
 

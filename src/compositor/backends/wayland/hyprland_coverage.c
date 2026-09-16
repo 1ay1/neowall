@@ -512,4 +512,69 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
     return frac >= threshold;
 }
 
+int hyprland_output_windows(const struct output_state *o,
+                            nw_window_rect *out, int max) {
+    if (!o || !out || max <= 0 || !hyprland_coverage_available()) return 0;
+
+    /* Refresh here rather than relying on the occlusion path to have done it.
+     * That path only runs when pause_on_fullscreen is enabled and the backend
+     * brought occlusion up, so a shader asking for windows would otherwise see
+     * an empty desktop forever on an otherwise working Hyprland session. The
+     * call is self-throttled to HYPR_REFRESH_MS, so the common case is a
+     * timestamp comparison and the two callers share one IPC round-trip. */
+    hyprland_coverage_refresh();
+
+    pthread_mutex_lock(&snap_lock);
+
+    /* Same staleness rule as the coverage path: a snapshot we no longer trust
+     * must report nothing rather than pin windows to where they used to be.
+     * A shader lighting up a stale rectangle is more obviously wrong than one
+     * that simply sees an empty desktop. */
+    if (last_refresh_ok_ms == 0 ||
+        get_time_ms() - last_refresh_ok_ms > HYPR_SNAPSHOT_TTL_MS) {
+        pthread_mutex_unlock(&snap_lock);
+        return 0;
+    }
+
+    const hypr_monitor_t *m = find_monitor_for(o);
+    if (!m || m->w <= 0 || m->h <= 0) {
+        pthread_mutex_unlock(&snap_lock);
+        return 0;
+    }
+
+    /* Report in OUTPUT-local pixels, not the compositor's global layout, so a
+     * shader on a second monitor sees windows at sane coordinates instead of
+     * ones offset by the first monitor's width. Unlike the coverage path this
+     * does NOT subtract reserved zones: a bar overlapping the wallpaper is
+     * still a real position a shader may want to react to. */
+    int n = 0;
+    for (int i = 0; i < snap_n_clients && n < max; i++) {
+        const hypr_client_t *c = &snap_clients[i];
+        if (c->monitor != m->id) continue;
+        if (c->ws != m->active_ws) continue;
+        if (c->w <= 0 || c->h <= 0) continue;
+
+        /* Clip to the monitor so a window straddling two screens does not
+         * report negative or overhanging coordinates. */
+        int x0 = c->x     < m->x        ? m->x        : c->x;
+        int y0 = c->y     < m->y        ? m->y        : c->y;
+        int x1 = c->x+c->w > m->x+m->w  ? m->x+m->w   : c->x + c->w;
+        int y1 = c->y+c->h > m->y+m->h  ? m->y+m->h   : c->y + c->h;
+        if (x1 <= x0 || y1 <= y0) continue;
+
+        out[n].x = (float)(x0 - m->x);
+        out[n].y = (float)(y0 - m->y);
+        out[n].w = (float)(x1 - x0);
+        out[n].h = (float)(y1 - y0);
+        /* Hyprland reports fullscreen state per client; treat any fullscreen
+         * window as the focused one, which is the useful approximation until
+         * the IPC snapshot starts carrying the active address. */
+        out[n].focused = (c->fullscreen != 0);
+        n++;
+    }
+
+    pthread_mutex_unlock(&snap_lock);
+    return n;
+}
+
 #endif /* HAVE_WAYLAND_BACKEND */
