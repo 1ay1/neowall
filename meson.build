@@ -225,6 +225,7 @@ shader_sources = files(
   'src/shader/multipass_parse.c',
   'src/shader/shadertoy_compat.c',
   'src/shader/glsl_shadow.c',
+  'src/shader/shader_scaffold.c',
   'src/shader/shader_clock.c',
   'src/shader/adaptive_scale.c',
   'src/shader/render_optimizer.c',
@@ -572,6 +573,19 @@ test_glsl_shadow_exe = executable('test_glsl_shadow',
 )
 
 test('glsl_shadow', test_glsl_shadow_exe)
+
+# `neowall new` scaffolding: name handling, template wiring, and the refusal
+# paths (no clobbering, no path traversal). Writes only under a scratch HOME.
+test_scaffold_exe = executable('test_shader_scaffold',
+  files('tests/test_shader_scaffold.c',
+        'src/shader/shader_scaffold.c',
+        'src/utils.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep, thread_dep],
+  build_by_default: false,
+)
+
+test('shader_scaffold', test_scaffold_exe)
 
 # Shader-clock rebase policy: the clock may only jump while nobody can see it.
 # Guards the "wallpaper jumps back in time" regression. No GL, no compositor.

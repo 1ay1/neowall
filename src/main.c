@@ -21,6 +21,7 @@
 #include "neowall/neowall.h"
 #include "neowall/clock.h"
 #include "neowall/watch.h"
+#include "neowall/shader/shader_scaffold.h"
 #include "neowall/config/config_access.h"
 #include "neowall/constants.h"
 #include "neowall/compositor/compositor.h"
@@ -592,6 +593,8 @@ static void print_usage(const char *program_name) {
     printf("NeoWall v%s - GPU-accelerated wallpapers for Wayland. Take the red pill. 🔴\n\n", NEOWALL_VERSION_STRING);
     printf("Usage: %s [OPTIONS]\n", program_name);
     printf("       %s set <index>   Set wallpaper by index (0-based)\n", program_name);
+    printf("       %s new <name>     Scaffold a new shader you can run immediately\n", program_name);
+    printf("                         (--template=scene|flat|reactive, --list)\n");
     printf("       %s preview <shader.glsl>\n", program_name);
     printf("                         Run one shader in the foreground without\n");
     printf("                         changing your config or stopping the daemon\n");
@@ -996,6 +999,45 @@ int main(int argc, char *argv[]) {
      *
      * Runs in the foreground alongside your real wallpaper without touching
      * the config, the saved state, or the daemon's pid file. */
+    /* `neowall new <name> [--template=scene|flat|reactive] [--force]`
+     *
+     * Scaffolding, handled before the daemon/option machinery because it never
+     * touches the daemon, the config or the pid file -- it writes one file and
+     * exits. */
+    if (argc >= 2 && strcmp(argv[1], "new") == 0) {
+        const char *shader_name = NULL;
+        const char *tmpl = NULL;
+        bool force = false;
+
+        for (int i = 2; i < argc; i++) {
+            if (strncmp(argv[i], "--template=", 11) == 0) {
+                tmpl = argv[i] + 11;
+            } else if (strcmp(argv[i], "--template") == 0 && i + 1 < argc) {
+                tmpl = argv[++i];
+            } else if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0) {
+                force = true;
+            } else if (strcmp(argv[i], "--list") == 0) {
+                neowall_scaffold_list_templates(stdout);
+                return EXIT_SUCCESS;
+            } else if (argv[i][0] == '-') {
+                fprintf(stderr, "Unknown option for 'new': %s\n", argv[i]);
+                return EXIT_FAILURE;
+            } else if (!shader_name) {
+                shader_name = argv[i];
+            }
+        }
+
+        if (!shader_name) {
+            fprintf(stderr, "Usage: %s new <name> [--template=NAME] [--force]\n\n", argv[0]);
+            neowall_scaffold_list_templates(stderr);
+            fprintf(stderr, "\nExample: %s new aurora --template=scene\n", argv[0]);
+            return EXIT_FAILURE;
+        }
+
+        return neowall_scaffold_create(shader_name, tmpl, force)
+               ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
     if (argc >= 2 && (strcmp(argv[1], "preview") == 0 || strcmp(argv[1], "watch") == 0)) {
         bool is_watch = (argv[1][0] == 'w');
         if (argc < 3 || argv[2][0] == '-') {

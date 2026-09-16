@@ -165,6 +165,11 @@ float ease_in_out_cubic(float t);
  * report. Returns true and writes *out on success. */
 bool neowall_parse_index(const char *s, long *out);
 
+/* Expand a leading `~` to $HOME and copy into `expanded`. Returns false if the
+ * result would not fit, which callers must treat as a hard failure rather than
+ * using a truncated path. Defined in utils.c. */
+bool expand_path(const char *path, char *expanded, size_t size);
+
 /* State file functions */
 const char *get_state_file_path(void);
 const char *get_cycle_list_file_path(void);

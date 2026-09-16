@@ -33,46 +33,9 @@ static struct image_data *image_scale_to_display(struct image_data *img, int32_t
                                                    int32_t display_height, int mode);
 static struct image_data *image_scale_bilinear(struct image_data *img, uint32_t new_width, uint32_t new_height);
 
-/* Expand path with tilde */
-static bool expand_path(const char *path, char *expanded, size_t size) {
-    if (!path || !expanded || size == 0) {
-        return false;
-    }
-
-    if (path[0] == '~') {
-        const char *home = getenv("HOME");
-        if (!home) {
-            log_error("Cannot expand ~: HOME not set");
-            return false;
-        }
-
-        size_t home_len = strlen(home);
-        size_t path_len = strlen(path + 1);
-
-        if (home_len + path_len + 1 > size) {
-            log_error("Expanded path too long");
-            return false;
-        }
-
-        /* Bounds already checked above, safe to use snprintf */
-        int written = snprintf(expanded, size, "%s%s", home, path + 1);
-        if (written < 0 || (size_t)written >= size) {
-            log_error("Path expansion failed");
-            return false;
-        }
-        return true;
-    }
-
-    /* No expansion needed */
-    if (strlen(path) >= size) {
-        log_error("Path too long");
-        return false;
-    }
-
-    strncpy(expanded, path, size - 1);
-    expanded[size - 1] = '\0';
-    return true;
-}
+/* expand_path lives in utils.c and is declared in neowall.h. This file used to
+ * carry a private copy; the two had drifted apart in their error handling, so
+ * the shared one is now the single implementation. */
 
 /* Detect image format from file extension */
 enum image_format image_detect_format(const char *path) {

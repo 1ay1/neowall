@@ -116,6 +116,15 @@ neowall set 3    # jump to index
 neowall current  # print what's playing
 ```
 
+Writing a shader:
+
+```bash
+neowall new aurora          # scaffold a working shader and tell you how to run it
+neowall new hud --template=reactive   # or: scene (default), flat, reactive
+neowall watch aurora.glsl   # live-reload as you edit
+neowall preview aurora.glsl # run it once, without touching your wallpaper
+```
+
 ## Shaders
 
 30+ in the box. Bring your own — neowall accepts unmodified [Shadertoy](https://www.shadertoy.com/) GLSL: drop a `.glsl` file into `~/.config/neowall/shaders/` and reference it from your config.
