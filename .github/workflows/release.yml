@@ -656,8 +656,19 @@ jobs:
             echo "ok=false" >> "$GITHUB_OUTPUT"
             echo "::error::AUR rejected the SSH key in AUR_SSH_PRIVATE_KEY."
             echo "::error::Register its PUBLIC half at https://aur.archlinux.org/account/ -> SSH keys."
-          elif printf '%s' "$OUT" | grep -qiE 'interactive shell is disabled|welcome to the aur|specify command'; then
-            # The friendly banner only shows to an AUTHORIZED key.
+          elif printf '%s' "$OUT" | grep -qiE 'interactive shell is disabled|welcome to the aur|specify command|^[[:space:]]*Commands:|git-receive-pack|list-repos'; then
+            # Only an AUTHORIZED key gets a response from the forced command.
+            # The exact wording has changed over time -- it used to be a
+            # friendly "Welcome to the AUR" banner and is now a bare
+            # "Commands:" listing -- so match on any of the known shapes plus
+            # the command names themselves, which are the part that actually
+            # proves the forced command ran for us.
+            #
+            # Getting this wrong is not harmless: an unrecognised success
+            # banner falls through to the "could not reach" branch below, which
+            # defers the publish with only a warning and leaves the job green.
+            # That is exactly how neowall-git/-bin sat at 0.5.5 while three
+            # releases shipped (issues #73, #76, #78).
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             # Couldn't reach the AUR at all (DNS/timeout/unknown). Not our key.
