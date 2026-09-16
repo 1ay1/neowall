@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <signal.h>
@@ -59,6 +60,29 @@ static pthread_t g_audio_thread;
 static atomic_bool g_audio_run = false;
 static atomic_bool g_audio_live = false;
 static pid_t g_parec_pid = -1;
+
+/* Self-pipe used to break the capture threads out of a blocking read().
+ *
+ * Both capture loops only test their run flag BETWEEN reads, so clearing the
+ * flag cannot wake a thread already parked in read(). Shutdown did SIGKILL the
+ * child, whose dying pipe delivers EOF -- but that only helps once the child
+ * has actually died and been reaped, which loses the 200ms race often enough
+ * that "capture thread did not stop in time; abandoning" printed on essentially
+ * every exit. An abandoned thread is then still holding g_lock-adjacent state
+ * while the process tears down around it.
+ *
+ * Writing one byte here makes the poll return at once, exactly as
+ * src/terminal/pty.c does for its PTY reader. */
+static int g_wake_pipe[2] = {-1, -1};
+
+/* Wake any capture thread parked in read() or sleeping between reconnects. */
+static void reactive_wake_threads(void) {
+    if (g_wake_pipe[1] >= 0) {
+        const char b = 'x';
+        ssize_t n = write(g_wake_pipe[1], &b, 1);
+        (void)n; /* best effort: a full pipe already means "wake pending" */
+    }
+}
 
 /* nvidia-smi worker thread — polls NVIDIA proprietary GPU stats that sysfs
  * doesn't expose (utilisation, VRAM, temp, power). Published into g_snap under
@@ -484,6 +508,22 @@ static void *audio_thread_fn(void *arg) {
     float beat_avg = 0.0f;       /* running average bass energy for onset detect */
 
     while (atomic_load(&g_audio_run)) {
+        /* Wait on the capture fd AND the wake pipe, so a stop request breaks the
+         * block immediately instead of leaving this thread parked until parec
+         * happens to produce another buffer. */
+        struct pollfd pfds[2] = {
+            {.fd = fd,             .events = POLLIN, .revents = 0},
+            {.fd = g_wake_pipe[0], .events = POLLIN, .revents = 0},
+        };
+        int pr = poll(pfds, 2, -1);
+        if (pr < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (pfds[1].revents) break;       /* stop requested */
+        if (!atomic_load(&g_audio_run)) break;
+        if (!(pfds[0].revents & (POLLIN | POLLHUP | POLLERR))) continue;
+
         float chunk[256];
         ssize_t got = read(fd, chunk, sizeof(chunk));
         if (got <= 0) {
@@ -664,6 +704,20 @@ bool reactive_init(void) {
     g_snap.charging = true;
 
     atomic_store(&g_audio_run, true);
+
+    /* Create the wake pipe before any capture thread starts, so a stop request
+     * can always break a blocking read. Non-fatal if it fails: the threads fall
+     * back to the old (racy) behaviour rather than not running at all. */
+    if (pipe(g_wake_pipe) != 0) {
+        g_wake_pipe[0] = g_wake_pipe[1] = -1;
+        log_info("Reactive: wake pipe unavailable; capture threads may lag at exit");
+    } else {
+        fcntl(g_wake_pipe[0], F_SETFD, FD_CLOEXEC);
+        fcntl(g_wake_pipe[1], F_SETFD, FD_CLOEXEC);
+        /* Never let a wake write block the caller. */
+        fcntl(g_wake_pipe[1], F_SETFL, O_NONBLOCK);
+    }
+
     if (pthread_create(&g_audio_thread, NULL, audio_thread_fn, NULL) != 0) {
         log_info("Reactive: could not start audio thread");
         atomic_store(&g_audio_run, false);
@@ -682,21 +736,23 @@ bool reactive_init(void) {
 
 void reactive_shutdown(void) {
     if (!atomic_load(&g_inited)) return;
-    /* Both capture threads block in a read()/fgets() on a pipe fed by a child
-     * (parec / nvidia-smi). Clearing the run flag alone does NOT unblock them —
-     * the read only re-checks the flag after it returns. To wake them we make
-     * the pipe hit EOF by killing the child. SIGTERM can be slow or ignored
-     * (observed: nvidia-smi still alive after SIGTERM), and there are startup /
-     * respawn / zombie races where g_*_pid is momentarily stale so the kill
-     * misses entirely — either way the plain pthread_join then hangs forever,
-     * and the daemon has to be SIGKILLed, which orphans the terminal-wallpaper
-     * child.
+    /* Both capture threads block waiting on a pipe fed by a child (parec /
+     * nvidia-smi). Clearing the run flag alone does NOT unblock them — the wait
+     * only re-checks the flag after it returns.
      *
-     * So: SIGKILL the child to force EOF, then join with a BOUNDED timeout. If a
-     * thread is still wedged after the grace period we stop waiting and let the
-     * process exit take it down — a never-returning shutdown is far worse than
-     * a detached capture thread the kernel reaps on _exit. */
+     * Primary wake is the self-pipe: one byte makes the poll return at once,
+     * regardless of whether the child is alive, already reaped, or never
+     * started. Relying on the child's death for EOF (as this used to) loses the
+     * race often enough that "capture thread did not stop in time; abandoning"
+     * printed on essentially every exit.
+     *
+     * SIGKILL of the child stays as a backstop: it stops the child promptly and
+     * covers the case where the wake pipe could not be created. The bounded
+     * join stays too — a never-returning shutdown is far worse than a detached
+     * capture thread the kernel reaps on _exit. */
     struct timespec deadline;
+
+    reactive_wake_threads();
 
     if (atomic_load(&g_audio_run)) {
         atomic_store(&g_audio_run, false);
@@ -721,6 +777,13 @@ void reactive_shutdown(void) {
             log_warn("reactive: NVIDIA capture thread did not stop in time; abandoning");
         }
     }
+
+    /* Both threads are joined (or detached and abandoned). Closing the read end
+     * last means an abandoned thread still parked in poll() sees POLLHUP and
+     * unwinds rather than waiting on an fd nobody will ever write to. */
+    if (g_wake_pipe[1] >= 0) { close(g_wake_pipe[1]); g_wake_pipe[1] = -1; }
+    if (g_wake_pipe[0] >= 0) { close(g_wake_pipe[0]); g_wake_pipe[0] = -1; }
+
     atomic_store(&g_inited, false);
 }
 
