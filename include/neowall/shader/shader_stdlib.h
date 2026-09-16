@@ -486,6 +486,175 @@ static const char *neowall_glsl_stdlib7 =
     "}\n"
     "\n";
 
+/* Chunk 8: the scene kit.
+ *
+ * Everything above is a toolbox of primitives; this is the assembled machine.
+ * The bundled shaders show why it is needed -- twelve of them hand-roll the
+ * same raymarch loop and fourteen redefine the same 2x2 rotation, and a
+ * good-looking 3D scene costs 200-500 lines before it looks like anything.
+ * That is the real barrier to "drop in a file and get something impressive".
+ *
+ * So this chunk provides the loop, the normals, the lighting and the camera,
+ * and asks the shader for exactly one thing: a distance function. A complete
+ * lit, shadowed, fogged, tonemapped scene becomes:
+ *
+ *     float nwMap(vec3 p){ return nwSdSphere(p, 1.0); }
+ *     void mainImage(out vec4 o, vec2 u){
+ *         o = vec4(nwRender(nwCameraOrbit(u, 4.0, iTime*0.2, 0.3)), 1.0);
+ *     }
+ *
+ * nwMap is a FORWARD DECLARATION: the shader defines it, the kit calls it.
+ * GLSL resolves that at link time within the translation unit, which is why
+ * the whole kit can live in the injected prelude.
+ */
+static const char *neowall_glsl_stdlib8 =
+    "// ============================================================\n"
+    "// Scene kit: a raymarcher you drive with one distance function.\n"
+    "//\n"
+    "// Define nwMap(vec3) and call nwRender(ray). Everything else -- marching,\n"
+    "// normals, soft shadows, ambient occlusion, sky, fog, tonemapping -- is\n"
+    "// handled here. Override any piece by defining your own before use.\n"
+    "// ============================================================\n"
+    "\n"
+    "// The shader supplies this. Signed distance to the nearest surface.\n"
+    "float nwMap(vec3 p);\n"
+    "// Surface albedo. Declared here so nwRender can call it whether it comes\n"
+    "// from the kit's default below or from the shader's own definition, which\n"
+    "// is appended after this whole prelude.\n"
+    "vec3 nwMaterial(vec3 p, vec3 n);\n"
+    "\n"
+    "// A camera ray: where it starts and which way it points.\n"
+    "struct nwRay { vec3 ro; vec3 rd; };\n"
+    "\n"
+    "// Pixel -> ray, looking at the origin from an orbiting position.\n"
+    "// uv is raw fragCoord; dist is orbit radius; yaw/pitch in radians.\n"
+    "nwRay nwCameraOrbit(vec2 uv, float dist, float yaw, float pitch){\n"
+    "    vec2 p = (uv - 0.5*iResolution.xy) / iResolution.y;\n"
+    "    float cp = cos(pitch);\n"
+    "    vec3 ro = dist * vec3(cp*sin(yaw), sin(pitch), cp*cos(yaw));\n"
+    "    vec3 fw = normalize(-ro);\n"
+    "    vec3 rt = normalize(cross(vec3(0.0,1.0,0.0), fw));\n"
+    "    vec3 up = cross(fw, rt);\n"
+    "    nwRay r; r.ro = ro; r.rd = normalize(p.x*rt + p.y*up + 1.4*fw);\n"
+    "    return r;\n"
+    "}\n"
+    "\n"
+    "// Free camera: explicit eye and target.\n"
+    "nwRay nwCameraLookAt(vec2 uv, vec3 eye, vec3 target, float zoom){\n"
+    "    vec2 p = (uv - 0.5*iResolution.xy) / iResolution.y;\n"
+    "    vec3 fw = normalize(target - eye);\n"
+    "    vec3 rt = normalize(cross(vec3(0.0,1.0,0.0), fw));\n"
+    "    vec3 up = cross(fw, rt);\n"
+    "    nwRay r; r.ro = eye; r.rd = normalize(p.x*rt + p.y*up + zoom*fw);\n"
+    "    return r;\n"
+    "}\n"
+    "\n"
+    "// March until we hit something. Returns distance travelled, or -1.0.\n"
+    "// Step scaling below 1.0 keeps thin//warped fields from overshooting.\n"
+    "float nwMarch(vec3 ro, vec3 rd, float tmax){\n"
+    "    float t = 0.0;\n"
+    "    for (int i = 0; i < 128; i++){\n"
+    "        vec3 p = ro + rd*t;\n"
+    "        float d = nwMap(p);\n"
+    "        if (d < 0.0005*t) return t;\n"
+    "        t += d*0.9;\n"
+    "        if (t > tmax) break;\n"
+    "    }\n"
+    "    return -1.0;\n"
+    "}\n"
+    "\n"
+    "// Gradient of the distance field = surface normal. Tetrahedron sampling:\n"
+    "// four taps instead of six, same quality.\n"
+    "vec3 nwNormal(vec3 p){\n"
+    "    vec2 e = vec2(1.0,-1.0)*0.0008;\n"
+    "    return normalize(e.xyy*nwMap(p+e.xyy) + e.yyx*nwMap(p+e.yyx) +\n"
+    "                     e.yxy*nwMap(p+e.yxy) + e.xxx*nwMap(p+e.xxx));\n"
+    "}\n"
+    "\n"
+    "// Soft shadow: march toward the light, track the closest approach.\n"
+    "float nwShadow(vec3 p, vec3 ldir, float k){\n"
+    "    float res = 1.0, t = 0.02;\n"
+    "    for (int i = 0; i < 48; i++){\n"
+    "        float h = nwMap(p + ldir*t);\n"
+    "        res = min(res, k*h/t);\n"
+    "        t += clamp(h, 0.01, 0.3);\n"
+    "        if (res < 0.004 || t > 12.0) break;\n"
+    "    }\n"
+    "    return clamp(res, 0.0, 1.0);\n"
+    "}\n"
+    "\n"
+    "// Ambient occlusion: how enclosed is this point.\n"
+    "float nwAO(vec3 p, vec3 n){\n"
+    "    float occ = 0.0, sca = 1.0;\n"
+    "    for (int i = 0; i < 5; i++){\n"
+    "        float h = 0.01 + 0.12*float(i)/4.0;\n"
+    "        occ += (h - nwMap(p + n*h))*sca;\n"
+    "        sca *= 0.95;\n"
+    "    }\n"
+    "    return clamp(1.0 - 3.0*occ, 0.0, 1.0);\n"
+    "}\n"
+    "\n"
+    "// Default sky. Time-of-day aware, so a scene drifts with the real sun\n"
+    "// without the shader asking for it.\n"
+    "vec3 nwSky(vec3 rd){\n"
+    "    vec3 day   = mix(vec3(0.52,0.70,0.95), vec3(0.11,0.28,0.62), clamp(rd.y*1.3,0.0,1.0));\n"
+    "    vec3 night = mix(vec3(0.05,0.07,0.14), vec3(0.01,0.02,0.05), clamp(rd.y*1.3,0.0,1.0));\n"
+    "    vec3 col = mix(night, day, nwDayNight());\n"
+    "    float sun = pow(clamp(dot(rd, normalize(vec3(0.5,0.42,0.3))),0.0,1.0), 32.0);\n"
+    "    return col + vec3(1.0,0.82,0.55)*sun*nwDayNight();\n"
+    "}\n"
+    "\n";
+
+/* Chunk 8b: shading and composition. Split from 8a only because ISO C99
+ * guarantees just 4095 characters per string literal, the same reason the
+ * chunks above are split; the two are concatenated back-to-back at injection
+ * and are a single unit semantically. */
+static const char *neowall_glsl_stdlib8b =
+    "// Surface albedo. Define your own nwMaterial(vec3 p, vec3 n) and neowall\n"
+    "// withholds this default, exactly as it does for the friendly aliases.\n"
+    "vec3 nwMaterial(vec3 p, vec3 n){ return vec3(0.62); }\n"
+    "\n";
+
+/* Chunk 8c: the renderer proper. Separated from the default material so the
+ * material can be withheld independently when the shader defines its own --
+ * a preprocessor guard cannot do this, because the user's #define is appended
+ * AFTER the prelude and so is not yet visible here. */
+static const char *neowall_glsl_stdlib8c =
+    "// The whole pipeline: march, light, shadow, occlude, fog, tonemap.\n"
+    "vec3 nwRender(nwRay r){\n"
+    "    float t = nwMarch(r.ro, r.rd, 40.0);\n"
+    "    if (t < 0.0) return nwSky(r.rd);\n"
+    "\n"
+    "    vec3 p = r.ro + r.rd*t;\n"
+    "    vec3 n = nwNormal(p);\n"
+    "    vec3 l = normalize(vec3(0.5, 0.42, 0.3));\n"
+    "\n"
+    "    float dif = clamp(dot(n, l),0.0,1.0) * nwShadow(p, l, 12.0);\n"
+    "    float sky = clamp(0.5 + 0.5*n.y,0.0,1.0);\n"
+    "    float ao  = nwAO(p, n);\n"
+    "    float spe = pow(clamp(dot(reflect(-l, n), -r.rd),0.0,1.0), 32.0)*dif;\n"
+    "\n"
+    "    vec3 lin = vec3(1.05,0.92,0.78)*dif*1.5\n"
+    "             + vec3(0.28,0.36,0.52)*sky*ao\n"
+    "             + vec3(0.12)*ao;\n"
+    "    vec3 col = nwMaterial(p, n)*lin + vec3(1.0,0.95,0.85)*spe*0.8;\n"
+    "\n"
+    "    col = mix(col, nwSky(r.rd), 1.0 - exp(-0.0016*t*t));  // distance fog\n"
+    "    return nwGamma(nwTonemap(col));\n"
+    "}\n"
+    "\n"
+    "// ---- composition helpers ----\n"
+    "// Repeat space on a grid: one primitive becomes an infinite field.\n"
+    "vec3 nwRepeat(vec3 p, vec3 period){ return mod(p + 0.5*period, period) - 0.5*period; }\n"
+    "vec2 nwRepeat2(vec2 p, vec2 period){ return mod(p + 0.5*period, period) - 0.5*period; }\n"
+    "// Which cell are we in -- feed to nwHash21 for per-cell variation.\n"
+    "vec2 nwCellId(vec2 p, vec2 period){ return floor((p + 0.5*period)/period); }\n"
+    "// Bend and twist space around Y.\n"
+    "vec3 nwTwist(vec3 p, float amount){ p.xz = nwRot(p.y*amount)*p.xz; return p; }\n"
+    "// Ground plane at height h, so scenes have something to cast onto.\n"
+    "float nwGround(vec3 p, float h){ return p.y - h; }\n"
+    "\n";
+
 /* ---------------------------------------------------------------- *
  * Friendly aliases
  *

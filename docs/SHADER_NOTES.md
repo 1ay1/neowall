@@ -181,7 +181,59 @@ available.
 - `dayNight()` — day/night blend factor from `iTimeOfDay`
 - `timeOfDayTint()` — a color tint that warms at dawn and dusk
 
-Aliases (disable with `#define NW_NO_ALIASES`): `fbm`, `palette`, `hsv2rgb`, `rot2d`.
+Aliases: the library is namespaced under `nw*`, and a set of friendly short
+names (`sdBox`, `sdSphere`, `pulse`, `beat`, `spectrum`, …) is layered on top.
+NeoWall emits each one **only if your shader does not define it**, so you can
+always write your own `sdBox` and it wins — the canonical `nwSdBox` stays
+available either way. Nothing to opt out of.
+
+---
+
+## 3b. The Scene Kit — 3D without the boilerplate
+
+A good-looking raymarched scene normally costs 200–500 lines of loop, normal
+estimation, shadowing and tonemapping before it looks like anything. The scene
+kit supplies all of that and asks you for one function.
+
+Define `nwMap` and the kit activates automatically:
+
+```glsl
+float nwMap(vec3 p) {
+    return min(nwGround(p, -0.5), nwSdSphere(p - vec3(0,0.5,0), 1.0));
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    fragColor = vec4(nwRender(nwCameraOrbit(fragCoord, 5.0, iTime*0.2, 0.3)), 1.0);
+}
+```
+
+That is a complete wallpaper: lit, soft-shadowed, ambient-occluded, fogged,
+tonemapped, with a sky that tracks the real time of day.
+
+| Function | Does |
+|----------|------|
+| `nwMap(vec3) → float` | **You write this.** Signed distance to the scene. |
+| `nwRender(nwRay) → vec3` | The whole pipeline: march, light, shade, fog, tonemap. |
+| `nwCameraOrbit(uv, dist, yaw, pitch)` | Ray for a camera orbiting the origin. |
+| `nwCameraLookAt(uv, eye, target, zoom)` | Ray for a free camera. |
+| `nwMaterial(vec3 p, vec3 n) → vec3` | Albedo. Define your own to colour the scene. |
+| `nwMarch` / `nwNormal` / `nwShadow` / `nwAO` / `nwSky` | The pieces, if you want them directly. |
+| `nwRepeat` / `nwRepeat2` / `nwCellId` | Tile space: one primitive becomes a field. |
+| `nwTwist` / `nwGround` | Bend space; add a floor. |
+
+Combine with the SDF primitives (`nwSdSphere`, `nwSdBox`, `nwSdTorus`) and the
+smooth operators (`nwOpSmoothUnion`, `nwOpSmoothSub`) to build the world, and
+with any reactive uniform to make it respond to the machine.
+
+Two details worth knowing:
+
+- The kit is injected **only when you define `nwMap`**, so shaders that do not
+  use it pay nothing and see no extra symbols.
+- Defining your own `nwMaterial` withholds the kit's default, the same
+  "you define it, you own it" rule the aliases follow.
+
+See [`examples/shaders/scene_demo.glsl`](../examples/shaders/scene_demo.glsl):
+a full reactive 3D scene in about 45 lines.
 
 ---
 

@@ -36,7 +36,7 @@
  *
  * `include_uniforms` selects whether the reactive uniform block (which declares
  * uniforms, not functions) is included along with the library proper. */
-#define MAX_INJECTED_CHUNKS 8
+#define MAX_INJECTED_CHUNKS 11
 
 static size_t injected_chunks(const char *out[MAX_INJECTED_CHUNKS],
                               bool include_uniforms) {
@@ -49,6 +49,12 @@ static size_t injected_chunks(const char *out[MAX_INJECTED_CHUNKS],
     out[n++] = neowall_glsl_stdlib5;
     out[n++] = neowall_glsl_stdlib6;
     out[n++] = neowall_glsl_stdlib7;
+    /* The scene kit is conditionally injected, but its namespace discipline
+     * must hold all the same -- it is still neowall-authored GLSL landing in
+     * the user's translation unit. */
+    out[n++] = neowall_glsl_stdlib8;
+    out[n++] = neowall_glsl_stdlib8b;
+    out[n++] = neowall_glsl_stdlib8c;
     return n;
 }
 
@@ -332,6 +338,45 @@ static void test_uniform_block_defines_no_functions(void) {
     glsl_shadow_free(s);
 }
 
+/* The scene kit is injected only when the shader defines nwMap, and its default
+ * nwMaterial is withheld when the shader defines one. Both decisions run
+ * through this scanner, so they inherit its comment-awareness: a shader that
+ * merely MENTIONS nwMap in prose must not trigger injection, or every such
+ * shader gets an unresolved forward declaration and fails to link. */
+static void test_scene_kit_gating(void) {
+    /* A real definition opts in. */
+    CHECK(defines("float nwMap(vec3 p){ return length(p)-1.0; }\n", "nwMap"));
+
+    /* Prose does not. */
+    CHECK(!defines("// define nwMap(vec3 p) to use the scene kit\n", "nwMap"));
+    CHECK(!defines("/* call nwMap(p) from your own loop */\n", "nwMap"));
+
+    /* Calling it without defining it does not either -- that shader would be
+     * broken anyway, but it must not be broken by US injecting a declaration. */
+    CHECK(!defines("void mainImage(out vec4 o, vec2 u){ float d = nwMap(vec3(u,0)); }\n",
+                   "nwMap"));
+
+    /* A shader supplying its own material suppresses the kit's default. */
+    CHECK(defines("vec3 nwMaterial(vec3 p, vec3 n){ return vec3(1.0); }\n",
+                  "nwMaterial"));
+    CHECK(!defines("// nwMaterial defaults to grey\n", "nwMaterial"));
+
+    /* The realistic combination: both defined in one source. */
+    glsl_shadow_set *s = glsl_shadow_create();
+    glsl_shadow_scan(s,
+        "vec3 nwMaterial(vec3 p, vec3 n){ return vec3(0.5); }\n"
+        "float nwMap(vec3 p){ return nwGround(p, -0.5); }\n"
+        "void mainImage(out vec4 o, vec2 u){ o = vec4(nwRender(nwCameraOrbit(u,4.,0.,0.3)),1.); }\n");
+    CHECK(glsl_shadow_contains(s, "nwMap"));
+    CHECK(glsl_shadow_contains(s, "nwMaterial"));
+    /* Kit-provided names the shader only CALLS must stay unclaimed, or we would
+     * wrongly suppress the very functions it is relying on. */
+    CHECK(!glsl_shadow_contains(s, "nwRender"));
+    CHECK(!glsl_shadow_contains(s, "nwCameraOrbit"));
+    CHECK(!glsl_shadow_contains(s, "nwGround"));
+    glsl_shadow_free(s);
+}
+
 int main(void) {
     test_detects_definitions();
     test_ignores_non_definitions();
@@ -341,6 +386,7 @@ int main(void) {
     test_aliases_forward_to_real_symbols();
     test_alias_table_has_no_duplicates();
     test_issue_82_regression();
+    test_scene_kit_gating();
 
     printf("glsl_shadow: %d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

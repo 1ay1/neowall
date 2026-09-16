@@ -598,8 +598,27 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
     size_t pass_len = pass_source ? strlen(pass_source) : 0;
     size_t suffix_len = strlen(multipass_wrapper_suffix);
 
+    /* The scene kit calls nwMap(), which only the SHADER can define, so it is
+     * injected exactly when the shader defines it. Emitting it unconditionally
+     * would leave an unresolved forward declaration in every ordinary shader:
+     * some drivers tolerate a never-called undefined function, many reject the
+     * link outright. The same scanner that decides alias suppression answers
+     * this, so an nwMap mentioned only in a comment does not trigger it. */
+    bool wants_scene_kit = shadow_ok && glsl_shadow_contains(shadow, "nwMap");
+    /* Same "you define it, you own it" rule as the aliases: a shader that
+     * supplies its own nwMaterial gets it, and the kit's default is withheld
+     * rather than duplicated. A preprocessor guard cannot express this, since
+     * the user's source is appended after this prelude. */
+    bool want_default_material =
+        wants_scene_kit && !glsl_shadow_contains(shadow, "nwMaterial");
+    size_t scene_len = 0;
+    if (wants_scene_kit) {
+        scene_len = strlen(neowall_glsl_stdlib8) + strlen(neowall_glsl_stdlib8c);
+        if (want_default_material) scene_len += strlen(neowall_glsl_stdlib8b);
+    }
+
     /* Extra space for .xy additions (worst case: every iChannelResolution gets .xy) */
-    size_t total = prefix_len + react_len + lib_len + alias_len + udecl_len +
+    size_t total = prefix_len + react_len + lib_len + alias_len + scene_len + udecl_len +
                    (common_len * 2) + (pass_len * 2) + suffix_len + 64;
     char *wrapped = malloc(total);
     if (!wrapped) {
@@ -621,6 +640,15 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
     for (size_t i = 0; i < NEOWALL_STDLIB_ALIAS_COUNT; i++) {
         if (emit_alias[i]) strcat(wrapped, neowall_stdlib_aliases[i].decl);
     }
+
+    /* After the aliases: the kit calls nwSaturate/nwTonemap/nwRot and may be
+     * overridden by a user nwMaterial, so it must see the finished library. */
+    if (wants_scene_kit) {
+        strcat(wrapped, neowall_glsl_stdlib8);
+        if (want_default_material) strcat(wrapped, neowall_glsl_stdlib8b);
+        strcat(wrapped, neowall_glsl_stdlib8c);
+    }
+
     glsl_shadow_free(shadow);
 
     if (user_uniform_decls) {
