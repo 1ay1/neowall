@@ -377,8 +377,24 @@ yourself; the bind keyword tells the daemon what live value to feed them each fr
 - **Keys cannot be bare numbers.** The VIBE parser rejects `bufferA { 0 self }`.
   Use a non-numeric prefix: `bufferA { ch0 self }`. The parser strips the non-digit
   prefix and reads the trailing integer.
-- **Channel sources:** `audio`, `noise`, `self`, `keyboard`, `texture`, `font`,
+- **Channel sources:** `audio`, `noise`, `self`, `keyboard`, `font`,
   and the buffer names `bufferA` through `bufferD`.
+- **Your own images:** point a channel at a PNG or JPEG and it is loaded and
+  bound for you:
+
+  ```
+  image {
+    ch0 texture:art.png      # explicit
+    ch1 photos/sky.jpg       # or just the path — .png/.jpg/.jpeg are detected
+    ch2 /abs/path/tex.png    # absolute and ~ also work
+  }
+  ```
+
+  Relative paths resolve against the **shader's own directory**, so a shader
+  and its textures can be copied around as a unit. Textures get mipmaps,
+  `GL_REPEAT` and linear filtering, matching Shadertoy channel behaviour.
+  A path that fails to load falls back to the noise texture and logs an error,
+  so a typo costs you the image rather than the whole wallpaper.
 - **Uniform bind keywords:** `cpu`, `ram`, `swap`, `net_down`, `net_up`,
   `disk_read`, `disk_write`, `load`, `cpu_temp`, `gpu`, `gpu_temp`, `uptime`,
   `procs`, `battery`, `time_of_day`, `sun`, `audio`, `bass`, `mid`, `treble`,

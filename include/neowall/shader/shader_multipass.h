@@ -31,6 +31,10 @@
  * truncate the upload or read past the uniform array. */
 #define NW_SHADER_MAX_WINDOWS 16
 
+/* Path buffer for per-channel texture files. Defined here rather than pulled
+ * from output.h so this header stays free of compositor dependencies. */
+#define NW_SHADER_MAX_TEXPATH 512
+
 /* Pass types matching Shadertoy */
 typedef enum {
     PASS_TYPE_NONE = 0,
@@ -63,6 +67,10 @@ typedef enum {
 typedef struct {
     channel_source_t source;
     int texture_id;            /* For CHANNEL_SOURCE_TEXTURE */
+    /* Image file backing CHANNEL_SOURCE_TEXTURE, resolved relative to the
+     * shader. Empty when the channel is not a user texture. Kept inline rather
+     * than as a pointer so a channel stays trivially copyable. */
+    char texture_path[NW_SHADER_MAX_TEXPATH];
     bool vflip;                /* Vertical flip */
     int filter;                /* GL_LINEAR or GL_NEAREST */
     int wrap;                  /* GL_REPEAT, GL_CLAMP_TO_EDGE, etc. */
@@ -730,6 +738,18 @@ void multipass_debug_dump(const multipass_shader_t *shader);
 void multipass_set_channel(multipass_shader_t *shader,
                            multipass_type_t pass_type,
                            int channel, channel_source_t source);
+
+/* Bind a channel to an IMAGE FILE (PNG or JPEG).
+ *
+ * `path` should already be resolved to something openable; manifests resolve
+ * relative paths against the shader's own directory so a shader plus its
+ * textures can be copied around as a unit.
+ *
+ * The upload is deferred to multipass_init, which is the first point where a
+ * GL context is guaranteed -- manifests are parsed before that. */
+void multipass_set_channel_texture(multipass_shader_t *shader,
+                                   multipass_type_t pass_type,
+                                   int channel, const char *path);
 
 /**
  * Register a user uniform declared by a manifest. It is injected into the

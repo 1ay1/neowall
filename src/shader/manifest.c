@@ -48,10 +48,32 @@ static void manifest_path_for(const char *shader_path, char *out, size_t cap) {
     }
 }
 
+/* Resolve a manifest-relative asset path against the shader's own directory,
+ * so a shader and its textures can be copied around as a unit. Absolute paths
+ * and ~ are passed through to expand_path untouched. */
+static void resolve_asset_path(const char *shader_path, const char *rel,
+                               char *out, size_t cap) {
+    if (rel[0] == '/' || rel[0] == '~') {
+        if (!expand_path(rel, out, cap)) snprintf(out, cap, "%s", rel);
+        return;
+    }
+    const char *slash = strrchr(shader_path, '/');
+    if (slash) {
+        int dirlen = (int)(slash - shader_path);
+        snprintf(out, cap, "%.*s/%s", dirlen, shader_path, rel);
+    } else {
+        snprintf(out, cap, "%s", rel);
+    }
+}
+
 /* Apply a per-pass channel block: each entry is "chN source" (e.g. ch0 audio).
- * The key's leading non-digits are skipped, so ch0 / channel0 / 0 all work. */
+ * The key's leading non-digits are skipped, so ch0 / channel0 / 0 all work.
+ *
+ * A source of the form "texture:FILE" (or just a path ending in .png/.jpg)
+ * binds an image file instead of a built-in source. */
 static void apply_channel_block(multipass_shader_t *shader, VibeObject *chans,
-                                multipass_type_t pass_type) {
+                                multipass_type_t pass_type,
+                                const char *shader_path) {
     if (!chans) return;
     for (size_t i = 0; i < chans->count; i++) {
         const char *key = chans->entries[i].key;       /* "ch0".."ch3" or "0".."3" */
@@ -62,6 +84,28 @@ static void apply_channel_block(multipass_shader_t *shader, VibeObject *chans,
         while (*digits && (*digits < '0' || *digits > '9')) digits++;
         int ch = atoi(digits);
         if (ch < 0 || ch >= MULTIPASS_MAX_CHANNELS) continue;
+
+        /* An image file, either tagged ("texture:art.png") or recognised by
+         * extension ("art.png"). Checked before the built-in names so a file
+         * called "noise.png" is still treated as a file. */
+        const char *spec = val->as_string;
+        const char *file = NULL;
+        if (strncasecmp(spec, "texture:", 8) == 0) {
+            file = spec + 8;
+        } else {
+            const char *ext = strrchr(spec, '.');
+            if (ext && (!strcasecmp(ext, ".png") || !strcasecmp(ext, ".jpg") ||
+                        !strcasecmp(ext, ".jpeg"))) {
+                file = spec;
+            }
+        }
+        if (file && *file) {
+            char resolved[NW_SHADER_MAX_TEXPATH];
+            resolve_asset_path(shader_path, file, resolved, sizeof(resolved));
+            multipass_set_channel_texture(shader, pass_type, ch, resolved);
+            continue;
+        }
+
         channel_source_t src = multipass_channel_source_from_name(val->as_string);
         if (src == CHANNEL_SOURCE_NONE) {
             log_info("Manifest: unknown channel source '%s' for channel %d",
@@ -162,6 +206,25 @@ bool manifest_apply(multipass_shader_t *shader, const char *shader_path) {
         snprintf(key, sizeof(key), "channel%d", c);
         VibeValue *v = vibe_object_get(root->as_object, key);
         if (v && v->type == VIBE_TYPE_STRING) {
+            /* Same file-vs-builtin rule as the per-pass blocks. */
+            const char *spec = v->as_string;
+            const char *file = NULL;
+            if (strncasecmp(spec, "texture:", 8) == 0) {
+                file = spec + 8;
+            } else {
+                const char *ext = strrchr(spec, '.');
+                if (ext && (!strcasecmp(ext, ".png") || !strcasecmp(ext, ".jpg") ||
+                            !strcasecmp(ext, ".jpeg"))) {
+                    file = spec;
+                }
+            }
+            if (file && *file) {
+                char resolved[NW_SHADER_MAX_TEXPATH];
+                resolve_asset_path(shader_path, file, resolved, sizeof(resolved));
+                multipass_set_channel_texture(shader, PASS_TYPE_IMAGE, c, resolved);
+                continue;
+            }
+
             channel_source_t src = multipass_channel_source_from_name(v->as_string);
             if (src != CHANNEL_SOURCE_NONE) {
                 multipass_set_channel(shader, PASS_TYPE_IMAGE, c, src);
@@ -183,7 +246,7 @@ bool manifest_apply(multipass_shader_t *shader, const char *shader_path) {
     for (size_t p = 0; p < sizeof(pass_keys) / sizeof(pass_keys[0]); p++) {
         VibeValue *blk = vibe_object_get(root->as_object, pass_keys[p].key);
         if (blk && blk->type == VIBE_TYPE_OBJECT) {
-            apply_channel_block(shader, blk->as_object, pass_keys[p].type);
+            apply_channel_block(shader, blk->as_object, pass_keys[p].type, shader_path);
         }
     }
 

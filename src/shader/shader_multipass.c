@@ -16,6 +16,7 @@
 #include "neowall/shader/platform_compat.h"
 #include "neowall/shader/shader_stdlib.h"
 #include "neowall/shader/glsl_shadow.h"
+#include "neowall/image/image.h"   /* user textures: manifest `ch0 texture:art.png` */
 #include "neowall/shader/reactive.h"
 #include "neowall/shader/program_cache.h"
 #include "neowall/textures.h"
@@ -299,6 +300,22 @@ uniform_bind_t multipass_bind_from_name(const char *name) {
     if (!strcasecmp(name, "uptime"))      return UNIFORM_BIND_UPTIME;
     if (!strcasecmp(name, "procs") || !strcasecmp(name, "processes")) return UNIFORM_BIND_PROCS;
     return UNIFORM_BIND_CONST;
+}
+
+void multipass_set_channel_texture(multipass_shader_t *shader,
+                                  multipass_type_t pass_type,
+                                  int channel, const char *path) {
+    if (!shader || !path || channel < 0 || channel >= MULTIPASS_MAX_CHANNELS) return;
+
+    multipass_set_channel(shader, pass_type, channel, CHANNEL_SOURCE_TEXTURE);
+
+    for (int i = 0; i < shader->pass_count; i++) {
+        if (shader->passes[i].type != pass_type) continue;
+        multipass_channel_t *c = &shader->passes[i].channels[channel];
+        snprintf(c->texture_path, sizeof(c->texture_path), "%s", path);
+        /* Upload is deferred to init, where a GL context is guaranteed. */
+        c->texture_id = 0;
+    }
 }
 
 void multipass_set_channel(multipass_shader_t *shader,
@@ -1151,6 +1168,45 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glGenerateMipmap(GL_TEXTURE_2D);
 
+    /* User textures declared by a manifest (`ch0 texture:art.png`). Uploaded
+     * here because this is the first point with a guaranteed GL context --
+     * manifests are parsed well before that. A failed load leaves texture_id
+     * at 0 and the render path falls back to noise, so a bad path costs you
+     * the image rather than the whole wallpaper. */
+    for (int pi = 0; pi < shader->pass_count; pi++) {
+        for (int ci = 0; ci < MULTIPASS_MAX_CHANNELS; ci++) {
+            multipass_channel_t *ch = &shader->passes[pi].channels[ci];
+            if (ch->source != CHANNEL_SOURCE_TEXTURE) continue;
+            if (ch->texture_id || ch->texture_path[0] == '\0') continue;
+
+            /* mode 0 = load at native size; the shader decides how to sample. */
+            struct image_data *img = image_load(ch->texture_path, 0, 0, 0);
+            if (!img || !img->pixels || img->width == 0 || img->height == 0) {
+                log_error("Shader texture: could not load %s (channel %d)",
+                          ch->texture_path, ci);
+                if (img) image_free(img);
+                continue;
+            }
+
+            GLuint tid = 0;
+            glGenTextures(1, &tid);
+            glBindTexture(GL_TEXTURE_2D, tid);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                         (GLsizei)img->width, (GLsizei)img->height, 0,
+                         GL_RGBA, GL_UNSIGNED_BYTE, img->pixels);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            glGenerateMipmap(GL_TEXTURE_2D);
+
+            ch->texture_id = (int)tid;
+            log_info("Shader texture: %s -> iChannel%d (%ux%u)",
+                     ch->texture_path, ci, img->width, img->height);
+            image_free(img);
+        }
+    }
+
     /* Live audio texture: width REACTIVE_AUDIO_BINS, 2 rows.
      * Row 0 = FFT spectrum, row 1 = waveform. Single red channel, float.
      * Re-uploaded each frame in multipass_set_uniforms from the reactive snap. */
@@ -1717,6 +1773,20 @@ void multipass_destroy(multipass_shader_t *shader) {
     /* Delete shared resources */
     if (shader->vbo) glDeleteBuffers(1, &shader->vbo);
     if (shader->vao) glDeleteVertexArrays(1, &shader->vao);
+
+    /* User textures are owned per channel, not shared, so free them here or a
+     * shader reload leaks one GL texture per image every time. */
+    for (int pi = 0; pi < shader->pass_count; pi++) {
+        for (int ci = 0; ci < MULTIPASS_MAX_CHANNELS; ci++) {
+            multipass_channel_t *ch = &shader->passes[pi].channels[ci];
+            if (ch->source == CHANNEL_SOURCE_TEXTURE && ch->texture_id) {
+                GLuint t = (GLuint)ch->texture_id;
+                glDeleteTextures(1, &t);
+                ch->texture_id = 0;
+            }
+        }
+    }
+
     if (shader->noise_texture) glDeleteTextures(1, &shader->noise_texture);
     if (shader->keyboard_texture) glDeleteTextures(1, &shader->keyboard_texture);
     if (shader->audio_texture) glDeleteTextures(1, &shader->audio_texture);
@@ -2022,6 +2092,19 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
                     /* For self-reference, read from current ping-pong (previous frame) */
                     tex = pass->textures[pass->ping_pong_index];
                     source_name = "self(feedback)";
+                }
+                break;
+
+            case CHANNEL_SOURCE_TEXTURE:
+                /* User image from a manifest. Falls back to noise if the file
+                 * could not be loaded, so a typo in a path degrades to a
+                 * visible-but-working shader instead of a black screen. */
+                if (pass->channels[c].texture_id) {
+                    tex = (GLuint)pass->channels[c].texture_id;
+                    source_name = "texture";
+                } else {
+                    tex = shader->noise_texture;
+                    source_name = "texture(missing->noise)";
                 }
                 break;
 
