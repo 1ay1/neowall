@@ -606,15 +606,26 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
      * this, so an nwMap mentioned only in a comment does not trigger it. */
     bool wants_scene_kit = shadow_ok && glsl_shadow_contains(shadow, "nwMap");
     /* Same "you define it, you own it" rule as the aliases: a shader that
-     * supplies its own nwMaterial gets it, and the kit's default is withheld
-     * rather than duplicated. A preprocessor guard cannot express this, since
-     * the user's source is appended after this prelude. */
-    bool want_default_material =
-        wants_scene_kit && !glsl_shadow_contains(shadow, "nwMaterial");
+     * supplies its own nwMaterial/nwGloss/nwEmissive gets it, and the kit's
+     * default is withheld rather than duplicated. A preprocessor guard cannot
+     * express this, since the user's source is appended after this prelude.
+     *
+     * Each hook is emitted separately so overriding one does not cost you the
+     * other two -- the common case is a custom nwMaterial with stock gloss. */
+    static const char *const scene_hooks[] = {
+        "nwMaterial", "nwGloss", "nwEmissive",
+    };
+    bool emit_hook[3];
     size_t scene_len = 0;
     if (wants_scene_kit) {
-        scene_len = strlen(neowall_glsl_stdlib8) + strlen(neowall_glsl_stdlib8c);
-        if (want_default_material) scene_len += strlen(neowall_glsl_stdlib8b);
+        scene_len = strlen(neowall_glsl_stdlib8) + strlen(neowall_glsl_stdlib8a2) +
+                    strlen(neowall_glsl_stdlib8c) + strlen(neowall_glsl_stdlib8d);
+        for (size_t i = 0; i < 3; i++) {
+            emit_hook[i] = !glsl_shadow_contains(shadow, scene_hooks[i]);
+            if (emit_hook[i]) scene_len += strlen(neowall_scene_hook_defaults[i]);
+        }
+    } else {
+        for (size_t i = 0; i < 3; i++) emit_hook[i] = false;
     }
 
     /* Extra space for .xy additions (worst case: every iChannelResolution gets .xy) */
@@ -645,8 +656,12 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
      * overridden by a user nwMaterial, so it must see the finished library. */
     if (wants_scene_kit) {
         strcat(wrapped, neowall_glsl_stdlib8);
-        if (want_default_material) strcat(wrapped, neowall_glsl_stdlib8b);
+        strcat(wrapped, neowall_glsl_stdlib8a2);
+        for (size_t i = 0; i < 3; i++) {
+            if (emit_hook[i]) strcat(wrapped, neowall_scene_hook_defaults[i]);
+        }
         strcat(wrapped, neowall_glsl_stdlib8c);
+        strcat(wrapped, neowall_glsl_stdlib8d);
     }
 
     glsl_shadow_free(shadow);

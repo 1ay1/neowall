@@ -36,7 +36,7 @@
  *
  * `include_uniforms` selects whether the reactive uniform block (which declares
  * uniforms, not functions) is included along with the library proper. */
-#define MAX_INJECTED_CHUNKS 11
+#define MAX_INJECTED_CHUNKS 15
 
 static size_t injected_chunks(const char *out[MAX_INJECTED_CHUNKS],
                               bool include_uniforms) {
@@ -53,8 +53,11 @@ static size_t injected_chunks(const char *out[MAX_INJECTED_CHUNKS],
      * must hold all the same -- it is still neowall-authored GLSL landing in
      * the user's translation unit. */
     out[n++] = neowall_glsl_stdlib8;
-    out[n++] = neowall_glsl_stdlib8b;
+    out[n++] = neowall_glsl_stdlib8a2;
     out[n++] = neowall_glsl_stdlib8c;
+    out[n++] = neowall_glsl_stdlib8d;
+    /* The per-hook defaults are separate strings; audit them too. */
+    for (size_t i = 0; i < 3; i++) out[n++] = neowall_scene_hook_defaults[i];
     return n;
 }
 

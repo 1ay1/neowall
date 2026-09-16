@@ -522,6 +522,11 @@ static const char *neowall_glsl_stdlib8 =
     "// from the kit's default below or from the shader's own definition, which\n"
     "// is appended after this whole prelude.\n"
     "vec3 nwMaterial(vec3 p, vec3 n);\n"
+    "// Optional surface response: x=roughness (0 mirror .. 1 chalk), y=metalness.\n"
+    "// Metals tint their reflection by the albedo and lose diffuse.\n"
+    "vec2 nwGloss(vec3 p, vec3 n);\n"
+    "// Optional emission, added after lighting. Use for neon, lava, screens.\n"
+    "vec3 nwEmissive(vec3 p, vec3 n);\n"
     "\n"
     "// A camera ray: where it starts and which way it points.\n"
     "struct nwRay { vec3 ro; vec3 rd; };\n"
@@ -571,14 +576,28 @@ static const char *neowall_glsl_stdlib8 =
     "                     e.yxy*nwMap(p+e.yxy) + e.xxx*nwMap(p+e.xxx));\n"
     "}\n"
     "\n"
-    "// Soft shadow: march toward the light, track the closest approach.\n"
+    "\n";
+
+/* Chunk 8a2: shadowing, occlusion and sky. Split purely for the C99 4095-char
+ * literal limit. */
+static const char *neowall_glsl_stdlib8a2 =
+    "// Soft shadow with penumbra, using Sebastian Aaltonen's improvement on the\n"
+    "// classic h/t estimator (GDC 2016): instead of sampling the ratio only at\n"
+    "// the marched points, triangulate the closest approach BETWEEN two steps.\n"
+    "// The naive version misses the darkest penumbra whenever it falls between\n"
+    "// samples, which shows up as banding along sharp shadow-caster corners.\n"
+    "// k is inverse light size: larger k = smaller light = sharper shadow.\n"
     "float nwShadow(vec3 p, vec3 ldir, float k){\n"
-    "    float res = 1.0, t = 0.02;\n"
+    "    float res = 1.0, t = 0.02, ph = 1e20;\n"
     "    for (int i = 0; i < 48; i++){\n"
     "        float h = nwMap(p + ldir*t);\n"
-    "        res = min(res, k*h/t);\n"
+    "        if (h < 0.0008) return 0.0;\n"
+    "        float y = h*h/(2.0*ph);\n"
+    "        float d = sqrt(max(h*h - y*y, 0.0));\n"
+    "        res = min(res, d/(max(0.0, t - y)/k));\n"
+    "        ph = h;\n"
     "        t += clamp(h, 0.01, 0.3);\n"
-    "        if (res < 0.004 || t > 12.0) break;\n"
+    "        if (res < 0.004 || t > 14.0) break;\n"
     "    }\n"
     "    return clamp(res, 0.0, 1.0);\n"
     "}\n"
@@ -609,18 +628,26 @@ static const char *neowall_glsl_stdlib8 =
  * guarantees just 4095 characters per string literal, the same reason the
  * chunks above are split; the two are concatenated back-to-back at injection
  * and are a single unit semantically. */
-static const char *neowall_glsl_stdlib8b =
-    "// Surface albedo. Define your own nwMaterial(vec3 p, vec3 n) and neowall\n"
-    "// withholds this default, exactly as it does for the friendly aliases.\n"
-    "vec3 nwMaterial(vec3 p, vec3 n){ return vec3(0.62); }\n"
-    "\n";
+/* Per-hook defaults for the scene kit. Kept as separate strings, not one
+ * chunk, so a shader overriding nwMaterial still gets the stock nwGloss and
+ * nwEmissive. Index order must match `scene_hooks` in shader_multipass.c. */
+static const char *const neowall_scene_hook_defaults[] = {
+    /* nwMaterial */
+    "vec3 nwMaterial(vec3 p, vec3 n){ return vec3(0.62); }\n",
+    /* nwGloss: x = roughness, y = metalness. */
+    "vec2 nwGloss(vec3 p, vec3 n){ return vec2(0.55, 0.0); }\n",
+    /* nwEmissive */
+    "vec3 nwEmissive(vec3 p, vec3 n){ return vec3(0.0); }\n",
+};
 
 /* Chunk 8c: the renderer proper. Separated from the default material so the
  * material can be withheld independently when the shader defines its own --
  * a preprocessor guard cannot do this, because the user's #define is appended
  * AFTER the prelude and so is not yet visible here. */
 static const char *neowall_glsl_stdlib8c =
-    "// The whole pipeline: march, light, shadow, occlude, fog, tonemap.\n"
+    "// The whole pipeline: march, light, shadow, occlude, reflect, fog, tonemap.\n"
+    "// Lighting is a three-source rig -- key sun, sky dome, bounce -- which is\n"
+    "// what makes an SDF scene read as lit rather than flat-shaded.\n"
     "vec3 nwRender(nwRay r){\n"
     "    float t = nwMarch(r.ro, r.rd, 40.0);\n"
     "    if (t < 0.0) return nwSky(r.rd);\n"
@@ -628,17 +655,44 @@ static const char *neowall_glsl_stdlib8c =
     "    vec3 p = r.ro + r.rd*t;\n"
     "    vec3 n = nwNormal(p);\n"
     "    vec3 l = normalize(vec3(0.5, 0.42, 0.3));\n"
+    "    vec3 v = -r.rd;\n"
     "\n"
-    "    float dif = clamp(dot(n, l),0.0,1.0) * nwShadow(p, l, 12.0);\n"
-    "    float sky = clamp(0.5 + 0.5*n.y,0.0,1.0);\n"
+    "    vec3  alb   = nwMaterial(p, n);\n"
+    "    vec2  gl    = nwGloss(p, n);\n"
+    "    float rough = clamp(gl.x, 0.03, 1.0);\n"
+    "    float metal = clamp(gl.y, 0.0, 1.0);\n"
+    "\n"
+    "    float sha = nwShadow(p, l, 16.0);\n"
+    "    float dif = clamp(dot(n, l),0.0,1.0) * sha;\n"
+    "    float sky = clamp(0.5 + 0.5*n.y, 0.0, 1.0);\n"
     "    float ao  = nwAO(p, n);\n"
-    "    float spe = pow(clamp(dot(reflect(-l, n), -r.rd),0.0,1.0), 32.0)*dif;\n"
+    "    // Bounce light from the ground, the cheap trick that stops undersides\n"
+    "    // from going flat black.\n"
+    "    float bnc = clamp(0.5 - 0.5*n.y, 0.0, 1.0)*ao;\n"
     "\n"
-    "    vec3 lin = vec3(1.05,0.92,0.78)*dif*1.5\n"
-    "             + vec3(0.28,0.36,0.52)*sky*ao\n"
-    "             + vec3(0.12)*ao;\n"
-    "    vec3 col = nwMaterial(p, n)*lin + vec3(1.0,0.95,0.85)*spe*0.8;\n"
+    "    // Blinn-Phong specular with roughness mapped to an exponent, plus a\n"
+    "    // Schlick fresnel so grazing angles brighten like real surfaces.\n"
+    "    vec3  h    = normalize(l + v);\n"
+    "    float shin = mix(256.0, 8.0, rough);\n"
+    "    float spe  = pow(clamp(dot(n, h),0.0,1.0), shin) * dif;\n"
+    "    float fres = pow(1.0 - clamp(dot(n, v),0.0,1.0), 5.0);\n"
     "\n"
+    "    vec3 lin = vec3(1.10,0.95,0.80)*dif*1.6\n"
+    "             + vec3(0.28,0.36,0.52)*sky*ao*0.9\n"
+    "             + vec3(0.22,0.18,0.14)*bnc*0.5\n"
+    "             + vec3(0.10)*ao;\n"
+    "\n"
+    "    // Metals have no diffuse and tint their highlight by the albedo.\n"
+    "    vec3 col = alb*lin*(1.0 - metal);\n"
+    "    vec3 specTint = mix(vec3(1.0), alb, metal);\n"
+    "    col += specTint*spe*mix(0.6, 2.2, metal);\n"
+    "\n"
+    "    // One reflection bounce off the sky, weighted by fresnel and smoothness.\n"
+    "    // Cheap (no second march) but it is what sells metal and wet surfaces.\n"
+    "    float refl = mix(0.04, 1.0, metal) * mix(fres, 1.0, metal) * (1.0 - rough);\n"
+    "    col = mix(col, nwSky(reflect(r.rd, n))*mix(vec3(1.0), alb, metal), refl*ao);\n"
+    "\n"
+    "    col += nwEmissive(p, n);\n"
     "    col = mix(col, nwSky(r.rd), 1.0 - exp(-0.0016*t*t));  // distance fog\n"
     "    return nwGamma(nwTonemap(col));\n"
     "}\n"
@@ -649,10 +703,66 @@ static const char *neowall_glsl_stdlib8c =
     "vec2 nwRepeat2(vec2 p, vec2 period){ return mod(p + 0.5*period, period) - 0.5*period; }\n"
     "// Which cell are we in -- feed to nwHash21 for per-cell variation.\n"
     "vec2 nwCellId(vec2 p, vec2 period){ return floor((p + 0.5*period)/period); }\n"
+    "// Repeat a LIMITED number of times, so the field stays finite. Without the\n"
+    "// clamp, mod() tiles to infinity and every shadow ray marches forever.\n"
+    "vec3 nwRepeatLim(vec3 p, float period, vec3 limit){\n"
+    "    return p - period*clamp(round(p/period), -limit, limit);\n"
+    "}\n"
+    "// Mirror space about an axis: model half, get both halves.\n"
+    "vec3 nwMirrorX(vec3 p){ p.x = abs(p.x); return p; }\n"
+    "// Polar repetition: n copies around the Y axis. Good for wheels, flowers.\n"
+    "vec3 nwPolarRepeat(vec3 p, float n){\n"
+    "    float a = atan(p.z, p.x);\n"
+    "    float seg = NW_TAU/n;\n"
+    "    a = mod(a + 0.5*seg, seg) - 0.5*seg;\n"
+    "    float r = length(p.xz);\n"
+    "    return vec3(r*cos(a), p.y, r*sin(a));\n"
+    "}\n"
     "// Bend and twist space around Y.\n"
     "vec3 nwTwist(vec3 p, float amount){ p.xz = nwRot(p.y*amount)*p.xz; return p; }\n"
+    "vec3 nwBend(vec3 p, float amount){ p.xy = nwRot(p.x*amount)*p.xy; return p; }\n"
     "// Ground plane at height h, so scenes have something to cast onto.\n"
     "float nwGround(vec3 p, float h){ return p.y - h; }\n"
+    "\n"
+    "\n";
+
+/* Chunk 8d: extra primitives and operators. Split for the C99 literal limit. */
+static const char *neowall_glsl_stdlib8d =
+    "// ---- more primitives (exact SDFs, after Inigo Quilez) ----\n"
+    "float nwSdRoundBox(vec3 p, vec3 b, float r){\n"
+    "    vec3 q = abs(p) - b + r;\n"
+    "    return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0) - r;\n"
+    "}\n"
+    "float nwSdCapsule(vec3 p, vec3 a, vec3 b, float r){\n"
+    "    vec3 pa = p-a, ba = b-a;\n"
+    "    float h = clamp(dot(pa,ba)/dot(ba,ba), 0.0, 1.0);\n"
+    "    return length(pa - ba*h) - r;\n"
+    "}\n"
+    "float nwSdCylinder(vec3 p, float r, float h){\n"
+    "    vec2 d = abs(vec2(length(p.xz), p.y)) - vec2(r,h);\n"
+    "    return min(max(d.x,d.y),0.0) + length(max(d,0.0));\n"
+    "}\n"
+    "float nwSdCone(vec3 p, float h, float r){\n"
+    "    vec2 q = vec2(length(p.xz), p.y);\n"
+    "    vec2 tip = q - vec2(0.0, h);\n"
+    "    vec2 mantleDir = normalize(vec2(h, r));\n"
+    "    float mantle = dot(tip, mantleDir);\n"
+    "    float d = max(mantle, -q.y);\n"
+    "    float projected = dot(tip, vec2(mantleDir.y, -mantleDir.x));\n"
+    "    if (q.y > h && projected < 0.0) d = max(d, length(tip));\n"
+    "    if (q.x > r && projected > length(vec2(h,r))) d = max(d, length(q - vec2(r,0.0)));\n"
+    "    return d;\n"
+    "}\n"
+    "float nwSdOctahedron(vec3 p, float s){\n"
+    "    p = abs(p); return (p.x+p.y+p.z-s)*0.57735027;\n"
+    "}\n"
+    "// Hollow out any shape: turn a solid into a shell of given thickness.\n"
+    "float nwOpOnion(float d, float thickness){ return abs(d) - thickness; }\n"
+    "// Carve b out of a, and keep only the overlap, both smoothed.\n"
+    "float nwOpSmoothInter(float a, float b, float k){\n"
+    "    float h = clamp(0.5 - 0.5*(b-a)/k, 0.0, 1.0);\n"
+    "    return mix(b, a, h) + k*h*(1.0-h);\n"
+    "}\n"
     "\n";
 
 /* ---------------------------------------------------------------- *

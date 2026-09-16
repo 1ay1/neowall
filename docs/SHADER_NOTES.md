@@ -213,13 +213,39 @@ tonemapped, with a sky that tracks the real time of day.
 | Function | Does |
 |----------|------|
 | `nwMap(vec3) → float` | **You write this.** Signed distance to the scene. |
-| `nwRender(nwRay) → vec3` | The whole pipeline: march, light, shade, fog, tonemap. |
+| `nwRender(nwRay) → vec3` | The whole pipeline: march, light, shade, reflect, fog, tonemap. |
 | `nwCameraOrbit(uv, dist, yaw, pitch)` | Ray for a camera orbiting the origin. |
 | `nwCameraLookAt(uv, eye, target, zoom)` | Ray for a free camera. |
-| `nwMaterial(vec3 p, vec3 n) → vec3` | Albedo. Define your own to colour the scene. |
 | `nwMarch` / `nwNormal` / `nwShadow` / `nwAO` / `nwSky` | The pieces, if you want them directly. |
+
+### Surfaces
+
+Three optional hooks. Define any of them and the kit's default is withheld;
+overriding one does not cost you the others.
+
+| Hook | Returns |
+|------|---------|
+| `nwMaterial(p, n)` | Base colour. |
+| `nwGloss(p, n)` | `vec2(roughness, metalness)`. Drives highlights and reflections — `vec2(0.05, 1.0)` is polished chrome, `vec2(0.9, 0.0)` is chalk. |
+| `nwEmissive(p, n)` | Glow, added after lighting. Neon, lava, screens. |
+
+### Shapes and space
+
+| Function | Does |
+|----------|------|
+| `nwSdSphere` `nwSdBox` `nwSdRoundBox` `nwSdTorus` | The staples. |
+| `nwSdCapsule` `nwSdCylinder` `nwSdCone` `nwSdOctahedron` | More primitives. |
+| `nwOpSmoothUnion` / `nwOpSmoothSub` / `nwOpSmoothInter` | Blend, carve, intersect. |
+| `nwOpOnion(d, thickness)` | Hollow any solid into a shell. |
 | `nwRepeat` / `nwRepeat2` / `nwCellId` | Tile space: one primitive becomes a field. |
-| `nwTwist` / `nwGround` | Bend space; add a floor. |
+| `nwRepeatLim(p, period, limit)` | Tile a **finite** number of times. |
+| `nwPolarRepeat(p, n)` | `n` copies around the Y axis — wheels, flowers. |
+| `nwMirrorX` / `nwTwist` / `nwBend` / `nwGround` | Mirror, twist, bend, add a floor. |
+
+The SDF formulas and the penumbra shadow follow
+[Inigo Quilez's](https://iquilezles.org/articles/distfunctions/) exact-distance
+derivations and the Aaltonen soft-shadow improvement, so shapes march
+efficiently and shadows do not band at caster corners.
 
 Combine with the SDF primitives (`nwSdSphere`, `nwSdBox`, `nwSdTorus`) and the
 smooth operators (`nwOpSmoothUnion`, `nwOpSmoothSub`) to build the world, and
@@ -233,7 +259,9 @@ Two details worth knowing:
   "you define it, you own it" rule the aliases follow.
 
 See [`examples/shaders/scene_demo.glsl`](../examples/shaders/scene_demo.glsl):
-a full reactive 3D scene in about 45 lines.
+a full reactive 3D scene in about 45 lines, and
+[`neon_city.glsl`](../examples/shaders/neon_city.glsl): chrome, neon and
+reflections in about 60.
 
 ---
 
