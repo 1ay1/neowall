@@ -300,7 +300,11 @@ look on unsupported compositors.
 The data is read from the snapshot the occlusion system already refreshes every
 500ms, so this costs a lock and a memcpy per frame, not an IPC round-trip.
 
-See [`examples/shaders/window_light.glsl`](../examples/shaders/window_light.glsl).
+See [`examples/shaders/window_light.glsl`](../examples/shaders/window_light.glsl)
+for the simple case, and
+[`window_forge.glsl`](../examples/shaders/window_forge.glsl) for the full
+treatment: panes reflected in a molten-metal floor, energy conduits wiring the
+focused window to the rest, and ripples spreading from each one.
 
 ---
 
