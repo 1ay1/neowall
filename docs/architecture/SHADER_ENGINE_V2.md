@@ -207,6 +207,39 @@ Compile/link logs live on the program object rather than in one global "last
 error" buffer, because with N passes a shared buffer means pass 3's failure
 overwrites pass 1's before anyone reads it.
 
+### The graph (slice 4)
+
+`include/neowall/graph/graph.h` is where the remaining hardcoded lists go. The
+old engine could not express "six passes", "nine inputs", or "bind this pass to
+a weather feed", because each of those was an enum arm or an array bound. Here
+they are lengths:
+
+| old | new |
+|---|---|
+| `MULTIPASS_MAX_PASSES 5` | `nw_pass_vec`, any length |
+| `PASS_TYPE_BUFFER_A..D` | a pass has a name; feedback is a flag |
+| `MULTIPASS_MAX_CHANNELS 4` | `nw_binding_vec`, any length |
+| `channel_source_t` (12 arms) | `nw_source *`, any provider |
+| `uniform_locations_t` (~60 `GLint` fields) | `nw_uniform_vec`, looked up by name |
+
+Execution order is a topological sort over the binding edges, so "buffers
+before image" is a consequence of the dependencies rather than a hardcoded pass
+ordering. Two rules matter and both are tested:
+
+- **A self-edge is feedback, not a cycle.** A pass sampling its own previous
+  frame is every accumulation buffer ever written; `gfx` resolves it through the
+  ping-pong pair, so it imposes no intra-frame ordering constraint. Treating it
+  as a dependency breaks every Buffer A shader in existence.
+- **Any other cycle is a build error.** A reads B reads A within one frame is
+  unsatisfiable, and refusing at build time means the render path never has to
+  think about it.
+
+Topology (`nw_graph`) is separate from GL state (`nw_graph_state`), so resize
+and reload can throw the state away without touching the graph. Binding
+resolution goes through `nw_gfx_target_read()`, which is what keeps a feedback
+pass off the texture it is currently writing; an unbound slot resolves to 0 and
+samples black rather than leaving whatever was last in the sampler unit.
+
 ## 6. The occlusion contract
 
 This is the part that has to survive the rewrite, because it is the reason to
@@ -236,10 +269,10 @@ Slices, each one shippable and green on its own. No big-bang branch.
 | # | slice | state |
 |---|---|---|
 | 1 | `source/` — open data plane, registry, exec + file providers | **landed** |
-| 2 | port `reactive.c`'s 24 binds to builtin providers, delete `uniform_bind_t` | **landed** (providers in; enum removal lands with slice 4) |
+| 2 | port `reactive.c`'s 24 binds to builtin providers, delete `uniform_bind_t` | **landed** (providers in; old enums die with slice 5, when the render path switches over) |
 | 3 | `gfx/` — pull GL object handling out of `shader_multipass.c` | **landed** |
-| 4 | `graph/` — N passes, M bindings, topo order; `channel_source_t` dies | next |
-| 5 | `frontend/shadertoy.c` — move the parser behind the vtable | |
+| 4 | `graph/` — N passes, M bindings, topo order; `channel_source_t` dies | **landed** (graph has no such limits; the old enums stay until slice 5 rewires the render path) |
+| 5 | `frontend/shadertoy.c` — move the parser behind the vtable | next |
 | 6 | `glsl/` — prelude + stdlib + shadow, currently three places | |
 | 7 | `engine/` — adaptive + optimizer as policy over the graph | |
 | 8 | layers: viewport + blend per pass, the actual "canvas" | |

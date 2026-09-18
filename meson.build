@@ -234,6 +234,12 @@ gfx_sources = files(
   'src/gfx/gfx.c',
 )
 
+# Render graph: N passes, M bindings, topological order. Replaces the fixed
+# 5-pass / 4-channel arrays of the old multipass_shader_t.
+graph_sources = files(
+  'src/graph/graph.c',
+)
+
 # Shader engine sources
 shader_sources = files(
   'src/shader/shader_core.c',
@@ -432,6 +438,7 @@ all_sources = (
   core_sources +
   egl_sources +
   gfx_sources +
+  graph_sources +
   source_sources +
   source_reactive_sources +
   shader_sources +
@@ -599,6 +606,19 @@ test_gfx_exe = executable('test_gfx',
 )
 
 test('gfx', test_gfx_exe)
+
+# Render graph: feedback-vs-cycle (a self-edge is legal, A<->B is not) and the
+# ordering contract every downstream layer assumes. Also pins that N passes and
+# M bindings work past the old 5-pass / 4-channel ceilings.
+test_graph_exe = executable('test_graph',
+  files('tests/test_graph.c', 'tests/gl_stub.c', 'src/utils.c')
+    + gfx_sources + graph_sources + source_sources,
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep, thread_dep],
+  build_by_default: false,
+)
+
+test('graph', test_graph_exe)
 
 # Shadertoy source-compat transforms are GL-free and unit-tested directly.
 test_compat_exe = executable('test_shadertoy_compat',
