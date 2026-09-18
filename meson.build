@@ -222,6 +222,12 @@ source_sources = files(
   'src/source/builtin_value.c',
 )
 
+# Reactive signals as providers. Split out because it pulls in reactive.h,
+# unlike the rest of the source layer which is dependency-free.
+source_reactive_sources = files(
+  'src/source/builtin_reactive.c',
+)
+
 # Shader engine sources
 shader_sources = files(
   'src/shader/shader_core.c',
@@ -420,6 +426,7 @@ all_sources = (
   core_sources +
   egl_sources +
   source_sources +
+  source_reactive_sources +
   shader_sources +
   transition_sources +
   texture_sources +
@@ -558,6 +565,20 @@ test_source_exe = executable('test_source',
 )
 
 test('source', test_source_exe)
+
+# The 24 hardcoded uniform_bind_t arms, ported to table-driven providers.
+# Pins that every legacy bind name still resolves (a dropped one reads 0
+# silently rather than crashing) and that the occlusion contract survived.
+test_source_reactive_exe = executable('test_source_reactive',
+  files('tests/test_source_reactive.c', 'src/shader/reactive.c', 'src/utils.c',
+        'src/clock.c')
+    + source_sources + source_reactive_sources,
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep, thread_dep],
+  build_by_default: false,
+)
+
+test('source_reactive', test_source_reactive_exe)
 
 # Shadertoy source-compat transforms are GL-free and unit-tested directly.
 test_compat_exe = executable('test_shadertoy_compat',

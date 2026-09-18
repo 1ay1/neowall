@@ -52,8 +52,9 @@
 #define NW_SOURCE_NAME_MAX 32
 /* Argument text inside name(...), e.g. the command line for exec(). */
 #define NW_SOURCE_ARG_MAX 512
-/* Cap on providers registered in one process. */
-#define NW_SOURCE_REGISTRY_MAX 64
+/* Cap on providers registered in one process. The reactive signal table alone
+ * is ~44 entries plus legacy aliases, so this has real headroom above it. */
+#define NW_SOURCE_REGISTRY_MAX 256
 /* Provider-supplied failure text length (open() error buffer). */
 #define NW_SOURCE_ERR_MAX 256
 
@@ -144,6 +145,21 @@ const nw_source_vtable *nw_source_find(const char *name);
 
 /* Register the built-in providers (const, exec, file, ...). Idempotent. */
 void nw_source_register_builtins(void);
+
+/*
+ * Register the live machine signals (cpu, ram, audio_bass, thermal, ...) as
+ * providers. Separate from nw_source_register_builtins() because these need
+ * reactive_init() to have run; the engine calls it once at startup.
+ * Idempotent.
+ */
+void nw_source_register_reactive(void);
+
+/* Drop the shared per-frame reactive snapshot. Call after the sampler is
+ * reinitialised so a stale frame is not served. */
+void nw_reactive_invalidate(void);
+
+/* How many distinct reactive signals exist (excluding legacy aliases). */
+size_t nw_source_reactive_signal_count(void);
 
 /*
  * exec() runs arbitrary commands, so it is opt-in. The engine enables it only

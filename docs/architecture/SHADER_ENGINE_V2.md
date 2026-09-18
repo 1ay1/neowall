@@ -169,6 +169,24 @@ Time is injected (`ctx->now_ms`), never read from a clock inside the layer, so
 the whole data plane is deterministic and unit-testable with no GL, no display,
 and no sleeping in tests.
 
+### Reactive signals (slice 2)
+
+`src/source/builtin_reactive.c` replaces `uniform_bind_t` with a table: one
+line per signal, `offsetof` into `reactive_snapshot_t`. Two things came out of
+the port.
+
+The enum exposed 24 signals; `reactive.c` was already sampling about 44. The
+absolute values (`ram_gb`, `net_down_mbs`, `cpu_temp_c`, `load_raw`), the fused
+shaping signals (`thermal`, `activity`, `pulse`), the NVIDIA block, and
+per-core spread were all computed every frame and thrown away. A table costs a
+line each, so they are all bindable now. Every legacy name and alias still
+resolves — `tests/test_source_reactive.c` pins the list verbatim, because a
+dropped binding does not crash, it silently reads 0.
+
+Sampling is shared: `reactive_snapshot_t` is ~4KB, so all bound uniforms read
+one process-wide snapshot refreshed at most once per frame, keyed on the
+injected timestamp. Twenty bound uniforms cost one `reactive_get()`.
+
 ## 6. The occlusion contract
 
 This is the part that has to survive the rewrite, because it is the reason to
@@ -198,8 +216,8 @@ Slices, each one shippable and green on its own. No big-bang branch.
 | # | slice | state |
 |---|---|---|
 | 1 | `source/` — open data plane, registry, exec + file providers | **landed** |
-| 2 | port `reactive.c`'s 24 binds to builtin providers, delete `uniform_bind_t` | next |
-| 3 | `gfx/` — pull GL object handling out of `shader_multipass.c` | |
+| 2 | port `reactive.c`'s 24 binds to builtin providers, delete `uniform_bind_t` | **landed** (providers in; enum removal lands with slice 4) |
+| 3 | `gfx/` — pull GL object handling out of `shader_multipass.c` | next |
 | 4 | `graph/` — N passes, M bindings, topo order; `channel_source_t` dies | |
 | 5 | `frontend/shadertoy.c` — move the parser behind the vtable | |
 | 6 | `glsl/` — prelude + stdlib + shadow, currently three places | |
