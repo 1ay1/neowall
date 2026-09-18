@@ -228,6 +228,12 @@ source_reactive_sources = files(
   'src/source/builtin_reactive.c',
 )
 
+# GL object layer: programs, textures, render targets. No shader semantics.
+# Bottom of the v2 engine (docs/architecture/SHADER_ENGINE_V2.md).
+gfx_sources = files(
+  'src/gfx/gfx.c',
+)
+
 # Shader engine sources
 shader_sources = files(
   'src/shader/shader_core.c',
@@ -425,6 +431,7 @@ endif
 all_sources = (
   core_sources +
   egl_sources +
+  gfx_sources +
   source_sources +
   source_reactive_sources +
   shader_sources +
@@ -579,6 +586,19 @@ test_source_reactive_exe = executable('test_source_reactive',
 )
 
 test('source_reactive', test_source_reactive_exe)
+
+# gfx feedback/ping-pong logic: which half of the pair is readable this frame.
+# Reading the texture you are writing is undefined on most drivers rather than
+# an error, so it shows up as flicker, not a crash. Linked against a GL stub so
+# the invariant is checkable with no display server.
+test_gfx_exe = executable('test_gfx',
+  files('tests/test_gfx.c', 'tests/gl_stub.c', 'src/utils.c') + gfx_sources,
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep, thread_dep],
+  build_by_default: false,
+)
+
+test('gfx', test_gfx_exe)
 
 # Shadertoy source-compat transforms are GL-free and unit-tested directly.
 test_compat_exe = executable('test_shadertoy_compat',

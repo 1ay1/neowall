@@ -187,6 +187,26 @@ Sampling is shared: `reactive_snapshot_t` is ~4KB, so all bound uniforms read
 one process-wide snapshot refreshed at most once per frame, keyed on the
 injected timestamp. Twenty bound uniforms cost one `reactive_get()`.
 
+### GL objects (slice 3)
+
+`include/neowall/gfx/gfx.h` is the bottom layer: `nw_gfx_program`,
+`nw_gfx_texture`, `nw_gfx_target`. It knows OpenGL and knows nothing about
+passes, channels, Shadertoy, or wallpapers.
+
+The one piece of real behaviour is feedback. A pass that samples its own
+previous frame needs two textures and a flip, and in the old code that was two
+raw GLuints plus a `ping_pong_index` that callers indexed by hand — so "which
+texture may I read this frame" was answered in several places and could
+disagree. `nw_gfx_target` owns the pair and exposes exactly `read()` and
+`write()`; no caller touches the array. Reading the texture you are writing is
+undefined rather than an error on most drivers, so that bug surfaces as flicker
+or wrong-looking decay, never a crash — `tests/test_gfx.c` pins it against a GL
+stub so it is checkable with no display server.
+
+Compile/link logs live on the program object rather than in one global "last
+error" buffer, because with N passes a shared buffer means pass 3's failure
+overwrites pass 1's before anyone reads it.
+
 ## 6. The occlusion contract
 
 This is the part that has to survive the rewrite, because it is the reason to
@@ -217,8 +237,8 @@ Slices, each one shippable and green on its own. No big-bang branch.
 |---|---|---|
 | 1 | `source/` — open data plane, registry, exec + file providers | **landed** |
 | 2 | port `reactive.c`'s 24 binds to builtin providers, delete `uniform_bind_t` | **landed** (providers in; enum removal lands with slice 4) |
-| 3 | `gfx/` — pull GL object handling out of `shader_multipass.c` | next |
-| 4 | `graph/` — N passes, M bindings, topo order; `channel_source_t` dies | |
+| 3 | `gfx/` — pull GL object handling out of `shader_multipass.c` | **landed** |
+| 4 | `graph/` — N passes, M bindings, topo order; `channel_source_t` dies | next |
 | 5 | `frontend/shadertoy.c` — move the parser behind the vtable | |
 | 6 | `glsl/` — prelude + stdlib + shadow, currently three places | |
 | 7 | `engine/` — adaptive + optimizer as policy over the graph | |
