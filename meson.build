@@ -215,6 +215,13 @@ egl_sources = files(
   'src/egl/egl_core.c',
 )
 
+# Data-plane sources (open provider registry; see
+# docs/architecture/SHADER_ENGINE_V2.md). GL-free and dependency-free.
+source_sources = files(
+  'src/source/source.c',
+  'src/source/builtin_value.c',
+)
+
 # Shader engine sources
 shader_sources = files(
   'src/shader/shader_core.c',
@@ -412,6 +419,7 @@ endif
 all_sources = (
   core_sources +
   egl_sources +
+  source_sources +
   shader_sources +
   transition_sources +
   texture_sources +
@@ -539,6 +547,17 @@ test_utils_exe = executable('test_utils',
 )
 
 test('utils', test_utils_exe)
+
+# The open data plane: provider registry, spec grammar, interval scheduling,
+# and the occlusion contract (a hidden source must not poll, spawn, or sample).
+# No GL and no display server, so it runs headless in CI.
+test_source_exe = executable('test_source',
+  files('tests/test_source.c') + source_sources,
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('source', test_source_exe)
 
 # Shadertoy source-compat transforms are GL-free and unit-tested directly.
 test_compat_exe = executable('test_shadertoy_compat',

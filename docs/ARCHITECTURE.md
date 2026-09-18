@@ -49,6 +49,8 @@ include/neowall/          PUBLIC headers (the project's API surface)
   output/                    per-monitor state + lifecycle
   render/  image/  egl/       rendering, image decode, EGL context
   occlusion/                 "pause when covered" dispatcher
+  source/                    open data plane: live scalar/texture providers
+                             (see architecture/SHADER_ENGINE_V2.md)
   shader/                    GLSL engine: multipass, shadertoy-compat, optimizers
   terminal/                  in-tree VT/xterm emulator (terminal-as-wallpaper)
 src/                       IMPLEMENTATION (.c) + truly-private impl headers
