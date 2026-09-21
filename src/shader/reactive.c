@@ -59,6 +59,10 @@ static atomic_bool g_inited = false;
 static pthread_t g_audio_thread;
 static atomic_bool g_audio_run = false;
 static atomic_bool g_audio_live = false;
+/* Set when a shader asks for audio before reactive_init() has run. The shader
+ * is loaded during output setup, which happens before the event loop calls
+ * reactive_init(), so the request must be remembered and honoured at init. */
+static atomic_bool g_audio_wanted = false;
 static pid_t g_parec_pid = -1;
 
 /* Self-pipe used to break the capture threads out of a blocking read().
@@ -450,8 +454,16 @@ static void sample_time(reactive_snapshot_t *s) {
 #define fft neowall_test_fft
 #endif
 
-/* Spawn `parec` capturing the default monitor as float32 mono @ SAMPLE_RATE.
- * Returns a read fd for the PCM stream, or -1 on failure. */
+/* Spawn `parec` capturing the default output monitor as float32 mono @
+ * SAMPLE_RATE. Returns a read fd for the PCM stream, or -1 on failure.
+ *
+ * The `-d @DEFAULT_MONITOR@` is load-bearing and must never be dropped.
+ * Without an explicit device parec records the default *source*, which on
+ * every normal desktop is the MICROPHONE — so neowall would silently listen
+ * to the room and light up the DE's "mic in use" indicator (issue #84).
+ * @DEFAULT_MONITOR@ is the loopback of the default sink, i.e. what the
+ * speakers are playing, which is the only thing a music-reactive wallpaper
+ * ever wanted. PulseAudio and PipeWire's pulse shim both resolve it. */
 static int spawn_parec(pid_t *out_pid) {
     int pipefd[2];
     if (pipe(pipefd) != 0) return -1;
@@ -459,7 +471,8 @@ static int spawn_parec(pid_t *out_pid) {
     char rate[16];
     snprintf(rate, sizeof(rate), "%d", SAMPLE_RATE);
     char *argv[] = {
-        "parec", "--format=float32le", "--channels=1", "--rate", rate,
+        "parec", "-d", "@DEFAULT_MONITOR@",
+        "--format=float32le", "--channels=1", "--rate", rate,
         "--latency-msec=30", NULL
     };
 
@@ -703,8 +716,6 @@ bool reactive_init(void) {
     g_snap.battery = 1.0f;
     g_snap.charging = true;
 
-    atomic_store(&g_audio_run, true);
-
     /* Create the wake pipe before any capture thread starts, so a stop request
      * can always break a blocking read. Non-fatal if it fails: the threads fall
      * back to the old (racy) behaviour rather than not running at all. */
@@ -718,11 +729,6 @@ bool reactive_init(void) {
         fcntl(g_wake_pipe[1], F_SETFL, O_NONBLOCK);
     }
 
-    if (pthread_create(&g_audio_thread, NULL, audio_thread_fn, NULL) != 0) {
-        log_info("Reactive: could not start audio thread");
-        atomic_store(&g_audio_run, false);
-    }
-
     atomic_store(&g_nv_run, true);
     if (pthread_create(&g_nv_thread, NULL, nv_thread_fn, NULL) != 0) {
         log_info("Reactive: could not start NVIDIA thread");
@@ -731,7 +737,37 @@ bool reactive_init(void) {
 
     atomic_store(&g_inited, true);
     log_info("Reactive subsystem initialised");
+
+    /* A shader loaded before this point may already have asked for audio.
+     * Now that the subsystem is up, honour that request. */
+    if (atomic_load(&g_audio_wanted)) reactive_audio_start();
+
     return true;
+}
+
+/* Start audio capture on demand.
+ *
+ * This is deliberately NOT called from reactive_init(). Capturing audio means
+ * spawning parec, which registers a recording stream the desktop reports as
+ * "an app is listening" — so neowall must only do it when a shader actually
+ * reads an audio signal, not merely because the daemon is running (issue #84).
+ * Idempotent and safe to call every time a shader loads; the second and later
+ * calls are a single atomic load. */
+void reactive_audio_start(void) {
+    /* Remember the request either way: if a shader asked before the subsystem
+     * came up, reactive_init() starts capture when it reaches the audio step. */
+    atomic_store(&g_audio_wanted, true);
+    if (!atomic_load(&g_inited)) return;
+    /* Already running (or a start is in flight) — nothing to do. */
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&g_audio_run, &expected, true)) return;
+
+    if (pthread_create(&g_audio_thread, NULL, audio_thread_fn, NULL) != 0) {
+        log_info("Reactive: could not start audio thread");
+        atomic_store(&g_audio_run, false);
+        return;
+    }
+    log_info("Reactive: audio capture requested by shader");
 }
 
 void reactive_shutdown(void) {

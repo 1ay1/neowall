@@ -119,6 +119,14 @@ void reactive_note_mouse(float dx, float dy);
 /* Copy the current frame-coherent snapshot. Cheap; call once per frame. */
 void reactive_get(reactive_snapshot_t *out);
 
+/* Begin audio capture. Call when a shader is known to read an audio signal.
+ *
+ * Audio is opt-in on purpose: capture spawns `parec`, which shows up as a
+ * recording stream and makes desktops display a "microphone in use" indicator.
+ * A wallpaper that never reads audio must never trigger that, so nothing
+ * starts capture until a loaded shader actually asks for it. Idempotent. */
+void reactive_audio_start(void);
+
 /* True if audio capture is live (a monitor source was opened). */
 bool reactive_audio_available(void);
 

@@ -161,7 +161,9 @@ your mouse/keyboard. See [`docs/REACTIVE_SHADERS.md`](docs/REACTIVE_SHADERS.md).
 
 Drop a `.neowall` sidecar next to any shader for explicit channel bindings and
 custom reactive uniforms (e.g. `uniform uGlow audio_bass`). Audio capture uses
-`parec` (PipeWire/PulseAudio) and degrades to silence if it's not installed.
+`parec` (PipeWire/PulseAudio) and degrades to silence if it's not installed. It
+records your **speaker output** (the default sink's monitor), never the
+microphone, and only starts when the loaded shader actually reads audio.
 
 **Changing what feeds `iChannel0..3`** (audio, noise, self-feedback, another
 buffer, a texture, a bitmap font atlas): a bare `.glsl` guesses via a heuristic;

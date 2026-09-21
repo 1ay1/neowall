@@ -625,9 +625,11 @@ sanity color first: `fragColor = vec4(1.0, 0.0, 1.0, 1.0);`. If magenta shows, y
 math is the problem, not the pipeline.
 
 **Audio uniforms are flat at zero.**
-Check `iAudioActive` — if it reads 0, the daemon found no audio. Confirm `parec` is
-installed and PulseAudio/PipeWire is publishing a monitor source. Silence (no playing
-audio) also yields zeros, which is correct.
+Check `iAudioActive` — if it reads 0, the daemon found no audio. Capture is opt-in
+and only starts if the shader references an audio uniform or helper, so make sure
+yours actually does. Then confirm `parec` is installed and PulseAudio/PipeWire is
+publishing a monitor source for your output device. Silence (nothing playing on the
+speakers) also yields zeros, which is correct — neowall reads output, not the mic.
 
 **`iGpu` is stuck at 0.**
 The hardware exposes no `gpu_busy_percent` (common on Intel iGPUs). This is graceful
