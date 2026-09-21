@@ -308,6 +308,15 @@ struct output_state *output_create(struct neowall_state *state,
     out->config->shader_path[0] = '\0';
     out->config->shader_speed = 1.0f;
     out->config->shader_fps = 60;  /* Default 60 FPS */
+    /* Default: vsync ON, matching config.c's parsed default.
+     *
+     * calloc leaves this false, and an output that never gets a parsed config
+     * (preview, `neowall new`, a hotplugged output before config applies)
+     * would keep that false and request ASYNC presentation -- the compositor
+     * then scans out frames the moment they land instead of on the refresh
+     * boundary, so the frame interval is never the shader's dt and motion
+     * visibly jerks even while the FPS counter looks healthy. */
+    out->config->vsync = true;
     out->config->show_fps = false;  /* Default: no FPS watermark */
     out->config->channel_paths = NULL;
     out->config->channel_count = 0;

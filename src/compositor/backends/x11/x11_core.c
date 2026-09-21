@@ -1655,6 +1655,9 @@ static struct output_state *x11_make_output(struct neowall_state *state,
     out->config->shader_path[0] = '\0';
     out->config->shader_speed = 1.0f;
     out->config->shader_fps = 60;
+    /* See output_create(): calloc leaves vsync false, which requests async
+     * presentation and makes motion jerk. config.c's parsed default is true. */
+    out->config->vsync = true;
     out->config->show_fps = false;
     out->config->channel_paths = NULL;
     out->config->channel_count = 0;
