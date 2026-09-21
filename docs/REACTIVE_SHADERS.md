@@ -98,8 +98,17 @@ float bass = iAudioBass;               // or audioBand(0.0, 0.12)
 col *= 0.6 + bass + 0.4*beat();        // pump on the beat
 ```
 
-**Audio capture** spawns `parec` (PulseAudio / PipeWire record) on the default
-monitor source. If `parec` isn't installed the audio signals stay 0 and
+**Audio capture** spawns `parec` (PulseAudio / PipeWire record) on
+`@DEFAULT_MONITOR@` — the loopback of your **output** device, i.e. what the
+speakers are playing. neowall never records the microphone.
+
+It is also **opt-in**: nothing is captured unless the shader you loaded
+actually reads an audio uniform or helper (`iAudio*`, `spectrum()`, `beat()`,
+`waveform()`, `audioBand()`, or an `iChannel` bound to `audio`). A wallpaper
+that doesn't use audio spawns no `parec` at all, so your desktop won't show a
+recording indicator.
+
+If `parec` isn't installed the audio signals stay 0 and
 everything else works — install `pulseaudio-utils` (Debian) /
 `libpulse`+`pulseaudio` or PipeWire's `pipewire-pulse` to enable it.
 

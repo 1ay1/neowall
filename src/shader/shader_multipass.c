@@ -1000,6 +1000,49 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
         }
     }
 
+    /* Audio is opt-in. Spawning the capture child registers a recording stream
+     * that desktops surface as "microphone in use", so we only do it once a
+     * shader is known to actually read audio (issue #84). Scan for the audio
+     * uniforms, the stdlib helpers and their unprefixed aliases, plus any
+     * iChannel wired to the audio texture. */
+    {
+        static const char *audio_tokens[] = {
+            "iAudio",                                  /* iAudioLevel/Bass/Mid/Treble/Beat */
+            "nwAudioBand", "nwSpectrum", "nwWaveform", "nwBeat",
+            "audioBand", "spectrum", "waveform", "beat"
+        };
+        bool uses_audio = false;
+
+        for (int i = 0; !uses_audio && i < shader->pass_count; i++) {
+            for (int c = 0; c < MULTIPASS_MAX_CHANNELS; c++) {
+                if (shader->passes[i].channels[c].source == CHANNEL_SOURCE_AUDIO) {
+                    uses_audio = true;
+                    break;
+                }
+            }
+        }
+
+        for (int i = 0; !uses_audio && i < shader->pass_count; i++) {
+            const char *src = shader->passes[i].source;
+            if (!src) continue;
+            for (size_t t = 0; t < sizeof(audio_tokens)/sizeof(audio_tokens[0]); t++) {
+                if (strstr(src, audio_tokens[t])) { uses_audio = true; break; }
+            }
+        }
+        if (!uses_audio && shader->common_source) {
+            for (size_t t = 0; t < sizeof(audio_tokens)/sizeof(audio_tokens[0]); t++) {
+                if (strstr(shader->common_source, audio_tokens[t])) {
+                    uses_audio = true; break;
+                }
+            }
+        }
+
+        if (uses_audio) {
+            log_info("Shader reads audio - starting capture (desktop output monitor)");
+            reactive_audio_start();
+        }
+    }
+
     return shader;
 }
 
