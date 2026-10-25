@@ -54,7 +54,7 @@ include/neowall/          PUBLIC headers (the project's API surface)
   shader/                    GLSL engine: multipass, shadertoy-compat, optimizers
   terminal/                  in-tree VT/xterm emulator (terminal-as-wallpaper)
 src/                       IMPLEMENTATION (.c) + truly-private impl headers
-  main.c eventloop.c utils.c
+  main.c app.c runtime/rt.c utils.c
   compositor/backends/{wayland,x11}/   backend implementations; private headers
                                        (frame_watchdog.h, *_occlusion.h) live here
   terminal/                  utf8 · vtparse (ANSI/DEC state machine) · screen
@@ -112,56 +112,26 @@ No core changes required.
 
 ---
 
-## 5. The event loop (`src/eventloop.c`)
+## 5. The runtime (`src/runtime/`, `src/app.c`)
 
-A single `poll(2)` over:
+neowall runs on a small Elm-style loop in C. `rt` waits on fds, timers and
+signals and turns each into a message; `app_update` folds it into the model
+(the only place state changes); `app_subscribe` declares which timers should
+exist; `app_present` draws (`render_outputs`, snapshot → render → present,
+with a reference held on each output so hotplug can't free one mid-frame).
+Other threads `app_post()` a message instead of setting a flag.
 
-| fd | source | meaning |
-|----|--------|---------|
-| `fds[0]` | compositor socket | Wayland/X11 events |
-| `fds[1]` | `timerfd` | wallpaper cycle due |
-| `fds[2]` | `eventfd` | internal wakeup (e.g. config events) |
-| `fds[3]` | `signalfd` | `next`/`pause`/`set`/`kill` etc. — **race-free** signal handling, no work in a signal handler |
-| `fds[4..]` | per-output `timerfd` | high-precision **phase-locked** frame pacing for vsync-off animated wallpapers |
+vsync outputs on Wayland are paced by their own frame callback and never block
+in the swap; vsync-off outputs use a phase-locked pacer whose next deadline is
+a timer subscription.
 
-There is **no polling thread** — the loop blocks in `poll` and wakes only on a
-real event or a capped 1 s timeout (so signals stay responsive).
-
-**Frame pacing.** vsync-off animated wallpapers (shaders + the live terminal)
-are paced by a per-output `timerfd` armed as a **one-shot absolute deadline**
-(`TFD_TIMER_ABSTIME`), re-armed after every present one period ahead. This is a
-*phase-locked* schedule, not a free-running interval: it anchors to the real
-present time so it can't drift against the display's vblank cadence (the source
-of periodic judder a fixed-interval timer produces). Overruns snap the phase
-forward instead of firing catch-up bursts. When the compositor supports
-`wp_presentation`, the real flip timestamp + hardware refresh period feed the
-pacer (`output_pace_note_present`), which then anchors to true present times and
-quantises its period to a whole number of refreshes; without it the pacer falls
-back to swap-completion time. Default presentation is **tearing-control async**
-(immediate flips, bypasses compositor FPS caps); `vsync=true` uses EGL vsync.
-
-`render_outputs()` runs in three phases, which is the key to its concurrency
-safety:
-
-1. **Snapshot** the output list under the read lock, taking a **reference** on
-   each output, then **drop the lock**.
-2. **Render** each output (cycling, transitions, `eglMakeCurrent`, draw) — all
-   the *blocking* GL work happens here, with **no lock held**.
-3. **Present**, still lockless:
-   - compute the changed region — a crisp terminal that moved only a few rows
-     reports a pixel band, everything else full-surface;
-   - queue `wl_surface` damage + request `wp_presentation` feedback;
-   - present via `eglSwapBuffersWithDamage` (only the changed rect is re-scanned;
-     falls back to `eglSwapBuffers` when the extension is absent) → `commit`;
-   - phase-lock the next frame to this present (`output_pace_advance`).
-
-Finally it **unrefs** every snapshotted output. See §7 for why the ref matters.
+Full description: [architecture/RUNTIME.md](architecture/RUNTIME.md).
 
 ---
 
 ## 6. Threading & lock model
 
-neowall is mostly single-threaded (the event-loop thread does config, render,
+neowall is mostly single-threaded (the runtime loop thread does config, render,
 and present). Two sources of concurrency exist:
 
 - The **compositor dispatch** can add/remove outputs (hotplug) — on Wayland this

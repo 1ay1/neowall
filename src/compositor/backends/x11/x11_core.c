@@ -2023,7 +2023,7 @@ static void x11_recreate_surfaces(x11_backend_data_t *backend) {
  * reparented into (or out of) a WM frame, or remapped, whatever was drawn is
  * discarded and the server sends Expose. A shader wallpaper repaints every frame
  * anyway, but a static image is drawn once and then needs_redraw is cleared
- * (eventloop.c), so without this the window stays black for the rest of the
+ * (app.c), so without this the window stays black for the rest of the
  * session. Observed on Xvfb: a static wallpaper goes black the moment the WM
  * takes the window over, and again when the WM dies. */
 static void x11_mark_window_dirty(x11_backend_data_t *backend, Window window) {

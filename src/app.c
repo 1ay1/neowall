@@ -1,0 +1,632 @@
+/* The neowall program on the rt runtime. See docs/architecture/RUNTIME.md.
+ *
+ *   on      signals, the compositor fd, the watch fd, other threads  → msgs
+ *   update  folds one msg into the model (struct app); no GL, no I/O
+ *   subs    which timers exist: one per cycling output, one per vsync-off
+ *           animated output, one while a transition runs
+ *   present draws every output that needs it (render_outputs, unchanged)
+ *
+ * This replaced eventloop.c. The request atomics that used to live on
+ * neowall_state (next_requested, set_index_requested, set_terminal_requested,
+ * paused, shader_paused, outputs_need_init) are model fields here: only the
+ * loop thread touches them, and only through update(). */
+
+#include <errno.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "neowall/neowall.h"
+#include "neowall/app.h"
+#include "neowall/runtime/rt.h"
+#include "neowall/watch.h"
+#include "neowall/shader/shader_multipass.h"
+#include "neowall/config/config_access.h"
+#include "neowall/config/config.h"
+#include "neowall/egl/egl_core.h"
+#include "neowall/output/output.h"
+#include "neowall/shader/reactive.h"
+#include "neowall/constants.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/occlusion/occlusion.h"
+#include "neowall/vec.h"
+
+#ifdef HAVE_WAYLAND_BACKEND
+bool output_configure_compositor_surface(struct output_state *output);
+void wayland_request_present_feedback(struct output_state *output);
+#endif
+
+/* Readers for the command files the CLI writes before signalling (main.c). */
+int read_set_index_file(void);
+bool read_set_terminal_file(char *buf, size_t size);
+
+/* A terminal's FX settle window: the change-fade plus cursor slide/trail
+ * decay, with a margin so the last animated frame is never clipped. */
+static const unsigned kTermFxSettleMs = 700;
+
+/* ── the model ────────────────────────────────────────────────────────── */
+
+struct app {
+    struct neowall_state *state;
+    rt_loop *loop;
+
+    /* Commands waiting for the next frame. */
+    int next_pending;
+    int set_index;                  /* -1 = none */
+    bool terminal_pending;
+    char terminal_cmd[512];
+
+    bool cycle_paused;              /* `neowall pause` */
+    bool shader_paused;             /* `neowall pause-shader` */
+    bool shader_pause_applied;      /* what apply_shader_pause last did */
+
+    /* The compositor told us outputs need bring-up (reconnect, hotplug). */
+    bool outputs_need_init;
+
+    /* Host bookkeeping. */
+    int compositor_fd;
+    uint32_t compositor_watch;
+    bool flush_blocked;
+    bool read_prepared;
+    uint32_t watch_handle;
+    bool has_occlusion;
+
+    uint64_t stats_since_ms;
+    uint64_t stats_frames;
+};
+
+/* The loop for app_post / app_request_* from other threads. Set for the
+ * lifetime of app_run; NULL otherwise, so a post before or after is a no-op. */
+static _Atomic(rt_loop *) g_loop = NULL;
+
+static void post(rt_loop *l, uint32_t kind, uint32_t id, int64_t v) {
+    rt_msg m = {.kind = kind, .id = id};
+    m.v.i = v;
+    rt_post(l, &m);
+}
+
+bool app_post(uint32_t kind, uint32_t id, int64_t value) {
+    rt_loop *l = atomic_load_explicit(&g_loop, memory_order_acquire);
+    if (!l) return false;
+    rt_msg m = {.kind = kind, .id = id};
+    m.v.i = value;
+    return rt_post(l, &m);
+}
+
+void app_request_redraw(struct neowall_state *state) {
+    if (!state) return;
+    /* Keep the dirty bits as the source of truth for present(), then wake the
+     * loop so it runs a step and notices them. */
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next)
+        atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+    pthread_rwlock_unlock(&state->output_list_lock);
+    app_post(NW_MSG_REDRAW, 0, 0);
+}
+
+void app_request_output_redraw(struct output_state *output) {
+    if (!output) return;
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
+    app_post(NW_MSG_REDRAW, 0, 0);
+}
+
+void app_stop(struct neowall_state *state) {
+    if (state) atomic_store_explicit(&state->running, false, memory_order_release);
+    app_post(NW_MSG_QUIT, 0, 0);
+}
+
+/* ── rendering ────────────────────────────────────────────────────────── */
+
+struct swap_info {
+    struct output_state *output;
+    bool render_success;
+};
+
+NW_VEC_DEFINE_STATIC(output_ptr_vec, struct output_state *)
+NW_VEC_DEFINE_STATIC(swap_vec, struct swap_info)
+
+/* Freeze or unfreeze the shader animation across every shader output.
+ * Freezing records the instant it stopped; unfreezing advances each shader's
+ * start_time by the frozen duration, so it picks up on the frame it stopped. */
+static void apply_shader_pause(struct neowall_state *state, bool paused) {
+    uint64_t now = get_time_ms();
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (o->config->type != WALLPAPER_SHADER) {
+            continue;
+        }
+        if (paused) {
+            if (o->shader_paused_at == 0) {
+                o->shader_paused_at = now;
+            }
+        } else if (o->shader_paused_at != 0) {
+            o->shader_start_time += now - o->shader_paused_at;
+            o->shader_paused_at = 0;
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+}
+
+#include "app_render.inc"
+
+/* ── update ───────────────────────────────────────────────────────────── */
+
+static struct output_state *output_by_id(struct neowall_state *state, uint32_t id) {
+    for (struct output_state *o = state->outputs; o; o = o->next)
+        if (o->name == id) return o;
+    return NULL;
+}
+
+static void mark_redraw_all(struct neowall_state *state) {
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next)
+        atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+    pthread_rwlock_unlock(&state->output_list_lock);
+}
+
+/* After the compositor fd was serviced: occlusion, and every per-iteration
+ * redraw rule the old loop applied (transitions, vsync animation, terminals).
+ * Runs as part of the DISPLAY message, so it's one place, not scattered. */
+static void after_display(struct app *a) {
+    struct neowall_state *state = a->state;
+    if (a->has_occlusion) {
+        occlusion_update(state);
+    }
+}
+
+/* The redraw rules for an output that isn't frame-timed. A vsync output is
+ * paced by its own frame callback (the swap doesn't block), so "redraw it
+ * every step" is what drives it. */
+static void mark_animated(struct app *a) {
+    struct neowall_state *state = a->state;
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (o->config->pause_on_fullscreen &&
+            atomic_load_explicit(&o->occluded, memory_order_acquire)) {
+            continue;
+        }
+        if (o->transition_start_time > 0 && o->config->transition != TRANSITION_NONE) {
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+        }
+        if (!wallpaper_is_animated(o->config->type)) continue;
+        if (o->shader_load_failed) continue;
+        if (o->live_shader_program == 0 && o->multipass_shader == NULL) continue;
+        if (o->config->type == WALLPAPER_SHADER && a->shader_paused) continue;
+
+        /* A static shader painted its one frame. */
+        bool is_static = o->config->type == WALLPAPER_SHADER && o->multipass_shader &&
+                         !o->multipass_shader->is_animated && o->frames_rendered > 0;
+        /* A settled terminal only redraws when its child writes. */
+        bool term_idle = o->config->type == WALLPAPER_TERMINAL && o->multipass_shader &&
+                         o->frames_rendered > 0 &&
+                         !multipass_terminal_animating(o->multipass_shader, kTermFxSettleMs);
+        if (!is_static && !term_idle &&
+            (o->config->vsync || output_get_frame_timer_fd(o) < 0)) {
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+}
+
+static bool app_update(void *self, rt_loop *loop, const rt_msg *m) {
+    struct app *a = self;
+    struct neowall_state *state = a->state;
+
+    switch (m->kind) {
+    case NW_MSG_QUIT:
+        log_info("Shutting down");
+        atomic_store_explicit(&state->running, false, memory_order_release);
+        rt_quit(loop, 0);
+        return true;
+
+    case NW_MSG_RELOAD:
+        log_info("Reloading configuration from %s", state->config_path);
+        /* Last-known-good: the whole file is validated before anything is
+         * applied, and a failure never falls back to the built-in default. */
+        if (!config_reload(state, state->config_path)) {
+            log_error("Reload failed; previous configuration remains in effect");
+        } else {
+            log_info("Configuration reloaded");
+            mark_redraw_all(state);
+        }
+        return true;
+
+    case NW_MSG_NEXT:
+        if (a->next_pending >= MAX_NEXT_REQUESTS) {
+            log_warn("Skip-next queue is full (%d), ignoring", a->next_pending);
+        } else {
+            a->next_pending++;
+            log_info("Skipping to next wallpaper (queue: %d)", a->next_pending);
+        }
+        return true;
+
+    case NW_MSG_CYCLE_PAUSE:
+        log_info("Pausing wallpaper cycling");
+        a->cycle_paused = true;
+        return true;
+
+    case NW_MSG_CYCLE_RESUME:
+        log_info("Resuming wallpaper cycling");
+        a->cycle_paused = false;
+        return true;
+
+    case NW_MSG_SET_INDEX: {
+        int index = read_set_index_file();
+        if (index >= 0) {
+            log_info("Setting wallpaper to index %d", index);
+            a->set_index = index;
+        } else {
+            log_error("set-index requested but no valid index file found");
+        }
+        return true;
+    }
+
+    case NW_MSG_SHADER_PAUSE:
+    case NW_MSG_SHADER_RESUME: {
+        bool want = m->kind == NW_MSG_SHADER_PAUSE;
+        a->shader_paused = want;
+        if (want != a->shader_pause_applied) {
+            apply_shader_pause(state, want);
+            a->shader_pause_applied = want;
+            log_info("Shader animation %s", want ? "paused" : "resumed");
+        }
+        return true;
+    }
+
+    case NW_MSG_SET_TERMINAL: {
+        char buf[512];
+        if (read_set_terminal_file(buf, sizeof(buf))) {
+            snprintf(a->terminal_cmd, sizeof(a->terminal_cmd), "%s", buf);
+            a->terminal_pending = true;
+            log_info("Swapping terminal wallpaper to: %s", buf);
+        } else {
+            log_error("set-terminal requested but no valid command file found");
+        }
+        return true;
+    }
+
+    case NW_MSG_SIGNAL:
+        log_debug("Received signal: %u", m->id);
+        return true;
+
+    case NW_MSG_CYCLE_DUE:
+        /* render_outputs() decides which outputs actually cycle
+         * (output_should_cycle), so a due timer marks every output: that's what
+         * gets render_outputs() to run and look. */
+        mark_redraw_all(state);
+        return true;
+
+    case NW_MSG_FRAME_DUE: {
+        /* A vsync-off animated output's frame. A terminal is idle-gated: the
+         * tick still comes so fresh child output is seen promptly, but only an
+         * animating terminal is re-rendered. */
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        struct output_state *o = output_by_id(state, m->id);
+        if (o && !(o->config->type == WALLPAPER_SHADER && a->shader_paused)) {
+            bool idle = o->config->type == WALLPAPER_TERMINAL && o->multipass_shader &&
+                        o->frames_rendered > 0 &&
+                        !multipass_terminal_animating(o->multipass_shader, kTermFxSettleMs);
+            if (!idle) atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+        }
+        /* Always move the pacer's deadline on, rendered or not. An idle
+         * terminal skips its render (and so the swap that would advance it);
+         * without this its timer would fire once and go silent. */
+        if (o) output_pace_advance(o, (uint64_t)rt_now_ns());
+        pthread_rwlock_unlock(&state->output_list_lock);
+        return true;
+    }
+
+    case NW_MSG_OUTPUTS_NEW:
+        /* The registry saw a new wl_output (hotplug, monitor back from DPMS).
+         * present() brings it up after this step's dispatch configured it. */
+        a->outputs_need_init = true;
+        return true;
+
+    case NW_MSG_TRANSITION:
+    case NW_MSG_REDRAW:
+    case NW_MSG_REDRAW_OUTPUT:
+        return true;
+
+    case NW_MSG_DISPLAY:
+        after_display(a);
+        return true;
+
+    case NW_MSG_WATCH:
+        if (state->watch_path[0]) watch_reload(state, state->watch_path);
+        return true;
+    }
+    return true;
+}
+
+/* ── subscriptions ────────────────────────────────────────────────────── */
+
+static void app_subscribe(void *self, rt_subs *subs) {
+    struct app *a = self;
+    struct neowall_state *state = a->state;
+    bool transition = false;
+
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        bool occluded = o->config->pause_on_fullscreen &&
+                        atomic_load_explicit(&o->occluded, memory_order_acquire);
+
+        /* Cycling: one timer per output, due when its duration is up. */
+        if (!a->cycle_paused && o->config->cycle && o->config->duration > 0.0f &&
+            o->config->cycle_count > 1) {
+            uint64_t dur_ms = (uint64_t)(o->config->duration * 1000.0f);
+            int64_t due = (int64_t)(o->last_cycle_time + dur_ms) * 1000000LL;
+            rt_sub_at(subs, NW_MSG_CYCLE_DUE, o->name, due);
+        }
+
+        if (o->transition_start_time > 0 && o->config->transition != TRANSITION_NONE)
+            transition = true;
+
+        /* vsync-off animated output: the phase-locked pacer's next deadline.
+         * output_pace_advance() moves it after each present. */
+        if (!occluded && o->pace_period_ns > 0 && output_get_frame_timer_fd(o) >= 0 &&
+            wallpaper_is_animated(o->config->type) &&
+            !(o->config->type == WALLPAPER_SHADER && a->shader_paused) &&
+            !(o->config->type == WALLPAPER_SHADER && o->multipass_shader &&
+              !o->multipass_shader->is_animated && o->frames_rendered > 0)) {
+            rt_sub_at(subs, NW_MSG_FRAME_DUE, o->name, (int64_t)o->pace_next_deadline_ns);
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+
+    if (transition) rt_sub_every(subs, NW_MSG_TRANSITION, 0, 16666667);
+}
+
+/* ── present ──────────────────────────────────────────────────────────── */
+
+static void app_present(void *self, rt_loop *loop) {
+    (void)loop;
+    struct app *a = self;
+    struct neowall_state *state = a->state;
+
+#ifdef HAVE_WAYLAND_BACKEND
+    if (a->outputs_need_init) {
+        a->outputs_need_init = false;
+        reinit_reconnected_outputs(state);
+    }
+#endif
+
+    mark_animated(a);
+
+    bool any = a->next_pending > 0 || a->set_index >= 0 || a->terminal_pending;
+    if (!any) {
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        for (struct output_state *o = state->outputs; o; o = o->next) {
+            if (atomic_load_explicit(&o->needs_redraw, memory_order_acquire)) {
+                any = true;
+                break;
+            }
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
+    }
+    if (any) render_outputs(a);
+
+    a->stats_frames++;
+    uint64_t now = get_time_ms();
+    if (now - a->stats_since_ms >= STATS_INTERVAL_MS) {
+        double secs = (double)(now - a->stats_since_ms) / (double)MS_PER_SECOND;
+        log_debug("Stats: %.1f steps/s, %lu frames rendered, %lu errors",
+                  (double)a->stats_frames / secs, state->frames_rendered, state->errors_count);
+        a->stats_since_ms = now;
+        a->stats_frames = 0;
+    }
+}
+
+/* A vsync output waits for its frame callback, which arrives on the
+ * compositor fd. If the compositor never sends it (hidden surface), the
+ * frame-ready timeout must still fire, so don't sleep past it. */
+static int64_t app_wait_hint(void *self) {
+    struct app *a = self;
+    struct neowall_state *state = a->state;
+    int64_t hint = -1;
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (!o->config->vsync) continue;
+        if (o->compositor_surface && o->compositor_surface->frame_cb) {
+            hint = 50 * 1000000LL;
+            break;
+        }
+        /* An animated vsync output with no callback pending wants the next
+         * step at once: present() will draw it and request one. Not if it
+         * can't draw (paused shader, hidden output): needs_redraw stays set
+         * for those, and treating it as owed work would spin the loop. */
+        if (!wallpaper_is_animated(o->config->type)) continue;
+        if (o->config->type == WALLPAPER_SHADER && a->shader_paused) continue;
+        if (o->config->pause_on_fullscreen &&
+            atomic_load_explicit(&o->occluded, memory_order_acquire)) continue;
+        if (atomic_load_explicit(&o->needs_redraw, memory_order_acquire)) {
+            hint = 0;
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+    return hint;
+}
+
+/* ── host: the compositor fd ──────────────────────────────────────────── */
+
+/* Before waiting: dispatch what's queued, flush, and tell rt whether the
+ * backend already holds events poll() can't see (Xlib's queue). */
+static bool host_prepare(void *ctx, rt_loop *loop) {
+    struct app *a = ctx;
+    struct neowall_state *state = a->state;
+    const compositor_backend_ops_t *ops = state->compositor_backend ?
+                                          state->compositor_backend->ops : NULL;
+    void *bd = state->compositor_backend ? state->compositor_backend->data : NULL;
+    if (!ops) return false;
+
+    a->read_prepared = false;
+    if (ops->prepare_events) {
+        if (!ops->prepare_events(bd)) {
+            log_error("Failed to prepare compositor events");
+            post(loop, NW_MSG_QUIT, 0, 0);
+            return true;
+        }
+        a->read_prepared = true;
+    }
+    if (ops->flush) {
+        compositor_flush_result_t fr = ops->flush(bd);
+        if (fr == COMPOSITOR_FLUSH_FATAL) {
+            log_error("Failed to flush compositor requests");
+            post(loop, NW_MSG_QUIT, 0, 0);
+            return true;
+        }
+        a->flush_blocked = fr == COMPOSITOR_FLUSH_BLOCKED;
+        if (a->compositor_watch)
+            rt_watch_modify(loop, a->compositor_watch,
+                            RT_READ | (a->flush_blocked ? RT_WRITE : 0));
+    }
+    return ops->has_pending_events && ops->has_pending_events(bd);
+}
+
+static void on_compositor(void *ctx, rt_loop *loop, int fd, unsigned ev) {
+    (void)fd;
+    struct app *a = ctx;
+    struct neowall_state *state = a->state;
+    const compositor_backend_ops_t *ops = state->compositor_backend->ops;
+    void *bd = state->compositor_backend->data;
+
+    if (ev & RT_HANGUP) {
+        log_error("Compositor disconnected, display server shut down");
+        if (a->read_prepared && ops->cancel_read) ops->cancel_read(bd);
+        a->read_prepared = false;
+        post(loop, NW_MSG_QUIT, 0, 0);
+        return;
+    }
+    if (ev & RT_READ) {
+        if (ops->read_events && !ops->read_events(bd)) {
+            log_error("Failed to read compositor events");
+            post(loop, NW_MSG_QUIT, 0, 0);
+            return;
+        }
+        a->read_prepared = false;
+    }
+    if ((ev & RT_WRITE) && a->flush_blocked && ops->flush) {
+        compositor_flush_result_t fr = ops->flush(bd);
+        if (fr == COMPOSITOR_FLUSH_FATAL) {
+            log_error("Failed to flush compositor requests after POLLOUT");
+            post(loop, NW_MSG_QUIT, 0, 0);
+            return;
+        }
+        a->flush_blocked = fr == COMPOSITOR_FLUSH_BLOCKED;
+    }
+}
+
+/* After every wait, whatever woke it: balance a prepared read (the fd
+ * callback above already did, if the fd was readable), dispatch what's
+ * queued (frame callbacks), and check for errors. */
+static void host_after_wait(void *ctx, rt_loop *loop, bool fd_ready) {
+    (void)fd_ready;
+    struct app *a = ctx;
+    struct neowall_state *state = a->state;
+    const compositor_backend_ops_t *ops = state->compositor_backend->ops;
+    void *bd = state->compositor_backend->data;
+
+    if (a->read_prepared && ops->cancel_read) ops->cancel_read(bd);
+    a->read_prepared = false;
+
+    if (ops->dispatch_events && !ops->dispatch_events(bd)) {
+        log_error("Failed to dispatch compositor events, display server may have disconnected");
+        post(loop, NW_MSG_QUIT, 0, 0);
+        return;
+    }
+    if (ops->get_error) {
+        int e = ops->get_error(bd);
+        if (e != 0) {
+            log_error("Compositor error (code %d), exiting", e);
+            post(loop, NW_MSG_QUIT, 0, 0);
+            return;
+        }
+    }
+    rt_msg m = {.kind = NW_MSG_DISPLAY};
+    rt_send(loop, &m);
+}
+
+static void on_watch(void *ctx, rt_loop *loop, int fd, unsigned ev) {
+    struct app *a = ctx;
+    if (!(ev & RT_READ)) return;
+    /* Always drain, even if the name doesn't match, or the fd stays ready. */
+    if (watch_consume(fd) && a->state->watch_path[0]) {
+        rt_msg m = {.kind = NW_MSG_WATCH};
+        rt_send(loop, &m);
+    }
+}
+
+/* ── run ──────────────────────────────────────────────────────────────── */
+
+void app_run(struct neowall_state *state) {
+    if (!state) {
+        log_error("Invalid state for the runtime");
+        return;
+    }
+
+    struct app a = {.state = state, .set_index = -1, .compositor_fd = -1};
+    a.stats_since_ms = get_time_ms();
+    a.loop = rt_loop_new();
+    if (!a.loop) {
+        log_error("Failed to create the runtime loop");
+        return;
+    }
+
+    /* Signals: the old signalfd's set, each now a message. They were blocked
+     * in every thread by main() before any thread started. */
+    rt_on_signal(a.loop, SIGINT, NW_MSG_QUIT);
+    rt_on_signal(a.loop, SIGTERM, NW_MSG_QUIT);
+    rt_on_signal(a.loop, SIGHUP, NW_MSG_RELOAD);
+    rt_on_signal(a.loop, SIGUSR1, NW_MSG_NEXT);
+    rt_on_signal(a.loop, SIGUSR2, NW_MSG_CYCLE_PAUSE);
+    rt_on_signal(a.loop, SIGCONT, NW_MSG_CYCLE_RESUME);
+    rt_on_signal(a.loop, SIGRTMIN, NW_MSG_SET_INDEX);
+    rt_on_signal(a.loop, SIGRTMIN + 1, NW_MSG_SHADER_PAUSE);
+    rt_on_signal(a.loop, SIGRTMIN + 2, NW_MSG_SHADER_RESUME);
+    rt_on_signal(a.loop, SIGRTMIN + 3, NW_MSG_SET_TERMINAL);
+
+    /* The compositor fd. */
+    const compositor_backend_ops_t *ops =
+        state->compositor_backend ? state->compositor_backend->ops : NULL;
+    void *bd = state->compositor_backend ? state->compositor_backend->data : NULL;
+    if (ops && ops->get_fd) {
+        a.compositor_fd = ops->get_fd(bd);
+        if (a.compositor_fd >= 0) {
+            a.compositor_watch = rt_watch(a.loop, a.compositor_fd, RT_READ, on_compositor, &a);
+            log_info("Using compositor backend '%s' with fd %d",
+                     state->compositor_backend->name, a.compositor_fd);
+        }
+    }
+    rt_set_host_hooks(a.loop, host_prepare, host_after_wait, &a);
+
+    if (state->watch_fd >= 0) {
+        a.watch_handle = rt_watch(a.loop, state->watch_fd, RT_READ, on_watch, &a);
+    }
+
+    a.has_occlusion = occlusion_init(state);
+    reactive_init();
+
+    atomic_store_explicit(&g_loop, a.loop, memory_order_release);
+
+    rt_program prog = {
+        .self = &a,
+        .update = app_update,
+        .subscribe = app_subscribe,
+        .present = app_present,
+        .wait_hint_ns = app_wait_hint,
+    };
+    log_info("Entering main loop");
+    rt_run(a.loop, &prog);
+    log_info("Main loop stopped");
+
+    atomic_store_explicit(&g_loop, NULL, memory_order_release);
+    atomic_store_explicit(&state->running, false, memory_order_release);
+
+    if (a.has_occlusion) occlusion_cleanup(state);
+    reactive_shutdown();
+    rt_loop_free(a.loop);
+}

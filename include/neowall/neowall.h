@@ -54,21 +54,11 @@ struct neowall_state {
 
     /* ===== RUNTIME STATE ===== */
     /* ALL flags must be atomic for thread safety */
-    atomic_bool_t running;           /* Main loop running flag - accessed from signal handlers */
-    atomic_bool_t paused;            /* Pause wallpaper cycling - set by signal handlers */
-    atomic_bool_t shader_paused;     /* Freeze shader animation (time uniform) - set by signal
-                                      * handlers. Distinct from `paused`: that stops cycling
-                                      * between wallpapers, this stops the shader's animation
-                                      * and resumes it from the same frame. */
-    atomic_bool_t outputs_need_init; /* Flag when new outputs need initialization */
-    atomic_int_t next_requested;     /* Counter for skip to next wallpaper requests */
-    atomic_int_t set_index_requested; /* Requested wallpaper index (-1 = no request) */
-    atomic_bool_t set_terminal_requested; /* A `neowall set-terminal <cmd>` is pending; the
-                                           * command text is in pending_terminal_cmd (guarded by
-                                           * state_mutex). Consumed once by the event loop, which
-                                           * kills the current terminal child and spawns the new. */
-    char pending_terminal_cmd[512];   /* The command to swap in; valid only while
-                                       * set_terminal_requested is true. Written under state_mutex. */
+    atomic_bool_t running;           /* false once the runtime is stopping; read by worker
+                                      * threads that must stop with it */
+    /* Cycling pause, shader pause, skip/set requests and output bring-up used
+     * to be atomics here, polled by the loop. They are messages now, folded
+     * into the runtime's model (src/app.c), so nothing else can see them. */
     atomic_bool_t mouse_interaction;  /* Global: bind wl_pointer / poll X11 mouse / set cursor.
                                        * Default true. When false, the wallpaper surface receives
                                        * no pointer events and iMouse stays at center. Read by
@@ -109,11 +99,6 @@ struct neowall_state {
      * deadlock scenarios.
      *========================================================*/
     
-    /* ===== EVENT-DRIVEN TIMERS ===== */
-    int timer_fd;               /* timerfd for next wallpaper cycle */
-    int wakeup_fd;              /* eventfd for waking poll on internal events */
-    int signal_fd;              /* signalfd for race-free signal handling */
-
     /* ===== SHADER HOT-RELOAD (`neowall watch`) ===== */
     int  watch_fd;                          /* inotify fd, -1 when not watching */
     char watch_path[MAX_PATH_LENGTH];       /* shader being watched ('' = none) */
@@ -131,12 +116,7 @@ bool egl_init(struct neowall_state *state);
 void egl_cleanup(struct neowall_state *state);
 void detect_gl_capabilities(struct neowall_state *state);
 
-/* Main loop */
-void event_loop_run(struct neowall_state *state);
-void event_loop_stop(struct neowall_state *state);
-
-/* Wake the loop and mark every output for a redraw. */
-void event_loop_request_redraw(struct neowall_state *state);
+/* The main loop is the runtime: see neowall/app.h (app_run, app_post). */
 
 /* Utility functions */
 uint64_t get_time_ms(void);

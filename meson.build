@@ -204,7 +204,8 @@ inc_dirs_build = include_directories('.')
 # Core sources (always compiled)
 core_sources = files(
   'src/main.c',
-  'src/eventloop.c',
+  'src/app.c',
+  'src/runtime/rt.c',
   'src/utils.c',
   'src/clock.c',
   'src/watch.c',
@@ -568,6 +569,17 @@ test_utils_exe = executable('test_utils',
 )
 
 test('utils', test_utils_exe)
+
+# The runtime loop on its own: timers keep phase and never fire early, posted
+# messages all arrive in order, signals become messages, an idle loop sleeps.
+test_runtime_exe = executable('test_runtime',
+  files('tests/test_runtime.c', 'src/runtime/rt.c', 'src/utils.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep, thread_dep],
+  build_by_default: false,
+)
+
+test('runtime', test_runtime_exe)
 
 # The open data plane: provider registry, spec grammar, interval scheduling,
 # and the occlusion contract (a hidden source must not poll, spawn, or sample).

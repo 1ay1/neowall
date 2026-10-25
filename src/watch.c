@@ -7,6 +7,7 @@
 #endif
 
 #include "neowall/watch.h"
+#include "neowall/app.h"
 #include "neowall/neowall.h"
 #include "neowall/output/output.h"
 #include "neowall/shader/shader.h"
@@ -178,7 +179,7 @@ void watch_reload(struct neowall_state *state, const char *path) {
     }
     fflush(stdout);
 
-    event_loop_request_redraw(state);
+    app_request_redraw(state);
 }
 
 void watch_cleanup(int fd) {

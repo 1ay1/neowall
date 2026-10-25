@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <time.h>
 #include "neowall/neowall.h"
+#include "neowall/app.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/compositor/backends/wayland.h"
 #include "frame_watchdog.h"
@@ -553,9 +554,8 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 
             log_info("New output detected (name=%u, model=%s) - will initialize on configuration",
                      name, output->model[0] ? output->model : "pending");
-            /* Set flag to trigger initialization in event loop - use atomic */
-            atomic_store_explicit(&state->outputs_need_init, true, memory_order_release);
-            log_debug("Set outputs_need_init flag, will initialize after Wayland events are processed");
+            /* Bring it up after this dispatch has delivered its configure. */
+            app_post(NW_MSG_OUTPUTS_NEW, name, 0);
         } else {
             log_error("Failed to create output state");
             wl_output_destroy(output_obj);

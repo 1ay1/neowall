@@ -408,7 +408,7 @@ void outputs_sync_span_group(struct output_state **outs, size_t count, size_t in
  * Returns how many outputs were cycled, the leader included. */
 size_t output_cycle_group(struct output_state **outs, size_t count, struct output_state *leader);
 
-/* Rendering wrappers - hide render module from eventloop */
+/* Rendering wrappers - hide render module from the runtime */
 bool output_render_frame(struct output_state *output);
 
 /* Forward a pointer event to this output's terminal wallpaper (pixel coords

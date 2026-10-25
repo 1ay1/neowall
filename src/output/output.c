@@ -104,7 +104,7 @@ static void output_configure_vsync(struct output_state *output) {
      *                what paces rendering (the event loop deliberately runs
      *                free and closes the frame timer in this mode -- see
      *                output_configure_frame_timer and the vsync branch in
-     *                eventloop.c). The swap interval MUST be 1 here or nothing
+     *                app.c). The swap interval MUST be 1 here or nothing
      *                limits the frame rate at all.
      * - vsync=false: a timerfd paces to shader_fps and tearing is permitted.
      *
@@ -2400,7 +2400,7 @@ void output_foreach(struct neowall_state *state,
 }
 
 /* ============================================================================
- * Rendering Wrappers - Hide render module from eventloop
+ * Rendering Wrappers - Hide render module from the runtime
  * ============================================================================ */
 
 /* Render a frame for this output */

@@ -117,7 +117,7 @@ bool x11_or_decide(x11_or_env_t env, bool wm_present);
  *    running, which re-arms the XLowerWindow path. It is not optional: observed
  *    on Xvfb under metacity, and under a deliberately reparenting test WM, the
  *    wallpaper window's contents are lost when the WM dies and — for a static
- *    image, where needs_redraw is cleared after the first frame (eventloop.c) —
+ *    image, where needs_redraw is cleared after the first frame (app_render.inc) —
  *    are never repainted, leaving the wallpaper permanently black.
  *
  *  - env_forced: the user pinned the choice with NEOWALL_X11_OVERRIDE_REDIRECT;

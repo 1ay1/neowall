@@ -16,9 +16,10 @@
 #include <sys/file.h>
 #include <fcntl.h>
 #include <time.h>
-#include <sys/signalfd.h>
 #include <limits.h>
 #include "neowall/neowall.h"
+#include "neowall/app.h"
+#include "neowall/runtime/rt.h"
 #include "neowall/clock.h"
 #include "neowall/watch.h"
 #include "neowall/shader/shader_scaffold.h"
@@ -664,121 +665,6 @@ static void print_version(void) {
     printf("  - JPEG/JPG\n");
 }
 
-/* ============================================================================
- * Signal Handling Using signalfd - RACE-FREE APPROACH
- * ============================================================================
- *
- * Instead of traditional signal handlers, we use signalfd which converts
- * signals into file descriptor events. This approach:
- *
- * 1. Eliminates ALL signal handler race conditions
- * 2. No async-signal-safe restrictions (can use any functions)
- * 3. Integrates cleanly with poll() event loop
- * 4. Guaranteed signal delivery and ordering
- * 5. No signal handler execution context issues
- *
- * Signals are blocked for all threads and read from signalfd in main loop.
- * ============================================================================ */
-
-/* Process signals received via signalfd - called from eventloop.c */
-void handle_signal_from_fd(struct neowall_state *state, int signum) {
-    switch (signum) {
-        case SIGTERM:
-        case SIGINT:
-            log_info("Received shutdown signal %d, exiting gracefully...", signum);
-            atomic_store_explicit(&state->running, false, memory_order_release);
-            break;
-
-        case SIGUSR1: {
-            /* Cap-before-increment via CAS loop. The previous code did a
-             * fetch_add then a blind store(10) on overflow — which races with
-             * the main loop's fetch_sub and can corrupt the counter (audit
-             * fix #22). */
-            int cur = atomic_load_explicit(&state->next_requested, memory_order_acquire);
-            for (;;) {
-                if (cur >= MAX_NEXT_REQUESTS) {
-                    log_warn("Skip-next queue is full (%d), ignoring SIGUSR1", cur);
-                    break;
-                }
-                if (atomic_compare_exchange_weak_explicit(
-                        &state->next_requested, &cur, cur + 1,
-                        memory_order_acq_rel, memory_order_acquire)) {
-                    log_info("Received SIGUSR1, skipping to next wallpaper (queue: %d -> %d)",
-                             cur, cur + 1);
-                    break;
-                }
-                /* CAS failed; cur has been reloaded — retry. */
-            }
-            break;
-        }
-
-        case SIGUSR2:
-            log_info("Received SIGUSR2, pausing wallpaper cycling...");
-            atomic_store_explicit(&state->paused, true, memory_order_release);
-            break;
-
-        case SIGCONT:
-            log_info("Received SIGCONT, resuming wallpaper cycling...");
-            atomic_store_explicit(&state->paused, false, memory_order_release);
-            break;
-
-        case SIGHUP:
-            log_info("Received SIGHUP, reloading configuration from %s", state->config_path);
-            /* Reload is last-known-good: the complete file is validated before
-             * any global or output config is applied, and failures never invoke
-             * the startup-only built-in fallback. */
-            if (!config_reload(state, state->config_path)) {
-                log_error("Reload failed; previous configuration remains in effect");
-            } else {
-                log_info("Configuration reloaded");
-            }
-            break;
-
-        default:
-            /* Real-time signals (SIGRTMIN+N) aren't compile-time constants, so
-             * they can't sit in the switch above — dispatch them here. */
-            if (signum == SIGRTMIN) {
-                /* Read the requested index from file */
-                int index = read_set_index_file();
-                if (index >= 0) {
-                    log_info("Received SIGRTMIN, setting wallpaper to index %d", index);
-                    atomic_store_explicit(&state->set_index_requested, index, memory_order_release);
-                } else {
-                    log_error("Received SIGRTMIN but no valid index file found");
-                }
-            } else if (signum == SIGRTMIN + 1) {
-                log_info("Received SIGRTMIN+1, freezing shader animation...");
-                atomic_store_explicit(&state->shader_paused, true, memory_order_release);
-            } else if (signum == SIGRTMIN + 2) {
-                log_info("Received SIGRTMIN+2, resuming shader animation...");
-                atomic_store_explicit(&state->shader_paused, false, memory_order_release);
-            } else if (signum == SIGRTMIN + 3) {
-                /* Swap the live terminal-wallpaper command. Read it into the
-                 * state buffer under state_mutex, then flag the event loop to
-                 * apply it (which kills the old child + spawns the new). */
-                char buf[512];
-                if (read_set_terminal_file(buf, sizeof(buf))) {
-                    /* Publish payload + generation flag as one mutex-protected
-                     * transaction. The renderer exchanges the flag while
-                     * holding this same lock, so it can never clear generation
-                     * N after copying generation N+1's payload. */
-                    pthread_mutex_lock(&state->state_mutex);
-                    snprintf(state->pending_terminal_cmd,
-                             sizeof(state->pending_terminal_cmd), "%s", buf);
-                    atomic_store_explicit(&state->set_terminal_requested, true,
-                                          memory_order_release);
-                    pthread_mutex_unlock(&state->state_mutex);
-                    log_info("Received SIGRTMIN+3, swapping terminal wallpaper to: %s", buf);
-                } else {
-                    log_error("Received SIGRTMIN+3 but no valid terminal command file found");
-                }
-            } else {
-                log_debug("Received signal: %d", signum);
-            }
-            break;
-    }
-}
-
 /* Handle crash signals - these still need traditional handlers.
  *
  * MUST be async-signal-safe: no printf, no malloc, no localtime, no exit().
@@ -811,41 +697,17 @@ static void handle_crash(int signum) {
     _exit(EXIT_FAILURE);
 }
 
-/* ============================================================================
- * Signal Setup Using signalfd - RACE-FREE APPROACH
- * ============================================================================ */
-
-static int setup_signalfd(void) {
-    sigset_t mask;
-    sigemptyset(&mask);
-
-    /* Block all signals we want to handle via signalfd */
-    sigaddset(&mask, SIGTERM);
-    sigaddset(&mask, SIGINT);
-    sigaddset(&mask, SIGUSR1);
-    sigaddset(&mask, SIGUSR2);
-    sigaddset(&mask, SIGCONT);
-    sigaddset(&mask, SIGHUP);        /* reload config */
-    sigaddset(&mask, SIGRTMIN);      /* For set-index command */
-    sigaddset(&mask, SIGRTMIN + 1);  /* For pause-shader command */
-    sigaddset(&mask, SIGRTMIN + 2);  /* For resume-shader command */
-    sigaddset(&mask, SIGRTMIN + 3);  /* For set-terminal command */
-
-    /* Block these signals for all threads */
-    if (pthread_sigmask(SIG_BLOCK, &mask, NULL) != 0) {
+/* Block the signals the runtime turns into messages (app.c), in this thread
+ * and so in every thread started after it. The runtime reads them from a
+ * signalfd; nothing ever runs in a handler. */
+static bool block_signals(void) {
+    const int sigs[] = {SIGTERM, SIGINT, SIGUSR1, SIGUSR2, SIGCONT, SIGHUP,
+                        SIGRTMIN, SIGRTMIN + 1, SIGRTMIN + 2, SIGRTMIN + 3, 0};
+    if (!rt_block_signals(sigs)) {
         log_error("Failed to block signals: %s", strerror(errno));
-        return -1;
+        return false;
     }
-
-    /* Create signalfd to receive signals as file descriptor events */
-    int sfd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
-    if (sfd < 0) {
-        log_error("Failed to create signalfd: %s", strerror(errno));
-        return -1;
-    }
-
-    log_info("Signal handling configured with signalfd (race-free)");
-    return sfd;
+    return true;
 }
 
 static void setup_crash_handlers(void) {
@@ -1422,17 +1284,8 @@ int main(int argc, char *argv[]) {
 
     /* Initialize atomic state flags - MUST use atomic_init before any access */
     atomic_init(&state.running, true);
-    atomic_init(&state.paused, false);
-    atomic_init(&state.shader_paused, false);
-    atomic_init(&state.outputs_need_init, false);
-    atomic_init(&state.next_requested, 0);
-    atomic_init(&state.set_index_requested, -1);  /* -1 means no request */
-    atomic_init(&state.set_terminal_requested, false);
-    state.pending_terminal_cmd[0] = '\0';
     atomic_init(&state.mouse_interaction, true);  /* default: pointer enabled, override from config */
     atomic_init(&state.term_raw_input, false);    /* default: drop signal/EOF keys so a stray Ctrl-C can't kill the wallpaper app */
-    state.timer_fd = -1;
-    state.wakeup_fd = -1;
     /* snprintf guarantees NUL-termination and silences GCC -O2
      * -Wstringop-truncation (config_path and state.config_path are the same
      * size, which is exactly the case the warning targets). */
@@ -1441,9 +1294,8 @@ int main(int argc, char *argv[]) {
     pthread_rwlock_init(&state.output_list_lock, NULL);
     pthread_mutex_init(&state.state_file_lock, NULL);
 
-    /* Set up signalfd for race-free signal handling */
-    state.signal_fd = setup_signalfd();
-    if (state.signal_fd < 0) {
+    /* Block the command/shutdown signals before any thread starts. */
+    if (!block_signals()) {
         log_error("Failed to set up signal handling");
         remove_pid_file();
         return EXIT_FAILURE;
@@ -1470,7 +1322,6 @@ int main(int argc, char *argv[]) {
     if (!state.compositor_backend) {
         log_error("Failed to initialize compositor backend");
         log_error("Ensure you're running under a Wayland compositor or X11 window manager");
-        close(state.signal_fd);
         remove_pid_file();
         return EXIT_FAILURE;
     }
@@ -1482,7 +1333,6 @@ int main(int argc, char *argv[]) {
     if (!egl_core_init(&state)) {
         log_error("Failed to initialize EGL");
         compositor_backend_cleanup(state.compositor_backend);
-        close(state.signal_fd);
         remove_pid_file();
         return EXIT_FAILURE;
     }
@@ -1492,15 +1342,14 @@ int main(int argc, char *argv[]) {
         log_error("Failed to load configuration");
         egl_core_cleanup(&state);
         compositor_backend_cleanup(state.compositor_backend);
-        close(state.signal_fd);
         remove_pid_file();
         return EXIT_FAILURE;
     }
 
     log_info("Initialization complete, entering main loop...");
 
-    /* Run main event loop */
-    event_loop_run(&state);
+    /* Run the program on the runtime loop until it's told to stop. */
+    app_run(&state);
 
     /* Cleanup */
     log_info("Shutting down...");
@@ -1528,11 +1377,6 @@ int main(int argc, char *argv[]) {
     if (state.compositor_backend) {
         compositor_backend_cleanup(state.compositor_backend);
         state.compositor_backend = NULL;
-    }
-
-    /* Close signal fd */
-    if (state.signal_fd >= 0) {
-        close(state.signal_fd);
     }
 
     /* Skip mutex/lock destruction during fast shutdown - OS will clean up */
