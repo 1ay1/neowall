@@ -434,6 +434,9 @@ int rt_run(rt_loop *l, const rt_program *p) {
         for (size_t i = 0; i < l->nwatch; i++) {
             const rt_watcher *w = &l->watch[i];
             if (!w->handle) continue;
+            /* Interest 0 = parked: poll() would still report POLLHUP for it, and
+             * a parked fd that hung up would wake every step. */
+            if (!(w->interest & (RT_READ | RT_WRITE))) continue;
             short ev = 0;
             if (w->interest & RT_READ) ev |= POLLIN;
             if (w->interest & RT_WRITE) ev |= POLLOUT;

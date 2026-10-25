@@ -21,6 +21,7 @@
 
 #include "neowall/neowall.h"
 #include "neowall/app.h"
+#include "neowall/ipc.h"
 #include "neowall/runtime/rt.h"
 #include "neowall/watch.h"
 #include "neowall/shader/shader_multipass.h"
@@ -76,6 +77,9 @@ struct app {
 
     uint64_t stats_since_ms;
     uint64_t stats_frames;
+
+    nw_ipc_server *ipc;             /* NULL for a preview, or if binding failed */
+    char ipc_terminal_cmd[512];     /* set-terminal's command, for its message */
 };
 
 /* The loop for app_post / app_request_* from other threads. Set for the
@@ -212,6 +216,130 @@ static void mark_animated(struct app *a) {
     pthread_rwlock_unlock(&state->output_list_lock);
 }
 
+static bool app_update(void *self, rt_loop *loop, const rt_msg *m);
+
+/* A request off the control socket. The command verbs fold through the same
+ * messages the signals do, so there is one path for each command. */
+static void ipc_answer(struct app *a, rt_loop *loop, const nw_ipc_request_t *r) {
+    static const struct { const char *verb; uint32_t kind; const char *done; } simple[] = {
+        {"next",          NW_MSG_NEXT,          "skipping to next wallpaper"},
+        {"pause",         NW_MSG_CYCLE_PAUSE,   "cycling paused"},
+        {"resume",        NW_MSG_CYCLE_RESUME,  "cycling resumed"},
+        {"pause-shader",  NW_MSG_SHADER_PAUSE,  "shader animation paused"},
+        {"resume-shader", NW_MSG_SHADER_RESUME, "shader animation resumed"},
+        {"kill",          NW_MSG_QUIT,          "stopping"},
+    };
+    char text[NW_IPC_MAX_LINE];
+
+    if (strcmp(r->verb, "ping") == 0) {
+        snprintf(text, sizeof(text), "neowall %s pid %d", NEOWALL_VERSION, (int)getpid());
+        ipc_server_reply(a->ipc, r->conn, true, text);
+        return;
+    }
+
+    if (strcmp(r->verb, "next") == 0) {
+        /* Say so instead of pretending: nothing to cycle is an answer. */
+        bool cyclable = false;
+        pthread_rwlock_rdlock(&a->state->output_list_lock);
+        for (struct output_state *o = a->state->outputs; o; o = o->next)
+            if (o->config->cycle && o->config->cycle_count > 1) { cyclable = true; break; }
+        pthread_rwlock_unlock(&a->state->output_list_lock);
+        if (!cyclable) {
+            ipc_server_reply(a->ipc, r->conn, false,
+                             "nothing to cycle: only one wallpaper or shader is configured");
+            return;
+        }
+    }
+
+    if (strcmp(r->verb, "reload") == 0) {
+        /* Reload is answered with its outcome, so it runs here rather than as
+         * a queued message: the client wants to know if the new config took. */
+        bool ok = config_reload(a->state, a->state->config_path);
+        if (ok) mark_redraw_all(a->state);
+        ipc_server_reply(a->ipc, r->conn, ok,
+                         ok ? "configuration reloaded"
+                            : "reload failed; the previous configuration is still in effect");
+        return;
+    }
+
+    for (size_t i = 0; i < sizeof(simple) / sizeof(simple[0]); i++) {
+        if (strcmp(r->verb, simple[i].verb) != 0) continue;
+        /* Queue it like a signal would; update() folds it in this same step.
+         * Reply now: "kill" stops the loop, and the client is owed an answer
+         * before that. */
+        ipc_server_reply(a->ipc, r->conn, true, simple[i].done);
+        rt_msg m = {.kind = simple[i].kind};
+        rt_send(loop, &m);
+        return;
+    }
+
+    if (strcmp(r->verb, "set") == 0) {
+        char *end = NULL;
+        long idx = strtol(r->arg, &end, 10);
+        if (!r->arg[0] || *end || idx < 0 || idx > 100000) {
+            ipc_server_reply(a->ipc, r->conn, false, "usage: set <index>");
+            return;
+        }
+        /* Answer for real: an index no output can take is an error, not an
+         * "ok" the daemon then quietly drops. */
+        size_t most = 0;
+        pthread_rwlock_rdlock(&a->state->output_list_lock);
+        for (struct output_state *o = a->state->outputs; o; o = o->next)
+            if (o->config->cycle && o->config->cycle_count > most) most = o->config->cycle_count;
+        pthread_rwlock_unlock(&a->state->output_list_lock);
+        if (most <= 1) {
+            ipc_server_reply(a->ipc, r->conn, false,
+                             "nothing to set: only one wallpaper or shader is configured");
+            return;
+        }
+        if ((size_t)idx >= most) {
+            snprintf(text, sizeof(text), "index %ld is out of range (0-%zu)", idx, most - 1);
+            ipc_server_reply(a->ipc, r->conn, false, text);
+            return;
+        }
+        rt_msg m = {.kind = NW_MSG_SET_INDEX};
+        m.v.i = idx;
+        rt_send(loop, &m);
+        snprintf(text, sizeof(text), "setting wallpaper %ld", idx);
+        ipc_server_reply(a->ipc, r->conn, true, text);
+        return;
+    }
+
+    if (strcmp(r->verb, "set-terminal") == 0) {
+        if (!r->arg[0] || strlen(r->arg) >= sizeof(a->terminal_cmd)) {
+            ipc_server_reply(a->ipc, r->conn, false,
+                             r->arg[0] ? "command too long" : "usage: set-terminal <command>");
+            return;
+        }
+        bool has_terminal = false;
+        pthread_rwlock_rdlock(&a->state->output_list_lock);
+        for (struct output_state *o = a->state->outputs; o; o = o->next)
+            if (o->config->type == WALLPAPER_TERMINAL) { has_terminal = true; break; }
+        pthread_rwlock_unlock(&a->state->output_list_lock);
+        if (!has_terminal) {
+            ipc_server_reply(a->ipc, r->conn, false,
+                             "no output is running a terminal wallpaper");
+            return;
+        }
+        /* The command text is too long for a message; it rides in the model,
+         * and the message says it's there. */
+        snprintf(a->ipc_terminal_cmd, sizeof(a->ipc_terminal_cmd), "%s", r->arg);
+        rt_msg m = {.kind = NW_MSG_SET_TERMINAL, .id = 1};
+        rt_send(loop, &m);
+        ipc_server_reply(a->ipc, r->conn, true, "swapping terminal wallpaper");
+        return;
+    }
+
+    snprintf(text, sizeof(text), "unknown command '%s'", r->verb);
+    ipc_server_reply(a->ipc, r->conn, false, text);
+}
+
+static void on_ipc_request(void *ctx, rt_loop *loop, const nw_ipc_request_t *req) {
+    /* The request lives in the server's buffer only for this call, so answer
+     * now. It still runs on the loop thread, in this step, like any message. */
+    ipc_answer(ctx, loop, req);
+}
+
 static bool app_update(void *self, rt_loop *loop, const rt_msg *m) {
     struct app *a = self;
     struct neowall_state *state = a->state;
@@ -255,7 +383,10 @@ static bool app_update(void *self, rt_loop *loop, const rt_msg *m) {
         return true;
 
     case NW_MSG_SET_INDEX: {
-        int index = read_set_index_file();
+        /* A signal message has id = signo and no argument: an older CLI wrote
+         * the index to a file first. From the socket, id is 0 and the index
+         * is in the message. */
+        int index = m->id != 0 ? read_set_index_file() : (int)m->v.i;
         if (index >= 0) {
             log_info("Setting wallpaper to index %d", index);
             a->set_index = index;
@@ -278,8 +409,12 @@ static bool app_update(void *self, rt_loop *loop, const rt_msg *m) {
     }
 
     case NW_MSG_SET_TERMINAL: {
+        /* id = signo from a signal (read the file), 1 from the socket (the
+         * command is already in ipc_terminal_cmd). */
         char buf[512];
-        if (read_set_terminal_file(buf, sizeof(buf))) {
+        bool have = m->id == 1 ? (snprintf(buf, sizeof(buf), "%s", a->ipc_terminal_cmd), true)
+                               : read_set_terminal_file(buf, sizeof(buf));
+        if (have) {
             snprintf(a->terminal_cmd, sizeof(a->terminal_cmd), "%s", buf);
             a->terminal_pending = true;
             log_info("Swapping terminal wallpaper to: %s", buf);
@@ -610,6 +745,13 @@ void app_run(struct neowall_state *state) {
     a.has_occlusion = occlusion_init(state);
     reactive_init();
 
+    /* The control socket. A preview runs beside the real daemon and must not
+     * take it; neither does an instance that finds another one listening. */
+    if (!state->is_preview) {
+        a.ipc = ipc_server_start(a.loop, on_ipc_request, &a);
+        if (!a.ipc) log_warn("Control socket unavailable; CLI commands fall back to signals");
+    }
+
     atomic_store_explicit(&g_loop, a.loop, memory_order_release);
 
     rt_program prog = {
@@ -625,6 +767,8 @@ void app_run(struct neowall_state *state) {
 
     atomic_store_explicit(&g_loop, NULL, memory_order_release);
     atomic_store_explicit(&state->running, false, memory_order_release);
+
+    ipc_server_stop(a.ipc);
 
     if (a.has_occlusion) occlusion_cleanup(state);
     reactive_shutdown();

@@ -68,6 +68,9 @@ messages, an idle loop sleeps.
 | `WATCH` | `neowall watch`: the shader file changed |
 | `REDRAW` | any thread (`app_request_redraw`) |
 
+Control-socket requests (below) are answered on the loop thread and then go
+through the same messages.
+
 **The model** (`struct app`) holds what used to be atomics on
 `neowall_state`: queued `next` requests, the requested index and terminal
 command, cycle pause, shader pause, pending output bring-up. Only `update`
@@ -112,6 +115,40 @@ occluded output draws nothing and wakes only for its timers.
 | cycle pause | wallpaper cycling: no `CYCLE_DUE` subscriptions | `pause` / `resume` |
 | shader pause | the shader clock and its draws; resumes on the same frame | `pause-shader` / `resume-shader` |
 | `output->occluded` | that output's draws and its frame timer | the backend's occlusion signals |
+
+## The control socket
+
+The CLI drives a running daemon over `$XDG_RUNTIME_DIR/neowall.sock`
+(`src/ipc.c`). One request line, one reply line:
+
+```
+$ printf 'next\n' | socat - UNIX:$XDG_RUNTIME_DIR/neowall.sock
+ok skipping to next wallpaper
+```
+
+| request | reply |
+|---|---|
+| `ping` | `ok neowall <version> pid <pid>` |
+| `next`, `pause`, `resume` | `ok ...`, or `err nothing to cycle...` |
+| `set <n>` | `ok`, or `err index n is out of range (0-k)` |
+| `reload` | `ok`, or `err reload failed; the previous configuration is still in effect` |
+| `pause-shader`, `resume-shader` | `ok ...` |
+| `set-terminal <cmd>` | `ok`, or `err no output is running a terminal wallpaper` |
+| `kill` | `ok stopping` |
+
+The listening socket and each connection are watched fds on the loop. A
+complete request is answered on the loop thread in the same step, and the
+command goes through the same message a signal would, so each command has
+one path. A client that doesn't finish its line in 2 s is dropped, a request
+over 1 KiB is refused, and only the daemon's own uid may connect
+(`SO_PEERCRED`, on top of the 0600 socket in a 0700 dir). A second daemon
+finds the socket answering and refuses to start; a socket file left by a
+crashed daemon (nobody listening) is replaced. `preview`/`watch` run beside
+the daemon and never bind it.
+
+The old signals (SIGUSR1 = next, SIGRTMIN = set, ...) still work, for a CLI
+older than the socket; the CLI itself only falls back to them when nothing
+answers on the socket.
 
 ## Hot-plug
 

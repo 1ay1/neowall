@@ -103,6 +103,10 @@ struct neowall_state {
     int  watch_fd;                          /* inotify fd, -1 when not watching */
     char watch_path[MAX_PATH_LENGTH];       /* shader being watched ('' = none) */
 
+    /* `neowall preview` / `watch`: a transient instance beside the real
+     * daemon. It must not take the pid file or the control socket. */
+    bool is_preview;
+
     /* ===== STATISTICS ===== */
     uint64_t frames_rendered;
     uint64_t errors_count;

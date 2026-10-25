@@ -96,7 +96,8 @@ enum { RT_HANGUP = 4 };
 typedef void (*rt_fd_fn)(void *ctx, rt_loop *loop, int fd, unsigned events);
 
 /* Watch an fd. Returns a handle > 0, or 0 on failure. Level-triggered:
- * the callback runs every step while the fd stays ready. */
+ * the callback runs every step while the fd stays ready. Interest 0 (via
+ * rt_watch_modify) parks it: not polled at all, so not even a hangup wakes. */
 uint32_t rt_watch(rt_loop *loop, int fd, unsigned interest, rt_fd_fn fn, void *ctx);
 bool rt_watch_modify(rt_loop *loop, uint32_t handle, unsigned interest);
 void rt_unwatch(rt_loop *loop, uint32_t handle);

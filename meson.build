@@ -205,6 +205,7 @@ inc_dirs_build = include_directories('.')
 core_sources = files(
   'src/main.c',
   'src/app.c',
+  'src/ipc.c',
   'src/runtime/rt.c',
   'src/utils.c',
   'src/clock.c',
@@ -580,6 +581,18 @@ test_runtime_exe = executable('test_runtime',
 )
 
 test('runtime', test_runtime_exe)
+
+# The control socket end to end: request/reply, a stuck client can't wedge it,
+# oversize and malformed lines are refused, a live socket isn't stolen and a
+# stale one is replaced.
+test_ipc_exe = executable('test_ipc',
+  files('tests/test_ipc.c', 'src/ipc.c', 'src/runtime/rt.c', 'src/utils.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep, thread_dep],
+  build_by_default: false,
+)
+
+test('ipc', test_ipc_exe)
 
 # The open data plane: provider registry, spec grammar, interval scheduling,
 # and the occlusion contract (a hidden source must not poll, spawn, or sample).

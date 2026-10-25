@@ -19,6 +19,7 @@
 #include <limits.h>
 #include "neowall/neowall.h"
 #include "neowall/app.h"
+#include "neowall/ipc.h"
 #include "neowall/runtime/rt.h"
 #include "neowall/clock.h"
 #include "neowall/watch.h"
@@ -491,6 +492,32 @@ static bool can_cycle_wallpaper(void) {
     return state_max_cycle_total() > 1;
 }
 
+/* Ask the daemon over the control socket. Prints its answer and sets *rc.
+ * Returns false only when no daemon answers on the socket (an older daemon
+ * that predates it, or none at all): the caller then falls back to signals,
+ * which still say "no daemon" properly. */
+static bool ipc_command(const char *verb, const char *arg, int *rc) {
+    char reply[NW_IPC_MAX_LINE];
+    nw_ipc_status st = nw_ipc_request(verb, arg, reply, sizeof(reply), 3000);
+    switch (st) {
+    case NW_IPC_OK:
+        if (reply[0]) printf("%s\n", reply);
+        *rc = EXIT_SUCCESS;
+        return true;
+    case NW_IPC_ERR:
+        fprintf(stderr, "%s\n", reply[0] ? reply : "the daemon refused the command");
+        *rc = EXIT_FAILURE;
+        return true;
+    case NW_IPC_FAILED:
+        fprintf(stderr, "The daemon didn't answer on %s\n", nw_ipc_socket_path());
+        *rc = EXIT_FAILURE;
+        return true;
+    case NW_IPC_NO_DAEMON:
+        break;
+    }
+    return false;
+}
+
 static bool send_daemon_signal(int signal, const char *action, bool check_cycle) {
     const char *pid_path = get_pid_file_path();
     FILE *fp = fopen(pid_path, "r");
@@ -921,6 +948,27 @@ int main(int argc, char *argv[]) {
     if (!preview_shader && argc >= 2 && argv[1][0] != '-') {
         const char *cmd = argv[1];
 
+        /* Commands that drive the daemon go over the control socket first: one
+         * request, one real answer. The signal paths below remain only for a
+         * daemon too old to have the socket. */
+        static const char *const socket_cmds[] = {
+            "next", "pause", "resume", "reload", "pause-shader", "resume-shader", NULL};
+        for (size_t i = 0; socket_cmds[i]; i++) {
+            int rc;
+            if (strcmp(cmd, socket_cmds[i]) == 0 && ipc_command(cmd, NULL, &rc)) return rc;
+        }
+        if (strcmp(cmd, "set") == 0 && argc >= 3) {
+            long parsed = 0;
+            if (neowall_parse_index(argv[2], &parsed) && parsed <= INT_MAX) {
+                int rc;
+                if (ipc_command("set", argv[2], &rc)) return rc;
+            }
+        }
+        if (strcmp(cmd, "set-terminal") == 0 && argc >= 3 && argv[2][0]) {
+            int rc;
+            if (ipc_command("set-terminal", argv[2], &rc)) return rc;
+        }
+
         /* Special case: kill command */
         if (strcmp(cmd, "kill") == 0) {
             return kill_daemon() ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -1290,6 +1338,7 @@ int main(int argc, char *argv[]) {
      * -Wstringop-truncation (config_path and state.config_path are the same
      * size, which is exactly the case the warning targets). */
     snprintf(state.config_path, sizeof(state.config_path), "%s", config_path);
+    state.is_preview = preview_shader != NULL;
     pthread_mutex_init(&state.state_mutex, NULL);
     pthread_rwlock_init(&state.output_list_lock, NULL);
     pthread_mutex_init(&state.state_file_lock, NULL);
