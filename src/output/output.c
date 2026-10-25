@@ -100,16 +100,12 @@ static void output_configure_vsync(struct output_state *output) {
     }
 
     /* Configure vsync based on user preference:
-     * - vsync=true:  eglSwapBuffers blocks until the refresh boundary, which is
-     *                what paces rendering (the event loop deliberately runs
-     *                free and closes the frame timer in this mode -- see
-     *                output_configure_frame_timer and the vsync branch in
-     *                app.c). The swap interval MUST be 1 here or nothing
-     *                limits the frame rate at all.
      * - vsync=false: a timerfd paces to shader_fps and tearing is permitted.
-     *
-     * On Wayland a vsync output is paced by its own frame callback instead, so
-     * its swap must not block: a blocking swap on one monitor stalls the rest. */
+     * - vsync=true on Wayland: each output is paced by its own frame callback,
+     *   and its swap must not block: a blocking swap on one monitor stalls the
+     *   rest (#85). So the interval is 0 there.
+     * - vsync=true without frame callbacks (X11): interval 1, so presents land
+     *   on the refresh; the frame timer paces the loop at the refresh rate. */
     bool paced = output->config->vsync &&
                  compositor_surface_supports_frame_pacing(output->compositor_surface);
     int swap_interval = (output->config->vsync && !paced) ? 1 : 0;
@@ -147,8 +143,14 @@ static bool output_configure_frame_timer(struct output_state *output) {
         return false;
     }
 
-    /* If vsync is enabled, we don't need a frame timer - eglSwapBuffers handles pacing */
-    if (output->config->vsync) {
+    /* If vsync is enabled and the backend paces each output by its own frame
+     * callback (Wayland), no frame timer is needed. Without callbacks (X11) a
+     * vsync swap would be the only pacing, and it can block the loop or not
+     * block at all (measured on Xwayland: 2 fps on the old loop, 280 on the
+     * new). There the timer paces it too: vsync still keeps each present on
+     * the refresh, the timer keeps the loop at the refresh rate. */
+    bool paced_by_callback = compositor_surface_supports_frame_pacing(output->compositor_surface);
+    if (output->config->vsync && paced_by_callback) {
         if (output->frame_timer_fd >= 0) {
             close(output->frame_timer_fd);
             output->frame_timer_fd = -1;

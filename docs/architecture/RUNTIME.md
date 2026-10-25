@@ -100,10 +100,15 @@ Finally it unrefs every snapshotted output.
   late monitor can't stall the others (#85). The loop waits on the
   compositor fd for the callback; `wait_hint` bounds the wait so a callback
   that never comes (hidden surface) times out.
+- **vsync=true, X11**: there are no frame callbacks, so the frame timer
+  paces the loop at the refresh rate and the swap keeps interval 1, which
+  lands each present on the refresh.
 - **vsync=false**: a phase-locked pacer. The next deadline is one period
   after the last present (anchored to the real flip time with
   `wp_presentation`, quantised to whole refreshes), and it's a `FRAME_DUE`
-  subscription. Overruns snap the phase forward instead of bursting.
+  subscription. Overruns snap the phase forward instead of bursting. The
+  pacer moves on once per frame, after the swap; a frame that won't render
+  (an idle terminal, a paused shader) moves it on from `FRAME_DUE` instead.
 
 ## Pausing
 

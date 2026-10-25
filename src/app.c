@@ -208,8 +208,10 @@ static void mark_animated(struct app *a) {
         bool term_idle = o->config->type == WALLPAPER_TERMINAL && o->multipass_shader &&
                          o->frames_rendered > 0 &&
                          !multipass_terminal_animating(o->multipass_shader, kTermFxSettleMs);
-        if (!is_static && !term_idle &&
-            (o->config->vsync || output_get_frame_timer_fd(o) < 0)) {
+        /* An output with a frame timer (vsync off, or vsync without frame
+         * callbacks) is driven by FRAME_DUE. Anything else is paced by its
+         * frame callback, so mark it every step. */
+        if (!is_static && !term_idle && output_get_frame_timer_fd(o) < 0) {
             atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
         }
     }
@@ -446,11 +448,14 @@ static bool app_update(void *self, rt_loop *loop, const rt_msg *m) {
                         o->frames_rendered > 0 &&
                         !multipass_terminal_animating(o->multipass_shader, kTermFxSettleMs);
             if (!idle) atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+            /* A frame that won't render (idle terminal) must still move the
+             * pacer on, or its timer fires once and goes silent. A frame that
+             * will render moves it after the swap (render_outputs); doing it
+             * here too skips a period every frame: 30 fps instead of 60. */
+            else output_pace_advance(o, (uint64_t)rt_now_ns());
+        } else if (o) {
+            output_pace_advance(o, (uint64_t)rt_now_ns());   /* paused shader */
         }
-        /* Always move the pacer's deadline on, rendered or not. An idle
-         * terminal skips its render (and so the swap that would advance it);
-         * without this its timer would fire once and go silent. */
-        if (o) output_pace_advance(o, (uint64_t)rt_now_ns());
         pthread_rwlock_unlock(&state->output_list_lock);
         return true;
     }
@@ -564,7 +569,7 @@ static int64_t app_wait_hint(void *self) {
     int64_t hint = -1;
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o; o = o->next) {
-        if (!o->config->vsync) continue;
+        if (!o->config->vsync || output_get_frame_timer_fd(o) >= 0) continue;
         if (o->compositor_surface && o->compositor_surface->frame_cb) {
             hint = 50 * 1000000LL;
             break;
