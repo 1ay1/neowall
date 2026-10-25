@@ -1,0 +1,3 @@
+[submodule "external/jaal"]
+	path = external/jaal
+	url = https://github.com/agentty-org/jaal.git
