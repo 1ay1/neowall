@@ -45,11 +45,16 @@ uint64_t get_time_us(void) {
     return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
 }
 
-/* Get formatted timestamp */
+/* Get formatted timestamp. localtime_r: log lines come from several threads,
+ * and localtime() shares one static buffer between them. */
 static void get_timestamp(char *buf, size_t size) {
     time_t now = time(NULL);
-    struct tm *tm_info = localtime(&now);
-    strftime(buf, size, "%Y-%m-%d %H:%M:%S", tm_info);
+    struct tm tm_buf;
+    if (localtime_r(&now, &tm_buf)) {
+        strftime(buf, size, "%Y-%m-%d %H:%M:%S", &tm_buf);
+    } else if (size) {
+        buf[0] = '\0';
+    }
 }
 
 /* Generic logging function */

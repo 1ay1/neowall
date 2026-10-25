@@ -102,7 +102,8 @@ static void reactive_wake_threads(void) {
 static pthread_t g_nv_thread;
 static atomic_bool g_nv_run = false;
 static atomic_bool g_nv_live = false;
-static pid_t g_nv_pid = -1;
+/* Written by the nvidia thread, read by reactive_shutdown to kill nvidia-smi. */
+static _Atomic pid_t g_nv_pid = -1;
 
 /* input energy accumulators (written from input handlers, decayed in sample) */
 static atomic_int g_key_hits = 0;
@@ -705,10 +706,10 @@ static void *nv_thread_fn(void *arg) {
     }
 
     fclose(fp);  /* closes fd */
-    if (g_nv_pid > 0) {
-        kill(g_nv_pid, SIGTERM);
-        waitpid(g_nv_pid, NULL, 0);
-        g_nv_pid = -1;
+    pid_t nv = atomic_exchange(&g_nv_pid, -1);
+    if (nv > 0) {
+        kill(nv, SIGTERM);
+        waitpid(nv, NULL, 0);
     }
     atomic_store(&g_nv_live, false);
     return NULL;
@@ -833,12 +834,14 @@ void reactive_shutdown(void) {
     }
     if (atomic_load(&g_nv_run)) {
         atomic_store(&g_nv_run, false);
-        if (g_nv_pid > 0) kill(g_nv_pid, SIGKILL);
+        pid_t nv = atomic_load(&g_nv_pid);
+        if (nv > 0) kill(nv, SIGKILL);
         clock_gettime(CLOCK_REALTIME, &deadline);
         deadline.tv_sec += 1;   /* 1s grace */
         if (pthread_timedjoin_np(g_nv_thread, NULL, &deadline) != 0) {
             pthread_detach(g_nv_thread);
-            if (g_nv_pid > 0) kill(g_nv_pid, SIGKILL);
+            nv = atomic_load(&g_nv_pid);
+            if (nv > 0) kill(nv, SIGKILL);
             log_warn("reactive: NVIDIA capture thread did not stop in time; abandoning");
         }
     }
