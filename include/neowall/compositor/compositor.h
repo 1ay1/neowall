@@ -158,6 +158,11 @@ struct compositor_surface {
     
     void *tearing_control;              /* Tearing control handle (protocol-specific) */
 
+    /* Pending wl_surface.frame callback for compositor-paced vsync rendering
+     * (Wayland only, opaque here). frame_pending_ms is when it was requested. */
+    void *frame_cb;
+    uint64_t frame_pending_ms;
+
     /* Fractional-scale + viewport (Wayland wlr backend only; NULL elsewhere).
      * Opaque here to keep this header free of wl protocol types. The
      * fractional_scale object delivers preferred_scale (120ths) to size the
@@ -325,6 +330,15 @@ typedef struct compositor_backend_ops {
      * already-created surface. Optional: backends without tearing control leave
      * this NULL. */
     void (*set_vsync)(struct compositor_surface *surface, bool vsync);
+
+    /* Compositor-paced rendering (optional; NULL = not supported).
+     * frame_request() asks for a frame callback on the NEXT commit (the swap).
+     * frame_ready() is true once that callback arrived, or a timeout passed.
+     * Lets the loop pace each output on its own instead of blocking in
+     * eglSwapBuffers for one slow monitor. */
+    void (*frame_request)(struct compositor_surface *surface);
+    bool (*frame_ready)(struct compositor_surface *surface);
+    void (*frame_cancel)(struct compositor_surface *surface);
 
     /**
      * Change keyboard interactivity on a LIVE surface (optional)
@@ -712,6 +726,12 @@ void compositor_surface_set_scale(struct compositor_surface *surface, int32_t sc
  * Safe to call repeatedly, and on backends or compositors without tearing
  * control (where it is a no-op). */
 void compositor_surface_set_vsync(struct compositor_surface *surface, bool vsync);
+
+/* Per-surface frame pacing; see frame_request/frame_ready in the ops table.
+ * supports() is false when the backend has no frame callbacks (X11). */
+bool compositor_surface_supports_frame_pacing(struct compositor_surface *surface);
+void compositor_surface_frame_request(struct compositor_surface *surface);
+bool compositor_surface_frame_ready(struct compositor_surface *surface);
 
 /**
  * Change keyboard interactivity on an already-created surface.

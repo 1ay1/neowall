@@ -92,6 +92,12 @@ void compositor_surface_destroy(struct compositor_surface *surface) {
         return;
     }
 
+    /* Drop a pending frame callback first, or its done would write to the
+     * freed surface. */
+    if (backend->ops->frame_cancel) {
+        backend->ops->frame_cancel(surface);
+    }
+
     /* Delegate to backend implementation */
     backend->ops->destroy_surface(surface);
 
@@ -410,6 +416,24 @@ void compositor_surface_set_vsync(struct compositor_surface *surface, bool vsync
     if (backend && backend->ops && backend->ops->set_vsync) {
         backend->ops->set_vsync(surface, vsync);
     }
+}
+
+bool compositor_surface_supports_frame_pacing(struct compositor_surface *surface) {
+    return surface && surface->backend && surface->backend->ops &&
+           surface->backend->ops->frame_request && surface->backend->ops->frame_ready;
+}
+
+void compositor_surface_frame_request(struct compositor_surface *surface) {
+    if (compositor_surface_supports_frame_pacing(surface)) {
+        surface->backend->ops->frame_request(surface);
+    }
+}
+
+bool compositor_surface_frame_ready(struct compositor_surface *surface) {
+    if (!compositor_surface_supports_frame_pacing(surface)) {
+        return true;
+    }
+    return surface->backend->ops->frame_ready(surface);
 }
 
 bool compositor_surface_set_keyboard_interactivity(struct compositor_surface *surface,

@@ -468,6 +468,10 @@ static const compositor_backend_ops_t gnome_backend_ops = {
     .cleanup = gnome_backend_cleanup,
     .create_surface = gnome_create_surface,
     .destroy_surface = gnome_destroy_surface,
+    /* Compositor-paced vsync rendering (shared, wayland_core.c) */
+    .frame_request = wayland_frame_request,
+    .frame_ready = wayland_frame_ready,
+    .frame_cancel = wayland_frame_cancel,
     .configure_surface = gnome_configure_surface,
     .commit_surface = gnome_commit_surface,
     .create_egl_window = gnome_create_egl_window,

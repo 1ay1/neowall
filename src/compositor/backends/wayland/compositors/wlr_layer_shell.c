@@ -1612,6 +1612,10 @@ static const compositor_backend_ops_t wlr_backend_ops = {
     .cleanup = wlr_cleanup,
     .create_surface = wlr_create_surface,
     .destroy_surface = wlr_destroy_surface,
+    /* Compositor-paced vsync rendering (shared, wayland_core.c) */
+    .frame_request = wayland_frame_request,
+    .frame_ready = wayland_frame_ready,
+    .frame_cancel = wayland_frame_cancel,
     .configure_surface = wlr_configure_surface,
     .set_keyboard_interactivity = wlr_set_keyboard_interactivity,
     .commit_surface = wlr_commit_surface,

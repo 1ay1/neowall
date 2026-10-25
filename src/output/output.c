@@ -106,8 +106,13 @@ static void output_configure_vsync(struct output_state *output) {
      *                output_configure_frame_timer and the vsync branch in
      *                eventloop.c). The swap interval MUST be 1 here or nothing
      *                limits the frame rate at all.
-     * - vsync=false: a timerfd paces to shader_fps and tearing is permitted. */
-    int swap_interval = output->config->vsync ? 1 : 0;
+     * - vsync=false: a timerfd paces to shader_fps and tearing is permitted.
+     *
+     * On Wayland a vsync output is paced by its own frame callback instead, so
+     * its swap must not block: a blocking swap on one monitor stalls the rest. */
+    bool paced = output->config->vsync &&
+                 compositor_surface_supports_frame_pacing(output->compositor_surface);
+    int swap_interval = (output->config->vsync && !paced) ? 1 : 0;
 
     if (!eglSwapInterval(output->state->egl_display, swap_interval)) {
         EGLint err = eglGetError();

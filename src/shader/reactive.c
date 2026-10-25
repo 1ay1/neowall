@@ -55,6 +55,14 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static reactive_snapshot_t g_snap;          /* protected by g_lock */
 static atomic_bool g_inited = false;
 
+/* Sampler thread: sysfs reads can take milliseconds, so they never run on the
+ * render thread. g_sys is its private copy; only publishing takes g_lock. */
+static pthread_t g_sys_thread;
+static atomic_bool g_sys_run = false;
+static pthread_mutex_t g_sample_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_sys_cond = PTHREAD_COND_INITIALIZER;
+static reactive_snapshot_t g_sys;           /* protected by g_sample_lock */
+
 /* audio thread */
 static pthread_t g_audio_thread;
 static atomic_bool g_audio_run = false;
@@ -710,6 +718,8 @@ static void *nv_thread_fn(void *arg) {
  * Public API
  * ============================================================================ */
 
+static void *sys_thread_fn(void *arg);
+
 bool reactive_init(void) {
     if (atomic_load(&g_inited)) return true;
     memset(&g_snap, 0, sizeof(g_snap));
@@ -736,6 +746,16 @@ bool reactive_init(void) {
     }
 
     atomic_store(&g_inited, true);
+
+    /* Prime the snapshot once, then hand sampling to its own thread. */
+    memcpy(&g_sys, &g_snap, sizeof(g_sys));
+    reactive_sample();
+    atomic_store(&g_sys_run, true);
+    if (pthread_create(&g_sys_thread, NULL, sys_thread_fn, NULL) != 0) {
+        log_info("Reactive: could not start sampler thread; system signals stay frozen");
+        atomic_store(&g_sys_run, false);
+    }
+
     log_info("Reactive subsystem initialised");
 
     /* A shader loaded before this point may already have asked for audio.
@@ -790,6 +810,15 @@ void reactive_shutdown(void) {
 
     reactive_wake_threads();
 
+    /* Wake the sampler off its condvar and wait for it. */
+    if (atomic_load(&g_sys_run)) {
+        pthread_mutex_lock(&g_sample_lock);
+        atomic_store(&g_sys_run, false);
+        pthread_cond_signal(&g_sys_cond);
+        pthread_mutex_unlock(&g_sample_lock);
+        pthread_join(g_sys_thread, NULL);
+    }
+
     if (atomic_load(&g_audio_run)) {
         atomic_store(&g_audio_run, false);
         if (g_parec_pid > 0) kill(g_parec_pid, SIGKILL);
@@ -823,35 +852,64 @@ void reactive_shutdown(void) {
     atomic_store(&g_inited, false);
 }
 
-void reactive_sample(void) {
-    if (!atomic_load(&g_inited)) return;
+/* Copy the sampler's fields into the published snapshot, keeping the ones
+ * other threads own (audio, nv_*) and the ones computed below. */
+static void publish_system_fields(reactive_snapshot_t *dst, const reactive_snapshot_t *src) {
+    reactive_snapshot_t keep = *dst;
+    *dst = *src;
+    dst->nv_gpu    = keep.nv_gpu;
+    dst->nv_vram   = keep.nv_vram;
+    dst->nv_temp_c = keep.nv_temp_c;
+    dst->nv_power  = keep.nv_power;
+    dst->nv_active = keep.nv_active;
+    dst->audio_active = keep.audio_active;
+    dst->audio_level  = keep.audio_level;
+    dst->audio_bass   = keep.audio_bass;
+    dst->audio_mid    = keep.audio_mid;
+    dst->audio_treble = keep.audio_treble;
+    dst->audio_beat   = keep.audio_beat;
+    memcpy(dst->audio_spectrum, keep.audio_spectrum, sizeof(dst->audio_spectrum));
+    memcpy(dst->audio_waveform, keep.audio_waveform, sizeof(dst->audio_waveform));
+    dst->key_energy   = keep.key_energy;
+    dst->mouse_energy = keep.mouse_energy;
+    dst->thermal      = keep.thermal;
+    dst->activity     = keep.activity;
+    dst->pulse        = keep.pulse;
+}
 
+/* One sampling pass. The slow reads happen without g_lock, so reactive_get()
+ * never waits on them. Caller holds g_sample_lock. */
+static void sample_once_locked(void) {
     static double last = 0.0;
+    static double last_slow = 0.0;
+    static double phase = 0.0;
+
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     double now = ts.tv_sec + ts.tv_nsec / 1e9;
-    double dt = now - last;
-    if (last != 0.0 && dt < 0.25) return;   /* 4 Hz is plenty for these */
+    double dt = last == 0.0 ? 0.0 : now - last;
     double prev = last;
     last = now;
 
-    pthread_mutex_lock(&g_lock);
-    sample_cpu(&g_snap);
-    sample_ram(&g_snap);
-    sample_net(&g_snap, prev == 0.0 ? 0.0 : dt);
-    sample_disk(&g_snap, prev == 0.0 ? 0.0 : dt);
-    sample_load(&g_snap);
-    sample_battery(&g_snap);
-    sample_time(&g_snap);
+    sample_cpu(&g_sys);
+    sample_ram(&g_sys);
+    sample_net(&g_sys, dt);
+    sample_disk(&g_sys, dt);
+    sample_load(&g_sys);
+    sample_battery(&g_sys);
+    sample_time(&g_sys);
 
     /* Thermals, GPU, uptime are pricier (sysfs dir scans). Refresh ~1 Hz. */
-    static double last_slow = 0.0;
     if (last_slow == 0.0 || now - last_slow >= 1.0) {
         last_slow = now;
-        sample_uptime(&g_snap);
-        sample_cpu_temp(&g_snap);
-        sample_gpu(&g_snap);
+        sample_uptime(&g_sys);
+        sample_cpu_temp(&g_sys);
+        sample_gpu(&g_sys);
     }
+
+    /* Publish; only arithmetic happens under g_lock. */
+    pthread_mutex_lock(&g_lock);
+    publish_system_fields(&g_snap, &g_sys);
 
     /* decay + fold in input energy */
     int keys = atomic_exchange(&g_key_hits, 0);
@@ -889,7 +947,6 @@ void reactive_sample(void) {
         /* pulse: a heartbeat whose rate rises with activity. Free-running phase
          * accumulator (independent of frame rate); output is a sharp 0..1 beat.
          * Idle ~0.6 Hz, maxed-out ~2.6 Hz. */
-        static double phase = 0.0;
         double rate = 0.6 + 2.0 * (double)g_snap.activity;   /* Hz */
         if (prev != 0.0) phase += rate * dt;
         phase = fmod(phase, 1.0);
@@ -898,6 +955,32 @@ void reactive_sample(void) {
         g_snap.pulse = b;
     }
     pthread_mutex_unlock(&g_lock);
+}
+
+/* Synchronous pass for tests; the daemon relies on the sampler thread. */
+void reactive_sample(void) {
+    if (!atomic_load(&g_inited)) return;
+    pthread_mutex_lock(&g_sample_lock);
+    sample_once_locked();
+    pthread_mutex_unlock(&g_sample_lock);
+}
+
+static void *sys_thread_fn(void *arg) {
+    (void)arg;
+    while (atomic_load(&g_sys_run)) {
+        pthread_mutex_lock(&g_sample_lock);
+        sample_once_locked();
+
+        /* 4 Hz, but wake at once on shutdown. */
+        struct timespec until;
+        clock_gettime(CLOCK_REALTIME, &until);
+        until.tv_nsec += 250 * 1000000L;
+        if (until.tv_nsec >= 1000000000L) { until.tv_sec++; until.tv_nsec -= 1000000000L; }
+        while (atomic_load(&g_sys_run) &&
+               pthread_cond_timedwait(&g_sys_cond, &g_sample_lock, &until) == 0) { }
+        pthread_mutex_unlock(&g_sample_lock);
+    }
+    return NULL;
 }
 
 void reactive_note_key(void) {

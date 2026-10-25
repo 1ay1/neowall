@@ -640,6 +640,10 @@ static const compositor_backend_ops_t kde_backend_ops = {
     .cleanup = kde_backend_cleanup,
     .create_surface = kde_create_surface,
     .destroy_surface = kde_destroy_surface,
+    /* Compositor-paced vsync rendering (shared, wayland_core.c) */
+    .frame_request = wayland_frame_request,
+    .frame_ready = wayland_frame_ready,
+    .frame_cancel = wayland_frame_cancel,
     .configure_surface = kde_configure_surface,
     .commit_surface = kde_commit_surface,
     .create_egl_window = kde_create_egl_window,

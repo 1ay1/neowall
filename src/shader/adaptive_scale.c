@@ -17,6 +17,7 @@
  */
 
 #include "neowall/shader/adaptive_scale.h"
+#include "neowall/shader/reactive.h"
 #include "neowall/shader/shader_log.h"
 #include <stdlib.h>
 #include <string.h>
@@ -399,28 +400,13 @@ void adaptive_end_frame(adaptive_state_t *state) {
  * ============================================================================ */
 
 float adaptive_read_gpu_temperature(void) {
-#ifdef __linux__
-    /* Try NVIDIA first */
-    FILE *f = fopen("/sys/class/hwmon/hwmon0/temp1_input", "r");
-    if (!f) {
-        /* Try AMD */
-        f = fopen("/sys/class/drm/card0/device/hwmon/hwmon0/temp1_input", "r");
-    }
-    if (!f) {
-        /* Try generic thermal zone */
-        f = fopen("/sys/class/thermal/thermal_zone0/temp", "r");
-    }
-    
-    if (f) {
-        int temp_milli = 0;
-        if (fscanf(f, "%d", &temp_milli) == 1) {
-            fclose(f);
-            return (float)temp_milli / 1000.0f;
-        }
-        fclose(f);
-    }
-#endif
-    return -1.0f;  /* Temperature unavailable */
+    /* Read from the reactive sampler's snapshot instead of sysfs: this runs
+     * on the render thread, and a hwmon read can take milliseconds. */
+    reactive_snapshot_t snap;
+    reactive_get(&snap);
+    float t = snap.nv_active && snap.nv_temp_c > 0.0f ? snap.nv_temp_c : snap.gpu_temp_c;
+    if (t <= 0.0f) t = snap.cpu_temp_c;
+    return t > 0.0f ? t : -1.0f;  /* -1: unavailable */
 }
 
 static void update_thermal_state(adaptive_state_t *state, double current_time) {

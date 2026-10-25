@@ -1000,6 +1000,56 @@ void wayland_request_present_feedback(struct output_state *output) {
     wp_presentation_feedback_add_listener(fb, &present_fb_listener, ctx);
 }
 
+/* ---- compositor-paced vsync rendering --------------------------------- */
+
+/* Render anyway if a frame callback hasn't come back by now. Compositors may
+ * hold callbacks for hidden surfaces; a lost one must not freeze the wallpaper.
+ * Occlusion handling stops rendering for truly hidden outputs separately. */
+#define WAYLAND_FRAME_TIMEOUT_MS 250
+
+static void frame_pacer_done(void *data, struct wl_callback *cb, uint32_t time) {
+    (void)time;
+    struct compositor_surface *surface = data;
+    wl_callback_destroy(cb);
+    if (surface && surface->frame_cb == cb) {
+        surface->frame_cb = NULL;
+    }
+}
+
+static const struct wl_callback_listener frame_pacer_listener = {
+    .done = frame_pacer_done,
+};
+
+/* Request a frame callback on the next commit; the caller's swap commits it. */
+void wayland_frame_request(struct compositor_surface *surface) {
+    if (!surface || !surface->native_surface || surface->frame_cb) return;
+    struct wl_callback *cb = wl_surface_frame((struct wl_surface *)surface->native_surface);
+    if (!cb) return;
+    wl_callback_add_listener(cb, &frame_pacer_listener, surface);
+    surface->frame_cb = cb;
+    surface->frame_pending_ms = get_time_ms();
+}
+
+/* True when the compositor asked for the next frame, or it's overdue. */
+bool wayland_frame_ready(struct compositor_surface *surface) {
+    if (!surface || !surface->frame_cb) return true;
+    if (get_time_ms() - surface->frame_pending_ms < WAYLAND_FRAME_TIMEOUT_MS) {
+        return false;
+    }
+    /* Overdue: drop it so the next swap re-arms cleanly. */
+    wl_callback_destroy((struct wl_callback *)surface->frame_cb);
+    surface->frame_cb = NULL;
+    return true;
+}
+
+/* Called on surface destroy so a late done can't touch freed memory. */
+void wayland_frame_cancel(struct compositor_surface *surface) {
+    if (surface && surface->frame_cb) {
+        wl_callback_destroy((struct wl_callback *)surface->frame_cb);
+        surface->frame_cb = NULL;
+    }
+}
+
 /* Configure compositor surface for an output using abstraction layer */
 bool output_configure_compositor_surface(struct output_state *output) {
     if (!output) {

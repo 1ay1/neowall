@@ -600,6 +600,10 @@ static const compositor_backend_ops_t fallback_backend_ops = {
     .cleanup = fallback_backend_cleanup,
     .create_surface = fallback_create_surface,
     .destroy_surface = fallback_destroy_surface,
+    /* Compositor-paced vsync rendering (shared, wayland_core.c) */
+    .frame_request = wayland_frame_request,
+    .frame_ready = wayland_frame_ready,
+    .frame_cancel = wayland_frame_cancel,
     .configure_surface = fallback_configure_surface,
     .commit_surface = fallback_commit_surface,
     .create_egl_window = fallback_create_egl_window,

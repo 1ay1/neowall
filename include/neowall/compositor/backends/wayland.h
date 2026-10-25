@@ -148,4 +148,11 @@ void wayland_apply_fractional_scale(struct output_state *output);
  */
 void wayland_request_present_feedback(struct output_state *output);
 
+/* Compositor-paced vsync rendering, shared by every Wayland backend's ops
+ * (frame_request / frame_ready). cancel() must run before a surface is freed. */
+struct compositor_surface;
+void wayland_frame_request(struct compositor_surface *surface);
+bool wayland_frame_ready(struct compositor_surface *surface);
+void wayland_frame_cancel(struct compositor_surface *surface);
+
 #endif /* WAYLAND_H */

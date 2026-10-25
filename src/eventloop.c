@@ -330,12 +330,16 @@ static void render_outputs(struct neowall_state *state) {
             continue;
         }
 
-        /* NOTE: per-frame wl_surface_frame gating was tried here and REVERTED:
-         * pairing it with the 60Hz timerfd pacing creates two independent
-         * gates that beat against each other (~23 FPS observed instead of 60).
-         * neowall deliberately uses tearing-control for immediate presentation;
-         * compositor-paced rendering belongs to the vsync=true path, and the
-         * occlusion watchdog already stops rendering for hidden surfaces. */
+        /* Vsync on Wayland: render only once this output's frame callback came
+         * back. The swap doesn't block (interval 0), so a slow monitor can't
+         * stall the others. vsync=false keeps its timerfd and isn't gated:
+         * gating both on one output makes two pacers beat (~23 FPS). */
+        bool frame_paced = output->config->vsync &&
+            compositor_surface_supports_frame_pacing(output->compositor_surface);
+        if (frame_paced && !compositor_surface_frame_ready(output->compositor_surface)) {
+            continue;
+        }
+
 
         /* Make EGL context current for this output. Note: eglMakeCurrent can
          * synchronize with the GPU — we are NOT holding output_list_lock here. */
@@ -510,6 +514,12 @@ static void render_outputs(struct neowall_state *state) {
             wayland_request_present_feedback(output);
         }
 #endif
+
+        /* Paced vsync: the callback rides the swap's commit. */
+        if (output->config->vsync &&
+            compositor_surface_supports_frame_pacing(output->compositor_surface)) {
+            compositor_surface_frame_request(output->compositor_surface);
+        }
 
         /* Present. With EGL_EXT/KHR_swap_buffers_with_damage we hand the driver
          * the exact changed rect (GL bottom-left origin) so it re-scans/
@@ -865,9 +875,6 @@ void event_loop_run(struct neowall_state *state) {
 #endif
         }
 
-        /* Refresh live system/audio signals for reactive shaders (self-throttled). */
-        reactive_sample();
-
         /* Prepare for reading events via compositor backend */
         if (ops && ops->prepare_events) {
             if (!ops->prepare_events(backend_data)) {
@@ -977,6 +984,16 @@ void event_loop_run(struct neowall_state *state) {
             if (output->transition_start_time > 0 &&
                 output->config->transition != TRANSITION_NONE) {
                 timeout_ms = FRAME_TIME_MS;  /* Fast polling during transitions */
+            }
+
+            /* A paced vsync output is woken by its frame callback on the
+             * compositor fd. Poll a little in case the compositor never sends
+             * it, so frame_ready()'s timeout can fire. */
+            if (output->config->vsync &&
+                output->compositor_surface &&
+                output->compositor_surface->frame_cb &&
+                timeout_ms > 50) {
+                timeout_ms = 50;
             }
 
             output = output->next;
