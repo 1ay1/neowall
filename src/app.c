@@ -90,6 +90,10 @@ struct app {
  * NULL or app_run sees the poster. */
 static _Atomic(rt_loop *) g_loop = NULL;
 static atomic_int g_posters = 0;
+/* Armed by the loop just before it sleeps with nothing else due to wake it.
+ * A terminal's reader only posts when it can claim this, so a chatty child
+ * costs at most one wake per sleep instead of one per read. */
+static atomic_bool g_output_wake_armed = true;
 
 static void post(rt_loop *l, uint32_t kind, uint32_t id, int64_t v) {
     rt_msg m = {.kind = kind, .id = id};
@@ -123,8 +127,10 @@ void app_request_redraw(struct neowall_state *state) {
 
 void app_request_output_redraw(struct output_state *output) {
     if (!output) return;
-    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
-    app_post(NW_MSG_REDRAW, 0, 0);
+    /* seq_cst pairs with app_wait_hint: it arms, then reads needs_redraw. */
+    atomic_store(&output->needs_redraw, true);
+    if (atomic_exchange(&g_output_wake_armed, false))
+        app_post(NW_MSG_REDRAW, 0, 0);
 }
 
 void app_stop(struct neowall_state *state) {
@@ -577,7 +583,17 @@ static int64_t app_wait_hint(void *self) {
     struct app *a = self;
     struct neowall_state *state = a->state;
     int64_t hint = -1;
+    /* Arm the output wake only if some output has no frame callback in
+     * flight; otherwise the callback wakes us and sees needs_redraw. */
+    bool want_wake = false;
     pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (!o->compositor_surface || !o->compositor_surface->frame_cb) {
+            want_wake = true;
+            break;
+        }
+    }
+    atomic_store(&g_output_wake_armed, want_wake);
     for (struct output_state *o = state->outputs; o; o = o->next) {
         if (!o->config->vsync || output_get_frame_timer_fd(o) >= 0) continue;
         if (o->compositor_surface && o->compositor_surface->frame_cb) {
@@ -592,7 +608,7 @@ static int64_t app_wait_hint(void *self) {
         if (o->config->type == WALLPAPER_SHADER && a->shader_paused) continue;
         if (o->config->pause_on_fullscreen &&
             atomic_load_explicit(&o->occluded, memory_order_acquire)) continue;
-        if (atomic_load_explicit(&o->needs_redraw, memory_order_acquire)) {
+        if (atomic_load(&o->needs_redraw)) {
             hint = 0;
             break;
         }

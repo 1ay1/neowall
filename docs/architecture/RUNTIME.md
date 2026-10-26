@@ -37,7 +37,14 @@ Rules it enforces:
 
 - **One thread changes state.** Other threads `rt_post()` a message; it is
   folded on the loop thread, in order, never dropped. After the loop stops,
-  `rt_post` returns false instead of writing into a dead loop.
+  `app_post` returns false, and `app_run` waits for posts already in flight
+  before freeing the loop.
+- **Wakes are coalesced.** A terminal's reader thread sets `needs_redraw` and
+  only posts a wake when the loop armed one before sleeping (and none is
+  armed while a frame callback is pending, since that wakes us anyway). A
+  child printing flat out costs one wake per frame, not one per read.
+- **Children start clean.** Every spawned child resets the blocked signals
+  and SIGPIPE (`include/neowall/child_signals.h`), or it can't be stopped.
 - **No work in signal handlers.** The command signals are blocked in every
   thread at startup (`main.c`, before any thread exists) and read from a
   signalfd. Crash signals (SEGV, BUS, ILL, FPE, ABRT) keep a plain
