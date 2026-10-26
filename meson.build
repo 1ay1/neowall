@@ -594,6 +594,18 @@ test_ipc_exe = executable('test_ipc',
 
 test('ipc', test_ipc_exe)
 
+# The adaptive resolution controller with a simulated 60 Hz clock and stubbed
+# GPU timer queries: a cheap shader must stay at full resolution, a slow one
+# must still be scaled down, and it must recover when the load goes away.
+test_adaptive_exe = executable('test_adaptive_scale',
+  files('tests/test_adaptive_scale.c', 'src/shader/adaptive_scale.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep],
+  build_by_default: false,
+)
+
+test('adaptive_scale', test_adaptive_exe)
+
 # The open data plane: provider registry, spec grammar, interval scheduling,
 # and the occlusion contract (a hidden source must not poll, spawn, or sample).
 # No GL and no display server, so it runs headless in CI.

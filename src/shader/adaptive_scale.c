@@ -591,6 +591,11 @@ void adaptive_update(adaptive_state_t *state, double current_time) {
      * CALIBRATION: Initial performance measurement
      * ======================================================================== */
     if (!state->calibrated) {
+        /* Calibrate on real samples only. During warmup nothing reaches the
+         * history, and counting those frames here calibrated on an empty sum
+         * (avg 0 ms), after which the controller started deciding off the
+         * placeholder statistics adaptive_init seeds. */
+        if (state->history_count == 0) return;
         if (state->calibration_start == 0.0) {
             state->calibration_start = current_time;
         }
@@ -641,6 +646,12 @@ void adaptive_update(adaptive_state_t *state, double current_time) {
      * ======================================================================== */
     update_statistics(state);
     update_thermal_state(state, current_time);
+
+    /* No decision until the percentiles come from real frames. Until then
+     * p95 is the target frame time adaptive_init seeds, which reads as 14%
+     * over budget and walked every shader down to half resolution in its
+     * first second, however cheap it was. */
+    if (state->history_count < cfg->min_samples_for_stats) return;
     
     /* Get the frame time to use for decisions based on percentile targeting */
     float decision_ms;
