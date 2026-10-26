@@ -13,6 +13,7 @@
 #define _DEFAULT_SOURCE   /* forkpty (<pty.h>) */
 
 #include "neowall/terminal/terminal.h"
+#include "neowall/child_signals.h"
 #include "vtparse.h"
 
 #include <errno.h>
@@ -234,6 +235,8 @@ nw_result term_spawn(const term_spawn_opts *opts, terminal **out) {
         prctl(PR_SET_PDEATHSIG, SIGHUP);
         if (getppid() == 1) _exit(129);
 #endif
+        /* Else the shell starts with SIGINT/SIGTERM blocked and SIGPIPE ignored. */
+        nw_child_reset_signals();
         if (opts->cwd && opts->cwd[0]) {
             /* Best-effort: an unreadable/missing cwd is not fatal — fall through
              * and let the child start in the inherited directory rather than

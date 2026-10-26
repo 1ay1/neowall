@@ -18,6 +18,7 @@
 #endif
 
 #include "neowall/shader/reactive.h"
+#include "neowall/child_signals.h"
 #include "neowall/clock.h"
 #include "neowall/neowall.h"
 
@@ -71,7 +72,7 @@ static atomic_bool g_audio_live = false;
  * is loaded during output setup, which happens before the event loop calls
  * reactive_init(), so the request must be remembered and honoured at init. */
 static atomic_bool g_audio_wanted = false;
-static pid_t g_parec_pid = -1;
+static _Atomic pid_t g_parec_pid = -1;
 
 /* Self-pipe used to break the capture threads out of a blocking read().
  *
@@ -491,8 +492,11 @@ static int spawn_parec(pid_t *out_pid) {
     posix_spawn_file_actions_addclose(&fa, pipefd[0]);
     posix_spawn_file_actions_addclose(&fa, pipefd[1]);
 
+    posix_spawnattr_t attr;
+    bool have_attr = nw_spawnattr_reset_signals(&attr) == 0;
     pid_t pid;
-    int rc = posix_spawnp(&pid, "parec", &fa, NULL, argv, environ);
+    int rc = posix_spawnp(&pid, "parec", &fa, have_attr ? &attr : NULL, argv, environ);
+    if (have_attr) posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&fa);
     close(pipefd[1]);
     if (rc != 0) {
@@ -516,7 +520,7 @@ static void *audio_thread_fn(void *arg) {
         atomic_store(&g_audio_live, false);
         return NULL;
     }
-    g_parec_pid = pid;
+    atomic_store(&g_parec_pid, pid);
     atomic_store(&g_audio_live, true);
     log_info("Reactive: audio capture active (parec monitor, %d Hz)", SAMPLE_RATE);
 
@@ -608,11 +612,12 @@ static void *audio_thread_fn(void *arg) {
      * because every parec exit (graceful or crash) drops us into this block
      * via the `break` above, where waitpid() collects the zombie. If parec
      * already exited on its own, kill() returns ESRCH harmlessly and waitpid
-     * returns immediately. */
-    if (g_parec_pid > 0) {
-        kill(g_parec_pid, SIGTERM);
-        waitpid(g_parec_pid, NULL, 0);
-        g_parec_pid = -1;
+     * returns immediately. Claim the pid first so shutdown can't kill it
+     * after it's reaped and possibly reused. */
+    pid_t parec = atomic_exchange(&g_parec_pid, -1);
+    if (parec > 0) {
+        kill(parec, SIGTERM);
+        waitpid(parec, NULL, 0);
     }
     atomic_store(&g_audio_live, false);
     return NULL;
@@ -648,8 +653,11 @@ static int spawn_nvsmi(pid_t *out_pid) {
     posix_spawn_file_actions_addclose(&fa, pipefd[0]);
     posix_spawn_file_actions_addclose(&fa, pipefd[1]);
 
+    posix_spawnattr_t attr;
+    bool have_attr = nw_spawnattr_reset_signals(&attr) == 0;
     pid_t pid;
-    int rc = posix_spawnp(&pid, "nvidia-smi", &fa, NULL, argv, environ);
+    int rc = posix_spawnp(&pid, "nvidia-smi", &fa, have_attr ? &attr : NULL, argv, environ);
+    if (have_attr) posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&fa);
     close(pipefd[1]);
     if (rc != 0) {
@@ -672,7 +680,7 @@ static void *nv_thread_fn(void *arg) {
         atomic_store(&g_nv_live, false);
         return NULL;
     }
-    g_nv_pid = pid;
+    atomic_store(&g_nv_pid, pid);
     log_info("Reactive: NVIDIA GPU capture active (nvidia-smi)");
 
     FILE *fp = fdopen(fd, "r");
@@ -822,13 +830,15 @@ void reactive_shutdown(void) {
 
     if (atomic_load(&g_audio_run)) {
         atomic_store(&g_audio_run, false);
-        if (g_parec_pid > 0) kill(g_parec_pid, SIGKILL);
+        pid_t parec = atomic_load(&g_parec_pid);
+        if (parec > 0) kill(parec, SIGKILL);
         clock_gettime(CLOCK_REALTIME, &deadline);
         deadline.tv_sec += 1;   /* 1s grace */
         if (pthread_timedjoin_np(g_audio_thread, NULL, &deadline) != 0) {
             /* still stuck — detach so no resource leak, then abandon it */
             pthread_detach(g_audio_thread);
-            if (g_parec_pid > 0) kill(g_parec_pid, SIGKILL);
+            parec = atomic_load(&g_parec_pid);
+            if (parec > 0) kill(parec, SIGKILL);
             log_warn("reactive: audio capture thread did not stop in time; abandoning");
         }
     }

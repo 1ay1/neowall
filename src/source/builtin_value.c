@@ -21,6 +21,7 @@
  */
 
 #include "neowall/source/source.h"
+#include "neowall/child_signals.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -210,6 +211,7 @@ static void exec_spawn(exec_state *st, uint64_t now_ms) {
     if (pid == 0) {
         /* Child. Wire stdout to the pipe, silence stdin/stderr so a chatty
          * command cannot scribble on the daemon's log. */
+        nw_child_reset_signals();
         close(fds[0]);
         dup2(fds[1], STDOUT_FILENO);
         close(fds[1]);

@@ -582,6 +582,17 @@ test_runtime_exe = executable('test_runtime',
 
 test('runtime', test_runtime_exe)
 
+# Spawned children (terminal shell, parec, nvidia-smi, exec sources) must not
+# inherit the daemon's blocked signals or ignored SIGPIPE.
+test_child_signals_exe = executable('test_child_signals',
+  files('tests/test_child_signals.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [thread_dep],
+  build_by_default: false,
+)
+
+test('child_signals', test_child_signals_exe)
+
 # The control socket end to end: request/reply, a stuck client can't wedge it,
 # oversize and malformed lines are refused, a live socket isn't stolen and a
 # stale one is replaced.
