@@ -315,6 +315,5 @@ Possible future improvements:
 
 ## See Also
 
-- [Transition API Documentation](TRANSITION_API.md)
-- [Multi-Monitor Improvements](MULTI_MONITOR_IMPROVEMENTS.md)
 - [Configuration Guide](../config/docs/CONFIG.md)
+- [Architecture](ARCHITECTURE.md)

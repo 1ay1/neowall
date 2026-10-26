@@ -633,12 +633,16 @@ Control running daemon:
 ```bash
 neowall              # Start daemon
 neowall kill         # Stop daemon
+neowall reload       # Re-read the config file
 neowall next         # Skip to next wallpaper/shader
 neowall pause        # Pause cycling (stops advancing between wallpapers)
 neowall resume       # Resume cycling
 neowall pause-shader   # Freeze the shader animation in place
 neowall resume-shader  # Resume a frozen shader animation (continues from the same frame)
-neowall current      # Show current wallpaper
+neowall list         # List the cycle with indices
+neowall set 3        # Jump to index 3
+neowall current      # Show current wallpaper, and which binary the daemon runs
+neowall set-terminal "htop"   # Swap the live terminal-wallpaper command
 ```
 
 `pause`/`resume` stop the slideshow from advancing between wallpapers;
@@ -646,25 +650,20 @@ neowall current      # Show current wallpaper
 time uniform) and stop drawing frames, leaving the last frame on screen. They
 are independent — pausing cycling does not freeze the animation, and vice versa.
 
-(There is no `neowall reload` — see [Reloading Config](#reloading-config).)
+Commands reach the daemon over a unix socket (`$XDG_RUNTIME_DIR/neowall.sock`)
+and print its reply. If nothing answers on the socket they fall back to
+signals, so an older daemon still responds.
 
 ## Reloading Config
 
-Config is read once at startup. **There is no hot-reload** — changes to
-`~/.config/neowall/config.vibe` take effect on the next daemon start.
-
-To apply a config change:
-
 ```bash
-neowall kill        # Stop the running daemon
-neowall             # Start it again
+neowall reload       # or: kill -HUP $(pidof neowall)
 ```
 
-Or in one line:
-
-```bash
-neowall kill && neowall
-```
+The whole file is parsed and validated before anything is applied. If it
+has an error, the reload is refused and the previous configuration stays in
+effect; it never falls back to the built-in default. Run with `-f -v` to see
+the error, or check the daemon log.
 
 ## Custom Shaders
 

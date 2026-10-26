@@ -10,20 +10,20 @@ before making structural changes.
 
 neowall is a single-process daemon that renders a wallpaper (a static image, an
 image slideshow, a live GLSL shader, or a full terminal running any TUI) onto
-every monitor, on both Wayland and X11. It is built around a **`poll(2)` event
-loop** over a small set of file
-descriptors (compositor socket, cycle timer, wakeup eventfd, signalfd, and
-per-output frame timers). All display-server specifics sit behind a **compositor
+every monitor, on both Wayland and X11. It runs on a small **Elm-style
+runtime**: one loop thread waits on the compositor socket, timers, signals
+(via signalfd) and a mailbox, turns each into a message, folds it into the
+model, and draws. All display-server specifics sit behind a **compositor
 backend vtable**, so the core never sees a `wl_*` or `X*` type. Rendering goes
-through **EGL → OpenGL 3.3** (desktop) with a GLES 2.0 fallback.
+through **EGL → OpenGL 3.3 core**.
 
 ```
 config.vibe ─► config_load ─► output_state(s)
                                    │
-   signals (next/set/pause) ─┐     ▼
-                             │  ┌─────────────── event loop (poll) ───────────────┐
-   compositor events ────────┼─►│ dispatch → occlusion → render_outputs → present │
-   timers (cycle / frame) ───┘  └──────────────────┬──────────────────────────────┘
+   signals / control socket ─┐     ▼
+                             │  ┌─────────── rt loop (src/runtime/rt.c) ───────────┐
+   compositor events ────────┼─►│ msg → update(model) → subscribe(timers) → present │
+   timers / worker posts ────┘  └─────────────────────────┬───────────────────────┘
                                                     ▼
                               compositor backend vtable  ◄──►  EGL / OpenGL 3.3
                               (wlr-layer-shell │ kde │ gnome │ fallback │ x11)
@@ -43,18 +43,27 @@ surface; there are **zero relative-path includes** (`../`) anywhere in the tree.
 include/neowall/          PUBLIC headers (the project's API surface)
   result.h  vec.h  defer.h   foundation primitives (header-only, dep-free)
   neowall.h                  app state + umbrella declarations
-  constants.h
+  constants.h  child_signals.h  ipc.h  app.h
+  runtime/rt.h               the Elm-style loop's API
   compositor/                compositor abstraction + backend interfaces
   config/                    vibe parser + config model
-  output/                    per-monitor state + lifecycle
+  output/                    per-monitor state + lifecycle, frame_clock.h
   render/  image/  egl/       rendering, image decode, EGL context
   occlusion/                 "pause when covered" dispatcher
   source/                    open data plane: live scalar/texture providers
                              (see architecture/SHADER_ENGINE_V2.md)
-  shader/                    GLSL engine: multipass, shadertoy-compat, optimizers
+  gfx/  graph/               GL object layer, render graph (engine v2 slices)
+  shader/                    GLSL engine: multipass, shadertoy-compat, clock,
+                             diagnostics, docs, optimizers
   terminal/                  in-tree VT/xterm emulator (terminal-as-wallpaper)
 src/                       IMPLEMENTATION (.c) + truly-private impl headers
-  main.c app.c runtime/rt.c utils.c
+  main.c                     CLI, daemonize, startup/shutdown
+  runtime/rt.c               the loop: wait, messages, timers, mailbox
+  app.c  app_render.inc      the program: update / subscribe / present
+  ipc.c                      control socket (CLI ↔ daemon)
+  watch.c                    `neowall watch` file watcher
+  clock.c                    virtual calendar clock (`--date`, `--timelapse`)
+  utils.c
   compositor/backends/{wayland,x11}/   backend implementations; private headers
                                        (frame_watchdog.h, *_occlusion.h) live here
   terminal/                  utf8 · vtparse (ANSI/DEC state machine) · screen
@@ -121,9 +130,14 @@ exist; `app_present` draws (`render_outputs`, snapshot → render → present,
 with a reference held on each output so hotplug can't free one mid-frame).
 Other threads `app_post()` a message instead of setting a flag.
 
-vsync outputs on Wayland are paced by their own frame callback and never block
-in the swap; vsync-off outputs use a phase-locked pacer whose next deadline is
-a timer subscription.
+vsync outputs on Wayland are paced by their own frame callback and swap with
+interval 0, so one slow monitor can't stall the others. vsync-off outputs use a
+phase-locked pacer (`output_pace_advance`) whose next deadline is a timer
+subscription.
+
+The CLI talks to a running daemon over a unix socket (`src/ipc.c`,
+`$XDG_RUNTIME_DIR/neowall.sock`); signals remain as a fallback when nothing
+answers on the socket.
 
 Full description: [architecture/RUNTIME.md](architecture/RUNTIME.md).
 
@@ -131,29 +145,40 @@ Full description: [architecture/RUNTIME.md](architecture/RUNTIME.md).
 
 ## 6. Threading & lock model
 
-neowall is mostly single-threaded (the runtime loop thread does config, render,
-and present). Two sources of concurrency exist:
+One thread owns state: the runtime loop does config, update, render and
+present. Every other thread only produces input:
 
-- The **compositor dispatch** can add/remove outputs (hotplug) — on Wayland this
-  happens during `dispatch_events`, on the same thread, but output *removal* can
-  also be driven by `registry_handle_global_remove`.
-- A **per-output background thread** decodes the next slideshow image off the GL
-  thread (`preload_thread_func`), handing the decoded pixels back via a mutex +
-  an atomic "upload pending" flag. It is **cooperatively cancelled**
-  (`preload_should_stop`) and always **joined** in `output_destroy` — never
-  `pthread_cancel`'d, because libpng/libjpeg are not async-cancel-safe.
+| Thread | Does | Talks to the loop by |
+|--------|------|----------------------|
+| slideshow preload (per output) | decodes the next image | mutex-guarded handoff + atomic flag; cooperatively cancelled, always joined in `output_destroy` (libpng/libjpeg aren't cancel-safe) |
+| terminal reader (per terminal) | drains the PTY into the screen model | sets `needs_redraw`, posts a wake only if the loop armed one (`app_request_output_redraw`) |
+| reactive sampler | reads /proc, /sys, hwmon at 4 Hz | publishes a snapshot under `g_lock` (`src/shader/reactive.c`) |
+| audio capture | runs `parec` on `@DEFAULT_MONITOR@`, FFT | same snapshot; only started when a shader reads audio |
+| nvidia-smi reader | parses `nvidia-smi -lms 500` | same snapshot |
+
+Workers never touch the model. `app_post()` is the one way in: it counts
+posts in flight, and `app_run` waits for them to drain before freeing the
+loop, so a late post can't use a freed mailbox.
+
+Spawned children (terminal shell, `parec`, `nvidia-smi`, `exec()` sources)
+start with a clean signal mask and default SIGPIPE
+(`include/neowall/child_signals.h`). The daemon blocks its control signals for
+signalfd and ignores SIGPIPE; without the reset, children inherit both and
+can't be stopped.
 
 **Locks (acquire in this order — documented in `neowall.h`):**
 
 1. `output_list_lock` (rwlock) — guards the output linked list structure.
 2. `state_mutex` — guards individual fields.
 
-Coarse-before-fine prevents deadlock. Never acquire them reversed.
+Coarse-before-fine prevents deadlock. Never acquire them reversed, and never
+take `output_list_lock` again while already holding it (a recursive rdlock can
+deadlock behind a waiting writer).
 
-**Atomics:** every flag shared with a signal handler or the background thread is
-`atomic_*` with explicit memory ordering (`acquire`/`release` on the flag,
-`acq_rel` on the refcount release). Signal-set flags (`running`, `paused`,
-`shader_paused`, `next_requested`, …) live in `neowall_state` as atomics.
+**Atomics:** every flag shared across threads is `atomic_*` with explicit
+ordering (`acquire`/`release` on flags, `acq_rel` on the refcount release).
+Command state (pause, next, set-index) is not shared at all: it lives in the
+loop's model and only changes through `update()`.
 
 ---
 
@@ -187,8 +212,29 @@ core`:
   `texture`, etc.); unit-tested headless in `tests/test_shadertoy_compat.c`.
 - `shader_multipass.c` — multi-pass (Buffer A–D + Image) rendering with
   ping-pong FBOs, channel-binding heuristics, cached uniform locations.
-- `adaptive_scale.c` / `*_optimizer.c` — adaptive resolution + GL state caching
-  to hit the frame budget.
+- `*_optimizer.c` / `adaptive_scale.c` — GL state caching, and timing stats.
+  They **never lower what's drawn**: every pass renders every frame at full
+  resolution; the only skip left is a frame identical to the last. Adaptive
+  resolution is off by default and the scale is pinned to 1.0.
+- `shader_diag.c` — turns driver compile logs (NVIDIA, Mesa, ANGLE) into
+  `file:line` errors with a caret and "did you mean"; each pass carries
+  `#line` directives so numbers are real file lines.
+
+**Shader time.** `iTime` is a float32, so two things keep it exact:
+
+- *Frame clock* (`src/output/frame_clock.c`). On Wayland each frame is stamped
+  with the vblank it will be shown at, from presentation-time feedback, so
+  `iTime` advances by exactly one refresh per refresh whatever the draw-start
+  jitter. `iTimeDelta` uses the same stamps. X11, or before the first present,
+  falls back to the wall clock.
+- *Rebase* (`src/shader/shader_clock.c`). Past an hour, the clock resets for
+  free while the output is hidden. A wallpaper that's never hidden resets
+  after 2 hours behind a 1.2 s cross-fade from its last frame, before float32
+  steps get coarse (7.8 ms after a day, 62.5 ms after ten).
+
+Reactive load and input uniforms (`iCpu`, `iRam`, key/mouse energy, ...) are
+sampled at 4 Hz and eased per frame with a ~0.25 s time constant, so nothing
+they drive steps.
 
 Channel bindings (which texture feeds each `iChannelN`) are recovered by a
 documented best-effort heuristic, since a bare `.glsl` file carries no binding
@@ -210,21 +256,31 @@ by `tests/test_vibe.c`.
 
 ## 10. Testing & quality gates
 
-| Test | Covers | Sanitizers |
-|------|--------|-----------|
-| `test_foundation` | result / vec / defer | ASan, UBSan, LSan |
-| `test_vibe` | config parser (happy + malformed) | ASan, UBSan, LSan |
-| `test_utils` | math/format/path helpers, secure-runtime-dir | ASan, UBSan, LSan |
-| `test_shadertoy_compat` | GLSL source rewrites | ASan, UBSan, LSan |
-| `test_output_refcount` | refcount protocol under concurrency | **TSan**, ASan |
+`meson test -C build` runs the whole suite headless (no display, no GPU). The
+ones that matter most when changing the runtime:
+
+| Test | Covers |
+|------|--------|
+| `runtime` | rt loop: timers keep phase and never fire early, posts arrive in order, signals become messages, an idle loop sleeps |
+| `ipc` | control socket end to end, stuck/oversize/malformed clients |
+| `terminal_wake` | a real child on a real PTY wakes an idle-gated renderer |
+| `child_signals` | spawned children get an empty signal mask and default SIGPIPE |
+| `frame_clock` | vblank stamping under jitter, timestamp noise, missed vblanks, latency changes |
+| `shader_clock` | the rebase policy, exhaustively |
+| `output_refcount` | refcount protocol under concurrency (8 threads × 20 000 iterations) |
+| `adaptive_scale` | a cheap shader is never scaled down |
+| `shader_diag` | compile-log parsing across vendors |
+| `foundation`, `vibe`, `utils`, `shadertoy_compat`, ... | pure units |
 
 CI (`.github/workflows/`):
 
 - `build.yml` — multi-distro build matrix (Arch / Debian / Ubuntu, Wayland-only,
-  X11-only, both).
-- `quality.yml` — ASan+UBSan test run, **ThreadSanitizer** run of the
-  concurrency tests, clang static analyzer (`scan-build`), `clang-tidy`, and a
-  `clang-format` check.
+  X11-only, both) plus an Xvfb RandR smoke test.
+- `quality.yml` — the full suite under ASan+UBSan, the concurrency tests under
+  **ThreadSanitizer**, clang static analyzer + `clang-tidy`, `gcc -fanalyzer`,
+  `clang-format`, and a check that every version string agrees.
+- `release.yml` — on a `v*` tag: Arch, Fedora, openSUSE, Debian, Ubuntu
+  packages, an AppImage, the AUR push and the flake version bump.
 
 Style is pinned by `.clang-format`, `.clang-tidy`, and `.editorconfig`:
 4-space indent, K&R braces, 100-column soft limit, pointers bound to the type.
@@ -243,5 +299,10 @@ Style is pinned by `.clang-format`, `.clang-tidy`, and `.editorconfig`:
 - **Cross-thread flags:** `atomic_*` with explicit ordering, never a plain `bool`.
 - **Cleanup ladders:** prefer `NW_DEFER_*` for scope-bound resources over nested
   `if (!x) { free(...); return; }`.
-- **Signals:** handled via `signalfd` in the event loop, never real work in a
-  handler.
+- **Signals:** blocked in every thread at startup and read from a signalfd by
+  the runtime, never real work in a handler.
+- **Child processes:** reset the signal state first
+  (`nw_child_reset_signals()` after fork, `nw_spawnattr_reset_signals()` for
+  posix_spawn).
+- **Cross-thread input:** `app_post()` a message; never write the model from
+  another thread.

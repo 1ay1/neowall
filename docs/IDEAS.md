@@ -18,9 +18,11 @@ and the live machine.
 
 | Idea | Effort | New deps | Already have |
 |------|--------|----------|--------------|
-| Window-aware / light leaks | M | none | foreign-toplevel data |
+| ~~Window-aware / light leaks~~ | — | — | **shipped** (`iWindows`, Hyprland) |
+| Shadertoy import | S | HTTPS fetch (on demand) | multipass + manifest format |
+| Record a clip | S | ffmpeg (pipe) | offscreen render path |
 | Album-art theming | M | MPRIS / playerctl | `parec` spawn, palette helpers |
-| Garden grows over days | M | state file | multipass buffers, noise lib |
+| ~~Garden grows over days~~ | — | — | **shipped** (`garden.glsl`) |
 | System stress as weather | S | none | `iCpu`/`iGpu`/`iLoad`/temps |
 | Battery as light | S | none | `iBattery`/`iCharging` |
 | Circadian palette | S | none | `iTimeOfDay`/`iSun` |
@@ -30,8 +32,9 @@ and the live machine.
 | App-id mood | S | none | foreign-toplevel app-id |
 | Workspace as world | M | compositor IPC | per-output rendering |
 | Notification bloom | M | D-Bus listen | ripple shader exists |
-| Live hot-swap | S | none | IPC table, command file |
-| Save-to-reload | S | inotify | live-test workflow |
+| Power modes | S | ext-idle-notify | `pause-shader`, `shader_fps` |
+| ~~Live hot-swap~~ | — | — | **shipped** (`neowall watch`) |
+| ~~Save-to-reload~~ | — | — | **shipped** (`neowall watch`) |
 | Click interaction | S | none | `iMouse` plumbing |
 | Scene packs | M | packaging | manifest format |
 
@@ -41,18 +44,15 @@ Effort: S = a sitting, M = a day or two, L = a real project.
 
 ## Tier 1 — Showpieces (unique to NeoWall's existing capabilities)
 
-### Window-aware rendering ("light leaks")
-The `wlr-foreign-toplevel-management` protocol is already bound, so the daemon knows
-every window's rect, app-id, title, and focus state — currently unused by shaders.
-Expose it:
+### Window-aware rendering ("light leaks") — shipped on Hyprland
+Shaders get `iWindows[]` (pixel rects, y down), `iWindowCount` and
+`iFocusedWindow`, from Hyprland's IPC; `window_forge.glsl` is the demo.
+`wlr-foreign-toplevel-management` is bound too, but it carries window state
+(fullscreen, maximised, activated), not geometry, so other compositors report
+`iWindowCount = 0` until they expose rects some other way.
 
-- `iWindowCount` — number of open windows
-- `iWindows[N]` — `vec4` rects (x, y, w, h) in screen space
-- `iFocusedRect` — the focused window's rect
-- `iWindowActivity` — pulses when focus changes or a window moves
-
-Demo: godrays and glow seep from behind the focused window and follow it as it moves.
-Bonus: skip animating fully-covered regions — a real perf win, not just an effect.
+Still open: an `iWindowActivity` pulse on focus/move, and skipping
+fully-covered regions as a perf win.
 
 ### Album-art theming
 `reactive.c` already spawns `parec`. Add an MPRIS (D-Bus) or `playerctl` poll to read
@@ -154,50 +154,27 @@ a one-line install and a small browsable gallery. Ecosystem over features.
 
 ---
 
-## Top three for sheer "whoa"
+## Top three next
 
-1. **Light leaks behind windows** — visually striking, doubles as a perf win, and uses
-   window data no other wallpaper tool exposes.
-2. **Album-art theming** — the wallpaper becomes part of your listening experience.
-3. **The garden that grows over days** — gives the wallpaper continuity and a life of
-   its own.
-
----
-
-## If I build one next: light leaks (sketch)
-
-The data already arrives over `wlr-foreign-toplevel-management` and is discarded. The
-minimal path to first light:
-
-1. **Capture** — in the toplevel event handlers, keep a small array of `{x, y, w, h,
-   focused}` per window. Most of this is already parsed for window management; it just
-   needs to be retained in a snapshot, same shape as the reactive snapshot.
-2. **Publish** — add `iWindowCount`, `iWindows[16]` (`vec4` rects, normalized to
-   `iResolution`), `iFocusedRect`, and `iWindowActivity` (a decaying pulse on focus or
-   move) to the wrapper preamble and the per-frame uniform set, next to the reactive
-   uniforms.
-3. **Shade** — a demo that, for each pixel, finds the nearest window edge via the
-   existing `sdBox` SDF, and emits a soft glow that is brightest along the focused
-   window's border:
-
-   ```glsl
-   float d = 1e9;
-   for (int i = 0; i < iWindowCount; i++) {
-       vec4 w = iWindows[i];
-       d = min(d, sdBox(uv - (w.xy + w.zw * 0.5), w.zw * 0.5));
-   }
-   float leak = exp(-40.0 * abs(d)) * (0.5 + 0.5 * iWindowActivity);
-   col += leak * nwPalette(0.6 + 0.2 * iTimeOfDay);
-   ```
-
-4. **Optimize** — once rects are known, fully-covered tiles can early-out, recovering
-   the cost of the feature and then some.
-
-Risk: the array must be updated on the main loop thread and copied into the frame
-snapshot the same way reactive data is, to stay lock-free on the render path. The
-reactive subsystem is the template to copy.
+1. **`neowall import <shadertoy-id>`** — fetch a Shadertoy shader with its
+   buffers and channel bindings, write the `.glsl` + `.neowall`, preview it.
+   Makes the whole Shadertoy catalogue a wallpaper in one command. Network only
+   when the user runs it.
+2. **`neowall record 10s out.mp4`** — render the live wallpaper offscreen at
+   full rate and pipe frames to ffmpeg, for sharing.
+3. **Album-art theming** — MPRIS accent colour, track progress and a
+   track-change pulse, so the wallpaper follows what's playing.
 
 ---
+
+## Light leaks: what shipped
+
+The window data comes from Hyprland's IPC (a throttled snapshot shared with
+the occlusion path), published per frame as `iWindows[]` (pixel rects, y
+down), `iWindowCount` and `iFocusedWindow`; `window_forge.glsl` is the
+demo. Still open from the original sketch: the same data on other
+compositors (wlr-foreign-toplevel carries state but not geometry), a decaying
+`iWindowActivity` pulse on focus/move, and early-out for fully covered tiles.
 
 ## Anti-goals
 
@@ -246,6 +223,13 @@ Features from this backlog that have landed. Move items here as they ship.
 - `garden.glsl` — a calendar-driven garden whose plants run multi-day life
   cycles, reacting to CPU (wind), temperature (drought), RAM (foliage) and
   battery (light).
+- **Window awareness** — `iWindows[]` / `iWindowCount` / `iFocusedWindow` on
+  Hyprland, with `window_forge.glsl` as the showpiece.
+- **Readable shader errors** — `neowall watch` reports `file:line` with the
+  source line, a caret and "did you mean"; `neowall docs` looks up helpers.
+- **Exact frame timing** (0.8) — `iTime` stamped with the presented vblank on
+  Wayland, eased reactive uniforms, and a cross-faded clock reset so a
+  wallpaper stays smooth for weeks.
 
-_Tiers 1–5 remain largely open; the authoring platform work above (Tier 5) has
+_The authoring platform (Tier 5) and the first Tier 1 showpieces have
 landed, which makes the rest substantially cheaper to build._

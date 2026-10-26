@@ -105,7 +105,7 @@ Full reference: [`config/docs/CONFIG.md`](config/docs/CONFIG.md).
 ```bash
 neowall          # start
 neowall kill     # stop
-neowall reload   # reload config
+neowall reload   # re-read the config (a broken file is refused, the old one stays)
 neowall next     # next wallpaper / shader
 neowall pause    # pause cycling
 neowall resume
@@ -113,7 +113,8 @@ neowall pause-shader   # freeze the shader animation in place
 neowall resume-shader  # resume a frozen shader animation
 neowall list     # show queue
 neowall set 3    # jump to index
-neowall current  # print what's playing
+neowall current  # print what's playing, and which binary the daemon runs
+neowall set-terminal "btop"  # swap the live terminal-wallpaper command
 ```
 
 Writing a shader:
@@ -121,8 +122,9 @@ Writing a shader:
 ```bash
 neowall new aurora          # scaffold a working shader and tell you how to run it
 neowall new hud --template=reactive   # or: scene (default), flat, reactive
-neowall watch aurora.glsl   # live-reload as you edit
-neowall preview aurora.glsl # run it once, without touching your wallpaper
+neowall watch aurora        # live-reload as you edit; errors as file:line + "did you mean"
+neowall preview aurora      # run it once, without touching your wallpaper
+neowall docs fbm            # look up a built-in helper or uniform
 ```
 
 ## Shaders
@@ -171,6 +173,11 @@ a `.neowall` sidecar lets you bind each channel explicitly — `channel0 audio`,
 `channel1 self`, `channel2 font`, etc.
 See [`docs/REACTIVE_SHADERS.md`](docs/REACTIVE_SHADERS.md#3-neowall-manifests).
 
+**Window-aware shaders.** On Hyprland a shader can see your windows:
+`iWindows[]` / `iWindowCount` give their rects and `iFocusedWindow` the
+fullscreen one, so the wallpaper can glow around them, light them, or grow
+around them. `window_forge` shows it off. Elsewhere `iWindowCount` is 0.
+
 ## Terminal as wallpaper
 
 Any terminal program can *be* the wallpaper. neowall ships its own in-tree,
@@ -207,15 +214,38 @@ Full key reference (`term_font`, `term_font_size`, `term_fg`/`term_bg`,
 `term_cwd`, `term_env`, `term_shader`, …) is in
 [`config/docs/CONFIG.md`](config/docs/CONFIG.md#terminal-options).
 
+An idle terminal costs nothing: when the child stops printing and the
+effects settle, neowall stops drawing it until the next byte arrives.
+
 ## How it works
 
-Single C binary. The event loop is built on `timerfd` + `signalfd` — there is no polling thread anywhere. Rendering goes through EGL → OpenGL 3.3 (desktop) with a GLES 2.0 fallback for older GPUs.
+Single C binary. One loop thread runs a small Elm-style runtime: signals, the
+compositor socket, the control socket, timers and worker threads all become
+messages folded into one model, and frames are drawn after each step that
+changed something. Sensor sampling, audio capture and terminal PTYs run on
+their own threads and only hand data over. Rendering goes through EGL →
+OpenGL 3.3 core.
 
 ```
-config.vibe → event loop ─┬─→ EGL / OpenGL 3.3
-                          ├─→ Wayland (layer-shell)
-                          └─→ X11 (root window + EWMH)
+config.vibe → runtime loop ─┬─→ EGL / OpenGL 3.3
+                            ├─→ Wayland (layer-shell)
+                            └─→ X11 (root window + EWMH)
 ```
+
+Smooth by construction:
+
+- Each monitor is paced by its own frame callback, so a slow one can't stall
+  the rest.
+- On Wayland `iTime` is stamped with the vblank each frame is shown at, so
+  animation moves exactly one refresh per refresh.
+- `iTime` resets before float32 gets coarse, behind a cross-fade if the
+  wallpaper never goes hidden, so a wallpaper that runs for weeks stays as
+  smooth as on day one.
+- Every pass renders at full resolution; neowall never quietly scales your
+  shader down.
+
+More in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
+[`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
 
 Smart pause is the main thing that separates neowall from the obvious one-evening hack:
 
@@ -253,15 +283,28 @@ ninja -C build
 ./build/neowall -f -v
 ```
 
-Architecture, threading model, and contribution conventions are documented in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Run the test suite (headless,
-no display server needed) with `meson test -C build`; for the memory-safety and
-concurrency gates use a sanitized build:
+Run the test suite (headless, no display server needed) with
+`meson test -C build`. For the memory-safety and concurrency gates use a
+sanitized build, the same as CI:
 
 ```bash
 meson setup build-asan -Db_sanitize=address,undefined && meson test -C build-asan
-meson setup build-tsan -Db_sanitize=thread && meson test -C build-tsan output_refcount
+meson setup build-tsan -Db_sanitize=thread -Db_lundef=false && \
+  meson test -C build-tsan output_refcount foundation runtime terminal_wake ipc child_signals
 ```
+
+Docs:
+
+| | |
+|-|-|
+| [`config/docs/CONFIG.md`](config/docs/CONFIG.md) | every config key, daemon commands |
+| [`docs/SHADER_NOTES.md`](docs/SHADER_NOTES.md) | writing shaders: stdlib, scene kit, manifests, workflow |
+| [`docs/REACTIVE_SHADERS.md`](docs/REACTIVE_SHADERS.md) | every reactive uniform, audio, manifests |
+| [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | what costs what, and what to do about it |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | layout, threading, locks, conventions |
+| [`docs/architecture/RUNTIME.md`](docs/architecture/RUNTIME.md) | the event loop and its rules |
+| [`docs/MULTI_MONITOR_SYNC.md`](docs/MULTI_MONITOR_SYNC.md) | spanning one scene across monitors |
+| [`docs/PACKAGING.md`](docs/PACKAGING.md) | distro packaging and releases |
 
 Shaders, bug reports, and compositor coverage PRs are all welcome. Issue tracker is the place.
 

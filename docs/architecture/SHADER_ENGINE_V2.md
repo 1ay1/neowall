@@ -274,7 +274,7 @@ Slices, each one shippable and green on its own. No big-bang branch.
 | 4 | `graph/` — N passes, M bindings, topo order; `channel_source_t` dies | **landed** (graph has no such limits; the old enums stay until slice 5 rewires the render path) |
 | 5 | `frontend/shadertoy.c` — move the parser behind the vtable | next |
 | 6 | `glsl/` — prelude + stdlib + shadow, currently three places | |
-| 7 | `engine/` — adaptive + optimizer as policy over the graph | |
+| 7 | `engine/` — adaptive + optimizer as policy over the graph | (both are switched off since 0.8: nothing lowers what's drawn; only timing stats and the identical-frame skip remain) |
 | 8 | layers: viewport + blend per pass, the actual "canvas" | |
 
 Old file → new home:

@@ -419,12 +419,15 @@ yourself; the bind keyword tells the daemon what live value to feed them each fr
 
 ```bash
 neowall preview myshader.glsl
+neowall preview garden          # a bare name is looked up in the shader dirs
 ```
 
 Runs one shader in the foreground next to your real wallpaper. It does not touch
 your config, the saved wallpaper state, or the daemon's pid file, so the running
 daemon keeps working and `neowall reload/next/kill` keep finding it. Ctrl-C to
-stop.
+stop. A path that exists wins; otherwise the name is looked up in
+`$XDG_CONFIG_HOME/neowall/shaders/`, `~/.config/neowall/shaders/` and
+`/usr/share/neowall/shaders/`, with or without `.glsl`.
 
 ### Hot reload while you edit
 
@@ -432,10 +435,49 @@ stop.
 neowall watch myshader.glsl
 ```
 
-Recompiles on every save and prints GLSL errors inline, with line numbers. A
-failed compile is a non-event: the shader is validated on a throwaway copy
-*before* anything is swapped, so the last good version keeps rendering while you
-fix the typo.
+Recompiles on every save. A failed compile is a non-event: the shader is
+validated on a throwaway copy *before* anything is swapped, so the last good
+version keeps rendering while you fix the typo. If the file doesn't compile at
+all when you start, `watch` shows the errors, runs a placeholder, and loads
+your shader on the first good save.
+
+Errors are printed once each, as `file:line` with the source line and a caret,
+plus a "did you mean" for a misspelt helper or uniform and a hint when a `;`
+is missing on the line before:
+
+```
+myshader.glsl:3: error: undefined variable "nwFbn"
+      3 |     float n = nwFbn(uv * 3.0);
+        |               ^
+  help: did you mean nwFbm?
+myshader.glsl:4: error: undefined variable "iTimee"
+      4 |     f = vec4(n) * iTimee;
+        |                   ^
+  help: did you mean iTime?
+2 errors
+```
+
+Line numbers are real lines in your file, in every pass: each pass carries
+`#line` directives for where it sits, so a Buffer A error at line 154 says
+154. NVIDIA, Mesa and ANGLE logs are all understood.
+
+### Looking up a helper
+
+```bash
+neowall docs            # every helper and uniform, with signature and comment
+neowall docs fbm        # just the ones matching a word
+```
+
+The list is read from the GLSL neowall injects into every shader, so it can't
+drift from what you actually get.
+
+### Starting a new shader
+
+```bash
+neowall new hello                      # a working shader in ~/.config/neowall/shaders/
+neowall new hello --template=scene     # scene | flat | reactive
+neowall new --list
+```
 
 ### Time travel (day-scale shaders)
 
@@ -538,28 +580,20 @@ Performance section).
 
 ## 5. Testing a Shader Live
 
-1. Stop any running daemon: `./build/neowall kill`
-2. Copy your shader to the search path: `cp foo.glsl ~/.config/neowall/shaders/`
-3. Write a throwaway config and run for a few seconds:
+`neowall preview foo.glsl` (or `neowall watch foo.glsl`) is the way: it runs
+beside your real wallpaper and leaves the daemon alone. Add `-v` to see the
+compile log, the manifest being applied, and an FPS line every two seconds.
 
-```
-printf 'default {\n  shader foo.glsl\n}\n' > /tmp/t.vibe
-timeout 4 ./build/neowall -f -v -c /tmp/t.vibe 2>&1 \
-  | grep -iE "Successfully compiled|Failed to compile|Manifest:"
-```
-
-4. Restore your real config afterward.
-
-A clean run prints `Successfully compiled pass Image`. Compile failures print the
-GLSL error with line numbers relative to the wrapped source.
+A clean run prints `Successfully compiled pass Image`.
 
 ---
 
 ## 6. Build Notes
 
 - Build: `ninja -C build` (incremental against the existing build dir).
-- Tests: `meson test -C build` (5 suites: `shadertoy_compat`, `vibe`, `foundation`,
-  `utils`, `output_refcount`).
+- Tests: `meson test -C build` runs the whole headless suite (no display or
+  GPU needed). `meson test -C build shader_diag shadertoy_compat` runs just
+  the shader-facing ones.
 - Reconfigure: `meson setup build --reconfigure`.
 - The GLSL std-lib string exceeds the C99 4095-char literal limit, so it is split
   into two adjacent `static const char *` chunks and concatenated at wrap time.
@@ -610,8 +644,25 @@ target that the next pass can sample.
   even though a glyph covers a tiny rect. Wrap each block of text in an
   `if (fragCoord within its screen-space rect)` so warps outside skip the samples —
   a HUD with dozens of glyphs drops from "per-pixel everywhere" to nearly free.
-- If the daemon stutters, drop resolution scale before optimizing math — it is the
-  single biggest lever.
+- If the daemon stutters, look at per-pixel cost first: raymarch steps and fbm
+  octaves are the big levers. neowall always draws at full resolution; it no
+  longer scales a shader down behind your back. See
+  [PERFORMANCE.md](PERFORMANCE.md).
+- Don't scale `iTime` by a live value (`iTime * (0.4 + iCpu)`): every change
+  in the value jumps the result by `iTime × change`, which grows the longer
+  the wallpaper runs. Use a fixed speed plus a bounded term. See
+  [REACTIVE_SHADERS.md](REACTIVE_SHADERS.md#driving-motion-with-a-live-value).
+
+### Time
+
+- `iTime` is seconds since the shader started, as a float32. On Wayland it is
+  stamped with the vblank each frame is shown at, so it advances by exactly
+  one refresh per refresh; `iTimeDelta` matches.
+- It resets: while the output is hidden after an hour, or after two hours on
+  screen behind a 1.2 s cross-fade, so float32 never gets too coarse to
+  animate smoothly. Anything that must survive a reset (a day cycle, growth)
+  should read `iDate`, `iTimeOfDay`, `iDayFraction` or persistent `iState`,
+  not `iTime`.
 
 ---
 
@@ -637,15 +688,22 @@ degradation, not a bug — the gauge simply reads empty. GPU *temperature* may s
 available via `iGpuTempC`.
 
 **Compile error line numbers look wrong.**
-They are relative to the *wrapped* source, which prepends the std-lib and uniform
-declarations. Subtract the wrapper length, or run with `-v` and read the surrounding
-context the daemon prints.
+They shouldn't any more: errors are reported against your file's own lines in
+every pass. If one looks off, run `neowall watch` on the file, which prints the
+source line under each error so you can see what it's pointing at.
 
 **Manifest seems ignored.**
 Confirm the sidecar is named exactly `<shader>.neowall` and sits in one of the search
 dirs listed in section 4. Run with `-v` and look for a `Manifest: applying` line — if
 it is absent the file was never found. Note a bare-number key (`bufferA { 0 self }`) is
 a hard parse error (the VIBE parser needs an identifier key) — use `ch0`, not `0`.
+
+**Motion stutters after the wallpaper has run for a long time, or things
+jump when CPU/mouse activity changes.**
+If the shader multiplies `iTime` by a reactive value, that's the cause (see
+§7). Otherwise check the daemon is 0.8.0 or newer: `neowall current` shows
+which binary it runs, and you may have upgraded without restarting it. Older
+daemons let `iTime` grow until float32 steps reached tens of milliseconds.
 
 **Per-core meters show fewer cores than expected.**
 `iCpuCores` is capped at 64 entries; `iCpuCoreCount` tells you how many are valid.

@@ -117,6 +117,34 @@ Finally it unrefs every snapshotted output.
   pacer moves on once per frame, after the swap; a frame that won't render
   (an idle terminal, a paused shader) moves it on from `FRAME_DUE` instead.
 
+## Shader time
+
+Pacing decides *when* a frame is drawn; the frame clock decides *what time
+it shows*. Every animated Wayland frame requests `wp_presentation` feedback.
+The feedback gives the vblank grid (phase and refresh), and
+`src/output/frame_clock.c` learns, by majority vote over recent frames, how
+many refreshes after the nearest vblank a frame drawn now is shown. Each
+frame's `iTime` is that predicted present time, chained in whole refreshes
+from the previous one, so it steps by exactly one refresh per refresh no
+matter how much the draw start jitters. It resyncs only if it drifts more
+than 1/8 refresh from the grid, and a one-off missed vblank is one vote, so
+it doesn't move the latency. X11, or before the first present, falls back to
+the wall clock.
+
+`iTime` is a float32, so it is reset before it gets coarse
+(`src/shader/shader_clock.c`): past an hour, for free while the output is
+hidden or paused; past two hours on screen, by keeping the last frame,
+resetting on the next, and cross-fading the kept frame out over 1.2 s.
+
+## Wakes from other threads
+
+A terminal's reader thread sets `needs_redraw` and calls
+`app_request_output_redraw`, which posts a wake only if the loop armed one
+before it slept. The loop arms it only when some output has no frame
+callback in flight; otherwise the callback wakes it anyway and `present`
+sees the flag. A child printing flat out costs one wake per frame instead
+of one per read.
+
 ## Pausing
 
 These are independent: a paused wallpaper with a frozen shader on an

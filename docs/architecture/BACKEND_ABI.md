@@ -26,7 +26,7 @@ The compositor-specific tier is what changes between e.g. wlroots, KDE Plasma,
 GNOME Shell — they all speak Wayland but expose different shell protocols.
 
 ```
-event loop
+runtime loop (src/runtime/rt.c, src/app.c)
     │
     ▼
 compositor_backend  ◀── auto-detected from $XDG_SESSION_TYPE +
@@ -71,6 +71,9 @@ they are.
 | Op | Purpose |
 |---|---|
 | `prepare_events` / `read_events` / `cancel_read` | Wayland's `wl_display_prepare_read` dance. X11 leaves these NULL. |
+| `has_pending_events` | True when events are already queued where poll() can't see them (Xlib's queue), so the loop dispatches instead of sleeping. |
+| `frame_request` / `frame_ready` / `frame_cancel` | Per-surface frame pacing: ask for a frame callback on the next commit, report when it arrived (or a timeout passed). Lets each output pace itself instead of one slow monitor blocking the swap. |
+| `set_vsync` | Change the tearing/vsync hint on a live surface. |
 | `set_scale` | HiDPI buffer scale. NULL means scale 1 forever. |
 | `on_output_added` / `on_output_removed` | Hotplug. NULL = static output list. |
 | `init_outputs` | For backends that synthesise outputs (X11 walks XRandR). |
@@ -98,12 +101,13 @@ compositor_backend_init(state)
             init() → if NULL, try next
                    → if non-NULL, this is your backend
 
-event loop runs:
-    poll(get_fd())
-    prepare_events() ; read_events() ; dispatch_events()
-    occlusion_update()  ← if op present
-    [render frame(s) for any non-occluded outputs]
-    flush()
+every runtime step (see docs/architecture/RUNTIME.md):
+    prepare:  prepare_events() ; flush() ; has_pending_events()
+    wait:     ppoll(get_fd(), timers, mailbox)
+    fd ready: read_events()       (or cancel_read() if it wasn't)
+    after:    dispatch_events() ; get_error()
+    present:  occlusion_update()  ← if op present
+              frame_ready()?  render, frame_request(), swap, commit
 
 config_load() runs:
     apply_input_config()  ← if op present
@@ -120,14 +124,13 @@ are fine.
 
 ## Threading rules
 
-- All ops are called from the event-loop thread (main thread). No locking
-  needed for backend-internal state.
-- EXCEPTION: render-thread paths (`get_native_window`, EGL ops) are called
-  from the GL context's thread, which may be the same thread or a dedicated
-  one depending on configuration. Touching `wl_display` from there is
-  unsafe — return immutable pointers only.
-- Audio capture in `reactive.c` runs on its own thread but doesn't touch the
-  backend; not relevant here.
+- All ops are called from the runtime's loop thread, which is also the GL
+  thread. No locking needed for backend-internal state.
+- Never call `wl_display_roundtrip` / `dispatch` or `XSync` while holding
+  `output_list_lock`: a listener that runs during the dispatch may take it
+  for writing (hotplug removal), and that deadlocks.
+- Worker threads (terminal PTY readers, the reactive sampler, audio, preload)
+  never touch the backend; they post to the loop.
 
 ---
 
@@ -152,8 +155,8 @@ detection — those are the rabbit holes worth budgeting time for.
 
 - All ops document their preconditions in the header comment in
   `compositor.h`. If you can't satisfy a precondition, leave the op NULL.
-- Log via `log_info` / `log_error` from `neowall/log.h` — same prefix scheme
-  as the rest of the daemon.
+- Log via `log_info` / `log_error` from `neowall/neowall.h` — same prefix
+  scheme as the rest of the daemon.
 - No `printf` or `fprintf` from a backend. The daemon may be detached from
   stdio; the log system routes correctly.
 
@@ -164,4 +167,4 @@ detection — those are the rabbit holes worth budgeting time for.
 - [`src/compositor/README.md`](../../src/compositor/README.md) — high-level
   overview of the layering, includes the per-compositor quirks.
 - [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) — where backends fit in the
-  event loop and rendering pipeline.
+  runtime and rendering pipeline.

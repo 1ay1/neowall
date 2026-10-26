@@ -1,5 +1,11 @@
 # Render Module OOP Design
 
+> **Status: proposal, not built.** `struct output_state` still carries its GL
+> fields directly (`include/neowall/output/output.h`). The GL-object layer that
+> did land is `include/neowall/gfx/gfx.h`, as slice 3 of
+> [SHADER_ENGINE_V2.md](SHADER_ENGINE_V2.md); new work should go through that
+> rather than the opaque context sketched here.
+
 ## Current Problems
 
 1. **Tight Coupling**: `struct output_state` contains 20+ OpenGL-specific fields

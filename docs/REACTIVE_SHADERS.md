@@ -64,21 +64,50 @@ System
 |---------|---------|
 | `iCpu` | total CPU load 0..1 |
 | `iCpuCores[64]`, `iCpuCoreCount` | per-core load |
+| `iCpuMax`, `iCpuSpread` | hottest single core 0..1; core-load imbalance 0..1 (1 = one core pegged) |
 | `iCpuTemp`, `iCpuTempC` | CPU temp 0..1 (over 30..95°C) and raw °C |
 | `iGpu` | GPU utilisation 0..1 (amdgpu; 0 if unavailable) |
 | `iGpuTemp`, `iGpuTempC` | GPU temp 0..1 and raw °C |
 | `iRam` | memory used 0..1 |
+| `iRamGB`, `iRamTotalGB` | memory used and total, GiB |
 | `iSwap` | swap used 0..1 |
 | `iDiskRead`, `iDiskWrite` | disk I/O activity 0..1 (log-scaled) |
 | `iLoad`, `iLoadRaw` | 1-min load avg / cores (0..1), and raw value |
 | `iProcs`, `iProcCount` | process activity proxy, total process count |
 | `iUptimeHours` | system uptime in hours |
 | `iNetDown`, `iNetUp` | network activity 0..1 (log-scaled) |
+| `iNetDownRaw`, `iNetUpRaw` | network rate in MB/s |
 | `iBattery`, `iCharging` | charge 0..1, 1.0 if on AC |
 | `iTimeOfDay` | 0..1 across the local day |
 | `iSun` | sun-elevation proxy 0..1 (warm at noon) |
 | `iDayFraction` | 0..1 across the year |
 | `iKeyEnergy`, `iMouseEnergy` | recent input activity 0..1 |
+
+NVIDIA (proprietary driver, via an `nvidia-smi` reader thread; all 0 without it)
+
+| Uniform | Meaning |
+|---------|---------|
+| `iNvGpu` | GPU utilisation 0..1 |
+| `iNvVram` | VRAM used 0..1 |
+| `iNvGpuTempC` | GPU temp °C |
+| `iNvPower` | power draw / limit 0..1 |
+| `iNvActive` | 1.0 while `nvidia-smi` is producing data |
+
+Fused signals (built from the above, for when you want one knob)
+
+| Uniform | Meaning |
+|---------|---------|
+| `iThermal` | hottest of CPU/GPU, 0..1 over 30..95°C |
+| `iActivity` | overall machine busyness 0..1 (CPU, GPU, I/O, RAM, load) |
+| `iPulse` | a heartbeat 0..1 whose rate rises with load |
+
+Windows (Hyprland today; `iWindowCount` is 0 elsewhere, see
+[SHADER_NOTES.md](SHADER_NOTES.md) §3c)
+
+| Uniform | Meaning |
+|---------|---------|
+| `iWindows[]`, `iWindowCount` | window rects in pixels (xy = position, zw = size, y down) |
+| `iFocusedWindow` | the fullscreen/active window, zero if none |
 
 Audio (live FFT of system output via `parec`)
 
@@ -173,7 +202,25 @@ image   { ch0 bufferA  ch1 audio }
 
 ## Performance
 
-Reactive sampling is throttled to ~4 Hz and runs on the main loop; audio FFT
-runs on a dedicated thread with a 1024-point radix-2 FFT (cheap). Unused
-uniforms cost nothing. The existing adaptive-resolution and multipass
-optimizers apply unchanged.
+System signals are sampled at ~4 Hz on their own thread, so a slow sensor
+read never stalls a frame. Load and input uniforms (`iCpu`, `iRam`, `iGpu`,
+`iKeyEnergy`, `iMouseEnergy`, ...) are eased toward each sample per frame with
+a ~0.25 s time constant, so motion they drive never steps; audio values pass
+through unsmoothed. Audio FFT runs on a dedicated thread with a 1024-point
+radix-2 FFT (cheap). Unused uniforms cost nothing.
+
+### Driving motion with a live value
+
+Don't multiply `iTime` by a live value:
+
+```glsl
+float x = iTime * (0.4 + iCpu);          // jumps by iTime * Δcpu on every change
+```
+
+Every change moves the result by `iTime × change`, and that grows the longer
+the wallpaper runs: after an hour a 0.1 change in `iCpu` is a 360-unit jump.
+Keep a fixed base speed and add a bounded term instead:
+
+```glsl
+float x = iTime * 0.7 + iCpu * 0.05 * sin(iTime * 0.6);   // change shifts it by ≤ 0.05
+```
