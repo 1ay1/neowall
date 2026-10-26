@@ -12,6 +12,7 @@
  * loop thread touches them, and only through update(). */
 
 #include <errno.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,8 +84,12 @@ struct app {
 };
 
 /* The loop for app_post / app_request_* from other threads. Set for the
- * lifetime of app_run; NULL otherwise, so a post before or after is a no-op. */
+ * lifetime of app_run; NULL otherwise, so a post before or after is a no-op.
+ * g_posters counts posts in flight: app_run clears g_loop, then waits for it
+ * to drain before freeing the loop. Both are seq_cst, so either a poster sees
+ * NULL or app_run sees the poster. */
 static _Atomic(rt_loop *) g_loop = NULL;
+static atomic_int g_posters = 0;
 
 static void post(rt_loop *l, uint32_t kind, uint32_t id, int64_t v) {
     rt_msg m = {.kind = kind, .id = id};
@@ -93,11 +98,16 @@ static void post(rt_loop *l, uint32_t kind, uint32_t id, int64_t v) {
 }
 
 bool app_post(uint32_t kind, uint32_t id, int64_t value) {
-    rt_loop *l = atomic_load_explicit(&g_loop, memory_order_acquire);
-    if (!l) return false;
-    rt_msg m = {.kind = kind, .id = id};
-    m.v.i = value;
-    return rt_post(l, &m);
+    atomic_fetch_add(&g_posters, 1);
+    rt_loop *l = atomic_load(&g_loop);
+    bool ok = false;
+    if (l) {
+        rt_msg m = {.kind = kind, .id = id};
+        m.v.i = value;
+        ok = rt_post(l, &m);
+    }
+    atomic_fetch_sub(&g_posters, 1);
+    return ok;
 }
 
 void app_request_redraw(struct neowall_state *state) {
@@ -770,7 +780,9 @@ void app_run(struct neowall_state *state) {
     rt_run(a.loop, &prog);
     log_info("Main loop stopped");
 
-    atomic_store_explicit(&g_loop, NULL, memory_order_release);
+    atomic_store(&g_loop, NULL);
+    /* A terminal reader may be mid-post; it's joined later, in main(). */
+    while (atomic_load(&g_posters) > 0) sched_yield();
     atomic_store_explicit(&state->running, false, memory_order_release);
 
     ipc_server_stop(a.ipc);
