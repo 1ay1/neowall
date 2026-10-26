@@ -88,16 +88,17 @@ static void test_every(void) {
     rt_loop_free(l);
 }
 
-/* 2. Sub-millisecond precision: a 16.67 ms period isn't padded to 17. */
+/* 2. Sub-millisecond precision: a 16.67 ms period isn't padded to 17.
+ * Measured from the start, not the first tick: the timer is phase-locked,
+ * so a first tick that ran late on a busy machine doesn't shift the rest. */
 static void test_precise(void) {
     rt_loop *l = rt_loop_new();
     prog_t p = {.want_tick = true, .tick_ns = 16666667, .stop_after_ticks = 31};
     rt_program pr = program(&p);
+    int64_t t0 = rt_now_ns();
     rt_run(l, &pr);
-    /* 30 periods between first and last tick. */
-    int64_t span = p.last_tick_at - p.first_tick_at;
-    double per = (double)span / 30.0 / 1e6;
-    CHECK(per >= 16.6 && per < 16.95, "mean period %.3f ms, want ~16.667", per);
+    double per = (double)(p.last_tick_at - t0) / 31.0 / 1e6;
+    CHECK(per >= 16.66 && per < 16.95, "mean period %.3f ms, want ~16.667", per);
     rt_loop_free(l);
 }
 
