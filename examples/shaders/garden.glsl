@@ -46,12 +46,19 @@ float windAmount() {
     return 0.18 + 0.55 * iCpu + 0.40 * iKeyEnergy + 0.28 * iMouseEnergy;
 }
 
-// Horizontal displacement of a stem at normalised height t.
-float windOffset(float t, float seed) {
+// Horizontal displacement of a stem at normalised height t. The turbulence
+// only depends on time and the plant, so it's computed once per plant
+// (windTurb) and passed in, not once per stem point.
+float windTurb(float seed) {
+    return nwFbm(vec2(iTime * 0.22 + seed * 3.0, seed * 5.0)) - 0.5;
+}
+float windOffsetT(float t, float seed, float turb) {
     float w = windAmount();
     float sway = sin(iTime * 0.9 + seed * 6.283 + t * 2.2);
-    float turb = nwFbm(vec2(iTime * 0.22 + seed * 3.0, seed * 5.0)) - 0.5;
     return (sway * 0.045 + turb * 0.05) * w * t * t;
+}
+float windOffset(float t, float seed) {
+    return windOffsetT(t, seed, windTurb(seed));
 }
 
 struct Plant {
@@ -62,6 +69,7 @@ struct Plant {
     float hue;
     float lean;
     float seed;
+    float turb;    // this plant's wind turbulence for this frame (see windTurb)
 };
 
 Plant getPlant(int i, float fieldW) {
@@ -86,12 +94,13 @@ Plant getPlant(int i, float fieldW) {
     p.bloom  = smoothstep(0.40, 0.62, p.age) * (1.0 - smoothstep(0.78, 0.97, p.age));
     p.hue    = fract(s3 * 0.77 + s1 * 0.31);
     p.lean   = (s2 - 0.5) * 0.18;
+    p.turb   = 0.0;   // filled in only for plants a pixel actually draws
     return p;
 }
 
 // Point on a stem at normalised height t (0 = soil, 1 = flower head).
 vec2 stemPoint(Plant p, float t) {
-    float x = p.x + p.lean * t * t * p.height + windOffset(t, p.seed);
+    float x = p.x + p.lean * t * t * p.height + windOffsetT(t, p.seed, p.turb);
     return vec2(x, GROUND_Y + p.height * t);
 }
 
@@ -219,6 +228,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     }
 
     // ------------------------------ grass --------------------------------
+    // Only pixels in the grass strip can be covered by a blade, so skip the
+    // blade's wind everywhere else. Same image.
+    if (p.y <= GROUND_Y + 0.012 + 0.038 * (0.7 + 0.5 * lush) && p.y >= GROUND_Y - 0.01)
     {
         float bladeIdx = floor(p.x * 220.0);
         float bh   = nwHash11(bladeIdx * 0.37);
@@ -240,6 +252,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         Plant pl = getPlant(i, fieldW);
         if (pl.height < 0.005) continue;
         if (abs(p.x - pl.x) > 0.30) continue;     // cheap horizontal cull
+        pl.turb = windTurb(pl.seed);              // once per plant, not per point
 
         // stem
         float d = 1e9;
