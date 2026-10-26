@@ -2380,6 +2380,30 @@ void multipass_render_pass(multipass_shader_t *shader,
     }
 }
 
+/* Take this frame's reactive snapshot. The sampler publishes load and input
+ * values at 4 Hz, so used raw they step 4 times a second, and anything a
+ * shader drives with them (wind, speed) jumps. Ease them toward the sample
+ * with a ~0.25 s time constant, framerate independent. Audio and the rest
+ * pass through untouched. */
+static void reactive_frame_update(multipass_shader_t *shader) {
+    reactive_snapshot_t prev = shader->frame_reactive;
+    reactive_get(&shader->frame_reactive);
+    if (!shader->frame_reactive_primed) {
+        shader->frame_reactive_primed = true;
+        return;
+    }
+    reactive_snapshot_t *r = &shader->frame_reactive;
+    float k = 1.0f - expf(-shader->frame_dt / 0.25f);
+#define EASE(f) r->f = prev.f + (r->f - prev.f) * k
+    EASE(cpu); EASE(cpu_max); EASE(cpu_spread); EASE(ram); EASE(swap);
+    EASE(net_down); EASE(net_up); EASE(disk_read); EASE(disk_write); EASE(load_avg);
+    EASE(gpu); EASE(nv_gpu); EASE(nv_power);
+    EASE(thermal); EASE(activity); EASE(procs);
+    EASE(key_energy); EASE(mouse_energy);
+    for (int i = 0; i < r->cpu_cores && i < REACTIVE_MAX_CPU_CORES; i++) EASE(cpu_per[i]);
+#undef EASE
+}
+
 void multipass_render(multipass_shader_t *shader,
                       float time,
                       float mouse_x, float mouse_y,
@@ -2421,7 +2445,7 @@ void multipass_render(multipass_shader_t *shader,
 
     /* One reactive snapshot per FRAME (mutex-guarded ~2.2KB copy), shared by
      * all passes and the audio texture upload below. */
-    reactive_get(&shader->frame_reactive);
+    reactive_frame_update(shader);
 
     /* Start GPU timing for this frame (if enabled) */
     adaptive_begin_frame(&shader->adaptive);

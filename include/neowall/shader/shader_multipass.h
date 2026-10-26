@@ -267,6 +267,7 @@ typedef struct {
     float date_cached[4];                    /* iDate vec4, refreshed when the second ticks */
     long long date_cached_sec;               /* time() value date_cached was built for */
     reactive_snapshot_t frame_reactive;      /* one reactive snapshot per frame */
+    bool frame_reactive_primed;              /* frame_reactive holds a smoothed value */
 
     /* Window geometry for the output this shader is drawn on, refreshed once
      * per frame alongside frame_reactive so every pass sees the same layout.

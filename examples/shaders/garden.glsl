@@ -133,8 +133,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float sp = mix(0.35, 1.0, nwHash11(fi * 3.11 + 0.7));
         float ph = nwHash11(fi * 5.71 + 2.3);
 
-        // Drift right on the wind, wrapping across the field.
-        float fx = fract(ph + iTime * (0.010 + 0.035 * sp) * (0.4 + w));
+        // Drift right at a steady speed, wrapping across the field. The wind
+        // only adds a bounded gust: scaling iTime by it would move every mote
+        // by iTime*dw whenever the wind changes, which teleports them.
+        float gust = w * 0.03 * sin(iTime * 0.6 * sp + fi * 1.3);
+        float fx = fract(ph + iTime * (0.010 + 0.035 * sp) * 0.7 + gust / fieldW);
         float cy = GROUND_Y + 0.04 + nwHash11(fi * 7.33 + 4.1) * 0.58
                  + sin(iTime * 0.5 * sp + fi * 2.1) * 0.035;
 
