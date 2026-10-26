@@ -1430,21 +1430,21 @@ void render_optimizer_log_stats(const render_optimizer_t *opt) {
     
     render_optimizer_stats_t stats = render_optimizer_get_stats(opt);
     
-    log_info("=== Render Optimizer Stats (Frame %lu) ===", (unsigned long)stats.frame_number);
-    log_info("  GL call efficiency:     %.1f%% (%lu avoided)",
+    log_debug("=== Render Optimizer Stats (Frame %lu) ===", (unsigned long)stats.frame_number);
+    log_debug("  GL call efficiency:     %.1f%% (%lu avoided)",
              stats.gl_call_efficiency, (unsigned long)opt->stats.gl_calls_avoided);
-    log_info("  Uniform efficiency:     %.1f%% (%lu avoided)",
+    log_debug("  Uniform efficiency:     %.1f%% (%lu avoided)",
              stats.uniform_efficiency, (unsigned long)opt->stats.uniform_updates_avoided);
-    log_info("  Texture bind efficiency: %.1f%% (%lu avoided)",
+    log_debug("  Texture bind efficiency: %.1f%% (%lu avoided)",
              stats.texture_bind_efficiency, (unsigned long)opt->stats.texture_binds_avoided);
-    log_info("  FBO bind efficiency:    %.1f%% (%lu avoided)",
+    log_debug("  FBO bind efficiency:    %.1f%% (%lu avoided)",
              stats.fbo_bind_efficiency, (unsigned long)opt->stats.fbo_binds_avoided);
-    log_info("  Program switch efficiency: %.1f%% (%lu avoided)",
+    log_debug("  Program switch efficiency: %.1f%% (%lu avoided)",
              stats.program_switch_efficiency, (unsigned long)opt->stats.program_switches_avoided);
-    log_info("  Pass cull rate:         %.1f%%", stats.pass_cull_rate);
-    log_info("  Temporal reuse rate:    %.1f%%", stats.temporal_reuse_rate);
-    log_info("  Estimated speedup:      %.2fx", stats.estimated_speedup);
-    log_info("  Frame time:             %.2f ms", stats.frame_time_ms);
+    log_debug("  Pass cull rate:         %.1f%%", stats.pass_cull_rate);
+    log_debug("  Temporal reuse rate:    %.1f%%", stats.temporal_reuse_rate);
+    log_debug("  Estimated speedup:      %.2fx", stats.estimated_speedup);
+    log_debug("  Frame time:             %.2f ms", stats.frame_time_ms);
 }
 
 void render_optimizer_sync_state(render_optimizer_t *opt) {

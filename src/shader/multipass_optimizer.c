@@ -139,8 +139,13 @@ void multipass_optimizer_init(multipass_optimizer_t *opt) {
     opt->enabled = true;
     opt->half_rate_enabled = false;       /* Disabled by default - can cause artifacts */
     opt->static_skip_enabled = true;      /* Safe - skip when nothing changes */
-    opt->smart_resolution_enabled = true; /* Main optimization */
-    opt->global_quality = 0.8f;           /* 80% quality bias */
+    /* Off: per-buffer downscaling guesses from the source text and renders a
+     * buffer at a fraction of the screen (garden's feedback pass at 50%),
+     * which the Image pass then samples at full size. It's a visible loss of
+     * detail on every frame to save time on a GPU that wasn't short of it.
+     * The optimizers must never lower what's drawn. */
+    opt->smart_resolution_enabled = false;
+    opt->global_quality = 1.0f;
     
     /* Static detection defaults */
     opt->static_detect.time_epsilon = 0.0001f;    /* Very small time change */
@@ -404,12 +409,10 @@ void multipass_optimizer_analyze_shader(multipass_optimizer_t *opt,
         (void)pass_types;  /* Reserved for future use */
     }
     
-    log_info("Multipass optimizer: analyzed %d passes", opt->pass_count);
+    log_info("Multipass optimizer: analyzed %d passes (every pass renders at full resolution)",
+             opt->pass_count);
     for (int i = 0; i < opt->pass_count; i++) {
-        log_info("  Pass %d: %s (scale=%.0f%%, rate=1/%d)",
-                 i, buffer_content_type_name(opt->passes[i].content_type),
-                 opt->passes[i].recommended_scale * 100.0f,
-                 opt->passes[i].update_divisor);
+        log_debug("  Pass %d: %s", i, buffer_content_type_name(opt->passes[i].content_type));
     }
 }
 
@@ -602,8 +605,12 @@ multipass_optimizer_stats_t multipass_optimizer_get_stats(const multipass_optimi
     stats.pass_count = opt->pass_count;
     for (int i = 0; i < opt->pass_count && i < MOPT_MAX_PASSES; i++) {
         stats.pass_stats[i].content_type = opt->passes[i].content_type;
-        stats.pass_stats[i].scale_used = opt->passes[i].recommended_scale;
-        stats.pass_stats[i].update_divisor = opt->passes[i].update_divisor;
+        /* What is drawn, not what the analysis suggested: with smart
+         * resolution and half-rate off, every pass is 100% at rate 1/1. */
+        stats.pass_stats[i].scale_used = opt->smart_resolution_enabled
+                                         ? opt->passes[i].recommended_scale : 1.0f;
+        stats.pass_stats[i].update_divisor = opt->half_rate_enabled
+                                             ? opt->passes[i].update_divisor : 1;
     }
     
     return stats;
@@ -614,15 +621,15 @@ void multipass_optimizer_log_stats(const multipass_optimizer_t *opt) {
     
     multipass_optimizer_stats_t stats = multipass_optimizer_get_stats(opt);
     
-    log_info("=== Multipass Optimizer Stats ===");
-    log_info("  Passes rendered: %lu", (unsigned long)stats.total_passes_rendered);
-    log_info("  Passes skipped:  %lu (%.1f%%)", 
+    log_debug("=== Multipass Optimizer Stats ===");
+    log_debug("  Passes rendered: %lu", (unsigned long)stats.total_passes_rendered);
+    log_debug("  Passes skipped:  %lu (%.1f%%)", 
              (unsigned long)stats.total_passes_skipped, 
              stats.skip_rate_percent);
-    log_info("  Estimated speedup: %.2fx", stats.estimated_speedup);
+    log_debug("  Estimated speedup: %.2fx", stats.estimated_speedup);
     
     for (int i = 0; i < stats.pass_count; i++) {
-        log_info("  Pass %d: %s @ %.0f%% (rate 1/%d)",
+        log_debug("  Pass %d: %s @ %.0f%% (rate 1/%d)",
                  i, 
                  buffer_content_type_name(stats.pass_stats[i].content_type),
                  stats.pass_stats[i].scale_used * 100.0f,

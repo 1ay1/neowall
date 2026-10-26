@@ -2434,83 +2434,16 @@ void multipass_render(multipass_shader_t *shader,
     
     /* Reset per-frame workload tracking for accurate feedback to adaptive_scale */
     multipass_optimizer_reset_frame_workload(&shader->multipass_opt);
-    
-    /* ========================================================================
-     * SYNCHRONIZED OPTIMIZATION MODE
-     * 
-     * Coordinate between adaptive_scale (global resolution) and multipass_optimizer
-     * (per-buffer resolution + pass skipping) for maximum performance.
-     * 
-     * Three optimization levels:
-     * 1. NORMAL: Per-buffer smart resolution only
-     * 2. AGGRESSIVE: Enable half-rate buffer updates  
-     * 3. EMERGENCY: Maximum savings - all optimizations active
-     * ======================================================================== */
-    
-    float current_fps = adaptive_get_current_fps(&shader->adaptive);
-    float target_fps = shader->adaptive.config.target_fps;
-    bool adaptive_emergency = shader->adaptive.in_emergency;
-    bool adaptive_thermal = shader->adaptive.thermal_throttling;
-    float stability = shader->adaptive.stability_score;
-    
-    if (target_fps > 0.0f) {
-        float fps_ratio = current_fps / target_fps;
-        
-        /* EMERGENCY MODE: Sync with adaptive_scale's emergency state
-         * When adaptive detects severe performance drop, go maximum aggressive */
-        if (adaptive_emergency || adaptive_thermal) {
-            if (!shader->multipass_opt.half_rate_enabled) {
-                shader->multipass_opt.half_rate_enabled = true;
-                shader->multipass_opt.global_quality = 0.5f;  /* Reduce quality bias */
-                log_info("Optimizer: EMERGENCY MODE - enabling all optimizations "
-                         "(adaptive emergency=%d, thermal=%d)",
-                         adaptive_emergency, adaptive_thermal);
-            }
-        }
-        /* AGGRESSIVE MODE: Enable half-rate if FPS is struggling */
-        else if (fps_ratio < 0.90f && !shader->multipass_opt.half_rate_enabled) {
-            shader->multipass_opt.half_rate_enabled = true;
-            shader->multipass_opt.global_quality = 0.6f;
-            log_info("Optimizer: AGGRESSIVE MODE - enabling half-rate updates "
-                     "(FPS: %.1f / %.1f = %.0f%%)",
-                     current_fps, target_fps, fps_ratio * 100.0f);
-        }
-        /* NORMAL MODE: Disable aggressive optimizations when performance is good.
-         *
-         * Recovery deliberately does NOT require the stability score. Stability
-         * is only accumulated on the normal decision path, which is skipped
-         * while the controller is in emergency, so gating recovery on it made
-         * the degraded mode a one-way latch: a single bogus startup frame
-         * dropped the shader to half-rate buffers and 50% quality, and it stayed
-         * there forever while rendering a perfect 60 FPS.
-         *
-         * Sustained FPS at target IS the recovery signal. Require it for a few
-         * consecutive checks so we do not flap on one good sample. */
-        else if (shader->multipass_opt.half_rate_enabled &&
-                 !adaptive_emergency && !adaptive_thermal &&
-                 fps_ratio > 0.95f) {
-            shader->multipass_opt.recovery_frames++;
-            if (shader->multipass_opt.recovery_frames >= MULTIPASS_RECOVERY_FRAMES) {
-                shader->multipass_opt.half_rate_enabled = false;
-                shader->multipass_opt.global_quality = 0.8f;  /* Restore quality */
-                shader->multipass_opt.recovery_frames = 0;
-                log_info("Optimizer: NORMAL MODE - performance recovered "
-                         "(FPS: %.1f, stability: %.0f%%)",
-                         current_fps, stability * 100.0f);
-            }
-        }
-        else if (fps_ratio <= 0.95f) {
-            /* Lost the streak; require a fresh run of good frames. */
-            shader->multipass_opt.recovery_frames = 0;
-        }
-    }
 
-    /* Update adaptive resolution using the wall-clock time sampled at the
-     * top of this frame (not shader time, which can be paused/scaled) */
+    /* The optimizers never lower what's drawn: no half-rate buffer updates, no
+     * resolution scaling, no per-buffer downscaling. They made a slow GPU look
+     * worse on purpose, and on a fast one they misjudged and degraded anyway
+     * (garden's feedback buffer ran at 50%). Every pass renders every frame at
+     * full resolution; the only skip left is a frame identical to the last.
+     * adaptive_update still runs so its timing stats stay available. */
     adaptive_update(&shader->adaptive, wall_time);
-    
-    /* Sync resolution scale from adaptive system */
-    shader->resolution_scale = adaptive_get_scale(&shader->adaptive);
+    shader->resolution_scale = 1.0f;
+    shader->multipass_opt.half_rate_enabled = false;
 
     /* Query the CURRENT framebuffer binding every frame
      * GTK's GtkGLArea can change its FBO on resize, so we must always query */
@@ -2742,41 +2675,10 @@ void multipass_render(multipass_shader_t *shader,
     /* End multipass optimizer frame */
     multipass_optimizer_end_frame(&shader->multipass_opt);
     
-    /* Log multipass optimizer stats every 600 frames */
+    /* Log multipass optimizer stats every 600 frames (debug: nothing in them is
+     * a decision any more, every pass is drawn at full resolution). */
     if (shader->frame_count > 0 && shader->frame_count % 600 == 0) {
         multipass_optimizer_log_stats(&shader->multipass_opt);
-        
-        /* Log current optimization mode and sync status */
-        const char *mode_name = "NORMAL";
-        if (shader->adaptive.in_emergency || shader->adaptive.thermal_throttling) {
-            mode_name = "EMERGENCY";
-        } else if (shader->multipass_opt.half_rate_enabled) {
-            mode_name = "AGGRESSIVE";
-        }
-        
-        log_info("  Optimization mode: %s (adaptive scale: %.0f%%, quality: %.0f%%)",
-                 mode_name,
-                 shader->adaptive.current_scale * 100.0f,
-                 shader->multipass_opt.global_quality * 100.0f);
-        
-        /* Log combined effective savings */
-        float base_pixels = (float)(shader->scaled_width * shader->scaled_height);
-        float actual_pixels = 0.0f;
-        for (int i = 0; i < shader->pass_count; i++) {
-            if (shader->passes[i].type != PASS_TYPE_IMAGE) {
-                actual_pixels += (float)(shader->passes[i].width * shader->passes[i].height);
-            }
-        }
-        if (base_pixels > 0.0f) {
-            float savings = (1.0f - actual_pixels / (base_pixels * (shader->pass_count - 1))) * 100.0f;
-            log_info("  Buffer pixel savings: %.1f%% (per-buffer smart resolution)", savings);
-        }
-        
-        /* Log workload feedback metrics */
-        float effective_workload = multipass_optimizer_get_effective_workload(&shader->multipass_opt);
-        float pixel_reduction = multipass_optimizer_get_pixel_reduction(&shader->multipass_opt);
-        log_info("  Effective workload: %.1f%% (pixel reduction: %.1f%%)",
-                 effective_workload * 100.0f, pixel_reduction * 100.0f);
     }
 
     shader->frame_count++;
