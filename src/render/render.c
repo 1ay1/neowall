@@ -1033,6 +1033,17 @@ bool render_frame_shader(struct output_state *output) {
         : output->shader_start_time;
 
     uint64_t current_time_us = get_time_us();
+    /* Stamp the frame with the vblank it will be shown at, when the
+     * compositor tells us the grid (Wayland presentation-time). Consecutive
+     * frames then step by exactly one refresh, whatever the draw start
+     * jitter. Without feedback (X11, no protocol) fall back to now. */
+    output->frame_target_ns = nw_frame_clock_target(&output->frame_clock,
+                                                    current_time_us * 1000ull,
+                                                    &output->frame_latency_used);
+    if (output->frame_target_ns) {
+        current_time_us = output->frame_target_ns / 1000ull;
+        output->multipass_shader->frame_stamp = (double)output->frame_target_ns / 1e9;
+    }
     uint64_t start_time_us = epoch_ms > 0
         ? epoch_ms * 1000ull
         : current_time_us;

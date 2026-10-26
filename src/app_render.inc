@@ -349,12 +349,11 @@ static void render_outputs(struct app *a) {
         /* Ask the compositor for a real present timestamp for the frame we are
          * about to publish (wp_presentation). The feedback attaches to the next
          * commit on this surface — and eglSwapBuffers itself performs that
-         * commit on Wayland — so it must be requested BEFORE the swap. Only for
-         * animated outputs the pacer actually drives; no-op without the
-         * protocol. Wayland-only. */
+         * commit on Wayland — so it must be requested BEFORE the swap. Every
+         * animated output: the pacer and the frame clock both use it. No-op
+         * without the protocol. Wayland-only. */
 #ifdef HAVE_WAYLAND_BACKEND
-        if (wallpaper_is_animated(output->config->type) &&
-            output_get_frame_timer_fd(output) >= 0) {
+        if (wallpaper_is_animated(output->config->type)) {
             wayland_request_present_feedback(output);
         }
 #endif

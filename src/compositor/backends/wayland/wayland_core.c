@@ -923,6 +923,8 @@ void wayland_cleanup(void) {
  * which point we drop the ref and free this. */
 struct present_fb_ctx {
     struct output_state *output;
+    uint64_t target_ns;     /* stamp the frame was drawn with, 0 = none */
+    int latency_used;
 };
 
 static void present_fb_finish(struct present_fb_ctx *ctx,
@@ -955,6 +957,8 @@ static void present_fb_presented(void *data,
         uint64_t sec = ((uint64_t)tv_sec_hi << 32) | (uint64_t)tv_sec_lo;
         uint64_t present_ns = sec * 1000000000ULL + (uint64_t)tv_nsec;
         output_pace_note_present(ctx->output, present_ns, (uint64_t)refresh);
+        nw_frame_clock_presented(&ctx->output->frame_clock, ctx->target_ns,
+                                 ctx->latency_used, present_ns, (uint64_t)refresh);
     }
     present_fb_finish(ctx, fb);
 }
@@ -989,6 +993,8 @@ void wayland_request_present_feedback(struct output_state *output) {
     if (!ctx) return;
     output_ref(output);
     ctx->output = output;
+    ctx->target_ns = output->frame_target_ns;
+    ctx->latency_used = output->frame_latency_used;
 
     struct wp_presentation_feedback *fb =
         wp_presentation_feedback(wl->presentation, surface);

@@ -10,6 +10,7 @@
 #include "neowall/image/image.h"   /* For struct image_data and enum image_format */
 #include "neowall/shader/shader_multipass.h"  /* For multipass_shader_t */
 #include "neowall/shader/shader_clock.h"      /* For shader_clock_tracker */
+#include "neowall/output/frame_clock.h"
 #include "neowall/output/span.h"   /* For struct span_view */
 
 /* Constants */
@@ -324,6 +325,9 @@ struct output_state {
      * these carry the ground truth the pacer phase-locks to; 0 = none yet. */
     uint64_t pace_last_present_ns;      /* last real present time (pacer clock) */
     uint64_t pace_hw_refresh_ns;        /* measured display refresh period, 0 = unknown */
+    nw_frame_clock frame_clock;         /* stamps iTime with the vblank it shows at */
+    uint64_t frame_target_ns;           /* stamp of the frame being drawn, 0 = wall clock */
+    int      frame_latency_used;        /* latency the stamp assumed (fed back on present) */
 
     struct output_state *next;
 };

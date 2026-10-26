@@ -330,6 +330,7 @@ struct output_state *output_create(struct neowall_state *state,
     out->config->channel_count = 0;
 
     out->shader_fade_start_time = 0;
+    nw_frame_clock_init(&out->frame_clock);
     out->shader_paused_at = 0;
     out->pending_shader_path[0] = '\0';
 

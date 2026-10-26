@@ -2426,6 +2426,10 @@ void multipass_render(multipass_shader_t *shader,
 #endif
     if (shader->last_frame_wall > 0.0) {
         float dt = (float)(wall_time - shader->last_frame_wall);
+        /* With present-time stamps, dt is the exact gap between the times
+         * the two frames are shown, so it matches iTime's step. */
+        if (shader->frame_stamp > 0.0 && shader->last_frame_stamp > 0.0)
+            dt = (float)(shader->frame_stamp - shader->last_frame_stamp);
         /* Clamp: a paused/occluded wallpaper can sit idle for minutes; feeding
          * a 60s dt into a physics shader explodes it. Cap at 1/4s, floor at
          * 0.1ms to avoid div-by-zero in shaders that do 1.0/iTimeDelta. */
@@ -2442,6 +2446,8 @@ void multipass_render(multipass_shader_t *shader,
         shader->frame_fps = 60.0f;
     }
     shader->last_frame_wall = wall_time;
+    shader->last_frame_stamp = shader->frame_stamp;
+    shader->frame_stamp = 0.0;
 
     /* One reactive snapshot per FRAME (mutex-guarded ~2.2KB copy), shared by
      * all passes and the audio texture upload below. */

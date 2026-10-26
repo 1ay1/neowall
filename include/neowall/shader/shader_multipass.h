@@ -262,6 +262,8 @@ typedef struct {
      * multipass_set_uniforms for every pass. Avoids redundant mutex-guarded
      * reactive snapshots and time()/localtime() syscalls per pass. */
     double last_frame_wall;                  /* monotonic seconds at previous frame (0 = first) */
+    double frame_stamp;                      /* if > 0, this frame's present time (s); dt uses it */
+    double last_frame_stamp;                 /* previous frame_stamp, 0 = none */
     float frame_dt;                          /* real seconds between frames, clamped sane */
     float frame_fps;                         /* smoothed instantaneous FPS for iFrameRate */
     float date_cached[4];                    /* iDate vec4, refreshed when the second ticks */

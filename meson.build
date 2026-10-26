@@ -283,6 +283,7 @@ texture_sources = files(
 # Output sources
 output_sources = files(
   'src/output/output.c',
+  'src/output/frame_clock.c',
   'src/output/span.c',
 )
 
@@ -592,6 +593,14 @@ test_child_signals_exe = executable('test_child_signals',
 )
 
 test('child_signals', test_child_signals_exe)
+
+test_frame_clock_exe = executable('test_frame_clock',
+  files('tests/test_frame_clock.c', 'src/output/frame_clock.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('frame_clock', test_frame_clock_exe)
 
 # The control socket end to end: request/reply, a stuck client can't wedge it,
 # oversize and malformed lines are refused, a live socket isn't stolen and a
