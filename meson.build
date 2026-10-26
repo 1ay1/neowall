@@ -247,6 +247,8 @@ shader_sources = files(
   'src/shader/shader_core.c',
   'src/shader/shader_state.c',
   'src/shader/shader_error_log.c',
+  'src/shader/shader_diag.c',
+  'src/shader/shader_docs.c',
   'src/shader/shader_multipass.c',
   'src/shader/program_cache.c',
   'src/shader/multipass_parse.c',
@@ -601,6 +603,14 @@ test_frame_clock_exe = executable('test_frame_clock',
 )
 
 test('frame_clock', test_frame_clock_exe)
+
+test_shader_diag_exe = executable('test_shader_diag',
+  files('tests/test_shader_diag.c', 'src/shader/shader_diag.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+)
+
+test('shader_diag', test_shader_diag_exe)
 
 # The control socket end to end: request/reply, a stuck client can't wedge it,
 # oversize and malformed lines are refused, a live socket isn't stolen and a

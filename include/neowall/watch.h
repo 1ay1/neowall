@@ -35,6 +35,14 @@ bool watch_consume(int fd);
  * stdout. On failure the previous shader keeps rendering. */
 void watch_reload(struct neowall_state *state, const char *path);
 
+/* Print the last shader compile errors against `source` (the file at path),
+ * readably: file:line, source line with a caret, and a "did you mean". */
+void watch_print_errors(const char *source, const char *path);
+
+/* Load a placeholder shader through a config written at config_path, for a
+ * watched file that doesn't compile yet. The next good save replaces it. */
+bool watch_load_placeholder(struct neowall_state *state, const char *config_path);
+
 /* Release watch resources. */
 void watch_cleanup(int fd);
 

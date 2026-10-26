@@ -92,6 +92,13 @@ const char *mp_find_function_end(const char *start) {
     return p;
 }
 
+/* 1-based line number of `at` inside `source`. */
+static int mp_line_of(const char *source, const char *at) {
+    int line = 1;
+    for (const char *p = source; p < at && *p; p++) line += *p == '\n';
+    return line;
+}
+
 char *mp_extract_substring(const char *start, const char *end) {
     if (!start || !end || end <= start) return NULL;
     size_t len = (size_t)(end - start);
@@ -169,6 +176,7 @@ multipass_parse_result_t *multipass_parse_shader(const char *source) {
         result->is_multipass = false;
         result->pass_count = 1;
         result->pass_sources[0] = mp_str_dup(source);
+        result->pass_first_line[0] = 1;
         result->pass_types[0] = PASS_TYPE_IMAGE;
         return result;
     }
@@ -252,52 +260,37 @@ multipass_parse_result_t *multipass_parse_shader(const char *source) {
         log_info("Pass %d assigned type: %s", pass_index, multipass_type_name(detected_type));
 
         if (pass_index > 0) {
-            /* For passes after the first, include every helper-function block
-             * that lives between previous mainImage end and this mainImage
-             * start. mainImages themselves are excluded. */
-            const char *helpers_end = line_start;
-            size_t max_helpers_len = 0;
-            const char *helpers_start_dbg = main_ends[0];
-            (void)helpers_start_dbg;
-            (void)helpers_end;
-            if (line_start > main_ends[0]) max_helpers_len = (size_t)(line_start - main_ends[0]);
-
-            char *helpers_only = NULL;
-            size_t helpers_only_len = 0;
-
-            if (max_helpers_len > 0) {
-                helpers_only = malloc(max_helpers_len + 1);
-                if (helpers_only) {
-                    helpers_only[0] = '\0';
-                    for (int prev = 0; prev < pass_index; prev++) {
-                        const char *seg_start = main_ends[prev];
-                        const char *seg_end = line_starts[prev + 1];
-                        if (seg_end > seg_start) {
-                            size_t seg_len = (size_t)(seg_end - seg_start);
-                            memcpy(helpers_only + helpers_only_len, seg_start, seg_len);
-                            helpers_only_len += seg_len;
-                        }
-                    }
-                    helpers_only[helpers_only_len] = '\0';
-                }
-            }
-
-            size_t main_len = (size_t)(func_end - line_start);
-            size_t total_len = helpers_only_len + main_len + 16;
-
-            char *combined = malloc(total_len);
+            /* Every helper block between earlier passes, then this pass. Each
+             * piece is preceded by a #line naming where it sits in the file,
+             * so the compiler reports errors as real file lines even though
+             * the pieces are glued together. */
+            size_t cap = (size_t)(func_end - source) + (size_t)(pass_index + 1) * 24 + 1;
+            char *combined = malloc(cap);
             if (combined) {
-                combined[0] = '\0';
-                if (helpers_only && helpers_only_len > 0) strcat(combined, helpers_only);
-                strncat(combined, line_start, main_len);
+                size_t n = 0;
+                for (int prev = 0; prev < pass_index; prev++) {
+                    const char *seg_start = main_ends[prev];
+                    const char *seg_end = line_starts[prev + 1];
+                    if (seg_end <= seg_start) continue;
+                    n += (size_t)snprintf(combined + n, cap - n, "#line %d\n",
+                                          mp_line_of(source, seg_start));
+                    memcpy(combined + n, seg_start, (size_t)(seg_end - seg_start));
+                    n += (size_t)(seg_end - seg_start);
+                }
+                n += (size_t)snprintf(combined + n, cap - n, "#line %d\n",
+                                      mp_line_of(source, line_start));
+                memcpy(combined + n, line_start, (size_t)(func_end - line_start));
+                n += (size_t)(func_end - line_start);
+                combined[n] = '\0';
                 result->pass_sources[pass_index] = combined;
+                result->pass_first_line[pass_index] = -1;   /* has its own #line */
             } else {
                 result->pass_sources[pass_index] = mp_extract_substring(line_start, func_end);
+                result->pass_first_line[pass_index] = mp_line_of(source, line_start);
             }
-
-            free(helpers_only);
         } else {
             result->pass_sources[pass_index] = mp_extract_substring(line_start, func_end);
+            result->pass_first_line[pass_index] = mp_line_of(source, line_start);
         }
 
         result->pass_types[pass_index] = detected_type;

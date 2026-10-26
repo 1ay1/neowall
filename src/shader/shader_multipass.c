@@ -39,9 +39,27 @@
 
 static inline void clear_error_log(void) { shader_error_log_clear(); }
 
+static const char *multipass_wrapper_prefix_ref(void);
+
 #define append_to_error_log shader_error_log_append
 
 const char *multipass_get_error_log(void) { return shader_error_log_get(); }
+
+/* Every chunk of GLSL neowall puts in front of a shader, for tools that need
+ * to know which names exist (error suggestions, `neowall docs`). */
+size_t multipass_preamble_chunks(const char **out, size_t max) {
+    const char *all[] = {
+        multipass_wrapper_prefix_ref(), neowall_reactive_uniforms,
+        neowall_glsl_stdlib, neowall_glsl_stdlib2, neowall_glsl_stdlib3,
+        neowall_glsl_stdlib4, neowall_glsl_stdlib5, neowall_glsl_stdlib6,
+        neowall_glsl_stdlib7, neowall_glsl_stdlib8, neowall_glsl_stdlib8a2,
+        neowall_glsl_stdlib8c, neowall_glsl_stdlib8d,
+    };
+    size_t n = sizeof(all) / sizeof(all[0]);
+    if (n > max) n = max;
+    for (size_t i = 0; i < n; i++) out[i] = all[i];
+    return n;
+}
 
 /* ============================================
  * Shader Compilation Utilities
@@ -555,6 +573,8 @@ static const char *multipass_wrapper_prefix =
     "out vec4 fragColor;\n"
     "\n";
 
+static const char *multipass_wrapper_prefix_ref(void) { return multipass_wrapper_prefix; }
+
 static const char *multipass_wrapper_suffix =
     "\n"
     "void main() {\n"
@@ -586,6 +606,7 @@ static char *fix_shadertoy_compatibility(const char *source) {
  * redefined", issue #82), so we scan the user's source first and withhold any
  * alias whose name is already taken. Shader wins; nw* stays available. */
 static char *wrap_pass_source(const char *common, const char *pass_source,
+                              int pass_first_line,
                               const char *user_uniform_decls) {
     /* Which friendly aliases can we safely emit? Scan both the Common block and
      * the pass body: in GLSL they are concatenated into one translation unit,
@@ -704,10 +725,16 @@ static char *wrap_pass_source(const char *common, const char *pass_source,
     }
     strcat(wrapped, "\n");
 
-    /* Apply compatibility fixes to pass source. Reset line numbering again so a
-     * single-file shader's errors read as "line N" of that file. */
+    /* Apply compatibility fixes to pass source. #line points the compiler at
+     * the pass's real place in the file, so errors read as file lines. A
+     * pass glued from pieces carries its own #line directives (first_line < 0). */
     if (pass_source) {
-        strcat(wrapped, "#line 1\n");
+        if (pass_first_line >= 0) {
+            char directive[32];
+            snprintf(directive, sizeof(directive), "#line %d\n",
+                     pass_first_line > 0 ? pass_first_line : 1);
+            strcat(wrapped, directive);
+        }
         char *fixed_pass = fix_shadertoy_compatibility(pass_source);
         if (fixed_pass) {
             strcat(wrapped, fixed_pass);
@@ -811,6 +838,7 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
         pass->type = parse_result->pass_types[i];
         pass->name = str_dup(multipass_type_name(pass->type));
         pass->source = str_dup(parse_result->pass_sources[i]);
+        pass->first_line = parse_result->pass_first_line[i];
         pass->is_compiled = false;
 
         /*
@@ -1575,7 +1603,7 @@ bool multipass_compile_pass(multipass_shader_t *shader, int pass_index) {
         }
     }
 
-    char *wrapped = wrap_pass_source(shader->common_source, pass->source,
+    char *wrapped = wrap_pass_source(shader->common_source, pass->source, pass->first_line,
                                      user_decls[0] ? user_decls : NULL);
     if (!wrapped) {
         pass->compile_error = str_dup("Failed to allocate memory for shader wrapping");

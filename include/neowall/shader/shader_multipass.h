@@ -163,6 +163,7 @@ typedef struct {
     multipass_type_t type;
     char *name;                              /* Pass name (e.g., "Buffer A") */
     char *source;                            /* GLSL source code for this pass */
+    int first_line;                          /* file line where source starts (0 = unknown) */
     multipass_channel_t channels[MULTIPASS_MAX_CHANNELS];
     GLuint program;                          /* Compiled shader program */
     GLuint fbo;                              /* Framebuffer object (NULL for Image pass) */
@@ -301,6 +302,7 @@ typedef struct {
     bool is_multipass;                       /* True if multiple passes detected */
     int pass_count;                          /* Number of passes found */
     char *pass_sources[MULTIPASS_MAX_PASSES]; /* Extracted source for each pass */
+    int pass_first_line[MULTIPASS_MAX_PASSES]; /* 1-based line in the file where it starts (0 = unknown) */
     multipass_type_t pass_types[MULTIPASS_MAX_PASSES];
     char *common_source;                     /* Common code (if any) */
     char *error_message;                     /* Parse error (if any) */
@@ -852,5 +854,9 @@ bool multipass_save_state(multipass_shader_t *shader);
  * Returns true if the shader runs on this build. On failure, logs what is
  * required vs. what is running. A shader with no pragma always returns true. */
 bool shader_check_required_version(const char *source, const char *shader_path);
+
+/* Every chunk of GLSL neowall puts in front of a shader (uniforms, helper
+ * library, scene kit). Fills out[] and returns the count. */
+size_t multipass_preamble_chunks(const char **out, size_t max);
 
 #endif /* SHADER_MULTIPASS_H */

@@ -77,11 +77,20 @@ static void log_message(const char *level, const char *color,
     fflush(stderr);
 }
 
+/* While set, log_error is demoted to debug: the caller reports the problem
+ * itself, in a better form. Loop thread only. */
+static bool g_quiet_errors = false;
+void log_quiet_errors(bool quiet) { g_quiet_errors = quiet; }
+
 /* Log error message */
 void log_error(const char *format, ...) {
     va_list args;
     va_start(args, format);
-    log_message("ERROR", COLOR_RED, format, args);
+    if (g_quiet_errors) {
+        if (log_level >= LOG_LEVEL_DEBUG) log_message("DEBUG", COLOR_CYAN, format, args);
+    } else {
+        log_message("ERROR", COLOR_RED, format, args);
+    }
     va_end(args);
 }
 

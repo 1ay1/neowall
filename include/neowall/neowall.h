@@ -137,6 +137,7 @@ enum transition_type transition_type_from_string(const char *str);
 #define LOG_LEVEL_DEBUG 3
 
 void log_error(const char *format, ...);
+void log_quiet_errors(bool quiet);
 void log_warn(const char *format, ...);
 void log_info(const char *format, ...);
 void log_debug(const char *format, ...);
