@@ -50,6 +50,13 @@ typedef struct {
  */
 bool shader_clock_should_rebase(const shader_clock_state *st, double threshold_seconds);
 
+/* True when a VISIBLE output's clock has grown so large that it must be reset
+ * anyway, hidden window or not. The caller hides the jump with a cross-fade
+ * from a snapshot of the last old-clock frame. Never for a spanned member
+ * (the group owns its clock), and not while hidden, where the plain rebase
+ * above is free. */
+bool shader_clock_should_fade_rebase(const shader_clock_state *st, double threshold_seconds);
+
 /* True when a spanned output should adopt the group's shared epoch instead of
  * rebasing on its own. Members of a span must agree on iTime or the seam
  * between two halves of one scene shows a phase gap. */

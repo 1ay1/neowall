@@ -288,6 +288,9 @@ struct output_state {
     shader_clock_tracker clock_tracker; /* Watches iTime for backward steps so a
                                          * visible "jumps back in time" glitch is
                                          * reported with its cause. Main-thread only. */
+    GLuint   clock_fade_tex;            /* Last frame before a visible clock reset */
+    uint64_t clock_fade_start;          /* ms; >0 while it fades out over the new clock */
+    bool     clock_fade_rebased;        /* Tell the tracker the next jump is a rebase */
     char pending_shader_path[OUTPUT_MAX_PATH_LENGTH];  /* Next shader to load after fade-out */
     float transition_progress;
     uint64_t frames_rendered;

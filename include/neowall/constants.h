@@ -58,13 +58,19 @@
  * Naively wrapping iTime does NOT work: shaders use fractional frequencies
  * (sin(0.9*iTime)), so any fixed period leaves a phase discontinuity for all
  * but exact-integer rates -- a visible jolt every wrap. Instead the renderer
- * rebases only while the shader is NOT visible (occluded or paused), where a
- * discontinuity cannot be seen, and otherwise lets iTime run. That bounds the
- * magnitude in practice without ever introducing a visible jump.
+ * rebases while the shader is NOT visible (occluded or paused), where a
+ * discontinuity cannot be seen. A wallpaper that is never hidden falls back
+ * to the faded reset below.
  *
  * Shaders needing genuinely long-scale time should read the calendar uniforms
  * (iDate/iTimeOfDay/iDayFraction), which are unwrapped at the source. */
 #define SHADER_TIME_REBASE_SECONDS 3600.0
+
+/* A wallpaper that is never hidden gets no free rebase, and after days iTime
+ * only moves in 60+ ms steps. Past this it is reset in view, behind a short
+ * cross-fade from the last old-clock frame. */
+#define SHADER_TIME_FADE_REBASE_SECONDS 7200.0
+#define SHADER_TIME_FADE_MS 1200
 
 /* Resolve a config shader_fps value with the project default fallback.
  * Centralized so we don't have four copies of `? FPS_TARGET` / `? 60`. */

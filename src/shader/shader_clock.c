@@ -21,6 +21,15 @@ bool shader_clock_should_rebase(const shader_clock_state *st,
     return true;
 }
 
+bool shader_clock_should_fade_rebase(const shader_clock_state *st,
+                                     double threshold_seconds) {
+    if (!st) return false;
+    if (!(st->elapsed_seconds > threshold_seconds)) return false;
+    if (st->spanned) return false;
+    if (st->occluded_now || st->paused_now) return false;
+    return true;
+}
+
 bool shader_clock_defers_to_group(const shader_clock_state *st) {
     return st && st->spanned;
 }

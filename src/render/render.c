@@ -426,6 +426,12 @@ void render_cleanup_output(struct output_state *output) {
         glDeleteVertexArrays(1, &output->vao);
         output->vao = 0;
     }
+    output->clock_fade_rebased = false;
+    output->clock_fade_start = 0;
+    if (output->clock_fade_tex) {
+        glDeleteTextures(1, &output->clock_fade_tex);
+        output->clock_fade_tex = 0;
+    }
 
     /* Delete textures */
     if (output->texture != 0) {
@@ -899,6 +905,75 @@ static void calculate_vertex_coords(struct output_state *output, float vertices[
 /* Render shader wallpaper frame using multipass system
  * Matches gleditor's on_gl_render exactly for consistent behavior */
 
+/* Fullscreen blit with constant alpha, for the clock-reset cross-fade. */
+static const char *clock_fade_vs =
+    "#version 330 core\n"
+    "out vec2 uv;\n"
+    "void main() {\n"
+    "    vec2 p = vec2((gl_VertexID & 1) * 2.0, (gl_VertexID >> 1) * 2.0);\n"
+    "    uv = p;\n"
+    "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+    "}\n";
+static const char *clock_fade_fs =
+    "#version 330 core\n"
+    "in vec2 uv;\n"
+    "out vec4 fragColor;\n"
+    "uniform sampler2D tex;\n"
+    "uniform float alpha;\n"
+    "void main() { fragColor = vec4(texture(tex, uv).rgb, alpha); }\n";
+static GLuint clock_fade_program = 0;
+static GLuint clock_fade_vao = 0;
+
+/* Copy what's in the back buffer now (the last frame on the old clock). */
+static bool clock_fade_capture(struct output_state *output, int w, int h) {
+    if (!output->clock_fade_tex) glGenTextures(1, &output->clock_fade_tex);
+    glBindTexture(GL_TEXTURE_2D, output->clock_fade_tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glReadBuffer(GL_BACK);
+    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 0, 0, w, h, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return glGetError() == GL_NO_ERROR;
+}
+
+/* Draw the captured frame over the new one, fading out. */
+static void clock_fade_draw(struct output_state *output, int w, int h, float alpha) {
+    if (!clock_fade_program) {
+        if (!shader_create_program_from_sources(clock_fade_vs, clock_fade_fs, &clock_fade_program))
+            return;
+        glGenVertexArrays(1, &clock_fade_vao);
+    }
+    GLint prev_prog = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &prev_prog);
+    GLboolean blend = glIsEnabled(GL_BLEND);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, w, h);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glUseProgram(clock_fade_program);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, output->clock_fade_tex);
+    glUniform1i(glGetUniformLocation(clock_fade_program, "tex"), 0);
+    glUniform1f(glGetUniformLocation(clock_fade_program, "alpha"), alpha);
+    glBindVertexArray(clock_fade_vao);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glBindVertexArray(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    if (!blend) glDisable(GL_BLEND);
+    glUseProgram((GLuint)prev_prog);
+}
+
+static void clock_fade_release(struct output_state *output) {
+    if (output->clock_fade_tex) {
+        glDeleteTextures(1, &output->clock_fade_tex);
+        output->clock_fade_tex = 0;
+    }
+    output->clock_fade_start = 0;
+}
+
 bool render_frame_shader(struct output_state *output) {
     if (!output || !output->multipass_shader) {
         log_error("Invalid output or multipass shader for render_frame_shader");
@@ -1021,6 +1096,16 @@ bool render_frame_shader(struct output_state *output) {
                       output_get_identifier(output));
         }
         output->shader_hidden_since = 0;
+    } else if (!output->clock_fade_start && output->clock_fade_rebased) {
+        /* Last frame on the old clock was captured; switch now. The old
+         * frame fades out on top of the new clock. */
+        output->clock_fade_rebased = false;
+        output->shader_start_time = get_time_ms();
+        output->clock_fade_start = output->shader_start_time;
+        current_time = 0.0;
+        did_rebase = true;
+        log_info("Reset shader clock on %s behind a cross-fade (float32 precision)",
+                 output_get_identifier(output));
     }
 
     /* Watch the value actually handed to the shader. iTime must never move
@@ -1091,6 +1176,22 @@ bool render_frame_shader(struct output_state *output) {
                      (float)current_time,
                      mouse_x, mouse_y,
                      false);  /* mouse_click */
+
+    if (output->clock_fade_start) {
+        float k = (float)(get_time_ms() - output->clock_fade_start) / (float)SHADER_TIME_FADE_MS;
+        if (k >= 1.0f) {
+            clock_fade_release(output);
+        } else {
+            float a = 1.0f - k;
+            clock_fade_draw(output, width, height, a * a * (3.0f - 2.0f * a));
+        }
+    } else if (!did_rebase && !output->clock_fade_rebased &&
+               shader_clock_should_fade_rebase(&clock_st, SHADER_TIME_FADE_REBASE_SECONDS)) {
+        /* Visible for hours with no hidden window to rebase in, so float32
+         * iTime is getting coarse. Keep this frame (still on the old clock)
+         * and reset on the next one, behind a cross-fade from it. */
+        output->clock_fade_rebased = clock_fade_capture(output, width, height);
+    }
 
     /* Log every 600 frames to confirm rendering is happening */
     static int frame_count = 0;

@@ -299,11 +299,35 @@ static void test_event_names(void) {
     CHECK(strcmp(shader_clock_event_name(SHADER_CLOCK_JUMP_UNKNOWN), "UNKNOWN") == 0);
 }
 
+/* A wallpaper that is always on screen never gets the free hidden rebase, so
+ * past the fade threshold it must reset in view (behind a cross-fade). Not
+ * while hidden (the free path handles that) and never for a span member. */
+static void test_fade_rebase_when_never_hidden(void) {
+    shader_clock_state st = {.elapsed_seconds = 900000.0};
+    CHECK_MSG(shader_clock_should_fade_rebase(&st, 7200.0),
+              "a visible output 10 days in must reset behind a fade");
+    CHECK_MSG(!shader_clock_should_rebase(&st, THRESHOLD),
+              "...and never through the unfaded path");
+    st.elapsed_seconds = 7000.0;
+    CHECK(!shader_clock_should_fade_rebase(&st, 7200.0));
+    st.elapsed_seconds = 900000.0;
+    st.occluded_now = true;
+    CHECK(!shader_clock_should_fade_rebase(&st, 7200.0));
+    st.occluded_now = false;
+    st.paused_now = true;
+    CHECK(!shader_clock_should_fade_rebase(&st, 7200.0));
+    st.paused_now = false;
+    st.spanned = true;
+    CHECK(!shader_clock_should_fade_rebase(&st, 7200.0));
+    CHECK(!shader_clock_should_fade_rebase(NULL, 7200.0));
+}
+
 int main(void) {
     test_visible_output_never_rebases();
     test_long_uptime_alone_does_not_rebase();
     test_threshold();
     test_paused_counts_as_hidden();
+    test_fade_rebase_when_never_hidden();
     test_spanned_defers_to_group();
     test_degenerate_inputs();
     test_full_truth_table();
