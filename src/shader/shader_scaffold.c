@@ -263,6 +263,8 @@ bool neowall_scaffold_create(const char *name, const char *template_name, bool f
     printf("  neowall watch %s.glsl        # live-reload while you edit\n", stem);
     printf("\nUse it as your wallpaper:\n");
     printf("  default {\n    shader %s.glsl\n  }\n", stem);
-    printf("\nReference: docs/SHADER_NOTES.md\n");
+    printf("\nSee what you can use:\n");
+    printf("  neowall docs              # every helper and uniform\n");
+    printf("  neowall docs noise        # search\n");
     return true;
 }
