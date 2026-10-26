@@ -115,6 +115,11 @@ Finally it unrefs every snapshotted output.
 These are independent: a paused wallpaper with a frozen shader on an
 occluded output draws nothing and wakes only for its timers.
 
+A terminal wallpaper idles too: once its child has been quiet past the FX
+settle window it clears its dirty bit and the loop sleeps. The terminal's
+reader thread calls `on_output` when the child writes, which posts a redraw
+for that output, so new output still shows within a frame.
+
 | state | stops | set by |
 |---|---|---|
 | cycle pause | wallpaper cycling: no `CYCLE_DUE` subscriptions | `pause` / `resume` |

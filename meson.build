@@ -857,6 +857,21 @@ if has_terminal
   )
   test('terminal_screen', test_terminal_exe)
 
+  # The terminal's output hook on a real PTY: the reader thread calls it when
+  # the child writes, and not while it's quiet. A settled terminal sleeps and
+  # relies on this to wake.
+  test_terminal_wake_exe = executable('test_terminal_wake',
+    files('tests/test_terminal_wake.c',
+          'src/terminal/pty.c',
+          'src/terminal/screen.c',
+          'src/terminal/vtparse.c'),
+    include_directories: [inc_dirs, inc_dirs_build,
+                          include_directories('src/terminal')],
+    dependencies: [util_dep, thread_dep],
+    build_by_default: false,
+  )
+  test('terminal_wake', test_terminal_wake_exe)
+
   # Glyph atlas: real font rasterization (stb_truetype). Links the relaxed-
   # warning glyph lib. SKIPs (exit 77) if no system monospace font is present.
   test_glyph_exe = executable('test_glyph_atlas',

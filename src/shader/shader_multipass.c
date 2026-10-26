@@ -382,6 +382,8 @@ nw_result multipass_attach_terminal(multipass_shader_t *shader,
     if (shader->term_font_italic) o.font_italic_path = shader->term_font_italic;
     if (shader->term_has_fg) o.default_fg = shader->term_fg;
     if (shader->term_has_bg) o.default_bg = shader->term_bg;
+    o.on_output = shader->term_on_output;
+    o.on_output_ctx = shader->term_on_output_ctx;
     nw_result err = nw_ok();
     shader->term = term_render_create(&o, &err);
     if (!shader->term) {

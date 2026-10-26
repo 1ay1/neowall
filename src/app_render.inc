@@ -428,11 +428,17 @@ static void render_outputs(struct app *a) {
 
         /* Reset needs_redraw unless we're in a transition or using an animated
          * (shader / terminal) wallpaper. Animated wallpapers keep needs_redraw
-         * set so the loop re-renders them every frame — a terminal must be
-         * re-pumped continuously or it freezes on its first frame. */
+         * set so the loop re-renders them every frame. A terminal that has
+         * settled is the exception: it clears the bit so the loop can sleep
+         * until the child writes (mark_animated sets it again then). Leaving it
+         * set redrew an idle terminal every frame-callback timeout, forever. */
+        bool term_settled = output->config->type == WALLPAPER_TERMINAL &&
+                            output->multipass_shader && output->frames_rendered > 0 &&
+                            !multipass_terminal_animating(output->multipass_shader,
+                                                          kTermFxSettleMs);
         if ((output->transition_start_time == 0 ||
              output->config->transition == TRANSITION_NONE) &&
-            !wallpaper_is_animated(output->config->type)) {
+            (!wallpaper_is_animated(output->config->type) || term_settled)) {
             atomic_store_explicit(&output->needs_redraw, false, memory_order_release);
         }
     }

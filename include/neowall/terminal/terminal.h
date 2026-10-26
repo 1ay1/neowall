@@ -104,6 +104,11 @@ typedef struct term_spawn_opts {
     int         scrollback;   /* scrollback lines to retain (0 = none) */
     const char *term_env;     /* value for TERM (default "xterm-256color") */
     const char *cwd;          /* working directory for the child (NULL = inherit) */
+    /* Called on the READER thread after the child's output changed the grid
+     * (optional). Must be thread-safe and cheap: it's how an idle-gated
+     * renderer that has gone to sleep learns there is something to draw. */
+    void      (*on_output)(void *ctx);
+    void       *on_output_ctx;
 } term_spawn_opts;
 
 /* Spawn `opts.cmd` under a fresh PTY and start the reader thread. On success

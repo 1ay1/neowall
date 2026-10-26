@@ -57,6 +57,10 @@ struct terminal {
     term_frame  frame;
     uint64_t    epoch;
     atomic_ullong dirty_epoch;  /* bumped by reader when grid changes */
+
+    /* Set once at spawn, read by the reader thread only. */
+    void (*on_output)(void *ctx);
+    void  *on_output_ctx;
 };
 
 /* ------------------------------------------------------------------------ */
@@ -120,6 +124,7 @@ static void *reader_main(void *arg) {
                 pthread_mutex_unlock(&t->lock);
                 if (rlen > 0) (void)write_reply(t, reply, rlen);
                 atomic_fetch_add(&t->dirty_epoch, 1);
+                if (t->on_output) t->on_output(t->on_output_ctx);
             } else if (n == 0) {
                 /* EOF: child closed the PTY. */
                 break;
@@ -155,6 +160,8 @@ nw_result term_spawn(const term_spawn_opts *opts, terminal **out) {
     t->master_fd = -1;
     t->selfpipe[0] = t->selfpipe[1] = -1;
     t->cols = cols; t->rows = rows;
+    t->on_output = opts->on_output;
+    t->on_output_ctx = opts->on_output_ctx;
 
     t->screen = term_screen_create(cols, rows);
     if (!t->screen) { free(t); return nw_err(NW_ERR_OOM, "term_spawn: screen"); }

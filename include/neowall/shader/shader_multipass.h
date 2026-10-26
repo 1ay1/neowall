@@ -223,6 +223,10 @@ typedef struct {
     char  *term_font_italic;
     long   term_fg, term_bg;                 /* 0xRRGGBB when *_has_* is set */
     bool   term_has_fg, term_has_bg;
+    /* Called on the terminal's reader thread when the child wrote something
+     * (optional; see term_spawn_opts.on_output). Not owned. */
+    void (*term_on_output)(void *ctx);
+    void  *term_on_output_ctx;
     float  term_fx[4];                       /* bloom, scanline, crt-curve, chromatic (0 = off) */
     float  term_fade;                        /* change-driven fade intensity (0 = off) */
     int    term_cursor_px, term_cursor_py;   /* last cursor cell, for slide interpolation */

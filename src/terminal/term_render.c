@@ -88,6 +88,8 @@ struct term_render {
     char        *cmd;
     char        *cwd;
     char        *term_env;
+    void       (*on_output)(void *ctx);
+    void        *on_output_ctx;
     double       exit_at;     /* monotonic secs when the child was seen exited (0 = alive) */
     int          restart_count;
 
@@ -207,7 +209,10 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
         .cmd = opts->cmd, .cols = tr->cols, .rows = tr->rows,
         .scrollback = 0, .term_env = opts->term_env,
         .cwd = opts->cwd,
+        .on_output = opts->on_output, .on_output_ctx = opts->on_output_ctx,
     };
+    tr->on_output = opts->on_output;
+    tr->on_output_ctx = opts->on_output_ctx;
     nw_result r = term_spawn(&so, &tr->term);
     if (nw_is_err(r)) {
         if (err_out) *err_out = r;
@@ -268,6 +273,7 @@ static bool term_render_respawn(term_render *tr) {
     term_spawn_opts so = {
         .cmd = tr->cmd, .cols = tr->cols, .rows = tr->rows,
         .scrollback = 0, .term_env = tr->term_env, .cwd = tr->cwd,
+        .on_output = tr->on_output, .on_output_ctx = tr->on_output_ctx,
     };
     nw_result r = term_spawn(&so, &tr->term);
     if (nw_is_err(r)) { tr->term = NULL; return false; }

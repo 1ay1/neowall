@@ -6,6 +6,7 @@
 #include <sys/timerfd.h>
 #include <unistd.h>
 #include "neowall/neowall.h"
+#include "neowall/app.h"
 #include "neowall/output/output.h"
 #include "neowall/image/image.h"    /* For struct image_data definition */
 #include "neowall/compositor/compositor.h"
@@ -1259,6 +1260,11 @@ static const char *kTermCrispShader =
     "    fragColor = vec4(nwTermFX(uv), 1.0);\n"
     "}\n";
 
+/* The terminal reader thread calls this when the child wrote something. */
+static void terminal_output_woke(void *ctx) {
+    app_request_output_redraw((struct output_state *)ctx);
+}
+
 nw_result output_set_terminal(struct output_state *output, const char *cmd,
                               const char *shader_path, const char *font_path,
                               int cols, int rows) {
@@ -1388,6 +1394,12 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
      * updating numbers glide, which is the biggest "feels alive" win. */
     candidate->term_fade =
         output->config->term_fade     >= 0.0f ? output->config->term_fade     : 0.5f;
+
+    /* A settled terminal stops redrawing and lets the loop sleep. Its child's
+     * output is what wakes it: the reader thread posts a redraw for this
+     * output. */
+    candidate->term_on_output = terminal_output_woke;
+    candidate->term_on_output_ctx = output;
 
     /* Attach the terminal BEFORE init_gl (init creates the cell/atlas textures
      * sized to the grid) and before compile (nwTerm uniforms must resolve). */

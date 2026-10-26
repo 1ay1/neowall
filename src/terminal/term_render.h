@@ -48,6 +48,10 @@ typedef struct term_render_opts {
     /* optional default fg/bg override (each -1 = use built-in). RGB packed 0xRRGGBB. */
     long           default_fg;
     long           default_bg;
+    /* optional: called on the reader thread when the child's output changed
+     * the grid (see term_spawn_opts). Kept across respawns. */
+    void         (*on_output)(void *ctx);
+    void          *on_output_ctx;
 } term_render_opts;
 
 /* Spawn the terminal + build the atlas. NULL on failure. */
