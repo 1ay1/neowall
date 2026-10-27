@@ -86,9 +86,9 @@ default {
   # Set to 'none' to disable transitions
   # transition fade
 
-  # Transition duration in milliseconds (optional, default: 300)
-  # Examples: 100 (fast), 300 (default), 500 (smooth), 1000 (slow)
-  transition_duration 300
+  # Transition duration in seconds (optional, default: 0.3, max 10)
+  # Examples: 0.1 (fast), 0.3 (default), 0.5 (smooth), 1.0 (slow)
+  transition_duration 0.3
 
   # Randomise the cycle order for directory cycling (optional, default: false).
   # Works for both image directories and shader directories. The list is
