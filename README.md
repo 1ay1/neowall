@@ -303,6 +303,7 @@ Docs:
 | [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | what costs what, and what to do about it |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | layout, threading, locks, conventions |
 | [`docs/architecture/RUNTIME.md`](docs/architecture/RUNTIME.md) | the event loop and its rules |
+| [`docs/architecture/MODERN_C.md`](docs/architecture/MODERN_C.md) | where the C architecture is headed, and why |
 | [`docs/MULTI_MONITOR_SYNC.md`](docs/MULTI_MONITOR_SYNC.md) | spanning one scene across monitors |
 | [`docs/PACKAGING.md`](docs/PACKAGING.md) | distro packaging and releases |
 
