@@ -127,7 +127,6 @@ bool           term_render_mouse(term_render *tr, int px, int py,
                                  int button, bool pressed, bool motion);
 
 /* True if the child enabled any mouse reporting mode. */
-bool           term_render_wants_mouse(const term_render *tr);
 
 /* Write raw key bytes to the child (already encoded by the caller). */
 bool           term_render_write(term_render *tr, const void *bytes, size_t len);

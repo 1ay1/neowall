@@ -369,15 +369,6 @@ nw_result term_write(terminal *t, const void *bytes, size_t len) {
     return off == len ? nw_ok() : nw_err(NW_ERR_IO, "term_write: short write");
 }
 
-bool term_wants_mouse(const terminal *t) {
-    if (!t) return false;
-    int proto = 0;
-    pthread_mutex_lock(&((terminal *)t)->lock);
-    term_screen_mouse_mode(t->screen, &proto, NULL);
-    pthread_mutex_unlock(&((terminal *)t)->lock);
-    return proto != 0;
-}
-
 bool term_mouse(terminal *t, int cell_x, int cell_y, int button, bool pressed, bool motion) {
     if (!t || t->master_fd < 0) return false;
 

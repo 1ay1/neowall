@@ -23,6 +23,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check every version reference agrees with meson.build
         run: ./scripts/version.sh check
+      - name: No unused functions
+        run: ./scripts/check-unused.sh
 
   sanitizers:
     name: ASan + UBSan (unit tests)

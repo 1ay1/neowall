@@ -278,25 +278,6 @@ void adaptive_set_target_fps(adaptive_state_t *state, float fps) {
     state->calibration_sum = 0.0f;
 }
 
-void adaptive_set_mode(adaptive_state_t *state, adaptive_mode_t mode) {
-    if (!state) return;
-    
-    float saved_fps = state->config.target_fps;
-    float saved_min = state->config.min_scale;
-    float saved_max = state->config.max_scale;
-    bool saved_verbose = state->config.verbose_logging;
-    
-    state->config = adaptive_config_for_mode(mode);
-    
-    /* Preserve user settings */
-    state->config.target_fps = saved_fps;
-    state->config.min_scale = saved_min;
-    state->config.max_scale = saved_max;
-    state->config.verbose_logging = saved_verbose;
-    
-    compute_quantized_levels(state);
-}
-
 void adaptive_set_enabled(adaptive_state_t *state, bool enabled) {
     if (!state) return;
     state->enabled = enabled;
@@ -859,60 +840,7 @@ float adaptive_get_target_scale(const adaptive_state_t *state) {
     return state ? state->target_scale : 1.0f;
 }
 
-float adaptive_get_current_fps(const adaptive_state_t *state) {
-    if (!state || state->avg_frame_time <= 0.0f) return 0.0f;
-    return 1000.0f / state->avg_frame_time;
-}
-
 bool adaptive_is_stable(const adaptive_state_t *state) {
     return state ? state->is_locked : false;
-}
-
-adaptive_stats_t adaptive_get_stats(const adaptive_state_t *state) {
-    adaptive_stats_t stats = {0};
-    if (!state) return stats;
-    
-    stats.current_fps = adaptive_get_current_fps(state);
-    stats.current_scale = state->current_scale;
-    stats.current_scale_percent = state->current_scale * 100.0f;
-    stats.current_level = state->current_level_index;
-    
-    stats.avg_frame_time_ms = state->avg_frame_time;
-    stats.p95_frame_time_ms = state->p95_frame_time;
-    stats.gpu_frame_time_ms = state->last_gpu_time_ms;
-    stats.target_frame_time_ms = 1000.0f / state->config.target_fps;
-    stats.headroom_ms = stats.target_frame_time_ms * state->config.headroom_factor - stats.avg_frame_time_ms;
-    
-    stats.is_locked = state->is_locked;
-    stats.is_emergency = state->in_emergency;
-    stats.is_thermal_throttling = state->thermal_throttling;
-    stats.gpu_timing_active = state->gpu_timing_available && state->config.use_gpu_timing;
-    
-    stats.stability_score = state->stability_score;
-    stats.pacing_score = state->pacing_score;
-    
-    stats.frame_time_velocity = state->frame_time_velocity;
-    stats.frame_time_accel = state->frame_time_accel;
-    
-    stats.total_frames = state->total_frames;
-    stats.upscale_count = state->total_upscales;
-    stats.downscale_count = state->total_downscales;
-    stats.emergency_count = state->total_emergency_triggers;
-    
-    return stats;
-}
-
-void adaptive_force_scale(adaptive_state_t *state, float scale) {
-    if (!state) return;
-    
-    scale = clampf(scale, state->config.min_scale, state->config.max_scale);
-    state->current_scale = scale;
-    state->target_scale = scale;
-    state->is_locked = true;
-    state->locked_scale = scale;
-    
-    if (state->config.use_quantized_levels) {
-        state->current_level_index = find_closest_level(state, scale);
-    }
 }
 

@@ -571,10 +571,6 @@ bool term_render_mouse(term_render *tr, int px, int py,
     return term_mouse(tr->term, cx, cy, button, pressed, motion);
 }
 
-bool term_render_wants_mouse(const term_render *tr) {
-    return tr ? term_wants_mouse(tr->term) : false;
-}
-
 bool term_render_write(term_render *tr, const void *bytes, size_t len) {
     if (!tr || !tr->term) return false;
     return nw_is_ok(term_write(tr->term, bytes, len));

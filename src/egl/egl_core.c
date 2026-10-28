@@ -16,27 +16,6 @@
  * Uses desktop OpenGL 3.3 Core profile for Shadertoy compatibility.
  */
 
-const char *egl_error_string(EGLint error) {
-    switch (error) {
-        case EGL_SUCCESS: return "Success";
-        case EGL_NOT_INITIALIZED: return "Not initialized";
-        case EGL_BAD_ACCESS: return "Bad access";
-        case EGL_BAD_ALLOC: return "Bad alloc";
-        case EGL_BAD_ATTRIBUTE: return "Bad attribute";
-        case EGL_BAD_CONFIG: return "Bad config";
-        case EGL_BAD_CONTEXT: return "Bad context";
-        case EGL_BAD_CURRENT_SURFACE: return "Bad current surface";
-        case EGL_BAD_DISPLAY: return "Bad display";
-        case EGL_BAD_MATCH: return "Bad match";
-        case EGL_BAD_NATIVE_PIXMAP: return "Bad native pixmap";
-        case EGL_BAD_NATIVE_WINDOW: return "Bad native window";
-        case EGL_BAD_PARAMETER: return "Bad parameter";
-        case EGL_BAD_SURFACE: return "Bad surface";
-        case EGL_CONTEXT_LOST: return "Context lost";
-        default: return "Unknown error";
-    }
-}
-
 bool egl_core_init(struct neowall_state *state) {
     if (!state) {
         log_error("Invalid state");

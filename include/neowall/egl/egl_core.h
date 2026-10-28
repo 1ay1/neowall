@@ -37,12 +37,4 @@ void egl_core_cleanup(struct neowall_state *state);
 bool egl_core_make_current(struct neowall_state *state, 
                            struct output_state *output);
 
-/**
- * Get human-readable error string
- * 
- * @param error EGL error code
- * @return Error string
- */
-const char *egl_error_string(EGLint error);
-
 #endif /* EGL_CORE_H */

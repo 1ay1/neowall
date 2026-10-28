@@ -140,7 +140,6 @@ bool term_mouse(terminal *t, int cell_x, int cell_y, int button, bool pressed, b
 
 /* True when the child has any mouse reporting enabled — lets the host avoid the
  * work of tracking/encoding motion when nobody is listening. */
-bool term_wants_mouse(const terminal *t);
 
 /* True once the child has exited (drives "restart the wallpaper command"). */
 bool term_child_exited(const terminal *t, int *exit_status_out);

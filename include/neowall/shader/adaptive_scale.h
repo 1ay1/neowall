@@ -248,7 +248,6 @@ void adaptive_destroy(adaptive_state_t *state);
 adaptive_config_t adaptive_default_config(void);
 adaptive_config_t adaptive_config_for_mode(adaptive_mode_t mode);
 void adaptive_set_target_fps(adaptive_state_t *state, float fps);
-void adaptive_set_mode(adaptive_state_t *state, adaptive_mode_t mode);
 void adaptive_set_enabled(adaptive_state_t *state, bool enabled);
 void adaptive_set_scale_range(adaptive_state_t *state, float min_scale, float max_scale);
 
@@ -266,12 +265,9 @@ void adaptive_submit_frame_time(adaptive_state_t *state, float frame_time_ms);
 /* Query state */
 float adaptive_get_scale(const adaptive_state_t *state);
 float adaptive_get_target_scale(const adaptive_state_t *state);
-float adaptive_get_current_fps(const adaptive_state_t *state);
 bool adaptive_is_stable(const adaptive_state_t *state);
-adaptive_stats_t adaptive_get_stats(const adaptive_state_t *state);
 
 /* Force scale (for debugging/override) */
-void adaptive_force_scale(adaptive_state_t *state, float scale);
 
 /* Thermal monitoring (Linux-specific) */
 float adaptive_read_gpu_temperature(void);
