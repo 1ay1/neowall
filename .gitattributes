@@ -1,0 +1,4 @@
+# Not part of release tarballs: third-party shaders under non-free or
+# unstated licenses (see contrib/shaders-unlicensed/README.md), so distros
+# can ship the tarball as is.
+contrib/shaders-unlicensed export-ignore
