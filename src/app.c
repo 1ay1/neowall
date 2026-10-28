@@ -23,6 +23,7 @@
 #include "neowall/neowall.h"
 #include "neowall/app.h"
 #include "neowall/ipc.h"
+#include "neowall/sd_notify.h"
 #include "neowall/runtime/rt.h"
 #include "neowall/watch.h"
 #include "neowall/shader/shader_multipass.h"
@@ -365,12 +366,14 @@ static bool app_update(void *self, rt_loop *loop, const rt_msg *m) {
     switch (m->kind) {
     case NW_MSG_QUIT:
         log_info("Shutting down");
+        nw_sd_notify("STOPPING=1");
         atomic_store_explicit(&state->running, false, memory_order_release);
         rt_quit(loop, 0);
         return true;
 
     case NW_MSG_RELOAD:
         log_info("Reloading configuration from %s", state->config_path);
+        nw_sd_notify("RELOADING=1");
         /* Last-known-good: the whole file is validated before anything is
          * applied, and a failure never falls back to the built-in default. */
         if (!config_reload(state, state->config_path)) {
@@ -379,6 +382,7 @@ static bool app_update(void *self, rt_loop *loop, const rt_msg *m) {
             log_info("Configuration reloaded");
             mark_redraw_all(state);
         }
+        nw_sd_notify("READY=1");
         return true;
 
     case NW_MSG_NEXT:
@@ -793,6 +797,7 @@ void app_run(struct neowall_state *state) {
         .wait_hint_ns = app_wait_hint,
     };
     log_info("Entering main loop");
+    nw_sd_notify("READY=1");
     rt_run(a.loop, &prog);
     log_info("Main loop stopped");
 

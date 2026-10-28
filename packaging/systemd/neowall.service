@@ -1,26 +1,27 @@
 [Unit]
-Description=NeoWall - Wallpaper Daemon
-Documentation=https://github.com/1ay1/neowall
-After=graphical-session.target
+Description=NeoWall shader wallpaper
+Documentation=man:neowall(1) https://github.com/1ay1/neowall
 PartOf=graphical-session.target
-
+After=graphical-session.target
+Requisite=graphical-session.target
 
 [Service]
-Type=simple
+# neowall stays in the foreground under systemd and reports READY=1 once
+# every output is up.
+Type=notify
+NotifyAccess=main
 ExecStart=@BINDIR@/neowall
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
-RestartSec=5
+RestartSec=2
+Slice=background-graphical.slice
 
-# Security hardening
-PrivateTmp=true
-ProtectSystem=strict
 NoNewPrivileges=true
+ProtectSystem=strict
 RestrictRealtime=true
-
-# Resource limits
-MemoryHigh=128M
-MemoryMax=256M
+LockPersonality=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=graphical-session.target

@@ -20,6 +20,7 @@
 #include "neowall/neowall.h"
 #include "neowall/app.h"
 #include "neowall/ipc.h"
+#include "neowall/sd_notify.h"
 #include "neowall/runtime/rt.h"
 #include "neowall/clock.h"
 #include "neowall/watch.h"
@@ -1367,7 +1368,11 @@ int main(int argc, char *argv[]) {
     }
 
     /* Daemonize if requested. The grandchild will rewrite the PID file to its
-     * own PID via update_pid_file() at the end of daemonize(). */
+     * own PID via update_pid_file() at the end of daemonize(). Under systemd
+     * we stay in the foreground: a fork looks like the service exiting. */
+    if (daemon_mode && nw_under_systemd()) {
+        daemon_mode = false;
+    }
     if (daemon_mode) {
         log_info("Running as daemon...");
         if (!daemonize()) {

@@ -172,6 +172,7 @@ core_sources = files(
   'src/main.c',
   'src/app.c',
   'src/ipc.c',
+  'src/sd_notify.c',
   'src/runtime/rt.c',
   'src/utils.c',
   'src/clock.c',
@@ -476,8 +477,14 @@ configured_service = configure_file(
   output: 'neowall.service',
   configuration: service_conf,
 )
-install_data(configured_service,
-  install_dir: get_option('prefix') / 'lib' / 'systemd' / 'user')
+# Prefer systemd's own user unit dir (correct on every distro), else the
+# conventional path under our prefix.
+systemd_dep = dependency('systemd', required: false)
+user_unit_dir = systemd_dep.found() ? \
+  systemd_dep.get_variable('systemd_user_unit_dir',
+    pkgconfig_define: ['prefix', get_option('prefix')]) : \
+  get_option('prefix') / 'lib' / 'systemd' / 'user'
+install_data(configured_service, install_dir: user_unit_dir)
 
 # =============================================================================
 # Custom Targets (matching Makefile's development targets)
@@ -588,6 +595,13 @@ test_ipc_exe = executable('test_ipc',
 )
 
 test('ipc', test_ipc_exe)
+
+# The systemd notify protocol, path and abstract sockets, without libsystemd.
+test('sd_notify', executable('test_sd_notify',
+  files('tests/test_sd_notify.c', 'src/sd_notify.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+))
 
 # The adaptive resolution controller with a simulated 60 Hz clock and stubbed
 # GPU timer queries: a cheap shader must stay at full resolution, a slow one
