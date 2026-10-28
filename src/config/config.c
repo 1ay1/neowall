@@ -1387,30 +1387,41 @@ static bool apply_builtin_default_config(struct neowall_state *state) {
 /* Read + parse the config file into a VibeValue tree. On success returns the
  * root object and hands ownership of the parser back via *out_parser (both must
  * be freed by the caller: vibe_value_free(root) then vibe_parser_free(parser)).
- * Returns NULL on any read/parse error (errors are logged). */
+ * Returns NULL on any read/parse error; with `verbose` the reason is logged. */
 static VibeValue *read_and_parse_config(const char *config_path,
-                                        VibeParser **out_parser) {
+                                        VibeParser **out_parser, bool verbose) {
     *out_parser = NULL;
 
     struct stat st;
-    if (stat(config_path, &st) == -1 || !S_ISREG(st.st_mode) ||
-        st.st_size > 1024 * 1024) {
+    if (stat(config_path, &st) == -1) {
+        if (verbose) log_error("Can't read config '%s': %s", config_path, strerror(errno));
+        return NULL;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        if (verbose) log_error("Config path is not a regular file (mode=0%o)", st.st_mode);
+        return NULL;
+    }
+    if (st.st_size > 1024 * 1024) {
+        if (verbose) log_error("Config file too large (%ld bytes)", (long)st.st_size);
         return NULL;
     }
 
     FILE *fp = fopen(config_path, "r");
     if (!fp) {
+        if (verbose) log_error("Failed to open config file: %s", strerror(errno));
         return NULL;
     }
-    char *content = malloc(st.st_size + 1);
+    char *content = malloc((size_t)st.st_size + 1);
     if (!content) {
         fclose(fp);
         return NULL;
     }
-    size_t bytes_read = fread(content, 1, st.st_size, fp);
+    size_t bytes_read = fread(content, 1, (size_t)st.st_size, fp);
     content[bytes_read] = '\0';
     fclose(fp);
     if (bytes_read != (size_t)st.st_size) {
+        if (verbose) log_error("Short read on config (expected %ld, got %zu)",
+                               (long)st.st_size, bytes_read);
         free(content);
         return NULL;
     }
@@ -1423,8 +1434,20 @@ static VibeValue *read_and_parse_config(const char *config_path,
     VibeValue *root = vibe_parse_string(parser, content);
     free(content);
 
-    if (!root || root->type != VIBE_TYPE_OBJECT) {
-        if (root) vibe_value_free(root);
+    if (!root) {
+        VibeError error = vibe_get_last_error(parser);
+        if (verbose && error.has_error) {
+            log_error("Config parse error in %s, line %d, column %d: %s",
+                      config_path, error.line, error.column, error.message);
+        } else if (verbose) {
+            log_error("Failed to parse config %s", config_path);
+        }
+        vibe_parser_free(parser);
+        return NULL;
+    }
+    if (root->type != VIBE_TYPE_OBJECT) {
+        if (verbose) log_error("Config root must be an object");
+        vibe_value_free(root);
         vibe_parser_free(parser);
         return NULL;
     }
@@ -1445,7 +1468,7 @@ bool config_apply_to_output(struct neowall_state *state, struct output_state *ou
                                                  : output->model;
 
     VibeParser *parser = NULL;
-    VibeValue *root = read_and_parse_config(state->config_path, &parser);
+    VibeValue *root = read_and_parse_config(state->config_path, &parser, false);
     if (!root) {
         log_error("Reconnect: could not read config for output %s, using built-in default",
                   name[0] ? name : "unknown");
@@ -1590,11 +1613,10 @@ static bool config_load_internal(struct neowall_state *state, const char *config
         return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
 
-    log_info("========================================");
     log_info("Loading configuration from: %s", config_path);
-    log_info("========================================");
 
-    /* Check if file exists, creating a starter config only during initial load. */
+    /* A missing file on first run gets a starter config; on reload it's an
+     * error and the live config stays. */
     struct stat st;
     if (stat(config_path, &st) == -1) {
         if (!allow_builtin_fallback) {
@@ -1605,101 +1627,15 @@ static bool config_load_internal(struct neowall_state *state, const char *config
         log_info("Configuration file not found, creating default: %s", config_path);
         if (!config_create_default(config_path)) {
             log_error("Failed to create default configuration, using built-in defaults");
-            return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
-        }
-        /* Re-stat to get the new file */
-        if (stat(config_path, &st) == -1) {
-            log_error("Failed to stat newly created config file, using built-in defaults");
-            return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
+            return apply_builtin_default_config(state);
         }
     }
 
-    /* Validate file is a regular file before opening (security check) */
-    if (!S_ISREG(st.st_mode)) {
-        log_error("Config path is not a regular file (mode=0%o), using built-in defaults",
-                 st.st_mode);
-        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
-    }
-
-    /* Sanity check file size (config should be reasonable, < 1MB) */
-    if (st.st_size > 1024 * 1024) {
-        log_error("Config file too large (%ld bytes), using built-in defaults",
-                 (long)st.st_size);
-        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
-    }
-
-    /* Read file content with error handling */
-    FILE *fp = fopen(config_path, "r");
-    if (!fp) {
-        /* File might have been deleted between stat and open (race condition) */
-        if (errno == ENOENT) {
-            log_error("Config file disappeared between stat and open (race), using built-in defaults");
-        } else {
-            log_error("Failed to open config file: %s, using built-in defaults", strerror(errno));
-        }
-        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
-    }
-
-    /* Use file size from stat (already validated) */
-    long file_size = st.st_size;
-
-    /* Allocate buffer for file content */
-    char *content = malloc(file_size + 1);
-    if (!content) {
-        log_error("Failed to allocate %ld bytes for config, using built-in defaults",
-                 file_size + 1);
-        fclose(fp);
-        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
-    }
-
-    /* Read entire file in one operation */
-    size_t bytes_read = fread(content, 1, file_size, fp);
-    content[bytes_read] = '\0';
-    fclose(fp);
-
-    if (bytes_read != (size_t)file_size) {
-        log_error("Failed to read config file (expected %ld, got %zu), using built-in defaults",
-                 file_size, bytes_read);
-        free(content);
-        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
-    }
-
-    /* Parse VIBE */
-    VibeParser *parser = vibe_parser_new();
-    if (!parser) {
-        log_error("Failed to create VIBE parser, using built-in defaults");
-        free(content);
-        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
-    }
-
-    VibeValue *root = vibe_parse_string(parser, content);
-    free(content);
-
+    VibeParser *parser = NULL;
+    VibeValue *root = read_and_parse_config(config_path, &parser, true);
     if (!root) {
-        VibeError error = vibe_get_last_error(parser);
-        if (error.has_error) {
-            log_error("========================================");
-            log_error("CONFIG PARSE ERROR");
-            log_error("========================================");
-            log_error("File: %s", config_path);
-            log_error("Line: %d, Column: %d", error.line, error.column);
-            log_error("Error: %s", error.message);
-            log_error("========================================");
-            log_error("Using built-in default configuration");
-            log_error("Fix the config file to resolve this issue");
-            log_error("========================================");
-        } else {
-            log_error("Failed to parse VIBE config, using built-in defaults");
-        }
-        vibe_parser_free(parser);
-        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
-    }
-
-    if (root->type != VIBE_TYPE_OBJECT) {
-        log_error("Config root must be an object%s",
-                  allow_builtin_fallback ? ", using built-in defaults" : "");
-        vibe_value_free(root);
-        vibe_parser_free(parser);
+        log_error("%s", allow_builtin_fallback ? "Using built-in default configuration"
+                                               : "Configuration rejected; live configuration is unchanged");
         return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
     }
 
