@@ -7,7 +7,7 @@ This directory contains files needed by package maintainers.
 - **`PKGBUILD`** - Canonical Arch `neowall-git` recipe (auto-published to the AUR)
 - **`systemd/neowall.service`** - Systemd user service file
 - **`neowall.install`** - Optional Arch Linux post-install script
-- **`neowall.desktop`**, **`neowall.svg`** - Desktop entry and icon
+- **`io.github._1ay1.neowall.{desktop,svg,metainfo.xml.in}`** - desktop entry, icon, AppStream metadata
 
 ## For Package Maintainers
 

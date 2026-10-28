@@ -404,8 +404,8 @@ jobs:
           DESTDIR="$PWD/AppDir" ninja -C build install
           # AppImage expects an AppRun + top-level .desktop + icon.
           ln -s usr/bin/neowall AppDir/AppRun
-          cp packaging/neowall.desktop AppDir/neowall.desktop
-          cp packaging/neowall.svg AppDir/neowall.svg
+          cp packaging/io.github._1ay1.neowall.desktop AppDir/neowall.desktop && sed -i "s/^Icon=.*/Icon=neowall/" AppDir/neowall.desktop
+          cp packaging/io.github._1ay1.neowall.svg AppDir/neowall.svg
 
       - name: Package AppImage
         run: |
@@ -436,10 +436,18 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write   # keyless signing of SHA256SUMS
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Install build deps (meson dist builds and tests the tarball)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build pkg-config libwayland-dev libwayland-bin \
+            wayland-protocols libx11-dev libxrandr-dev libegl1-mesa-dev libgl-dev \
+            libpng-dev libjpeg-dev libxkbcommon-dev libfontconfig-dev
 
       - name: Resolve version
         id: version
@@ -466,15 +474,24 @@ jobs:
                -o -name '*.AppImage' -o -name '*.pkg.tar.zst' \) \
             -exec cp -v {} release/ \;
 
-          # Source tarball
-          tar -czf "release/neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz" \
-            --exclude='.git' --exclude='release' --exclude='artifacts' \
-            --exclude='.github' --exclude='build' --exclude='builddir' \
-            --exclude='AppDir' --exclude='pkgroot' \
-            --transform "s,^,neowall-${{ steps.version.outputs.VERSION }}/," \
-            *
+          # Source tarball: meson dist takes exactly what git tracks, and
+          # checks it builds and passes tests from the tarball alone.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          meson setup build-dist
+          meson dist -C build-dist --formats xztar,gztar
+          cp build-dist/meson-dist/neowall-${{ steps.version.outputs.VERSION }}.tar.xz \
+             build-dist/meson-dist/neowall-${{ steps.version.outputs.VERSION }}.tar.gz release/
+          cp release/neowall-${{ steps.version.outputs.VERSION }}.tar.gz \
+             "release/neowall-${{ steps.version.outputs.VERSION }}-source.tar.gz"
 
           cd release && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign checksums
+        run: |
+          cd release
+          cosign sign-blob --yes --bundle SHA256SUMS.txt.sigstore.json SHA256SUMS.txt
 
       - name: Generate changelog
         id: changelog

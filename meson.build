@@ -59,7 +59,7 @@ x11_backend_option = get_option('x11_backend')
 wayland_client_dep = dependency('wayland-client', required: wayland_backend_option)
 wayland_egl_dep = dependency('wayland-egl', required: wayland_backend_option)
 wayland_cursor_dep = dependency('wayland-cursor', required: wayland_backend_option)
-wayland_protocols_dep = dependency('wayland-protocols', version: '>= 1.32',
+wayland_protocols_dep = dependency('wayland-protocols', version: '>= 1.31',
   required: wayland_backend_option)
 wayland_scanner_dep = dependency('wayland-scanner', native: true,
   required: wayland_backend_option)
@@ -349,7 +349,7 @@ if has_wayland
                             wl_protocol_dir / 'unstable/tablet/tablet-unstable-v2.xml',
     'fractional-scale-v1': wl_protocol_dir / 'staging/fractional-scale/fractional-scale-v1.xml',
     'tearing-control-v1': wl_protocol_dir / 'staging/tearing-control/tearing-control-v1.xml',
-    'cursor-shape-v1':    wl_protocol_dir / 'staging/cursor-shape/cursor-shape-v1.xml',
+    'cursor-shape-v1':    'protocols/cursor-shape-v1.xml',   # vendored: 1.32+, Debian 12 has 1.31
     'xdg-output-unstable-v1': wl_protocol_dir / 'unstable/xdg-output/xdg-output-unstable-v1.xml',
     # Not in wayland-protocols; vendored unchanged from upstream.
     'wlr-layer-shell-unstable-v1': 'protocols/wlr-layer-shell-unstable-v1.xml',
@@ -484,14 +484,38 @@ install_subdir('examples/shaders',
 )
 
 # Install documentation
-install_data('README.md', install_dir: get_option('datadir') / 'doc' / 'neowall')
-install_data('LICENSE', install_dir: get_option('datadir') / 'doc' / 'neowall')
+doc_dir = get_option('datadir') / 'doc' / 'neowall'
+install_data('README.md', 'LICENSE', 'CHANGELOG.md', 'config/docs/CONFIG.md',
+  install_dir: doc_dir)
 
-# Desktop integration
-install_data('packaging/neowall.desktop',
+# Desktop integration, named by the AppStream id
+app_id = 'io.github._1ay1.neowall'
+install_data('packaging' / app_id + '.desktop',
   install_dir: get_option('datadir') / 'applications')
-install_data('packaging/neowall.svg',
+install_data('packaging' / app_id + '.svg',
   install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps')
+
+paths_conf = configuration_data()
+paths_conf.set('VERSION', meson.project_version())
+paths_conf.set('DATADIR', get_option('prefix') / get_option('datadir') / 'neowall')
+paths_conf.set('SYSCONFDIR', get_option('prefix') / get_option('sysconfdir'))
+paths_conf.set('DOCDIR', get_option('prefix') / doc_dir)
+
+metainfo = configure_file(
+  input: 'packaging' / app_id + '.metainfo.xml.in',
+  output: app_id + '.metainfo.xml',
+  configuration: paths_conf,
+)
+install_data(metainfo, install_dir: get_option('datadir') / 'metainfo')
+
+# Man pages: plain roff, so no doc tool is needed at build time.
+foreach page : ['neowall.1', 'neowall.vibe.5']
+  install_man(configure_file(
+    input: 'docs/man' / page + '.in',
+    output: page,
+    configuration: paths_conf,
+  ))
+endforeach
 
 # systemd user unit (started by the user's graphical session). Configure the
 # executable path so non-/usr prefixes work too.

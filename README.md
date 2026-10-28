@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="packaging/neowall.svg" alt="NeoWall" width="280"/>
+  <img src="packaging/io.github._1ay1.neowall.svg" alt="NeoWall" width="280"/>
 </p>
 
 <p align="center">

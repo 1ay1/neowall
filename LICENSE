@@ -27,7 +27,7 @@ Some files carry their own license, stated in an SPDX header at the top:
 - examples/shaders/time.glsl: CC-BY-4.0 (Rigel)
 - examples/shaders/moon_ocean.glsl, star_next.glsl: MIT, their authors
 - protocols/plasma-shell.xml: LGPL-2.1-or-later (KDE)
-- protocols/wlr-*.xml: MIT (wlroots contributors)
+- protocols/wlr-*.xml, cursor-shape-v1.xml: MIT (their authors)
 - src/terminal/vendor/stb_*.h: MIT or public domain (Sean Barrett)
 
 contrib/shaders-unlicensed/ holds third-party ports under their original

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<component type="desktop-application">
+  <id>io.github._1ay1.neowall</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>NeoWall</name>
+  <summary>Live shader, image and terminal wallpapers</summary>
+  <developer id="io.github._1ay1">
+    <name>Ayush Bhat</name>
+  </developer>
+  <description>
+    <p>
+      NeoWall draws a wallpaper on every monitor: a still image, a
+      slideshow, a live GLSL shader, or a terminal running any program.
+      Shadertoy code works unchanged.
+    </p>
+    <p>
+      Shaders can react to music, the real time of day, system load and
+      where your windows are, and the garden wallpaper grows over days.
+      Each monitor can show something different, or one scene can span
+      several.
+    </p>
+    <p>
+      It runs on Wayland compositors with layer shell (Hyprland, Sway,
+      river, Wayfire, niri and others), KDE Plasma, and X11.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github._1ay1.neowall.desktop</launchable>
+  <icon type="stock">io.github._1ay1.neowall</icon>
+  <url type="homepage">https://github.com/1ay1/neowall</url>
+  <url type="bugtracker">https://github.com/1ay1/neowall/issues</url>
+  <url type="vcs-browser">https://github.com/1ay1/neowall</url>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>wallpaper</keyword>
+    <keyword>background</keyword>
+    <keyword>shader</keyword>
+    <keyword>shadertoy</keyword>
+    <keyword>wayland</keyword>
+    <keyword>live wallpaper</keyword>
+  </keywords>
+  <provides>
+    <binary>neowall</binary>
+  </provides>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="2026-10-28">
+      <description>
+        <p>Packaging and robustness release.</p>
+        <ul>
+          <li>Recovers from GPU resets and lost surfaces by restarting cleanly</li>
+          <li>Runs as a systemd notify service and reports readiness</li>
+          <li>Ships only freely licensed shaders; the default is now garden</li>
+          <li>Fixes a heap overflow in the terminal wallpaper found by fuzzing</li>
+          <li>Refuses GNOME on Wayland clearly instead of showing nothing</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.8.0" date="2026-10-26"/>
+    <release version="0.7.2" date="2026-09-22"/>
+    <release version="0.7.1" date="2026-09-16"/>
+    <release version="0.7.0" date="2026-09-09"/>
+  </releases>
+</component>

@@ -1,0 +1,194 @@
+.TH NEOWALL 1 "2026-10-28" "neowall @VERSION@" "User Commands"
+.SH NAME
+neowall \- GPU shader, image and terminal wallpapers for Wayland and X11
+.SH SYNOPSIS
+.B neowall
+.RB [ \-c
+.IR config ]
+.RB [ \-f ]
+.RB [ \-v ]
+.RB [ \-\-date
+.IR offset ]
+.RB [ \-\-timelapse
+.IR span / duration ]
+.br
+.B neowall
+.I command
+.RI [ args ]
+.SH DESCRIPTION
+.B neowall
+draws a wallpaper on every monitor: a still image, a slideshow, a live
+GLSL shader (Shadertoy code works unchanged), or a terminal running any
+program.
+Shaders can react to audio, the time of day, system load and where your
+windows are.
+.PP
+Run without a command,
+.B neowall
+starts the daemon.
+If a daemon is already running, a command talks to it over a socket in
+.BR $XDG_RUNTIME_DIR .
+.PP
+On Wayland it needs a compositor with
+.B wlr\-layer\-shell
+(Hyprland, Sway, river, Wayfire, niri and others) or KDE Plasma.
+GNOME on Wayland has no way for a client to draw behind windows, so
+.B neowall
+refuses to start there; GNOME on X11 works.
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-config " " \fIpath\fR
+Use this config file instead of the default search path (see
+.BR FILES ).
+.TP
+.BR \-f ", " \-\-foreground
+Stay in the foreground instead of forking.
+Implied when started by systemd.
+.TP
+.BR \-v ", " \-\-verbose
+Debug logging, including OpenGL driver messages.
+.TP
+.BI \-\-date " offset"
+Shift the clock shaders see, e.g.
+.BR +6d ", " \-2h ", " 90m .
+Handy for previewing time\-of\-day wallpapers.
+.TP
+.BI \-\-timelapse " span/duration"
+Compress shader time, e.g.
+.B 30d/20s
+plays thirty days in twenty seconds.
+.TP
+.BR \-h ", " \-\-help
+Print usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Print the version and exit.
+.SH COMMANDS
+.SS Running daemon
+.TP
+.B next
+Skip to the next wallpaper in a cycle.
+.TP
+.BR pause ", " resume
+Pause or resume wallpaper cycling.
+.TP
+.BR pause\-shader ", " resume\-shader
+Freeze or resume shader animation.
+.TP
+.B reload
+Re\-read the config.
+If the new file is invalid the old config stays in effect.
+.TP
+.BI set " index"
+Show wallpaper
+.I index
+(0\-based) of the cycle.
+.TP
+.B list
+List the wallpapers in the cycle with their indices.
+.TP
+.BR current ", " status
+Show what each output is displaying.
+.TP
+.BI set\-terminal " command"
+Replace the program running in a terminal wallpaper.
+.TP
+.B kill
+Stop the daemon.
+.SS Shader authoring
+.TP
+.BI new " name"
+Write a new shader that runs as is.
+.B \-\-template=scene|flat|reactive
+picks a starting point;
+.B \-\-list
+shows them.
+.TP
+.BI preview " shader"
+Run one shader in the foreground next to the daemon, without touching
+your config.
+.TP
+.BI watch " shader"
+Like
+.BR preview ,
+but recompile on every save and print errors inline.
+A broken save keeps the last good shader on screen.
+.TP
+.BR docs " [\fIword\fR]"
+List the helpers and uniforms shaders can use, optionally filtered.
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/neowall/config.vibe
+User config (falls back to
+.IR ~/.config/neowall/config.vibe ).
+Created from the installed sample on first run.
+.TP
+.I @SYSCONFDIR@/neowall/config.vibe
+System\-wide config, used when the user has none.
+.TP
+.I ~/.config/neowall/shaders/
+Your shaders.
+Looked up first by bare name.
+.TP
+.I @DATADIR@/shaders/
+Shaders that ship with neowall.
+.B $XDG_DATA_HOME
+and
+.B $XDG_DATA_DIRS
+are searched too.
+.TP
+.I $XDG_RUNTIME_DIR/neowall.sock
+Control socket.
+.SH ENVIRONMENT
+.TP
+.B NEOWALL_GL_DEBUG=1
+Log OpenGL driver debug messages without full verbose logging.
+.TP
+.BR WAYLAND_DISPLAY ", " DISPLAY
+Pick the display server, as usual.
+.SH EXIT STATUS
+.TP
+.B 0
+Clean exit.
+.TP
+.B 1
+Startup or command failure.
+.TP
+.B 75
+The GPU reset or a surface was lost.
+Under systemd the unit restarts
+.BR neowall ;
+otherwise it restarts itself, at most three times a minute.
+.SH EXAMPLES
+Start it with your session (systemd):
+.PP
+.RS
+.nf
+systemctl \-\-user enable \-\-now neowall
+.fi
+.RE
+.PP
+A shader on one monitor and a slideshow on the other:
+.PP
+.RS
+.nf
+output {
+  DP\-1     { shader moon_ocean.glsl }
+  HDMI\-A\-1 { path ~/Pictures/ duration 600 }
+}
+.fi
+.RE
+.PP
+Write a shader and watch it as you edit:
+.PP
+.RS
+.nf
+neowall new sky \-\-template=scene
+neowall watch sky
+.fi
+.RE
+.SH SEE ALSO
+.BR neowall.vibe (5),
+.BR systemctl (1)
+.PP
+https://github.com/1ay1/neowall

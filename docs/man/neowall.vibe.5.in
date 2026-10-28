@@ -1,0 +1,167 @@
+.TH NEOWALL.VIBE 5 "2026-10-28" "neowall @VERSION@" "File Formats"
+.SH NAME
+neowall.vibe \- neowall configuration
+.SH SYNOPSIS
+.I $XDG_CONFIG_HOME/neowall/config.vibe
+.SH DESCRIPTION
+The config is written in VIBE: nested blocks of
+.I key value
+lines,
+.B #
+comments, and four value types (integer, float, boolean, string).
+Quote a string only if it has spaces.
+.PP
+A
+.B default
+block applies to every monitor.
+An
+.B output
+block holds one block per connector name (as shown by
+.BR "neowall current" );
+each overrides
+.B default
+for that monitor.
+.PP
+.RS
+.nf
+default {
+  shader garden.glsl
+}
+
+output {
+  DP\-1     { shader moon_ocean.glsl }
+  HDMI\-A\-1 { path ~/Pictures/ duration 600 }
+}
+.fi
+.RE
+.PP
+A block shows exactly one of
+.BR path ,
+.B shader
+or
+.BR terminal .
+.PP
+.B neowall reload
+re\-reads the file.
+An invalid file is rejected as a whole and the running config stays.
+.SH WHAT TO SHOW
+.TP
+.BI path " file|dir/"
+An image (PNG or JPEG), or a directory of them to cycle through.
+.TP
+.BI shader " file|dir/"
+A GLSL shader.
+A bare name is looked up in
+.I ~/.config/neowall/shaders/
+and then the installed shaders.
+A directory cycles through its shaders.
+.TP
+.BI terminal " command"
+Run
+.I command
+under a pseudo\-terminal and draw it as the wallpaper.
+It's restarted if it exits.
+.SH CYCLING AND TRANSITIONS
+.TP
+.BI duration " seconds"
+Time between wallpapers in a directory cycle.
+.B 0
+(default) doesn't cycle.
+.TP
+.BR shuffle " true|false"
+Random order, reshuffled every pass.
+.TP
+.BR transition " fade|slide_left|slide_right|glitch|pixelate|none"
+Effect between images.
+.TP
+.BI transition_duration " seconds"
+Default 0.3.
+.TP
+.BR mode " fill|fit|center|stretch|tile"
+How an image covers the screen.
+Default
+.BR fill .
+.TP
+.BI span " bool" "\fR, \fPspan_group" " name"
+Stretch one wallpaper across several monitors.
+.SH SHADERS
+.TP
+.BI shader_speed " float"
+Animation speed; 1.0 is normal.
+.TP
+.BR vsync " true|false"
+Present on the display's refresh (default).
+With
+.BR false ,
+frames are paced by
+.BR shader_fps .
+.TP
+.BI shader_fps " n"
+Target frame rate when vsync is off.
+Default 60.
+.TP
+.BI channels " [a b ...]"
+Up to four
+.B iChannel
+textures, in order, as an array: image paths or the built\-ins
+.BR rgba_noise ", " gray_noise ", " blue_noise ", " wood ", " abstract ", " font .
+Audio and other live inputs are bound in a shader's
+.B .neowall
+sidecar instead.
+.TP
+.BR show_fps " true|false"
+Draw a frame\-rate counter.
+.TP
+.BR pause_on_fullscreen " true|false"
+Stop rendering while a window covers the monitor.
+.TP
+.BI pause_coverage_threshold " 0..1"
+How much of the screen must be covered to count.
+.SH TERMINAL
+.TP
+.BI term_cols " n" "\fR, \fPterm_rows" " n"
+Grid size in cells.
+.B 0
+(default) fits the screen.
+.TP
+.BI term_font_size " px"
+Cell font size.
+.TP
+.BI term_font " file" "\fR, \fPterm_font_bold" " file" "\fR, \fPterm_font_italic" " file"
+Fonts.
+Unset picks a monospace face through fontconfig.
+.TP
+.BI term_fg " #rrggbb" "\fR, \fPterm_bg" " #rrggbb"
+Default colours.
+.TP
+.BI term_cwd " dir" "\fR, \fPterm_env" " TERM"
+Working directory and
+.B $TERM
+for the program.
+.TP
+.BI term_shader " file"
+A shader that post\-processes the terminal image.
+.TP
+.BR term_fade ", " term_bloom ", " term_scanline ", " term_crt ", " term_chroma " \fI0..1\fR"
+Built\-in effect strengths.
+.SH TOP\-LEVEL KEYS
+These go outside any block.
+.TP
+.BR mouse_interaction " true|false"
+Let shaders see the pointer.
+Default
+.BR true .
+.TP
+.BR term_raw_input " true|false"
+Pass Ctrl\-C and friends to a focused terminal wallpaper.
+Default
+.BR false .
+.SH FILES
+.TP
+.I @DATADIR@/neowall.vibe
+A fully commented example of every option.
+.TP
+.I @DOCDIR@/CONFIG.md
+The long\-form reference.
+.SH SEE ALSO
+.BR neowall (1)
