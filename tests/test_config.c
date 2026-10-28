@@ -150,6 +150,39 @@ int main(void) {
     CHECK(config_load(&st, cfg));
     CHECK(left.config && left.config->duration == 60.0f);
 
+    /* a bad channel after a directory cycle is built: rejected, no leak (ASan) */
+    snprintf(text, sizeof(text), "default {\n  shader %s/\n  channels [ \"rgba_noise\" 5 ]\n}\n",
+             shaders);
+    write_cfg(text);
+    CHECK(!config_reload(&st, cfg));
+
+    /* channels are for shaders only */
+    write_cfg("default {\n  path /x.png\n  channels [ \"rgba_noise\" ]\n}\n");
+    CHECK(!config_reload(&st, cfg));
+
+    /* an empty directory with dir syntax is an error, not a single file */
+    char empty[600];
+    snprintf(empty, sizeof(empty), "%s/empty", dir);
+    mkdir(empty, 0755);
+    snprintf(text, sizeof(text), "default {\n  shader %s/\n}\n", empty);
+    write_cfg(text);
+    CHECK(!config_reload(&st, cfg));
+
+    /* terminal block: command, ints, colours and clamped effects */
+    write_cfg("default {\n  terminal \"htop -d 10\"\n  term_cols 120\n  term_fg \"#a0b0c0\"\n"
+              "  term_bloom 3\n  term_crt 0.25\n}\n");
+    CHECK(config_load(&st, cfg));
+    CHECK(left.config && left.config->type == WALLPAPER_TERMINAL);
+    CHECK(left.config && strcmp(left.config->term_cmd, "htop -d 10") == 0);
+    CHECK(left.config && left.config->term_cols == 120);
+    CHECK(left.config && left.config->term_fg == 0xa0b0c0);
+    CHECK(left.config && left.config->term_bloom == 1.0f);   /* clamped */
+    CHECK(left.config && left.config->term_crt == 0.25f);
+    write_cfg("default {\n  terminal htop\n  term_fg \"blue\"\n}\n");
+    CHECK(!config_reload(&st, cfg));
+    write_cfg("default {\n  terminal htop\n  term_rows 9999\n}\n");
+    CHECK(!config_reload(&st, cfg));
+
     /* top-level keys */
     snprintf(text, sizeof(text), "mouse_interaction false\ndefault {\n  shader %s\n}\n", a);
     write_cfg(text);

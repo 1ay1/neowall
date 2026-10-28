@@ -528,6 +528,180 @@ static long parse_hex_color(const char *s) {
     return n == 6 ? v : -1;
 }
 
+/* Terminal mode: the command plus its term_* options. */
+static bool parse_terminal_keys(VibeValue *obj, struct wallpaper_config *config,
+                                VibeValue *term_val, const char *context_name) {
+    config->type = WALLPAPER_TERMINAL;
+    if (!copy_config_string(config->term_cmd, sizeof(config->term_cmd), term_val,
+                            "terminal", context_name, false))
+        return false;
+    log_info("[%s] TERMINAL MODE: command '%s'", context_name, config->term_cmd);
+
+    struct { const char *key; char *dst; size_t size; } strings[] = {
+        { "term_font",        config->term_font,        sizeof(config->term_font) },
+        { "term_shader",      config->shader_path,      sizeof(config->shader_path) },
+        { "term_font_bold",   config->term_font_bold,   sizeof(config->term_font_bold) },
+        { "term_font_italic", config->term_font_italic, sizeof(config->term_font_italic) },
+        { "term_cwd",         config->term_cwd,         sizeof(config->term_cwd) },
+        { "term_env",         config->term_env,         sizeof(config->term_env) },
+    };
+    for (size_t i = 0; i < sizeof(strings) / sizeof(strings[0]); i++) {
+        VibeValue *v = vibe_object_get(obj->as_object, strings[i].key);
+        if (!copy_config_string(strings[i].dst, strings[i].size, v, strings[i].key,
+                                context_name, true))
+            return false;
+    }
+
+    struct { const char *key; int *dst; int maximum; } ints[] = {
+        { "term_cols",      &config->term_cols,      1024 },
+        { "term_rows",      &config->term_rows,      512 },
+        { "term_font_size", &config->term_font_size, 96 },
+    };
+    for (size_t i = 0; i < sizeof(ints) / sizeof(ints[0]); i++) {
+        VibeValue *v = vibe_object_get(obj->as_object, ints[i].key);
+        if (!v) continue;
+        if (v->type != VIBE_TYPE_INTEGER || v->as_integer < 0 || v->as_integer > ints[i].maximum) {
+            log_error("[%s] '%s' must be an integer between 0 and %d",
+                      context_name, ints[i].key, ints[i].maximum);
+            return false;
+        }
+        *ints[i].dst = (int)v->as_integer;
+    }
+
+    struct { const char *key; long *dst; } colors[] = {
+        { "term_fg", &config->term_fg },
+        { "term_bg", &config->term_bg },
+    };
+    for (size_t i = 0; i < sizeof(colors) / sizeof(colors[0]); i++) {
+        VibeValue *v = vibe_object_get(obj->as_object, colors[i].key);
+        if (!v) continue;
+        if (v->type != VIBE_TYPE_STRING || (*colors[i].dst = parse_hex_color(v->as_string)) < 0) {
+            log_error("[%s] '%s' must be a six-digit RGB hex string", context_name, colors[i].key);
+            return false;
+        }
+    }
+
+    /* nwTermFX intensities, 0..1. Absent keeps the -1 sentinel, which
+     * output_set_terminal maps to the built-in default. */
+    struct { const char *key; float *dst; } fx[] = {
+        { "term_bloom",    &config->term_bloom },
+        { "term_scanline", &config->term_scanline },
+        { "term_crt",      &config->term_crt },
+        { "term_chroma",   &config->term_chroma },
+        { "term_fade",     &config->term_fade },
+    };
+    for (size_t i = 0; i < sizeof(fx) / sizeof(fx[0]); i++) {
+        VibeValue *v = vibe_object_get(obj->as_object, fx[i].key);
+        if (!v) continue;
+        double f;
+        if (v->type == VIBE_TYPE_FLOAT)        f = v->as_float;
+        else if (v->type == VIBE_TYPE_INTEGER) f = (double)v->as_integer;
+        else {
+            log_error("[%s] '%s' must be a number 0..1", context_name, fx[i].key);
+            return false;
+        }
+        *fx[i].dst = (float)(f < 0.0 ? 0.0 : f > 1.0 ? 1.0 : f);
+        log_info("[%s] %s = %.2f", context_name, fx[i].key, *fx[i].dst);
+    }
+    return true;
+}
+
+/* `channels [a b ...]`: up to four iChannel textures, shaders only. Built in
+ * a local array so a bad entry leaves the config untouched. */
+static bool parse_channels(VibeValue *obj, struct wallpaper_config *config,
+                           const char *context_name) {
+    VibeValue *val = vibe_object_get(obj->as_object, "channels");
+    if (!val) return true;
+    if (val->type != VIBE_TYPE_ARRAY) {
+        log_error("[%s] 'channels' must be an array", context_name);
+        return false;
+    }
+    size_t count = val->as_array->count;
+    enum { SHADERTOY_CHANNEL_COUNT = 4 };
+    if (count > SHADERTOY_CHANNEL_COUNT) {
+        log_error("[%s] 'channels' supports at most %d iChannel textures (got %zu)",
+                  context_name, SHADERTOY_CHANNEL_COUNT, count);
+        return false;
+    }
+    if (count == 0) return true;
+    if (config->type != WALLPAPER_SHADER) {
+        log_error("[%s] 'channels' only applies to shaders", context_name);
+        return false;
+    }
+
+    char **paths = calloc(count, sizeof(char *));
+    if (!paths) {
+        log_error("[%s] Failed to allocate memory for channels", context_name);
+        return false;
+    }
+    for (size_t i = 0; i < count; i++) {
+        VibeValue *e = val->as_array->values[i];
+        if (!e || e->type != VIBE_TYPE_STRING || e->as_string[0] == '\0' ||
+            strlen(e->as_string) >= MAX_PATH_LENGTH) {
+            log_error("[%s] Channel[%zu] must be a non-empty string shorter than %d bytes",
+                      context_name, i, MAX_PATH_LENGTH);
+            free_path_array(paths, i);
+            return false;
+        }
+        paths[i] = strdup(e->as_string);
+        if (!paths[i]) {
+            free_path_array(paths, i);
+            return false;
+        }
+        log_debug("[%s] iChannel%zu: %s", context_name, i, paths[i]);
+    }
+    config->channel_paths = paths;
+    config->channel_count = count;
+    log_info("[%s] Loaded %zu iChannel texture assignments", context_name, count);
+    return true;
+}
+
+/* An image or shader source: one file, or a directory whose files become a
+ * cycle. Shuffling happens here, before the per-output copy, so every output
+ * sharing this block sees the same order (issue #47). */
+static bool parse_cycle_source(struct wallpaper_config *config, const char *src,
+                               bool shader, const char *context_name) {
+    const char *kind = shader ? "SHADER" : "IMAGE";
+    ValidationResult v = validate_path(src);
+    if (!v.valid) {
+        log_error("[%s] Invalid %s path: %s", context_name, shader ? "shader" : "image",
+                  v.error_message);
+        return false;
+    }
+    config->type = shader ? WALLPAPER_SHADER : WALLPAPER_IMAGE;
+    char *dst = shader ? config->shader_path : config->path;
+    size_t dst_size = shader ? sizeof(config->shader_path) : sizeof(config->path);
+
+    size_t len = strlen(src);
+    bool is_dir_syntax = len > 0 && src[len - 1] == '/';
+    size_t count = 0;
+    char **paths = shader ? load_shaders_from_directory(src, &count)
+                          : load_images_from_directory(src, &count);
+
+    if (paths && count > 0) {
+        config->cycle = true;
+        config->cycle_count = count;
+        config->cycle_paths = paths;
+        config->current_cycle_index = 0;   /* restored per output later */
+        if (config->shuffle) {
+            config_shuffle_cycle_paths(config->cycle_paths, config->cycle_count, false);
+            log_info("[%s] %s MODE: shuffled %zu-entry cycle", context_name, kind, count);
+        }
+        snprintf(dst, dst_size, "%s", paths[0]);
+        log_info("[%s] %s MODE: %zu files from directory for cycling", context_name, kind, count);
+        return true;
+    }
+    free(paths);
+    if (is_dir_syntax) {
+        log_error("[%s] '%s' ends with '/' but has no %s files", context_name, src,
+                  shader ? "shader" : "image");
+        return false;
+    }
+    snprintf(dst, dst_size, "%s", src);
+    log_info("[%s] %s MODE: single file '%s'", context_name, kind, src);
+    return true;
+}
+
 /* Parse wallpaper configuration with strict validation */
 static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *config,
                                    const char *context_name) {
@@ -599,118 +773,13 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     }
 
     /* ========================================================================
-     * IMAGE MODE: path is specified, shader is not
+     * IMAGE / SHADER MODE: a file, or a directory to cycle through
      * ======================================================================== */
-    if (has_path) {
-        const char *path_str = path_val->as_string;
-
-        ValidationResult path_validation = validate_path(path_str);
-        if (!path_validation.valid) {
-            log_error("[%s] Invalid path: %s", context_name,
-                     path_validation.error_message);
-            return false;
-        }
-
-        config->type = WALLPAPER_IMAGE;
-
-        /* Check if path is a directory (ends with /) or actually is a directory */
-        size_t path_len = strlen(path_str);
-        bool is_dir_syntax = (path_len > 0 && path_str[path_len - 1] == '/');
-
-        /* Try to load as directory */
-        size_t image_count = 0;
-        char **image_paths = load_images_from_directory(path_str, &image_count);
-
-        if (image_paths && image_count > 0) {
-            /* It's a directory with images - enable cycling */
-            config->cycle = true;
-            config->cycle_count = image_count;
-            config->cycle_paths = image_paths;
-            config->current_cycle_index = 0;  /* Will be restored per-output in output_apply_config */
-
-            /* Randomise order if requested (issue #47). Done here so every
-             * downstream consumer — per-output deep copy, write_cycle_list for
-             * `neowall list`, multi-monitor sync — sees the SAME shuffled
-             * order. Two monitors sharing this default block stay in sync. */
-            if (config->shuffle) {
-                config_shuffle_cycle_paths(config->cycle_paths, config->cycle_count, false);
-                log_info("[%s] IMAGE MODE: shuffle=true, randomised %zu-entry cycle order",
-                        context_name, image_count);
-            }
-
-            /* Use first image as initial path (will be updated per-output) */
-            snprintf(config->path, sizeof(config->path), "%s", image_paths[0]);
-
-            log_info("[%s] IMAGE MODE: Loaded %zu images from directory for cycling",
-                    context_name, image_count);
-        } else if (is_dir_syntax) {
-            /* User specified directory syntax but no images found */
-            log_error("[%s] Path ends with '/' indicating directory, "
-                     "but no images found in '%s'", context_name, path_str);
-            return false;
-        } else {
-            /* Single image file */
-            snprintf(config->path, sizeof(config->path), "%s", path_str);
-
-            log_info("[%s] IMAGE MODE: Single image '%s'", context_name, path_str);
-        }
+    if (has_path && !parse_cycle_source(config, path_val->as_string, false, context_name)) {
+        return false;
     }
-
-    /* ========================================================================
-     * SHADER MODE: shader is specified, path is not
-     * ======================================================================== */
-    if (has_shader) {
-        const char *shader_str = shader_val->as_string;
-
-        ValidationResult shader_validation = validate_path(shader_str);
-        if (!shader_validation.valid) {
-            log_error("[%s] Invalid shader path: %s", context_name,
-                     shader_validation.error_message);
-            return false;
-        }
-
-        config->type = WALLPAPER_SHADER;
-
-        /* Check if shader is a directory (ends with /) or actually is a directory */
-        size_t shader_len = strlen(shader_str);
-        bool is_dir_syntax = (shader_len > 0 && shader_str[shader_len - 1] == '/');
-
-        /* Try to load as directory */
-        size_t shader_count = 0;
-        char **shader_paths = load_shaders_from_directory(shader_str, &shader_count);
-
-        if (shader_paths && shader_count > 0) {
-            /* It's a directory with shaders - enable cycling */
-            config->cycle = true;
-            config->cycle_count = shader_count;
-            config->cycle_paths = shader_paths;
-            config->current_cycle_index = 0;  /* Will be restored per-output in output_apply_config */
-
-            /* Randomise order if requested (issue #47). Same reasoning as the
-             * image branch above — shuffle before the per-output deep copy so
-             * everyone sees the same order. */
-            if (config->shuffle) {
-                config_shuffle_cycle_paths(config->cycle_paths, config->cycle_count, false);
-                log_info("[%s] SHADER MODE: shuffle=true, randomised %zu-entry cycle order",
-                        context_name, shader_count);
-            }
-
-            /* Use first shader as initial shader_path (will be updated per-output) */
-            snprintf(config->shader_path, sizeof(config->shader_path), "%s", shader_paths[0]);
-
-            log_info("[%s] SHADER MODE: Loaded %zu shaders from directory for cycling",
-                    context_name, shader_count);
-        } else if (is_dir_syntax) {
-            /* User specified directory syntax but no shaders found */
-            log_error("[%s] Shader path ends with '/' indicating directory, "
-                     "but no shaders found in '%s'", context_name, shader_str);
-            return false;
-        } else {
-            /* Single shader file */
-            snprintf(config->shader_path, sizeof(config->shader_path), "%s", shader_str);
-
-            log_info("[%s] SHADER MODE: Single shader '%s'", context_name, shader_str);
-        }
+    if (has_shader && !parse_cycle_source(config, shader_val->as_string, true, context_name)) {
+        return false;
     }
 
     /* ========================================================================
@@ -718,85 +787,8 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
      * Optional: term_font (path), term_cols/term_rows (grid), term_shader
      * (a GLSL styling pass that samples nwTerm()).
      * ======================================================================== */
-    if (has_terminal) {
-        config->type = WALLPAPER_TERMINAL;
-        if (!copy_config_string(config->term_cmd, sizeof(config->term_cmd), term_val,
-                                "terminal", context_name, false))
-            return false;
-        log_info("[%s] TERMINAL MODE: command '%s'", context_name, config->term_cmd);
-
-#define COPY_TERM_STRING(key, field, allow_empty) do {                         \
-        VibeValue *value = vibe_object_get(obj->as_object, (key));             \
-        if (!copy_config_string(config->field, sizeof(config->field), value,   \
-                                (key), context_name, (allow_empty)))            \
-            return false;                                                       \
-    } while (0)
-        COPY_TERM_STRING("term_font", term_font, true);
-        COPY_TERM_STRING("term_shader", shader_path, true);
-        COPY_TERM_STRING("term_font_bold", term_font_bold, true);
-        COPY_TERM_STRING("term_font_italic", term_font_italic, true);
-        COPY_TERM_STRING("term_cwd", term_cwd, true);
-        COPY_TERM_STRING("term_env", term_env, true);
-#undef COPY_TERM_STRING
-
-        struct {
-            const char *key;
-            int *dst;
-            int maximum;
-        } integer_fields[] = {
-            { "term_cols", &config->term_cols, 1024 },
-            { "term_rows", &config->term_rows, 512 },
-            { "term_font_size", &config->term_font_size, 96 },
-        };
-        for (size_t i = 0; i < sizeof(integer_fields) / sizeof(integer_fields[0]); i++) {
-            VibeValue *value = vibe_object_get(obj->as_object, integer_fields[i].key);
-            if (!value) continue;
-            if (value->type != VIBE_TYPE_INTEGER || value->as_integer < 0 ||
-                value->as_integer > integer_fields[i].maximum) {
-                log_error("[%s] '%s' must be an integer between 0 and %d",
-                          context_name, integer_fields[i].key, integer_fields[i].maximum);
-                return false;
-            }
-            *integer_fields[i].dst = (int)value->as_integer;
-        }
-
-        struct { const char *key; long *dst; } color_fields[] = {
-            { "term_fg", &config->term_fg },
-            { "term_bg", &config->term_bg },
-        };
-        for (size_t i = 0; i < sizeof(color_fields) / sizeof(color_fields[0]); i++) {
-            VibeValue *value = vibe_object_get(obj->as_object, color_fields[i].key);
-            if (!value) continue;
-            if (value->type != VIBE_TYPE_STRING ||
-                (*color_fields[i].dst = parse_hex_color(value->as_string)) < 0) {
-                log_error("[%s] '%s' must be a six-digit RGB hex string",
-                          context_name, color_fields[i].key);
-                return false;
-            }
-        }
-
-        /* nwTermFX post-effect intensities, each 0..1. Accept int or float;
-         * absent leaves the -1 sentinel, which output_set_terminal maps to the
-         * built-in default (a subtle bloom, everything else off). */
-        struct { const char *key; float *dst; } fxk[] = {
-            { "term_bloom",    &config->term_bloom },
-            { "term_scanline", &config->term_scanline },
-            { "term_crt",      &config->term_crt },
-            { "term_chroma",   &config->term_chroma },
-            { "term_fade",     &config->term_fade },
-        };
-        for (size_t k = 0; k < sizeof(fxk)/sizeof(fxk[0]); k++) {
-            VibeValue *v = vibe_object_get(obj->as_object, fxk[k].key);
-            if (!v) continue;
-            double f;
-            if (v->type == VIBE_TYPE_FLOAT)        f = v->as_float;
-            else if (v->type == VIBE_TYPE_INTEGER) f = (double)v->as_integer;
-            else { log_error("[%s] '%s' must be a number 0..1", context_name, fxk[k].key); return false; }
-            if (f < 0.0) f = 0.0;
-            if (f > 1.0) f = 1.0;
-            *fxk[k].dst = (float)f;
-            log_info("[%s] %s = %.2f", context_name, fxk[k].key, *fxk[k].dst);
-        }
+    if (has_terminal && !parse_terminal_keys(obj, config, term_val, context_name)) {
+        return false;
     }
 
     /* ========================================================================
@@ -1069,75 +1061,7 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         }
     }
 
-    /* Parse channels (only relevant for shader mode) */
-    VibeValue *channels_val = vibe_object_get(obj->as_object, "channels");
-    if (channels_val) {
-        if (channels_val->type != VIBE_TYPE_ARRAY) {
-            log_error("[%s] 'channels' must be an array", context_name);
-            return false;
-        }
-
-        size_t count = channels_val->as_array->count;
-        enum { SHADERTOY_CHANNEL_COUNT = 4 };
-        if (count > SHADERTOY_CHANNEL_COUNT) {
-            log_error("[%s] 'channels' supports at most %d iChannel textures (got %zu)",
-                      context_name, SHADERTOY_CHANNEL_COUNT, count);
-            return false;
-        }
-        if (count > 0) {
-            if (config->type != WALLPAPER_SHADER) {
-                log_error("[%s] INVALID CONFIG: 'channels' specified in IMAGE mode. "
-                         "Channels (iChannel textures) only apply to GLSL shaders. This setting is invalid for images.",
-                         context_name);
-                return false;
-            }
-
-            config->channel_count = count;
-            config->channel_paths = calloc(count, sizeof(char *));
-
-            if (!config->channel_paths) {
-                log_error("[%s] Failed to allocate memory for channels", context_name);
-                return false;
-            }
-
-            for (size_t i = 0; i < count; i++) {
-                VibeValue *elem = channels_val->as_array->values[i];
-                if (!elem || elem->type != VIBE_TYPE_STRING) {
-                    log_error("[%s] Channel[%zu] must be a string", context_name, i);
-                    /* Free already allocated */
-                    for (size_t j = 0; j < i; j++) {
-                        free(config->channel_paths[j]);
-                    }
-                    free(config->channel_paths);
-                    config->channel_paths = NULL;
-                    config->channel_count = 0;
-                    return false;
-                }
-
-                if (elem->as_string[0] == '\0' ||
-                    strlen(elem->as_string) >= MAX_PATH_LENGTH) {
-                    log_error("[%s] Channel[%zu] must be a non-empty path shorter than %d bytes",
-                              context_name, i, MAX_PATH_LENGTH);
-                    for (size_t j = 0; j < i; j++) free(config->channel_paths[j]);
-                    free(config->channel_paths);
-                    config->channel_paths = NULL;
-                    config->channel_count = 0;
-                    return false;
-                }
-                config->channel_paths[i] = strdup(elem->as_string);
-                if (!config->channel_paths[i]) {
-                    for (size_t j = 0; j < i; j++) free(config->channel_paths[j]);
-                    free(config->channel_paths);
-                    config->channel_paths = NULL;
-                    config->channel_count = 0;
-                    return false;
-                }
-                log_debug("[%s] iChannel%zu: %s", context_name, i, elem->as_string);
-            }
-
-            log_info("[%s] Loaded %zu iChannel texture assignments", context_name, count);
-        }
-    }
+    if (!parse_channels(obj, config, context_name)) return false;
 
     /* Unknown keys are warned about, not rejected, so a config written for a
      * newer neowall still loads. Suggest the closest key to catch typos. */
