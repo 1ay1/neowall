@@ -794,9 +794,6 @@ struct compositor_backend *compositor_backend_wlr_layer_shell_init(struct neowal
 /* KDE Plasma Shell backend */
 struct compositor_backend *compositor_backend_kde_plasma_init(struct neowall_state *state);
 
-/* GNOME Shell backend (subsurface fallback) */
-struct compositor_backend *compositor_backend_gnome_shell_init(struct neowall_state *state);
-
 /* Generic fallback backend (works everywhere, limited features) */
 struct compositor_backend *compositor_backend_fallback_init(struct neowall_state *state);
 

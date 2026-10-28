@@ -21,8 +21,8 @@ This abstraction layer decouples NeoWall from specific compositor protocols, all
 Different Wayland compositors use different protocols for wallpaper/background layers:
 - **wlroots-based** (Hyprland, Sway, River): `zwlr_layer_shell_v1`
 - **KDE Plasma**: `org_kde_plasma_shell`
-- **GNOME Shell**: No official protocol (requires workarounds)
-- **Others**: Various or no support
+- **GNOME Shell**: no client wallpaper role on Wayland; refused with an error
+- **Others**: supported if they offer `zwlr_layer_shell_v1`
 
 Previously, NeoWall was tightly coupled to wlr-layer-shell, limiting it to wlroots compositors.
 
@@ -53,9 +53,8 @@ compositor/
 ├── compositor_surface.c      # Surface management API
 └── backends/
     ├── wlr_layer_shell.c     # wlroots compositor support
-    ├── kde_plasma.c          # KDE Plasma support (stub)
-    ├── gnome_shell.c         # GNOME Shell support (stub)
-    └── fallback.c            # Universal fallback
+    ├── kde_plasma.c          # KDE Plasma support
+    └── fallback.c            # dev only, not registered
 ```
 
 ### Key Concepts
@@ -172,54 +171,22 @@ Application Startup
 
 **File:** `backends/wlr_layer_shell.c`
 
-### 2. KDE Plasma Shell (Priority: 90) 🚧 **STUB**
+### 2. KDE Plasma Shell (Priority: 90)
 
 **Compositors:** KDE Plasma (KWin)
 
 **Protocol:** `org_kde_plasma_shell`
 
-**Features:**
-- 🚧 Desktop role placement
-- 🚧 Per-output surfaces
-- 🚧 Panel auto-hide support
+**File:** `backends/wayland/compositors/kde_plasma.c`
 
-**Status:** Stub implementation - needs protocol bindings
+### GNOME / Mutter
 
-**File:** `backends/kde_plasma.c`
+Not supported on Wayland. Mutter offers no wallpaper surface role to clients
+(no layer shell, no plasma shell), so the registry refuses with a clear error
+instead of mapping a surface that would never show. GNOME on X11 works through
+the X11 backend.
 
-**TODO:**
-1. Obtain `plasma-shell.xml` protocol definition
-2. Generate bindings with `wayland-scanner`
-3. Implement surface role setting (desktop background)
-4. Handle KDE-specific configuration
-
-### 3. GNOME Shell (Priority: 80) 🚧 **STUB**
-
-**Compositors:** GNOME Shell, Mutter
-
-**Protocol:** xdg-shell (workaround approach)
-
-**Features:**
-- 🚧 Fullscreen window approach
-- 🚧 Click pass-through
-- ⚠️ No guaranteed z-order
-
-**Status:** Stub implementation - requires xdg-shell integration
-
-**File:** `backends/gnome_shell.c`
-
-**Limitations:**
-- GNOME has no official wallpaper protocol
-- May appear in alt-tab/overview
-- Cannot guarantee always-below behavior
-
-**TODO:**
-1. Implement xdg-shell window creation
-2. Configure fullscreen on target output
-3. Set empty input region
-4. Test z-order behavior
-
-### 4. Fallback (Priority: 10) ✅ **IMPLEMENTED**
+### 3. Fallback (Priority: 10), development only
 
 **Compositors:** Any Wayland compositor
 
@@ -337,7 +304,6 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     
     compositor_backend_wlr_layer_shell_init(state);
     compositor_backend_kde_plasma_init(state);
-    compositor_backend_gnome_shell_init(state);
     compositor_backend_my_compositor_init(state);  // Add here
     compositor_backend_fallback_init(state);
     
@@ -354,7 +320,6 @@ wayland_sources = files(
   'src/compositor/backends/wayland/wayland_core.c',
   'src/compositor/backends/wayland/compositors/wlr_layer_shell.c',
   'src/compositor/backends/wayland/compositors/kde_plasma.c',
-  'src/compositor/backends/wayland/compositors/gnome_shell.c',
   'src/compositor/backends/wayland/compositors/my_compositor.c',
   'src/compositor/backends/wayland/compositors/fallback.c',
 )
@@ -598,8 +563,6 @@ Common issues:
 
 ### Future Work
 
-- [ ] Complete KDE Plasma backend implementation
-- [ ] Complete GNOME Shell backend implementation
 - [ ] Add Weston-specific optimizations
 - [ ] Add Vivaldi compositor support
 - [ ] Implement protocol negotiation for version compatibility

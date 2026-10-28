@@ -29,7 +29,6 @@
  * - Higher priority = preferred backend
  * - wlr-layer-shell: 100 (best for wlroots compositors)
  * - KDE Plasma: 90 (native KDE support)
- * - GNOME Shell: 80 (GNOME-specific)
  * - Fallback: 10 (works everywhere, limited features)
  */
 
@@ -308,9 +307,16 @@ static struct compositor_backend *select_wayland_backend(struct neowall_state *s
 
         case COMPOSITOR_TYPE_GNOME_SHELL:
         case COMPOSITOR_TYPE_MUTTER:
-            preferred_backend = "gnome-shell";
-            log_info("Using GNOME Shell backend");
-            break;
+            /* Mutter has no wallpaper surface role for clients. Use layer
+             * shell if a future Mutter grows it, else say so plainly. */
+            if (info->has_layer_shell) {
+                preferred_backend = "wlr-layer-shell";
+                break;
+            }
+            log_error("GNOME on Wayland isn't supported: Mutter doesn't offer wlr-layer-shell,");
+            log_error("so there's no way for a client to draw behind your windows.");
+            log_error("Use an X11 session, or a compositor with layer shell (KDE, Hyprland, Sway, ...).");
+            return NULL;
 
         default:
             /* A bare wl_surface has no role and cannot be mapped. Only select a
@@ -515,7 +521,6 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     log_debug("Registering available Wayland backends...");
     compositor_backend_wlr_layer_shell_init(state);
     compositor_backend_kde_plasma_init(state);
-    compositor_backend_gnome_shell_init(state);
     /* The generic fallback remains buildable for development, but is not
      * registered: its raw/subsurface surfaces have no mappable top-level role. */
 

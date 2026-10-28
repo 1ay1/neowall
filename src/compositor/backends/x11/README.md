@@ -385,9 +385,7 @@ When both Wayland and X11 are available, backend selection order:
 
 1. **wlr-layer-shell** (priority: 100) - Wayland compositors
 2. **KDE Plasma Shell** (priority: 90) - KDE Wayland
-3. **GNOME Shell** (priority: 80) - GNOME Wayland
-4. **X11 Tiling WM** (priority: 50) - **This backend**
-5. **Fallback** (priority: 10) - Generic Wayland
+3. **X11 Tiling WM** (priority: 50) - **This backend**
 
 Force X11 backend:
 ```bash
