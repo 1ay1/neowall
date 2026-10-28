@@ -1,5 +1,6 @@
 #!/bin/sh
-# End to end: the real neowall daemon on a real Wayland compositor, driven
+# End to end: the real neowall daemon on a real display server (Wayland or,
+# with NEOWALL_E2E_X11=1, X11 via Xvfb or rootful Xwayland), driven
 # through every control command.
 #
 # Starts a private compositor (sway headless, or a nested Hyprland when
@@ -65,9 +66,33 @@ wait_for() {  # wait_for <seconds> <cmd...>
     return 1
 }
 
-# ---- compositor -------------------------------------------------------------
+# ---- display server -----------------------------------------------------------
 before=$(ls "$XDG_RUNTIME_DIR" 2>/dev/null)
-if [ "${NEOWALL_E2E_HYPRLAND:-0}" = 1 ] && command -v Hyprland >/dev/null && [ -n "${WAYLAND_DISPLAY:-}" ]; then
+x11=0
+if [ "${NEOWALL_E2E_X11:-0}" = 1 ]; then
+    # The X11 backend: Xvfb, or a rootful Xwayland window in the caller's
+    # Wayland session. Hotplug and occlusion are Wayland-only checks.
+    x11=1
+    dpy=":$(( $$ % 400 + 100 ))"
+    if command -v Xvfb >/dev/null; then
+        Xvfb "$dpy" -screen 0 640x360x24 +extension RANDR >"$tmp/comp.log" 2>&1 &
+    elif command -v Xwayland >/dev/null && [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        parent="${REAL_XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$WAYLAND_DISPLAY"
+        ln -s "$parent" "$XDG_RUNTIME_DIR/parent-wayland"
+        env -u __EGL_VENDOR_LIBRARY_FILENAMES -u LIBGL_ALWAYS_SOFTWARE WAYLAND_DISPLAY=parent-wayland \
+            Xwayland "$dpy" -geometry 640x360 -noreset >"$tmp/comp.log" 2>&1 &
+    else
+        echo "skip: no Xvfb or Xwayland"; exit $SKIP
+    fi
+    comp_pid=$!
+    if ! wait_for 15 sh -c "kill -0 $comp_pid && [ -S /tmp/.X11-unix/X${dpy#:} ]"; then
+        echo "skip: X server didn't start"; tail -3 "$tmp/comp.log"; exit $SKIP
+    fi
+    export DISPLAY=$dpy
+    unset WAYLAND_DISPLAY
+    nw_env() { env -u WAYLAND_DISPLAY DISPLAY="$DISPLAY" "$@"; }
+    echo "X server up on $DISPLAY"
+elif [ "${NEOWALL_E2E_HYPRLAND:-0}" = 1 ] && command -v Hyprland >/dev/null && [ -n "${WAYLAND_DISPLAY:-}" ]; then
     # Nested in the caller's session: its socket must be reachable from ours,
     # and Hyprland needs the real GPU driver, not the forced software GL.
     parent="${REAL_XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$WAYLAND_DISPLAY"
@@ -89,6 +114,7 @@ else
     echo "skip: no sway (or Hyprland with NEOWALL_E2E_HYPRLAND=1)"
     exit $SKIP
 fi
+if [ "$x11" = 0 ]; then
 sock_ready() {
     kill -0 "$comp_pid" 2>/dev/null || return 1   # never fall back to another compositor
     for s in "$XDG_RUNTIME_DIR"/wayland-*; do
@@ -112,6 +138,7 @@ if [ "${NEOWALL_E2E_HYPRLAND:-0}" = 1 ]; then
     hypr_sig=$(ls -t "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | head -1)
 fi
 echo "compositor up on $WAYLAND_DISPLAY"
+fi
 
 # ---- a config that cycles three shaders --------------------------------------
 cfg="$tmp/config.vibe"
@@ -192,7 +219,9 @@ wait_for 10 sh -c "! kill -0 ${new_child:-0} 2>/dev/null" && ok "terminal child 
 # removing it must not take the daemon down. Needs a compositor that can add
 # outputs at runtime (hyprctl / swaymsg).
 hot_cmd=""
-if [ -n "${hypr_sig:-}" ]; then
+if [ "$x11" = 1 ]; then
+    :
+elif [ -n "${hypr_sig:-}" ]; then
     # nested Hyprland gives "headless" outputs no mode; a wayland one gets a real size
     hot_add()    { HYPRLAND_INSTANCE_SIGNATURE=$hypr_sig hyprctl output create wayland NW-HOT >/dev/null; }
     hot_remove() { HYPRLAND_INSTANCE_SIGNATURE=$hypr_sig hyprctl output remove NW-HOT >/dev/null; }
@@ -249,7 +278,7 @@ EOF
     cp "$tmp/good.vibe" "$cfg"
     expect "daemon still answers"        0 "pid $nw_pid"              "$nw" ping
 else
-    echo "  skip hotplug: no hyprctl/swaymsg"
+    echo "  skip hotplug: no hyprctl/swaymsg (or X11)"
 fi
 
 # ---- errors and stop ----------------------------------------------------------

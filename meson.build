@@ -1037,6 +1037,14 @@ if has_wayland
     depends: neowall_exe, suite: 'e2e', timeout: 180, is_parallel: false)
 endif
 
+# The same end-to-end run on the X11 backend (Xvfb). Skips without Xvfb.
+if has_x11
+  test('e2e_x11', find_program('tests/e2e_wayland.sh'),
+    args: [neowall_exe.full_path(), meson.project_source_root()],
+    env: {'NEOWALL_E2E_X11': '1'},
+    depends: neowall_exe, suite: 'e2e', timeout: 180, is_parallel: false)
+endif
+
 # =============================================================================
 # Fuzzers
 # =============================================================================

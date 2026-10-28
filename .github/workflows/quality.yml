@@ -35,7 +35,7 @@ jobs:
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
             egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon clang \
-            sway python
+            sway xorg-server-xvfb python
 
       - uses: actions/checkout@v4
       - name: Configure (ASan + UBSan)
@@ -50,11 +50,12 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: |
           meson test -C build-asan --print-errorlogs
-          # mesa and sway are installed here, so the GL tests and the daemon
-          # end-to-end test must really run, not skip.
+          # mesa, sway and Xvfb are installed here, so the GL tests and both
+          # end-to-end runs must really run, not skip.
           python3 - <<'EOF'
           import json, sys
-          must_run = {"neowall:multipass_gl", "neowall:output_render", "neowall:e2e_wayland"}
+          must_run = {"neowall:multipass_gl", "neowall:output_render",
+                      "neowall:e2e_wayland", "neowall:e2e_x11"}
           seen = {}
           for line in open("build-asan/meson-logs/testlog.json"):
               t = json.loads(line)
@@ -74,7 +75,8 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
-            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon sway
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon sway \
+            xorg-server-xvfb
 
       - uses: actions/checkout@v4
 
