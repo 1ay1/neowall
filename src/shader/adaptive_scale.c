@@ -540,436 +540,327 @@ void adaptive_submit_frame_time(adaptive_state_t *state, float frame_time_ms) {
     state->total_frames++;
 }
 
-void adaptive_update(adaptive_state_t *state, double current_time) {
-    if (!state || !state->initialized || !state->enabled) return;
-    
+/* Snap a scale to the nearest quantized level when that mode is on. */
+static void set_scale_level(adaptive_state_t *state, float scale) {
+    if (state->config.use_quantized_levels) {
+        state->current_level_index = find_closest_level(state, scale);
+        state->current_scale = state->quantized_levels[state->current_level_index];
+    } else {
+        state->current_scale = scale;
+    }
+}
+
+/* Take this frame's time (GPU if available, else wall clock) into history.
+ * Returns false when the frame was a gap (resume, stall), not a sample. */
+static bool sample_frame(adaptive_state_t *state, double current_time) {
     const adaptive_config_t *cfg = &state->config;
-    float target_ms = 1000.0f / cfg->target_fps;
-    float budget_ms = target_ms * cfg->headroom_factor;
-    
-    /* ========================================================================
-     * TIMING: Compute frame time from wall clock or GPU
-     * ======================================================================== */
-    float frame_time_ms;
-    
     if (state->last_frame_time > 0.0) {
         float wall_ms = (float)(current_time - state->last_frame_time) * 1000.0f;
-        
-        /* Prefer GPU timing if available (excludes vsync wait) */
-        if (state->gpu_timing_available && cfg->use_gpu_timing && state->last_gpu_time_ms > 0.1f) {
-            frame_time_ms = state->last_gpu_time_ms;
-        } else {
-            frame_time_ms = wall_ms;
-        }
-        
-        /* Discard startup and resume outliers instead of treating them as
-         * performance data.
-         *
-         * The first frames after a shader loads include surface configuration,
-         * EGL setup and shader compilation, and an occluded or idle wallpaper
-         * can sit parked for minutes before the next frame. Feeding those
-         * multi-hundred-millisecond gaps to the controller reads as a
-         * catastrophic performance collapse: it trips EMERGENCY on frame one,
-         * which latches half-rate buffer updates and halves quality for a
-         * shader that then runs a perfect 60 FPS forever after.
-         *
-         * A frame slower than this is not a slow frame, it is a gap. */
+        /* GPU time excludes the vsync wait */
+        float frame_time_ms =
+            (state->gpu_timing_available && cfg->use_gpu_timing && state->last_gpu_time_ms > 0.1f)
+                ? state->last_gpu_time_ms : wall_ms;
+
+        /* Startup frames include surface and shader setup, and a parked
+         * wallpaper can sit idle for minutes. Fed to the controller those read
+         * as a collapse and drop quality for a shader that's actually fine. A
+         * frame slower than ADAPTIVE_GAP_MS is a gap, not a slow frame. */
         if (state->warmup_frames < ADAPTIVE_WARMUP_FRAMES) {
             state->warmup_frames++;
         } else if (frame_time_ms > ADAPTIVE_GAP_MS) {
-            /* Treat as a discontinuity: keep the clock moving, drop the sample. */
-            state->last_frame_time = current_time;
-            return;
+            state->last_frame_time = current_time;   /* keep the clock, drop the sample */
+            return false;
         } else {
-            /* Submit to history */
             adaptive_submit_frame_time(state, frame_time_ms);
         }
     }
     state->last_frame_time = current_time;
-    
-    /* ========================================================================
-     * CALIBRATION: Initial performance measurement
-     * ======================================================================== */
-    if (!state->calibrated) {
-        /* Calibrate on real samples only. During warmup nothing reaches the
-         * history, and counting those frames here calibrated on an empty sum
-         * (avg 0 ms), after which the controller started deciding off the
-         * placeholder statistics adaptive_init seeds. */
-        if (state->history_count == 0) return;
-        if (state->calibration_start == 0.0) {
-            state->calibration_start = current_time;
-        }
-        
-        state->calibration_frames++;
-        if (state->history_count > 0) {
-            int idx = (state->history_index - 1 + ADAPTIVE_HISTORY_SIZE) & ADAPTIVE_HISTORY_MASK;
-            state->calibration_sum += state->frame_times[idx];
-        }
-        
-        double elapsed = current_time - state->calibration_start;
-        
-        /* Calibrate after 250ms or 15 frames */
-        if ((elapsed >= 0.25 && state->calibration_frames >= 8) || state->calibration_frames >= 15) {
-            float avg_ms = state->calibration_sum / (float)state->calibration_frames;
-            
-            if (avg_ms > budget_ms) {
-                /* Performance below target - estimate optimal scale */
-                /* render_time ∝ pixels ∝ scale², so scale = sqrt(budget/actual) */
-                float ratio = budget_ms / avg_ms;
-                float optimal = state->current_scale * sqrtf(ratio) * 0.9f;  /* 10% safety margin */
-                optimal = clampf(optimal, cfg->min_scale, cfg->max_scale);
-                
-                if (cfg->use_quantized_levels) {
-                    state->current_level_index = find_closest_level(state, optimal);
-                    state->current_scale = state->quantized_levels[state->current_level_index];
-                } else {
-                    state->current_scale = optimal;
-                }
-                state->target_scale = state->current_scale;
-                
-                if (cfg->verbose_logging) {
-                    log_info("Adaptive: Calibrated %.1fms avg (budget %.1fms) -> %.0f%% scale",
-                             avg_ms, budget_ms, state->current_scale * 100.0f);
-                }
-            } else if (cfg->verbose_logging) {
-                log_info("Adaptive: Calibrated %.1fms avg (budget %.1fms) -> full resolution OK",
-                         avg_ms, budget_ms);
-            }
-            
-            state->calibrated = true;
-        }
+    return true;
+}
+
+/* First ~250 ms of real samples: jump straight to a sensible scale instead of
+ * walking there. Calibrates on real samples only, never on the seeds
+ * adaptive_init puts in the history. */
+static void calibrate(adaptive_state_t *state, double current_time, float budget_ms) {
+    const adaptive_config_t *cfg = &state->config;
+    if (state->history_count == 0) return;
+    if (state->calibration_start == 0.0) state->calibration_start = current_time;
+
+    state->calibration_frames++;
+    int idx = (state->history_index - 1 + ADAPTIVE_HISTORY_SIZE) & ADAPTIVE_HISTORY_MASK;
+    state->calibration_sum += state->frame_times[idx];
+
+    double elapsed = current_time - state->calibration_start;
+    if (!((elapsed >= 0.25 && state->calibration_frames >= 8) || state->calibration_frames >= 15)) {
         return;
     }
-    
-    /* ========================================================================
-     * STATISTICS: Update performance metrics
-     * ======================================================================== */
-    update_statistics(state);
-    update_thermal_state(state, current_time);
-
-    /* No decision until the percentiles come from real frames. Until then
-     * p95 is the target frame time adaptive_init seeds, which reads as 14%
-     * over budget and walked every shader down to half resolution in its
-     * first second, however cheap it was. */
-    if (state->history_count < cfg->min_samples_for_stats) return;
-    
-    /* Get the frame time to use for decisions based on percentile targeting */
-    float decision_ms;
-    if (cfg->target_percentile >= 0.99f) {
-        decision_ms = state->p99_frame_time;
-    } else if (cfg->target_percentile >= 0.95f) {
-        decision_ms = state->p95_frame_time;
-    } else {
-        decision_ms = state->p50_frame_time;
-    }
-    
-    /* ========================================================================
-     * VELOCITY & ACCELERATION: Predictive component
-     * ======================================================================== */
-    {
-        /* These were function-scope statics, which is wrong: adaptive_state_t
-         * is per-output, so two monitors running shaders shared one velocity
-         * history and each one's frame times polluted the other's prediction
-         * (and the readings were nonsense the moment a second output existed).
-         * They live in the state now. */
-        if (state->prev_update_time > 0.0) {
-            float dt = (float)(current_time - state->prev_update_time);
-            if (dt > 0.001f) {
-                float new_velocity = (decision_ms - state->prev_decision_ms) / dt;
-                /* EMA smooth the velocity */
-                state->frame_time_velocity = lerpf(state->frame_time_velocity, new_velocity, 0.2f);
-
-                /* Compute acceleration */
-                float new_accel = (state->frame_time_velocity - state->prev_velocity) / dt;
-                state->frame_time_accel = lerpf(state->frame_time_accel, new_accel, 0.15f);
-                state->prev_velocity = state->frame_time_velocity;
-            }
+    float avg_ms = state->calibration_sum / (float)state->calibration_frames;
+    if (avg_ms > budget_ms) {
+        /* render time ~ pixels ~ scale^2, so scale = sqrt(budget/actual), less 10% */
+        float optimal = state->current_scale * sqrtf(budget_ms / avg_ms) * 0.9f;
+        set_scale_level(state, clampf(optimal, cfg->min_scale, cfg->max_scale));
+        state->target_scale = state->current_scale;
+        if (cfg->verbose_logging) {
+            log_info("Adaptive: Calibrated %.1fms avg (budget %.1fms) -> %.0f%% scale",
+                     avg_ms, budget_ms, state->current_scale * 100.0f);
         }
-        state->prev_decision_ms = decision_ms;
-        state->prev_update_time = current_time;
+    } else if (cfg->verbose_logging) {
+        log_info("Adaptive: Calibrated %.1fms avg (budget %.1fms) -> full resolution OK",
+                 avg_ms, budget_ms);
     }
-    
-    /* Predictive frame time: current + velocity * lookahead */
-    float lookahead_sec = 0.1f;  /* 100ms lookahead */
-    float predicted_ms = decision_ms + state->frame_time_velocity * lookahead_sec;
-    predicted_ms = fmaxf(predicted_ms, decision_ms * 0.8f);  /* Don't predict too optimistically */
-    
-    /* ========================================================================
-     * EMERGENCY MODE: Severe performance drop
-     * ======================================================================== */
+    state->calibrated = true;
+}
+
+/* The frame time decisions are made on: the configured percentile. */
+static float decision_frame_time(const adaptive_state_t *state) {
+    float pct = state->config.target_percentile;
+    if (pct >= 0.99f) return state->p99_frame_time;
+    if (pct >= 0.95f) return state->p95_frame_time;
+    return state->p50_frame_time;
+}
+
+/* Smoothed velocity/acceleration of the decision time, per output. Returns
+ * the frame time predicted 100 ms ahead, never much better than now. */
+static float predict_frame_time(adaptive_state_t *state, double current_time, float decision_ms) {
+    if (state->prev_update_time > 0.0) {
+        float dt = (float)(current_time - state->prev_update_time);
+        if (dt > 0.001f) {
+            float new_velocity = (decision_ms - state->prev_decision_ms) / dt;
+            state->frame_time_velocity = lerpf(state->frame_time_velocity, new_velocity, 0.2f);
+            float new_accel = (state->frame_time_velocity - state->prev_velocity) / dt;
+            state->frame_time_accel = lerpf(state->frame_time_accel, new_accel, 0.15f);
+            state->prev_velocity = state->frame_time_velocity;
+        }
+    }
+    state->prev_decision_ms = decision_ms;
+    state->prev_update_time = current_time;
+
+    float predicted_ms = decision_ms + state->frame_time_velocity * 0.1f;
+    return fmaxf(predicted_ms, decision_ms * 0.8f);
+}
+
+/* A severe drop skips the normal controller and cuts the scale at once.
+ * Returns whether we're (still) in emergency. */
+static bool handle_emergency(adaptive_state_t *state, float decision_ms,
+                             float target_ms, float budget_ms) {
+    const adaptive_config_t *cfg = &state->config;
     bool was_emergency = state->in_emergency;
-    
+
     if (decision_ms > target_ms * cfg->emergency_threshold) {
         state->in_emergency = true;
         state->emergency_frames++;
         state->total_emergency_triggers++;
-        
         if (!was_emergency) {
-            /* Just entered emergency - immediately drop scale */
-            float ratio = budget_ms / decision_ms;
-            float emergency_scale = state->current_scale * sqrtf(ratio) * 0.85f;
-            emergency_scale = clampf(emergency_scale, cfg->min_scale, cfg->max_scale);
-            
+            float scale = state->current_scale * sqrtf(budget_ms / decision_ms) * 0.85f;
+            scale = clampf(scale, cfg->min_scale, cfg->max_scale);
             if (cfg->use_quantized_levels) {
-                /* Jump down multiple levels in emergency */
-                int target_level = find_closest_level(state, emergency_scale);
-                target_level = (target_level < ADAPTIVE_SCALE_LEVELS - 2) ? target_level + 2 : ADAPTIVE_SCALE_LEVELS - 1;
-                state->current_level_index = target_level;
-                state->current_scale = state->quantized_levels[target_level];
+                /* two levels further down than the estimate */
+                int level = find_closest_level(state, scale);
+                level = level < ADAPTIVE_SCALE_LEVELS - 2 ? level + 2 : ADAPTIVE_SCALE_LEVELS - 1;
+                state->current_level_index = level;
+                state->current_scale = state->quantized_levels[level];
             } else {
-                state->current_scale = emergency_scale;
+                state->current_scale = scale;
             }
             state->target_scale = state->current_scale;
             state->is_locked = false;
-            
             if (cfg->verbose_logging) {
                 log_info("Adaptive: EMERGENCY! %.1fms >> %.1fms budget -> %.0f%% scale",
                          decision_ms, budget_ms, state->current_scale * 100.0f);
             }
         }
     } else if (decision_ms < target_ms * 0.9f) {
-        /* Recovered from emergency */
         if (was_emergency && cfg->verbose_logging) {
             log_info("Adaptive: Emergency resolved after %d frames", state->emergency_frames);
         }
         state->in_emergency = false;
         state->emergency_frames = 0;
     }
-    
-    if (state->in_emergency) {
-        goto apply_scale;  /* Skip normal adjustment logic */
-    }
-    
-    /* ========================================================================
-     * STABILITY TRACKING
-     * ======================================================================== */
-    float budget_ratio = decision_ms / budget_ms;
-    
+    return state->in_emergency;
+}
+
+/* Count stable / over / under frames; lock after sustained stability, unlock
+ * when performance drifts well outside the band. */
+static void track_stability(adaptive_state_t *state, float budget_ratio) {
+    const adaptive_config_t *cfg = &state->config;
     if (budget_ratio >= cfg->threshold_up && budget_ratio <= cfg->threshold_down) {
-        /* Within acceptable range */
         state->consecutive_stable_frames++;
         state->consecutive_over_budget = 0;
         state->consecutive_under_budget = 0;
-        
-        /* Increase stability score over time */
         state->stability_score = fminf(1.0f, state->stability_score + 0.02f);
-        
-        /* Lock after sustained stability */
         if (state->consecutive_stable_frames >= cfg->stable_frames_to_lock && !state->is_locked) {
             state->is_locked = true;
             state->locked_scale = state->current_scale;
             state->oscillation_count = 0;
             state->oscillation_damping = 1.0f;
-            
             if (cfg->verbose_logging) {
                 log_info("Adaptive: LOCKED at %.0f%% (stable for %d frames, score=%.2f)",
                          state->current_scale * 100.0f, state->consecutive_stable_frames,
                          state->stability_score);
             }
         }
+        return;
+    }
+
+    state->consecutive_stable_frames = 0;
+    state->stability_score = fmaxf(0.0f, state->stability_score - 0.05f);
+    if (budget_ratio > cfg->threshold_down) {
+        state->consecutive_over_budget++;
+        state->consecutive_under_budget = 0;
     } else {
-        /* Outside acceptable range */
-        state->consecutive_stable_frames = 0;
-        state->stability_score = fmaxf(0.0f, state->stability_score - 0.05f);
-        
-        if (budget_ratio > cfg->threshold_down) {
-            state->consecutive_over_budget++;
-            state->consecutive_under_budget = 0;
-        } else {
-            state->consecutive_under_budget++;
-            state->consecutive_over_budget = 0;
-        }
-        
-        /* Unlock if performance drifts significantly */
-        if (state->is_locked && (budget_ratio > cfg->threshold_down * 1.1f || 
-                                  budget_ratio < cfg->threshold_up * 0.9f)) {
-            state->is_locked = false;
-            if (cfg->verbose_logging) {
-                log_info("Adaptive: UNLOCKED (budget_ratio=%.2f)", budget_ratio);
-            }
-        }
+        state->consecutive_under_budget++;
+        state->consecutive_over_budget = 0;
     }
-    
-    /* ========================================================================
-     * SCALE ADJUSTMENT (if not locked)
-     * ======================================================================== */
-    if (state->is_locked) {
-        state->target_scale = state->locked_scale;
-        goto apply_scale;
+    if (state->is_locked && (budget_ratio > cfg->threshold_down * 1.1f ||
+                             budget_ratio < cfg->threshold_up * 0.9f)) {
+        state->is_locked = false;
+        if (cfg->verbose_logging) log_info("Adaptive: UNLOCKED (budget_ratio=%.2f)", budget_ratio);
     }
-    
-    /* Check cooldowns */
-    double time_since_up = current_time - state->last_upscale_time;
-    double time_since_down = current_time - state->last_downscale_time;
-    
-    int direction = 0;
-    float new_scale = state->current_scale;
-    
-    /* DOWNSCALE: Over budget - need to reduce quality */
-    if (budget_ratio > cfg->threshold_down && 
-        time_since_down * 1000.0 >= cfg->cooldown_down_ms) {
-        
-        /* Proportional control with prediction */
-        float overage = predicted_ms - budget_ms;
-        float adjustment_factor = sqrtf(overage / budget_ms);
-        
-        /* Apply oscillation damping */
-        adjustment_factor *= state->oscillation_damping;
-        
-        /* Thermal throttling - more aggressive downscaling */
-        if (state->thermal_throttling) {
-            adjustment_factor *= 1.5f;
-        }
-        
+}
+
+/* The scale the controller wants next, and which way that moves (-1/0/+1). */
+static int propose_scale(const adaptive_state_t *state, double current_time, float budget_ratio,
+                         float budget_ms, float predicted_ms, float *out_scale) {
+    const adaptive_config_t *cfg = &state->config;
+    double since_up_ms = (current_time - state->last_upscale_time) * 1000.0;
+    double since_down_ms = (current_time - state->last_downscale_time) * 1000.0;
+    *out_scale = state->current_scale;
+
+    if (budget_ratio > cfg->threshold_down && since_down_ms >= cfg->cooldown_down_ms) {
+        /* down: proportional to the predicted overage, damped, harder when hot */
+        float factor = sqrtf((predicted_ms - budget_ms) / budget_ms) * state->oscillation_damping;
+        if (state->thermal_throttling) factor *= 1.5f;
         if (cfg->use_quantized_levels) {
-            /* Move down by 1-2 levels based on severity */
-            int levels_down = (adjustment_factor > 0.3f) ? 2 : 1;
-            int new_level = find_level_down(state->current_level_index);
-            if (levels_down > 1) new_level = find_level_down(new_level);
-            
-            if (new_level != state->current_level_index) {
-                new_scale = state->quantized_levels[new_level];
-                direction = -1;
-            }
-        } else {
-            /* Continuous scaling */
-            float reduction = adjustment_factor * 0.15f;
-            reduction = clampf(reduction, 0.02f, 0.20f);
-            new_scale = state->current_scale * (1.0f - reduction);
-            if (new_scale < state->current_scale - 0.01f) {
-                direction = -1;
-            }
+            int level = find_level_down(state->current_level_index);
+            if (factor > 0.3f) level = find_level_down(level);
+            if (level == state->current_level_index) return 0;
+            *out_scale = state->quantized_levels[level];
+            return -1;
         }
+        float reduction = clampf(factor * 0.15f, 0.02f, 0.20f);
+        *out_scale = state->current_scale * (1.0f - reduction);
+        return *out_scale < state->current_scale - 0.01f ? -1 : 0;
     }
-    /* UPSCALE: Under budget - can try increasing quality */
-    else if (budget_ratio < cfg->threshold_up && 
-             time_since_up * 1000.0 >= cfg->cooldown_up_ms &&
-             state->current_scale < cfg->max_scale - 0.01f &&
-             !state->thermal_throttling) {
-        
-        /* Only upscale if velocity is stable or improving */
-        if (state->frame_time_velocity < 1.0f) {  /* Not getting worse */
-            
-            /* Conservative upscaling - use theoretical headroom */
-            float headroom = budget_ms - predicted_ms;
-            float headroom_ratio = headroom / budget_ms;
-            
-            if (cfg->use_quantized_levels) {
-                /* Move up by 1 level only if sufficient headroom */
-                if (headroom_ratio > 0.15f && state->consecutive_under_budget >= 10) {
-                    int new_level = find_level_up(state->current_level_index);
-                    if (new_level != state->current_level_index) {
-                        new_scale = state->quantized_levels[new_level];
-                        direction = 1;
-                    }
-                }
-            } else {
-                /* Continuous - move 10% towards theoretical max */
-                float theoretical_max = state->current_scale * sqrtf(budget_ms / predicted_ms);
-                theoretical_max = fminf(theoretical_max, cfg->max_scale);
-                
-                float increase = (theoretical_max - state->current_scale) * 0.10f;
-                increase = clampf(increase, 0.01f, 0.05f);
-                
-                if (increase > 0.01f && state->consecutive_under_budget >= 5) {
-                    new_scale = state->current_scale + increase;
-                    direction = 1;
-                }
-            }
-        }
+
+    bool may_go_up = budget_ratio < cfg->threshold_up && since_up_ms >= cfg->cooldown_up_ms &&
+                     state->current_scale < cfg->max_scale - 0.01f &&
+                     !state->thermal_throttling &&
+                     state->frame_time_velocity < 1.0f;   /* not getting worse */
+    if (!may_go_up) return 0;
+
+    if (cfg->use_quantized_levels) {
+        float headroom_ratio = (budget_ms - predicted_ms) / budget_ms;
+        if (headroom_ratio <= 0.15f || state->consecutive_under_budget < 10) return 0;
+        int level = find_level_up(state->current_level_index);
+        if (level == state->current_level_index) return 0;
+        *out_scale = state->quantized_levels[level];
+        return 1;
     }
-    
-    /* Oscillation detection and damping */
-    if (direction != 0) {
-        if (state->last_direction != 0 && state->last_direction != direction) {
-            state->oscillation_count++;
-            
-            /* Increase damping with each oscillation */
-            state->oscillation_damping *= 0.7f;
-            state->oscillation_damping = fmaxf(state->oscillation_damping, 0.3f);
-            
-            /* Lock if oscillating too much */
-            if (state->oscillation_count >= 3) {
-                state->is_locked = true;
-                state->locked_scale = state->current_scale;
-                state->oscillation_count = 0;
-                
-                if (cfg->verbose_logging) {
-                    log_info("Adaptive: LOCKED at %.0f%% (oscillation damping)",
-                             state->current_scale * 100.0f);
-                }
-                goto apply_scale;
-            }
-        } else {
-            /* Same direction - reduce oscillation count */
-            if (state->oscillation_count > 0) state->oscillation_count--;
-            
-            /* Recover damping slowly */
-            state->oscillation_damping = fminf(1.0f, state->oscillation_damping + 0.05f);
-        }
-        state->last_direction = direction;
-        
-        /* Apply the scale change */
-        new_scale = clampf(new_scale, cfg->min_scale, cfg->max_scale);
-        
-        if (fabsf(new_scale - state->target_scale) > 0.005f) {
-            state->target_scale = new_scale;
-            
-            if (direction > 0) {
-                state->last_upscale_time = current_time;
-                state->total_upscales++;
-            } else {
-                state->last_downscale_time = current_time;
-                state->total_downscales++;
-            }
-            state->last_any_scale_time = current_time;
-            
-            if (cfg->use_quantized_levels) {
-                state->current_level_index = find_closest_level(state, new_scale);
-            }
-            
+    /* continuous: 10% of the way to the theoretical max */
+    float theoretical_max = fminf(state->current_scale * sqrtf(budget_ms / predicted_ms),
+                                  cfg->max_scale);
+    float increase = clampf((theoretical_max - state->current_scale) * 0.10f, 0.01f, 0.05f);
+    if (increase <= 0.01f || state->consecutive_under_budget < 5) return 0;
+    *out_scale = state->current_scale + increase;
+    return 1;
+}
+
+/* Take a proposed move, with oscillation damping: flipping direction three
+ * times locks the scale where it is. */
+static void commit_scale(adaptive_state_t *state, double current_time, int direction,
+                         float new_scale, float decision_ms) {
+    const adaptive_config_t *cfg = &state->config;
+    if (state->last_direction != 0 && state->last_direction != direction) {
+        state->oscillation_count++;
+        state->oscillation_damping = fmaxf(state->oscillation_damping * 0.7f, 0.3f);
+        if (state->oscillation_count >= 3) {
+            state->is_locked = true;
+            state->locked_scale = state->current_scale;
+            state->oscillation_count = 0;
             if (cfg->verbose_logging) {
-                log_info("Adaptive: %.1fms (P%d) %s -> %.0f%% (vel=%.1f, damp=%.2f)",
-                         decision_ms, (int)(cfg->target_percentile * 100),
-                         direction > 0 ? "UP" : "DOWN",
-                         new_scale * 100.0f,
-                         state->frame_time_velocity,
-                         state->oscillation_damping);
+                log_info("Adaptive: LOCKED at %.0f%% (oscillation damping)",
+                         state->current_scale * 100.0f);
             }
+            return;
         }
+    } else {
+        if (state->oscillation_count > 0) state->oscillation_count--;
+        state->oscillation_damping = fminf(1.0f, state->oscillation_damping + 0.05f);
     }
-    
-apply_scale:
-    /* ========================================================================
-     * SMOOTH INTERPOLATION
-     * ======================================================================== */
-    {
-        float diff = state->target_scale - state->current_scale;
-        float abs_diff = fabsf(diff);
-        
-        if (abs_diff > 0.001f) {
-            /* Asymmetric interpolation: faster down, slower up */
-            float lerp_rate;
-            if (diff < 0) {
-                /* Scaling down - faster for responsiveness */
-                lerp_rate = state->in_emergency ? 0.6f : 0.25f;
-            } else {
-                /* Scaling up - slower for stability */
-                lerp_rate = 0.12f;
-            }
-            
-            state->current_scale += diff * lerp_rate;
-            
-            /* Snap to quantized level if close */
-            if (cfg->use_quantized_levels && abs_diff < 0.02f) {
-                state->current_scale = state->quantized_levels[state->current_level_index];
-            }
+    state->last_direction = direction;
+
+    new_scale = clampf(new_scale, cfg->min_scale, cfg->max_scale);
+    if (fabsf(new_scale - state->target_scale) <= 0.005f) return;
+
+    state->target_scale = new_scale;
+    if (direction > 0) {
+        state->last_upscale_time = current_time;
+        state->total_upscales++;
+    } else {
+        state->last_downscale_time = current_time;
+        state->total_downscales++;
+    }
+    state->last_any_scale_time = current_time;
+    if (cfg->use_quantized_levels) state->current_level_index = find_closest_level(state, new_scale);
+    if (cfg->verbose_logging) {
+        log_info("Adaptive: %.1fms (P%d) %s -> %.0f%% (vel=%.1f, damp=%.2f)",
+                 decision_ms, (int)(cfg->target_percentile * 100), direction > 0 ? "UP" : "DOWN",
+                 new_scale * 100.0f, state->frame_time_velocity, state->oscillation_damping);
+    }
+}
+
+/* Ease current_scale toward target_scale: fast down, slow up. */
+static void approach_target(adaptive_state_t *state) {
+    const adaptive_config_t *cfg = &state->config;
+    float diff = state->target_scale - state->current_scale;
+    float abs_diff = fabsf(diff);
+    if (abs_diff > 0.001f) {
+        float rate = diff < 0 ? (state->in_emergency ? 0.6f : 0.25f) : 0.12f;
+        state->current_scale += diff * rate;
+        if (cfg->use_quantized_levels && abs_diff < 0.02f) {
+            state->current_scale = state->quantized_levels[state->current_level_index];
+        }
+    } else {
+        state->current_scale = state->target_scale;
+    }
+    state->current_scale = clampf(state->current_scale, cfg->min_scale, cfg->max_scale);
+}
+
+/* One controller step per frame: sample, (calibrate), decide, ease. */
+void adaptive_update(adaptive_state_t *state, double current_time) {
+    if (!state || !state->initialized || !state->enabled) return;
+
+    const adaptive_config_t *cfg = &state->config;
+    float target_ms = 1000.0f / cfg->target_fps;
+    float budget_ms = target_ms * cfg->headroom_factor;
+
+    if (!sample_frame(state, current_time)) return;
+    if (!state->calibrated) {
+        calibrate(state, current_time, budget_ms);
+        return;
+    }
+
+    update_statistics(state);
+    update_thermal_state(state, current_time);
+    /* No decisions until the percentiles come from real frames, not seeds. */
+    if (state->history_count < cfg->min_samples_for_stats) return;
+
+    float decision_ms = decision_frame_time(state);
+    float predicted_ms = predict_frame_time(state, current_time, decision_ms);
+
+    if (!handle_emergency(state, decision_ms, target_ms, budget_ms)) {
+        float budget_ratio = decision_ms / budget_ms;
+        track_stability(state, budget_ratio);
+        if (state->is_locked) {
+            state->target_scale = state->locked_scale;
         } else {
-            state->current_scale = state->target_scale;
+            float new_scale;
+            int direction = propose_scale(state, current_time, budget_ratio, budget_ms,
+                                          predicted_ms, &new_scale);
+            if (direction != 0) commit_scale(state, current_time, direction, new_scale, decision_ms);
         }
-        
-        state->current_scale = clampf(state->current_scale, cfg->min_scale, cfg->max_scale);
     }
+    approach_target(state);
 }
 
 /* ============================================================================

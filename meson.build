@@ -672,6 +672,17 @@ test_adaptive_exe = executable('test_adaptive_scale',
 
 test('adaptive_scale', test_adaptive_exe)
 
+# Every controller decision, hashed: modes x quantized x eight load shapes.
+# -ffp-contract=off keeps the float math (and so the hash) the same on
+# targets that fuse multiply-adds by default, like aarch64.
+test('adaptive_golden', executable('test_adaptive_golden',
+  files('tests/test_adaptive_golden.c', 'src/shader/adaptive_scale.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  c_args: cc.get_supported_arguments('-ffp-contract=off'),
+  dependencies: [m_dep],
+  build_by_default: false,
+))
+
 # The open data plane: provider registry, spec grammar, interval scheduling,
 # and the occlusion contract (a hidden source must not poll, spawn, or sample).
 # No GL and no display server, so it runs headless in CI.
