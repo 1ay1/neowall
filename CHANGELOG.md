@@ -12,6 +12,10 @@ All notable changes to neowall. Dates are release dates.
   daemon right after start.
 - GNOME on Wayland now exits with a clear message instead of starting a
   backend that could never show anything.
+- A per-output config block was applied on top of `default`, so the output
+  was set up (and its shader compiled) twice on every load and reload.
+- A shader could be refused on a backend whose surface wasn't a
+  wl_egl_window or an X11 window, though an EGL surface existed.
 
 ### Added
 - GPU reset and lost-surface recovery: the GL context is created robust,
@@ -22,6 +26,11 @@ All notable changes to neowall. Dates are release dates.
 - Man pages `neowall(1)` and `neowall.vibe(5)`, AppStream metainfo.
 - Fuzzers for the terminal and EXIF parsers; all fuzzers run in `meson test`
   and in CI.
+- The shader engine and the output/render path are tested end to end with no
+  display: a surfaceless Mesa GL context renders real shaders and images and
+  the pixels are checked. CI fails if these tests skip.
+- The adaptive resolution controller is pinned by a golden trace of every
+  decision across modes and load shapes.
 
 ### Changed
 - Only freely licensed shaders are installed. Ports whose license forbids
