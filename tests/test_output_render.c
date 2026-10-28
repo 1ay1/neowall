@@ -259,6 +259,47 @@ int main(void) {
     CHECK(close_rgb(first, 0x00ff00) || close_rgb(first, 0xffffff), "cycle shows a cycle image: %06x", first);
     CHECK(!close_rgb(first, second), "cycling changes the picture: %06x -> %06x", first, second);
 
+    /* 6. Every transition: start a cycle step with it, then draw at the
+     *    start, the middle and the end. Solid green -> solid white (or back),
+     *    so the ends are the two images and the middle is neither, except
+     *    slides, whose middle is half of each. */
+    static const struct { enum transition_type t; const char *name; } trans[] = {
+        {TRANSITION_FADE, "fade"}, {TRANSITION_SLIDE_LEFT, "slide_left"},
+        {TRANSITION_SLIDE_RIGHT, "slide_right"}, {TRANSITION_GLITCH, "glitch"},
+        {TRANSITION_PIXELATE, "pixelate"},
+    };
+    for (size_t i = 0; i < sizeof(trans) / sizeof(trans[0]); i++) {
+        d.transition = trans[i].t;
+        d.transition_duration = 10.0f;   /* long: we drive progress by hand */
+        CHECK(output_apply_config(o, &d), "apply cycle with %s", trans[i].name);
+        CHECK(draw(o), "%s: settle", trans[i].name);
+        unsigned from = read_rgb(W / 2, H / 2);
+        output_cycle_wallpaper(o);
+        CHECK(o->transition_start_time > 0, "%s: cycling starts a transition", trans[i].name);
+
+        o->transition_progress = 0.0f;
+        CHECK(draw(o), "%s: draw at 0", trans[i].name);
+        unsigned at0 = read_rgb(W / 2, H / 2);
+        o->transition_progress = 0.5f;
+        CHECK(draw(o), "%s: draw at 0.5", trans[i].name);
+        unsigned left = read_rgb(2, H / 2), right = read_rgb(W - 3, H / 2), mid = read_rgb(W / 2, H / 2);
+        o->transition_progress = 1.0f;
+        CHECK(draw(o), "%s: draw at 1", trans[i].name);
+        unsigned at1 = read_rgb(W / 2, H / 2);
+
+        CHECK(close_rgb(at0, from), "%s: starts on the old image (%06x vs %06x)", trans[i].name, at0, from);
+        CHECK(!close_rgb(at1, from), "%s: ends on the new image (%06x)", trans[i].name, at1);
+        if (trans[i].t == TRANSITION_SLIDE_LEFT || trans[i].t == TRANSITION_SLIDE_RIGHT) {
+            CHECK(!close_rgb(left, right), "%s: halfway shows both images (%06x | %06x)",
+                  trans[i].name, left, right);
+        } else if (trans[i].t == TRANSITION_FADE) {
+            CHECK(!close_rgb(mid, from) && !close_rgb(mid, at1),
+                  "fade: halfway is a blend (%06x between %06x and %06x)", mid, from, at1);
+        }
+        CHECK(glGetError() == GL_NO_ERROR, "%s: no GL error", trans[i].name);
+        o->transition_start_time = 0;   /* let the next one start clean */
+    }
+
     output_destroy(o);
     eglMakeCurrent(g_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     eglDestroyContext(g_dpy, st.egl_context);
