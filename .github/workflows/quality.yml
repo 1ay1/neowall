@@ -48,7 +48,20 @@ jobs:
         env:
           ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: meson test -C build-asan --print-errorlogs
+        run: |
+          meson test -C build-asan --print-errorlogs
+          # mesa is installed here, so the GL tests must really run, not skip.
+          python3 - <<'EOF'
+          import json, sys
+          gl = {"neowall:multipass_gl", "neowall:output_render"}
+          seen = {}
+          for line in open("build-asan/meson-logs/testlog.json"):
+              t = json.loads(line)
+              if t["name"] in gl:
+                  seen[t["name"]] = t["result"]
+          print(seen)
+          sys.exit(0 if seen and all(r == "OK" for r in seen.values()) else 1)
+          EOF
 
   threadsanitizer:
     name: ThreadSanitizer (concurrency tests)
