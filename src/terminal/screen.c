@@ -330,7 +330,11 @@ static void cb_osc(void *u, const uint8_t *data, size_t len) {
     /* split leading numeric Ps up to the first ';' */
     size_t i = 0;
     int ps = 0; bool have_ps = false;
-    while (i < len && data[i] >= '0' && data[i] <= '9') { ps = ps * 10 + (data[i] - '0'); have_ps = true; i++; }
+    while (i < len && data[i] >= '0' && data[i] <= '9') {
+        if (ps < 100000) ps = ps * 10 + (data[i] - '0');   /* cap: no int overflow */
+        have_ps = true;
+        i++;
+    }
     if (i < len && data[i] == ';') i++;
     if (!have_ps) return;
     if (ps == 0 || ps == 2) {           /* set window/icon title */
@@ -772,6 +776,11 @@ bool term_screen_resize(term_screen *s, int cols, int rows) {
     s->scroll_top = 0; s->scroll_bottom = rows - 1;
     s->cur.x = clampi(s->cur.x, 0, cols - 1);
     s->cur.y = clampi(s->cur.y, 0, rows - 1);
+    /* DECRC restores these later, so they must fit the new grid too. */
+    s->saved_primary.x = clampi(s->saved_primary.x, 0, cols - 1);
+    s->saved_primary.y = clampi(s->saved_primary.y, 0, rows - 1);
+    s->saved_alt.x = clampi(s->saved_alt.x, 0, cols - 1);
+    s->saved_alt.y = clampi(s->saved_alt.y, 0, rows - 1);
     reset_tabstops(s);
     /* A shrink can retain a wide tail while its head remains immediately
      * before it, or retain a head while dropping its tail. Clear the complete

@@ -238,6 +238,28 @@ int main(void) {
     }
     term_screen_destroy(s);
 
+    /* A cursor saved before a shrink must not land outside the new grid. */
+    s = term_screen_create(80, 24);
+    feed(s, "\x1b[24;80H\x1b" "7");
+    expect(term_screen_resize(s, 40, 12), "shrink after DECSC");
+    feed(s, "\x1b" "8X");
+    {
+        const term_cell *r = term_screen_row(s, 11);
+        expect(r[39].cp == 'X', "DECRC after shrink prints inside the grid");
+    }
+    /* same for the alt screen's saved cursor */
+    feed(s, "\x1b[?1049h\x1b[12;40H\x1b" "7");
+    expect(term_screen_resize(s, 10, 3), "shrink on alt screen");
+    feed(s, "\x1b" "8Y");
+    expect(term_screen_row(s, 2)[9].cp == 'Y', "alt DECRC after shrink stays in grid");
+    term_screen_destroy(s);
+
+    /* A huge OSC number must not overflow (UBSan catches it if it does). */
+    s = term_screen_create(10, 2);
+    feed(s, "\x1b]99999999999999999999;x\x07ok");
+    expect(term_screen_row(s, 0)[0].cp == 'o', "oversized OSC number is ignored");
+    term_screen_destroy(s);
+
     printf("terminal_screen: %d checks, %d failures\n", g_checks, g_fails);
     return g_fails ? 1 : 0;
 }
