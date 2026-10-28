@@ -185,6 +185,70 @@ int main(void) {
     write_cfg("default {\n  terminal htop\n  term_rows 9999\n}\n");
     CHECK(!config_reload(&st, cfg));
 
+    /* every key: wrong type, wrong wallpaper type and out of range are
+     * refused; good values land in the config */
+    struct { const char *body; bool ok; } cases[] = {
+        {"shader A\n  mode fill", false},                 /* mode is image-only */
+        {"shader A\n  transition fade", false},           /* image-only */
+        {"shader A\n  transition_duration 1", false},     /* image-only */
+        {"path /x.png\n  shader_speed 2", false},         /* shader-only */
+        {"path /x.png\n  shader_fps 30", false},          /* shader/terminal only */
+        {"path /x.png\n  vsync false", false},            /* shader/terminal only */
+        {"path /x.png\n  mode 3", false},                 /* wrong type */
+        {"path /x.png\n  duration fast", false},
+        {"path /x.png\n  duration -5", false},
+        {"path /x.png\n  transition_duration x", false},
+        {"path /x.png\n  transition_duration -1", false},
+        {"shader A\n  shader_speed fast", false},
+        {"shader A\n  shader_fps 0", false},
+        {"shader A\n  shader_fps 241", false},
+        {"shader A\n  shader_fps fast", false},
+        {"shader A\n  vsync 1", false},
+        {"shader A\n  show_fps yes", false},
+        {"shader A\n  pause_on_fullscreen 1", false},
+        {"shader A\n  pause_coverage_threshold 2", false},
+        {"shader A\n  pause_coverage_threshold x", false},
+        {"shader A\n  shuffle 1", false},
+        {"shader A\n  span 1", false},
+        {"shader 5", false},
+        {"", false},                                       /* no source */
+        {"path /x.png\n  terminal htop", false},
+        {"terminal htop\n  shader_fps 30\n  vsync false", true},
+        {"shader A\n  shader_fps 30.0\n  shader_speed 2", true},
+        {"path /x.png\n  mode fit\n  transition fade\n  transition_duration 0.5\n  duration 10", true},
+        {"shader A\n  show_fps true\n  pause_on_fullscreen true\n  pause_coverage_threshold 0.4", true},
+        {"shader A\n  span_group desk", true},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        /* "A" stands for the real shader file */
+        char body[1024] = "";
+        const char *s = cases[i].body;
+        const char *hit = strstr(s, "shader A");
+        if (hit) {
+            snprintf(body, sizeof(body), "%.*sshader %s%s", (int)(hit - s), s, a, hit + 8);
+        } else {
+            snprintf(body, sizeof(body), "%s", s);
+        }
+        snprintf(text, sizeof(text), "default {\n  %s\n}\n", body);
+        write_cfg(text);
+        bool ok = config_reload(&st, cfg);
+        if (ok != cases[i].ok) printf("  case %zu: %s\n", i, cases[i].body);
+        CHECK(ok == cases[i].ok);
+    }
+    /* and the values from the good cases arrive */
+    write_cfg("default {\n  path /x.png\n  mode fit\n  transition fade\n  transition_duration 0.5\n  duration 10\n}\n");
+    CHECK(config_reload(&st, cfg));
+    CHECK(left.config && left.config->mode == MODE_FIT && left.config->transition == TRANSITION_FADE);
+    CHECK(left.config && left.config->transition_duration == 0.5f && left.config->duration == 10.0f);
+    snprintf(text, sizeof(text), "default {\n  shader %s\n  show_fps true\n  pause_on_fullscreen true\n"
+             "  pause_coverage_threshold 0.4\n  shader_fps 30.0\n  vsync false\n  span_group desk\n}\n", a);
+    write_cfg(text);
+    CHECK(config_reload(&st, cfg));
+    CHECK(left.config && left.config->show_fps && left.config->pause_on_fullscreen);
+    CHECK(left.config && left.config->pause_coverage_threshold == 0.4f);
+    CHECK(left.config && left.config->shader_fps == 30 && !left.config->vsync);
+    CHECK(left.config && left.config->span && strcmp(left.config->span_group, "desk") == 0);
+
     /* top-level keys */
     snprintf(text, sizeof(text), "mouse_interaction false\ndefault {\n  shader %s\n}\n", a);
     write_cfg(text);

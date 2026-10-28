@@ -494,6 +494,65 @@ static void init_wallpaper_config_defaults(struct wallpaper_config *config) {
     config->term_fade = -1.0f;
 }
 
+/* Typed key readers. Each returns false with a logged error on a bad value;
+ * an absent key is fine and leaves *out alone (*present says which). */
+static bool read_bool(VibeValue *obj, const char *key, bool *out, bool *present,
+                      const char *ctx) {
+    VibeValue *v = vibe_object_get(obj->as_object, key);
+    if (present) *present = v != NULL;
+    if (!v) return true;
+    if (v->type != VIBE_TYPE_BOOLEAN) {
+        log_error("[%s] '%s' must be true or false", ctx, key);
+        return false;
+    }
+    *out = v->as_boolean;
+    return true;
+}
+
+static bool read_number(VibeValue *obj, const char *key, double *out, bool *present,
+                        const char *ctx) {
+    VibeValue *v = vibe_object_get(obj->as_object, key);
+    if (present) *present = v != NULL;
+    if (!v) return true;
+    if (v->type == VIBE_TYPE_FLOAT) {
+        *out = v->as_float;
+    } else if (v->type == VIBE_TYPE_INTEGER) {
+        *out = (double)v->as_integer;
+    } else {
+        log_error("[%s] '%s' must be a number", ctx, key);
+        return false;
+    }
+    if (!isfinite(*out)) {
+        log_error("[%s] '%s' must be a finite number", ctx, key);
+        return false;
+    }
+    return true;
+}
+
+static bool read_string(VibeValue *obj, const char *key, const char **out, const char *ctx) {
+    VibeValue *v = vibe_object_get(obj->as_object, key);
+    if (!v) return true;
+    if (v->type != VIBE_TYPE_STRING) {
+        log_error("[%s] '%s' must be a string", ctx, key);
+        return false;
+    }
+    *out = v->as_string;
+    return true;
+}
+
+/* Keys that only make sense for some wallpaper types. */
+enum { FOR_IMAGE = 1, FOR_SHADER = 2, FOR_TERMINAL = 4 };
+
+static bool key_allowed(const struct wallpaper_config *config, const char *key, int allowed,
+                        const char *ctx) {
+    int have = config->type == WALLPAPER_SHADER   ? FOR_SHADER :
+               config->type == WALLPAPER_TERMINAL ? FOR_TERMINAL : FOR_IMAGE;
+    if (allowed & have) return true;
+    log_error("[%s] INVALID CONFIG: '%s' doesn't apply to %s wallpapers", ctx, key,
+              have == FOR_SHADER ? "shader" : have == FOR_TERMINAL ? "terminal" : "image");
+    return false;
+}
+
 static bool copy_config_string(char *dst, size_t dst_size, const VibeValue *value,
                                const char *key, const char *context_name,
                                bool allow_empty) {
@@ -702,6 +761,128 @@ static bool parse_cycle_source(struct wallpaper_config *config, const char *src,
     return true;
 }
 
+/* The keys every wallpaper type shares: display, cycling, timing, pausing. */
+static bool parse_common_keys(VibeValue *obj, struct wallpaper_config *config, const char *ctx) {
+    const char *mode = NULL, *transition = NULL;
+    double duration = 0, trans_dur = 0, speed = 0, fps = 0, coverage = 0;
+    bool has_dur, has_trans_dur, has_speed, has_fps, has_vsync, has_coverage;
+
+    if (!read_string(obj, "mode", &mode, ctx) || !read_string(obj, "transition", &transition, ctx) ||
+        !read_number(obj, "duration", &duration, &has_dur, ctx) ||
+        !read_number(obj, "transition_duration", &trans_dur, &has_trans_dur, ctx) ||
+        !read_number(obj, "shader_speed", &speed, &has_speed, ctx) ||
+        !read_number(obj, "shader_fps", &fps, &has_fps, ctx) ||
+        !read_number(obj, "pause_coverage_threshold", &coverage, &has_coverage, ctx) ||
+        !read_bool(obj, "vsync", &config->vsync, &has_vsync, ctx) ||
+        !read_bool(obj, "show_fps", &config->show_fps, NULL, ctx) ||
+        !read_bool(obj, "pause_on_fullscreen", &config->pause_on_fullscreen, NULL, ctx)) {
+        return false;
+    }
+
+    /* Not for shaders, which always draw fullscreen and have no transitions. */
+    const int NOT_SHADER = FOR_IMAGE | FOR_TERMINAL;
+    if (mode) {
+        if (!key_allowed(config, "mode", NOT_SHADER, ctx)) return false;
+        if (!parse_wallpaper_mode(mode, &config->mode)) {
+            log_error("[%s] Invalid wallpaper mode '%s'", ctx, mode);
+            return false;
+        }
+    }
+    if (transition) {
+        if (!parse_transition_type(transition, &config->transition)) {
+            log_error("[%s] Invalid transition type '%s'", ctx, transition);
+            return false;
+        }
+        if (!key_allowed(config, "transition", NOT_SHADER, ctx)) return false;
+    }
+    if (has_dur) {
+        ValidationResult v = validate_duration(duration);
+        if (!v.valid) {
+            log_error("[%s] Invalid duration: %s", ctx, v.error_message);
+            return false;
+        }
+        config->duration = (float)duration;
+        if (config->duration > 0.0f && !config->cycle) {
+            log_info("[%s] 'duration' has no effect on a single file", ctx);
+        }
+    }
+    if (has_trans_dur) {
+        ValidationResult v = validate_transition_duration(trans_dur);
+        if (!v.valid) {
+            log_error("[%s] Invalid transition_duration: %s", ctx, v.error_message);
+            return false;
+        }
+        if (!key_allowed(config, "transition_duration", NOT_SHADER, ctx)) return false;
+        config->transition_duration = (float)trans_dur;
+    }
+    if (has_speed) {
+        ValidationResult v = validate_shader_speed(speed);
+        if (!v.valid) {
+            log_error("[%s] Invalid shader_speed: %s", ctx, v.error_message);
+            return false;
+        }
+        if (!key_allowed(config, "shader_speed", FOR_SHADER, ctx)) return false;
+        config->shader_speed = (float)speed;
+    }
+    if (has_fps) {
+        if (fps < 1.0 || fps > 240.0 || trunc(fps) != fps) {
+            log_error("[%s] Invalid shader_fps: must be a whole number between 1 and 240", ctx);
+            return false;
+        }
+        if (!key_allowed(config, "shader_fps", FOR_SHADER | FOR_TERMINAL, ctx)) return false;
+        config->shader_fps = (int)fps;
+    }
+    if (has_vsync && !key_allowed(config, "vsync", FOR_SHADER | FOR_TERMINAL, ctx)) return false;
+    if (has_coverage) {
+        if (coverage < 0.0 || coverage > 1.0) {
+            log_error("[%s] 'pause_coverage_threshold' must be between 0.0 and 1.0, got %.3f",
+                      ctx, coverage);
+            return false;
+        }
+        config->pause_coverage_threshold = (float)coverage;
+        /* Only Hyprland's tiled-coverage path reads it; say so elsewhere. */
+        if (!getenv("HYPRLAND_INSTANCE_SIGNATURE")) {
+            log_info("[%s] pause_coverage_threshold only has an effect on Hyprland", ctx);
+        }
+    }
+    return true;
+}
+
+/* Warn (not fail, so newer configs still load) about keys we don't know,
+ * with the closest known key as a hint. */
+static void warn_unknown_keys(VibeValue *obj, const char *ctx) {
+    static const char *const known_keys[] = {
+        "path", "shader", "terminal", "term_font", "term_cols", "term_rows",
+        "term_shader", "term_font_bold", "term_font_italic", "term_cwd",
+        "term_env", "term_font_size", "term_fg", "term_bg",
+        "term_bloom", "term_scanline", "term_crt", "term_chroma", "term_fade",
+        "mode", "duration", "transition",
+        "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps",
+        "pause_on_fullscreen", "pause_coverage_threshold", "shuffle",
+        "span", "span_group",
+    };
+    for (size_t i = 0; i < obj->as_object->count; i++) {
+        const char *key = obj->as_object->entries[i].key;
+        const char *closest = NULL;
+        size_t best = (size_t)-1;
+        bool known = false;
+        for (size_t j = 0; j < sizeof(known_keys) / sizeof(known_keys[0]) && !known; j++) {
+            known = strcmp(key, known_keys[j]) == 0;
+            size_t d = config_edit_distance(key, known_keys[j]);
+            if (d < best) {
+                best = d;
+                closest = known_keys[j];
+            }
+        }
+        if (known) continue;
+        if (closest && best <= 2) {
+            log_warn("[%s] Unknown key '%s', ignored. Did you mean '%s'?", ctx, key, closest);
+        } else {
+            log_warn("[%s] Unknown key '%s', ignored", ctx, key);
+        }
+    }
+}
+
 /* Parse wallpaper configuration with strict validation */
 static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *config,
                                    const char *context_name) {
@@ -713,33 +894,15 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     /* Initialize with safe defaults */
     init_wallpaper_config_defaults(config);
 
-    /* Parse 'shuffle' EARLY — needs to be in scope before the directory
-     * branches below so we can apply it the moment cycle_paths is built. */
-    VibeValue *shuffle_val = vibe_object_get(obj->as_object, "shuffle");
-    if (shuffle_val) {
-        if (shuffle_val->type != VIBE_TYPE_BOOLEAN) {
-            log_error("[%s] 'shuffle' must be a boolean (true or false), got type: %d",
-                     context_name, shuffle_val->type);
-            return false;
-        }
-        config->shuffle = shuffle_val->as_boolean;
-    }
-
-    VibeValue *span_val = vibe_object_get(obj->as_object, "span");
-    if (span_val) {
-        if (span_val->type != VIBE_TYPE_BOOLEAN) {
-            log_error("[%s] 'span' must be a boolean (true or false)", context_name);
-            return false;
-        }
-        config->span = span_val->as_boolean;
-    }
+    /* Shuffle first: the directory branches below apply it as they build
+     * the cycle. A named span group is itself an opt-in to spanning. */
     VibeValue *span_group_val = vibe_object_get(obj->as_object, "span_group");
-    if (!copy_config_string(config->span_group, sizeof(config->span_group), span_group_val,
+    if (!read_bool(obj, "shuffle", &config->shuffle, NULL, context_name) ||
+        !read_bool(obj, "span", &config->span, NULL, context_name) ||
+        !copy_config_string(config->span_group, sizeof(config->span_group), span_group_val,
                             "span_group", context_name, false)) {
         return false;
     }
-    /* A named group is itself an explicit opt-in; accepting it without a
-     * redundant span=true keeps per-output configuration concise. */
     if (span_group_val) config->span = true;
 
     /* Check for 'path' and 'shader' - these are MUTUALLY EXCLUSIVE */
@@ -791,318 +954,10 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         return false;
     }
 
-    /* ========================================================================
-     * Parse optional parameters (valid for both modes)
-     * ======================================================================== */
-
-    /* Parse mode */
-    VibeValue *mode_val = vibe_object_get(obj->as_object, "mode");
-    if (mode_val) {
-        if (mode_val->type != VIBE_TYPE_STRING) {
-            log_error("[%s] 'mode' must be a string", context_name);
-            return false;
-        }
-
-        if (config->type == WALLPAPER_SHADER) {
-            log_error("[%s] INVALID CONFIG: 'mode' specified in SHADER mode. "
-                     "Display modes (fill, fit, center, etc.) only apply to image wallpapers. "
-                     "Shaders always render fullscreen.", context_name);
-            return false;
-        }
-
-        if (!parse_wallpaper_mode(mode_val->as_string, &config->mode)) {
-            log_error("[%s] Invalid wallpaper mode '%s'", context_name,
-                      mode_val->as_string);
-            return false;
-        }
-    }
-
-    /* Parse duration (for cycling) */
-    VibeValue *duration_val = vibe_object_get(obj->as_object, "duration");
-    if (duration_val) {
-        double duration_value = 0.0;
-
-        if (duration_val->type == VIBE_TYPE_FLOAT) {
-            duration_value = duration_val->as_float;
-        } else if (duration_val->type == VIBE_TYPE_INTEGER) {
-            duration_value = (double)duration_val->as_integer;
-        } else {
-            log_error("[%s] 'duration' must be a number (seconds)", context_name);
-            return false;
-        }
-
-        ValidationResult dur_validation = validate_duration(duration_value);
-        if (!dur_validation.valid) {
-            log_error("[%s] Invalid duration: %s", context_name,
-                     dur_validation.error_message);
-            return false;
-        }
-
-        config->duration = (float)duration_value;
-
-        if (config->duration > 0.0f && !config->cycle) {
-            log_info("[%s] Duration specified but no cycling enabled (single file). "
-                    "Duration will have no effect.", context_name);
-        }
-
-        log_info("[%s] Duration set to: %.2f seconds", context_name, config->duration);
-    }
-
-    /* Parse transition */
-    VibeValue *transition_val = vibe_object_get(obj->as_object, "transition");
-    if (transition_val) {
-        if (transition_val->type != VIBE_TYPE_STRING) {
-            log_error("[%s] 'transition' must be a string", context_name);
-            return false;
-        }
-
-        if (!parse_transition_type(transition_val->as_string, &config->transition)) {
-            log_error("[%s] Invalid transition type '%s'", context_name,
-                      transition_val->as_string);
-            return false;
-        }
-
-        if (config->type == WALLPAPER_SHADER) {
-            log_error("[%s] INVALID CONFIG: 'transition' specified in SHADER mode. "
-                     "Transitions only apply to image wallpapers. This setting is invalid for shaders.",
-                     context_name);
-            return false;
-        }
-
-        log_info("[%s] Transition set to: %s (type=%d)", context_name,
-                 transition_val->as_string, config->transition);
-    }
-    /* Parse transition_duration */
-    VibeValue *trans_dur_val = vibe_object_get(obj->as_object, "transition_duration");
-    if (trans_dur_val) {
-        double trans_duration_value = 0.0;
-
-        if (trans_dur_val->type == VIBE_TYPE_FLOAT) {
-            trans_duration_value = trans_dur_val->as_float;
-        } else if (trans_dur_val->type == VIBE_TYPE_INTEGER) {
-            trans_duration_value = (double)trans_dur_val->as_integer;
-        } else {
-            log_error("[%s] 'transition_duration' must be a number (seconds)",
-                     context_name);
-            return false;
-        }
-
-        ValidationResult trans_dur_validation =
-            validate_transition_duration(trans_duration_value);
-        if (!trans_dur_validation.valid) {
-            log_error("[%s] Invalid transition_duration: %s", context_name,
-                     trans_dur_validation.error_message);
-            return false;
-        }
-
-        config->transition_duration = (float)trans_duration_value;
-
-        if (config->type == WALLPAPER_SHADER) {
-            log_error("[%s] INVALID CONFIG: 'transition_duration' specified in SHADER mode. "
-                     "Transitions only apply to image wallpapers. This setting is invalid for shaders.",
-                     context_name);
-            return false;
-        }
-
-        log_info("[%s] Transition duration set to: %.2f seconds", context_name, config->transition_duration);
-    }
-
-    /* Parse shader_speed (only relevant for shader mode) */
-    VibeValue *shader_speed_val = vibe_object_get(obj->as_object, "shader_speed");
-    if (shader_speed_val) {
-        double speed = 0.0;
-
-        if (shader_speed_val->type == VIBE_TYPE_FLOAT) {
-            speed = shader_speed_val->as_float;
-        } else if (shader_speed_val->type == VIBE_TYPE_INTEGER) {
-            speed = (double)shader_speed_val->as_integer;
-        } else {
-            log_error("[%s] 'shader_speed' must be a number", context_name);
-            return false;
-        }
-
-        ValidationResult speed_validation = validate_shader_speed(speed);
-        if (!speed_validation.valid) {
-            log_error("[%s] Invalid shader_speed: %s", context_name,
-                     speed_validation.error_message);
-            return false;
-        }
-
-        config->shader_speed = (float)speed;
-
-        if (config->type != WALLPAPER_SHADER) {
-            log_error("[%s] INVALID CONFIG: 'shader_speed' specified in IMAGE mode. "
-                     "Shader speed only applies to GLSL shaders. This setting is invalid for images.",
-                     context_name);
-            return false;
-        }
-    }
-
-    /* Parse shader_fps (only relevant for shader mode) */
-    VibeValue *shader_fps_val = vibe_object_get(obj->as_object, "shader_fps");
-    if (shader_fps_val) {
-        double fps_value;
-        if (shader_fps_val->type == VIBE_TYPE_INTEGER) {
-            if (shader_fps_val->as_integer < 1 || shader_fps_val->as_integer > 240) {
-                log_error("[%s] Invalid shader_fps: value must be between 1 and 240",
-                          context_name);
-                return false;
-            }
-            fps_value = (double)shader_fps_val->as_integer;
-        } else if (shader_fps_val->type == VIBE_TYPE_FLOAT) {
-            fps_value = shader_fps_val->as_float;
-            if (!isfinite(fps_value) || fps_value < 1.0 || fps_value > 240.0 ||
-                trunc(fps_value) != fps_value) {
-                log_error("[%s] Invalid shader_fps: value must be a whole number between 1 and 240",
-                          context_name);
-                return false;
-            }
-        } else {
-            log_error("[%s] 'shader_fps' must be a number", context_name);
-            return false;
-        }
-
-        int fps = (int)fps_value;
-
-        config->shader_fps = fps;
-        log_info("[%s] Shader FPS set to: %d", context_name, fps);
-
-        if (config->type != WALLPAPER_SHADER && config->type != WALLPAPER_TERMINAL) {
-            log_error("[%s] INVALID CONFIG: 'shader_fps' specified in IMAGE mode. "
-                     "Shader FPS only applies to GLSL shaders. This setting is invalid for images.",
-                     context_name);
-            return false;
-        }
-    }
-
-    /* Parse vsync (only relevant for shader mode) */
-    VibeValue *vsync_val = vibe_object_get(obj->as_object, "vsync");
-    if (vsync_val) {
-        if (vsync_val->type != VIBE_TYPE_BOOLEAN) {
-            log_error("[%s] 'vsync' must be a boolean (true or false), got type: %d",
-                     context_name, vsync_val->type);
-            return false;
-        }
-        config->vsync = vsync_val->as_boolean;
-
-        if (config->vsync) {
-            log_info("[%s] Vsync: ENABLED (will sync to monitor refresh rate, shader_fps ignored)", context_name);
-        } else {
-            log_info("[%s] Vsync: disabled (using custom FPS with tearing control)", context_name);
-        }
-
-        if (config->type != WALLPAPER_SHADER && config->type != WALLPAPER_TERMINAL) {
-            log_error("[%s] INVALID CONFIG: 'vsync' specified in IMAGE mode. "
-                     "Vsync only applies to GLSL shaders. This setting is invalid for images.",
-                     context_name);
-            return false;
-        }
-    }
-
-    /* Parse show_fps */
-    VibeValue *show_fps_val = vibe_object_get(obj->as_object, "show_fps");
-    if (show_fps_val) {
-        if (show_fps_val->type != VIBE_TYPE_BOOLEAN) {
-            log_error("[%s] 'show_fps' must be a boolean (true or false), got type: %d",
-                     context_name, show_fps_val->type);
-            log_error("[%s] Invalid value for show_fps - use 'true' or 'false' only", context_name);
-            log_error("[%s] Config parsing failed due to invalid show_fps value", context_name);
-            return false;
-        }
-        config->show_fps = show_fps_val->as_boolean;
-        log_info("[%s] FPS watermark: %s", context_name, config->show_fps ? "enabled" : "disabled");
-    }
-
-    /* Parse pause_on_fullscreen */
-    VibeValue *pause_fs_val = vibe_object_get(obj->as_object, "pause_on_fullscreen");
-    if (pause_fs_val) {
-        if (pause_fs_val->type != VIBE_TYPE_BOOLEAN) {
-            log_error("[%s] 'pause_on_fullscreen' must be a boolean (true or false), got type: %d",
-                     context_name, pause_fs_val->type);
-            return false;
-        }
-        config->pause_on_fullscreen = pause_fs_val->as_boolean;
-        log_info("[%s] Pause on fullscreen: %s", context_name,
-                 config->pause_on_fullscreen ? "enabled" : "disabled");
-    }
-
-    /* Parse pause_coverage_threshold */
-    VibeValue *pause_cov_val = vibe_object_get(obj->as_object, "pause_coverage_threshold");
-    if (pause_cov_val) {
-        double cov = 0.0;
-        if (pause_cov_val->type == VIBE_TYPE_FLOAT) {
-            cov = pause_cov_val->as_float;
-        } else if (pause_cov_val->type == VIBE_TYPE_INTEGER) {
-            cov = (double)pause_cov_val->as_integer;
-        } else {
-            log_error("[%s] 'pause_coverage_threshold' must be a number between 0.0 and 1.0, got type: %d",
-                     context_name, pause_cov_val->type);
-            return false;
-        }
-        if (cov < 0.0 || cov > 1.0) {
-            log_error("[%s] 'pause_coverage_threshold' must be between 0.0 and 1.0, got: %.3f",
-                     context_name, cov);
-            return false;
-        }
-        config->pause_coverage_threshold = (float)cov;
-        log_info("[%s] Pause coverage threshold: %.2f (%.0f%%)", context_name,
-                 config->pause_coverage_threshold, config->pause_coverage_threshold * 100.0f);
-        /* This setting only affects Hyprland's tiled-coverage path. On every
-         * other compositor it's silently inert — warn the user once so they
-         * don't think the wallpaper is ignoring them. We detect Hyprland via
-         * its IPC env var, the same signal hyprland_coverage_available() uses
-         * at runtime, so this stays accurate even when the binary was built
-         * with both backends. */
-        if (!getenv("HYPRLAND_INSTANCE_SIGNATURE")) {
-            log_info("[%s] Note: pause_coverage_threshold only affects Hyprland's "
-                     "tiled-coverage detection. On other compositors it has no "
-                     "effect (other backends pause via fullscreen/maximized signals "
-                     "or the frame-callback watchdog).", context_name);
-        }
-    }
-
+    if (!parse_common_keys(obj, config, context_name)) return false;
     if (!parse_channels(obj, config, context_name)) return false;
+    warn_unknown_keys(obj, context_name);
 
-    /* Unknown keys are warned about, not rejected, so a config written for a
-     * newer neowall still loads. Suggest the closest key to catch typos. */
-    static const char *const known_keys[] = {
-        "path", "shader", "terminal", "term_font", "term_cols", "term_rows",
-        "term_shader", "term_font_bold", "term_font_italic", "term_cwd",
-        "term_env", "term_font_size", "term_fg", "term_bg",
-        "term_bloom", "term_scanline", "term_crt", "term_chroma", "term_fade",
-        "mode", "duration", "transition",
-        "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps",
-        "pause_on_fullscreen", "pause_coverage_threshold", "shuffle",
-        "span", "span_group",
-    };
-    size_t known_key_count = sizeof(known_keys) / sizeof(known_keys[0]);
-
-    for (size_t i = 0; i < obj->as_object->count; i++) {
-        const char *key = obj->as_object->entries[i].key;
-        const char *closest = NULL;
-        size_t best = (size_t)-1;
-        bool is_known = false;
-
-        for (size_t j = 0; j < known_key_count; j++) {
-            if (strcmp(key, known_keys[j]) == 0) {
-                is_known = true;
-                break;
-            }
-            size_t d = config_edit_distance(key, known_keys[j]);
-            if (d < best) {
-                best = d;
-                closest = known_keys[j];
-            }
-        }
-
-        if (is_known) continue;
-        if (closest && best <= 2) {
-            log_warn("[%s] Unknown key '%s', ignored. Did you mean '%s'?",
-                     context_name, key, closest);
-        } else {
-            log_warn("[%s] Unknown key '%s', ignored", context_name, key);
-        }
-    }
 
     return true;
 }
