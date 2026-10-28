@@ -1,6 +1,95 @@
 /* Rendering and output bring-up. Included by app.c only: these need its
  * struct app and helpers. */
 
+/* Whether this output draws this step. Pure gating: no GL, no side effects. */
+static bool output_wants_frame(const struct app *a, struct output_state *output) {
+    if (output->config->pause_on_fullscreen &&
+        atomic_load_explicit(&output->occluded, memory_order_acquire)) {
+        return false;   /* a fullscreen window covers it */
+    }
+    /* Shader pause keeps the last frame on screen with the GPU idle; the
+     * clock is reconciled on resume (apply_shader_pause). */
+    if (output->config->type == WALLPAPER_SHADER && a->shader_paused) return false;
+    if (!atomic_load_explicit(&output->needs_redraw, memory_order_acquire) ||
+        !output->compositor_surface ||
+        output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
+        return false;
+    }
+    /* Vsync on Wayland: draw only once this output's frame callback came back.
+     * The swap doesn't block (interval 0), so a slow monitor can't stall the
+     * others. vsync=false keeps its own timerfd: gating both on one output
+     * makes two pacers beat (~23 FPS). */
+    bool frame_paced = output->config->vsync &&
+        compositor_surface_supports_frame_pacing(output->compositor_surface);
+    return !frame_paced || compositor_surface_frame_ready(output->compositor_surface);
+}
+
+/* Advance an image cross-fade to `now`. */
+static void output_step_transition(struct output_state *output, uint64_t now) {
+    if (output->transition_start_time == 0 || output->config->transition == TRANSITION_NONE) return;
+    uint64_t elapsed = now - output->transition_start_time;
+    uint64_t dur_ms = (uint64_t)(output->config->transition_duration * 1000.0f);
+    float progress = dur_ms > 0 ? (float)elapsed / (float)dur_ms : 1.0f;
+    output->transition_progress = progress >= 1.0f ? 1.0f : ease_in_out_cubic(progress);
+}
+
+/* Count a shader frame and log the measured FPS every two seconds. */
+static void output_meter_fps(struct output_state *output, uint64_t frame_start, uint64_t frame_end) {
+    output->fps_frame_count++;
+    if (output->fps_last_log_time == 0) output->fps_last_log_time = frame_end;
+    uint64_t elapsed = frame_end - output->fps_last_log_time;
+    if (elapsed < 2000) return;
+    float fps = (float)output->fps_frame_count / ((float)elapsed / 1000.0f);
+    output->fps_current = fps;
+    uint64_t frame_time = frame_end - frame_start;
+    if (output->config->vsync) {
+        log_info("FPS [%s]: %.1f FPS (vsync: monitor sync, frame_time: %lums)",
+                 output->model, fps, frame_time);
+    } else {
+        log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums)", output->model, fps,
+                 shader_fps_resolve(output->config->shader_fps), frame_time);
+    }
+    output->fps_frame_count = 0;
+    output->fps_last_log_time = frame_end;
+}
+
+/* Log render failures at most once a second, with a count of the rest. */
+static void log_render_failure(struct output_state *output) {
+    static uint64_t last = 0;
+    static int suppressed = 0;
+    if (output->shader_load_failed) return;   /* already explained */
+    uint64_t now = get_time_ms();
+    if (now - last < 1000) {
+        suppressed++;
+        return;
+    }
+    if (suppressed > 0) {
+        log_error("Failed to render frame for output %s (%d failures in last second)",
+                  output->model, suppressed + 1);
+    } else {
+        log_error("Failed to render frame for output %s", output->model);
+    }
+    last = now;
+    suppressed = 0;
+}
+
+/* Swap the terminal program on an output hosting a terminal wallpaper. The
+ * old child and its process group are killed before the new one starts. */
+static void output_swap_terminal(struct output_state *output, const char *cmd) {
+    if (output->config->type != WALLPAPER_TERMINAL || cmd[0] == '\0') return;
+    const char *name = output->model[0] ? output->model : "unknown";
+    log_info("Swapping terminal wallpaper on output %s: '%s'", name, cmd);
+    /* cols/rows 0: re-derive the grid from the output size, as at spawn. */
+    nw_result tr = output_set_terminal(
+        output, cmd,
+        output->config->shader_path[0] ? output->config->shader_path : NULL,
+        output->config->term_font[0] ? output->config->term_font : NULL, 0, 0);
+    if (nw_is_err(tr)) {
+        log_error("Failed to swap terminal wallpaper on output %s: %s", name,
+                  tr.context ? tr.context : nw_status_str(tr.status));
+    }
+}
+
 static void render_outputs(struct app *a) {
     struct neowall_state *state = a->state;
 
@@ -96,32 +185,12 @@ static void render_outputs(struct app *a) {
             }
         }
 
-        /* Handle set-terminal request — swap the live terminal-wallpaper
-         * command. output_set_terminal destroys the current multipass shader
-         * (killing the old terminal child and its whole process group before
-         * spawning the new one), so no orphan is possible. We apply it to every
-         * output that currently hosts a terminal wallpaper. */
-        if (terminal_requested && output->config->type == WALLPAPER_TERMINAL) {
-            const char *cmd = terminal_cmd;
-
-            if (cmd[0] != '\0') {
-                log_info("Swapping terminal wallpaper on output %s: '%s'",
-                         output->model[0] ? output->model : "unknown", cmd);
-                /* Reuse the output's existing grid + styling shader; passing
-                 * cols/rows 0 lets output_set_terminal re-derive the grid from
-                 * the output size, matching the original spawn. */
-                nw_result tr = output_set_terminal(
-                    output, cmd,
-                    output->config->shader_path[0] ? output->config->shader_path : NULL,
-                    output->config->term_font[0] ? output->config->term_font : NULL,
-                    0, 0);
-                if (nw_is_err(tr)) {
-                    log_error("Failed to swap terminal wallpaper on output %s: %s",
-                              output->model[0] ? output->model : "unknown",
-                              tr.context ? tr.context : nw_status_str(tr.status));
-                }
-                current_time = get_time_ms();
-            }
+        /* Handle set-terminal request: swap the live terminal-wallpaper
+         * command on every output that hosts a terminal wallpaper. */
+        if (terminal_requested && output->config->type == WALLPAPER_TERMINAL &&
+            terminal_cmd[0] != '\0') {
+            output_swap_terminal(output, terminal_cmd);
+            current_time = get_time_ms();
         }
 
         /* Handle one next request for every distinct span/cycle group. */
@@ -154,36 +223,7 @@ static void render_outputs(struct app *a) {
             }
         }
 
-        /* Skip rendering if output is occluded by a fullscreen window */
-        if (output->config->pause_on_fullscreen &&
-            atomic_load_explicit(&output->occluded, memory_order_acquire)) {
-            continue;
-        }
-
-        /* Freeze shader animation while shader-pause is active: skip the draw so
-         * the last rendered frame stays on screen and the GPU stays idle. The
-         * time offset is reconciled on resume in the main loop (apply_shader_pause). */
-        if (output->config->type == WALLPAPER_SHADER && a->shader_paused) {
-            continue;
-        }
-
-        /* Check if this output needs rendering */
-        if (!atomic_load_explicit(&output->needs_redraw, memory_order_acquire) ||
-            !output->compositor_surface ||
-            output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
-            continue;
-        }
-
-        /* Vsync on Wayland: render only once this output's frame callback came
-         * back. The swap doesn't block (interval 0), so a slow monitor can't
-         * stall the others. vsync=false keeps its timerfd and isn't gated:
-         * gating both on one output makes two pacers beat (~23 FPS). */
-        bool frame_paced = output->config->vsync &&
-            compositor_surface_supports_frame_pacing(output->compositor_surface);
-        if (frame_paced && !compositor_surface_frame_ready(output->compositor_surface)) {
-            continue;
-        }
-
+        if (!output_wants_frame(a, output)) continue;
 
         /* Make EGL context current for this output. Note: eglMakeCurrent can
          * synchronize with the GPU — we are NOT holding output_list_lock here. */
@@ -216,68 +256,17 @@ static void render_outputs(struct app *a) {
             pthread_mutex_unlock(&output->preload_mutex);
         }
 
-        /* Handle image transitions */
-        if (output->transition_start_time > 0 &&
-            output->config->transition != TRANSITION_NONE) {
-            uint64_t elapsed = current_time - output->transition_start_time;
-            uint64_t transition_duration_ms = (uint64_t)(output->config->transition_duration * 1000.0f);
-            float progress = transition_duration_ms > 0
-                ? (float)elapsed / (float)transition_duration_ms
-                : 1.0f;
-            if (progress >= 1.0f) {
-                output->transition_progress = 1.0f;
-            } else {
-                output->transition_progress = ease_in_out_cubic(progress);
-            }
-        }
+        output_step_transition(output, current_time);
 
-        /* Render frame */
         uint64_t frame_start = get_time_ms();
         bool render_success = output_render_frame(output);
         uint64_t frame_end = get_time_ms();
 
-        /* FPS measurement for shaders */
         if (render_success && output->config->type == WALLPAPER_SHADER) {
-            output->fps_frame_count++;
-            if (output->fps_last_log_time == 0) {
-                output->fps_last_log_time = frame_end;
-            }
-            uint64_t elapsed = frame_end - output->fps_last_log_time;
-            if (elapsed >= 2000) {
-                float actual_fps = (float)output->fps_frame_count / ((float)elapsed / 1000.0f);
-                output->fps_current = actual_fps;
-                uint64_t frame_time = frame_end - frame_start;
-                int target_fps = shader_fps_resolve(output->config->shader_fps);
-                if (output->config->vsync) {
-                    log_info("FPS [%s]: %.1f FPS (vsync: monitor sync, frame_time: %lums)",
-                             output->model, actual_fps, frame_time);
-                } else {
-                    log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums)",
-                             output->model, actual_fps, target_fps, frame_time);
-                }
-                output->fps_frame_count = 0;
-                output->fps_last_log_time = frame_end;
-            }
+            output_meter_fps(output, frame_start, frame_end);
         }
-
         if (!render_success) {
-            if (!output->shader_load_failed) {
-                static uint64_t last_render_error_time = 0;
-                static int render_error_count = 0;
-                uint64_t err_now = get_time_ms();
-                if (err_now - last_render_error_time >= 1000) {
-                    if (render_error_count > 0) {
-                        log_error("Failed to render frame for output %s (%d failures in last second)",
-                                 output->model, render_error_count + 1);
-                    } else {
-                        log_error("Failed to render frame for output %s", output->model);
-                    }
-                    last_render_error_time = err_now;
-                    render_error_count = 0;
-                } else {
-                    render_error_count++;
-                }
-            }
+            log_render_failure(output);
             state->errors_count++;
         }
 
