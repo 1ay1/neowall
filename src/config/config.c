@@ -219,6 +219,26 @@ static int compare_strings(const void *a, const void *b) {
  * Directory Loading Functions
  * ============================================================================ */
 
+/* Levenshtein distance between two short strings, for "did you mean"
+ * hints. Strings of 32+ chars count as far apart. */
+size_t config_edit_distance(const char *a, const char *b) {
+    enum { CAP = 32 };
+    size_t la = strlen(a), lb = strlen(b);
+    if (la >= CAP || lb >= CAP) return 99;
+    size_t prev[CAP + 1], cur[CAP + 1];
+    for (size_t j = 0; j <= lb; j++) prev[j] = j;
+    for (size_t i = 1; i <= la; i++) {
+        cur[0] = i;
+        for (size_t j = 1; j <= lb; j++) {
+            size_t cost = a[i - 1] == b[j - 1] ? 0 : 1;
+            size_t del = prev[j] + 1, ins = cur[j - 1] + 1, sub = prev[j - 1] + cost;
+            cur[j] = del < ins ? (del < sub ? del : sub) : (ins < sub ? ins : sub);
+        }
+        memcpy(prev, cur, sizeof(prev));
+    }
+    return prev[lb];
+}
+
 static void free_path_array(char **paths, size_t count) {
     if (!paths) return;
     for (size_t i = 0; i < count; i++) free(paths[i]);
@@ -1119,20 +1139,24 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
         }
     }
 
-    /* Warn about unknown keys */
-    const char *known_keys[] = {
+    /* Unknown keys are warned about, not rejected, so a config written for a
+     * newer neowall still loads. Suggest the closest key to catch typos. */
+    static const char *const known_keys[] = {
         "path", "shader", "terminal", "term_font", "term_cols", "term_rows",
         "term_shader", "term_font_bold", "term_font_italic", "term_cwd",
         "term_env", "term_font_size", "term_fg", "term_bg",
         "term_bloom", "term_scanline", "term_crt", "term_chroma", "term_fade",
         "mode", "duration", "transition",
         "transition_duration", "shader_speed", "channels", "shader_fps", "vsync", "show_fps",
-        "pause_on_fullscreen", "pause_coverage_threshold", "shuffle"
+        "pause_on_fullscreen", "pause_coverage_threshold", "shuffle",
+        "span", "span_group",
     };
     size_t known_key_count = sizeof(known_keys) / sizeof(known_keys[0]);
 
     for (size_t i = 0; i < obj->as_object->count; i++) {
         const char *key = obj->as_object->entries[i].key;
+        const char *closest = NULL;
+        size_t best = (size_t)-1;
         bool is_known = false;
 
         for (size_t j = 0; j < known_key_count; j++) {
@@ -1140,11 +1164,19 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
                 is_known = true;
                 break;
             }
+            size_t d = config_edit_distance(key, known_keys[j]);
+            if (d < best) {
+                best = d;
+                closest = known_keys[j];
+            }
         }
 
-        if (!is_known) {
-            log_info("[%s] Unknown configuration key '%s' (will be ignored)",
-                    context_name, key);
+        if (is_known) continue;
+        if (closest && best <= 2) {
+            log_warn("[%s] Unknown key '%s', ignored. Did you mean '%s'?",
+                     context_name, key, closest);
+        } else {
+            log_warn("[%s] Unknown key '%s', ignored", context_name, key);
         }
     }
 

@@ -819,12 +819,23 @@ test('output_refcount', test_refcount_exe)
 # Alias-safe config field setter — guards the self-assignment bug that blanked
 # term_cmd/shader_path/path on every deferred wallpaper re-apply.
 test_config_str_exe = executable('test_config_str_set',
-  files('tests/test_config_str_set.c'),
+  files('tests/test_config_str_set.c', 'src/utils.c'),
   include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep, thread_dep],
   build_by_default: false,
 )
 
 test('config_str_set', test_config_str_exe)
+
+# config.c itself, headless: parsing, validation, default/per-output precedence
+# and reload keeping the last good config. output_apply_config is stubbed.
+test('config', executable('test_config',
+  files('tests/test_config.c', 'src/config/config.c', 'src/config/shuffle.c',
+        'src/config/vibe_impl.c', 'src/utils.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [m_dep, thread_dep, egl_dep, gl_dep],
+  build_by_default: false,
+))
 
 # X11 multi-monitor geometry — occlusion coverage + per-output mouse mapping.
 # Pure integer math, no Xlib/display needed (see x11_geometry.c).

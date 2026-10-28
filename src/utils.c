@@ -279,6 +279,16 @@ bool neowall_find_data(const char *rel, char *out, size_t size) {
     return false;
 }
 
+void config_str_set(char *dst, size_t dst_size, const char *src) {
+    if (!dst || dst_size == 0) return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    if (dst == src) return;   /* already holds the value */
+    snprintf(dst, dst_size, "%s", src);
+}
+
 /* Check if file exists */
 bool file_exists(const char *path) {
     return access(path, F_OK) == 0;

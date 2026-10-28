@@ -23,6 +23,9 @@ bool config_apply_to_output(struct neowall_state *state, struct output_state *ou
 bool config_parse_wallpaper(struct wallpaper_config *config, const char *output_name);
 void config_free_wallpaper(struct wallpaper_config *config);
 const char *config_get_default_path(void);
+
+/* Edit distance between two short strings (typo suggestions). */
+size_t config_edit_distance(const char *a, const char *b);
 char **load_images_from_directory(const char *dir_path, size_t *count);
 char **load_shaders_from_directory(const char *dir_path, size_t *count);
 

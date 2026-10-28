@@ -164,6 +164,11 @@ bool expand_path(const char *path, char *expanded, size_t size);
  * Returns false if none exists or a path doesn't fit. */
 bool neowall_find_data(const char *rel, char *out, size_t size);
 
+/* Copy src into a fixed-size field. Safe when src IS dst (the deferred
+ * re-apply paths pass a config's own buffer back in, and overlapping
+ * snprintf is undefined). NULL src clears the field. */
+void config_str_set(char *dst, size_t dst_size, const char *src);
+
 /* Call `fn` on each existing neowall data dir, same order as above, until it
  * returns true. Returns whether any call returned true. */
 bool neowall_each_data_dir(bool (*fn)(const char *dir, void *ctx), void *ctx);

@@ -28,32 +28,6 @@ static inline const char *output_get_identifier(const struct output_state *outpu
     return output->model;
 }
 
-/* Copy a string into a fixed-size config field, tolerating self-assignment.
- *
- * The deferred re-apply paths call the setters with the config's own buffer as
- * the argument — output_set_terminal(output, output->config->term_cmd, ...),
- * output_set_shader(output, output->config->shader_path),
- * output_set_wallpaper(output, output->config->path) — and every setter then
- * writes the argument back into that same field. snprintf() with overlapping
- * source and destination is undefined; glibc in practice produces an EMPTY
- * string, so a terminal wallpaper restored from a deferred config lost its
- * command ("Terminal wallpaper running: ''") and a re-applied shader/image
- * lost its path. Skipping the copy when the buffers are identical is both the
- * correct and the cheap answer. */
-static void config_str_set(char *dst, size_t dst_size, const char *src) {
-    if (!dst || dst_size == 0) {
-        return;
-    }
-    if (!src) {
-        dst[0] = '\0';
-        return;
-    }
-    if (dst == src) {
-        return;  /* Self-assignment: already holds the value. */
-    }
-    snprintf(dst, dst_size, "%s", src);
-}
-
 /* Keep the surface's keyboard interactivity in step with the wallpaper type.
  *
  * The layer surface is created in output_configure_compositor_surface() long

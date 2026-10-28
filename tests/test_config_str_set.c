@@ -17,27 +17,14 @@
  *     INFO: Terminal wallpaper running: '' (213x60 cells)
  *
  * config_str_set() fixes it by short-circuiting the self-assignment. This test
- * mirrors that function exactly (output.c can't be linked headless — it pulls
- * in the whole EGL/GL/image stack) and pins the three properties that matter.
+ * links the real helper from utils.c and pins the three properties that matter.
  */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
-/* ---- mirror of the production helper (src/output/output.c) ---- */
-static void config_str_set(char *dst, size_t dst_size, const char *src) {
-    if (!dst || dst_size == 0) {
-        return;
-    }
-    if (!src) {
-        dst[0] = '\0';
-        return;
-    }
-    if (dst == src) {
-        return;
-    }
-    snprintf(dst, dst_size, "%s", src);
-}
+/* The real helper, from utils.c. */
+void config_str_set(char *dst, size_t dst_size, const char *src);
 
 static int failures;
 
