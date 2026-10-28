@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: NeoWall contributors
 # garden.neowall — channel bindings for the growing garden.
 #
 # Buffer A is the pollen/firefly layer and feeds back into itself so the motes

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // system_deck.glsl — a "command deck" HUD that reads your machine's vitals like
 // a real dashboard: radial CPU + RAM gauges, a scrolling CPU history graph,
 // per-core meters, network up/down traces, a battery cell, and a live clock —

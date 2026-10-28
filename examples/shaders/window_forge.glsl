@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // window_forge.glsl — your desktop, rendered as molten glass over dark metal.
 //
 // Every window on your screen becomes a luminous pane. The desktop beneath is

@@ -43,17 +43,17 @@ default {
   # Option 2: Live Shader Wallpaper (NEW!)
   # Animated, GPU-accelerated shader effects
   # Just specify the shader filename - no path needed!
-  # shader retro_wave.glsl
+  # shader neon_city.glsl
   #
   # Available shaders (in ~/.config/neowall/shaders/):
-  #   - retro_wave.glsl : Retro synthwave aesthetic with neon colors
-  #   - plasma.glsl   : Colorful animated plasma effect
-  #   - matrix_rain.glsl : Matrix-style falling characters
-  #   - synthwave.glsl : Classic 80s synthwave vibes
+  #   - garden.glsl        : A garden that grows over days
+  #   - neon_city.glsl     : Chrome, neon and rain
+  #   - plasma_touch.glsl  : Plasma you push around with the mouse
+  #   - rain_window.glsl   : Rain running down a window
   #
   # You can also use full paths:
-  # shader ~/.config/neowall/shaders/retro_wave.glsl
-  # shader /usr/share/neowall/shaders/synthwave.glsl
+  # shader ~/.config/neowall/shaders/neon_city.glsl
+  # shader /usr/share/neowall/shaders/neon_city.glsl
   #
   # NOTE: Use EITHER 'path' OR 'shader', not both!
 
@@ -191,7 +191,7 @@ output {
 
 # --- Example 1b: Live Shader Wallpaper ---
 # default {
-#   shader retro_wave.glsl
+#   shader neon_city.glsl
 #   shader_speed 1.5    # Optional: run animations 1.5x faster
 # }
 
@@ -263,14 +263,14 @@ output {
 
 # --- Example 6: Live Shader Wallpapers ---
 # default {
-#   shader retro_wave.glsl # Retro synthwave aesthetic
+#   shader neon_city.glsl # Chrome, neon and rain
 #   shader_speed 0.8       # Smooth nostalgic animations
 # }
 
 # --- Example 7: Mix Shaders and Images ---
 # output {
 #   eDP-1 {
-#     shader retro_wave.glsl # Synthwave effect on laptop
+#     shader neon_city.glsl # Neon city on the laptop
 #   }
 #   HDMI-A-1 {
 #     path ~/Pictures/wallpaper.png  # Static image on external monitor
@@ -329,7 +329,7 @@ output {
 #
 # 11. Live shader wallpapers:
 #     - Installed to ~/.config/neowall/shaders/ on first run
-#     - Just use the filename: shader retro_wave.glsl
+#     - Just use the filename: shader neon_city.glsl
 #     - Renders at ~60 FPS with minimal CPU usage
 #     - Control animation speed: shader_speed 2.0 (2x faster) or 0.5 (slower)
 #     - Create your own shaders! See shaders/README.md
@@ -362,7 +362,7 @@ output {
 #
 # Problem: Shader not found
 # Solution: Shaders are in ~/.config/neowall/shaders/ (copied on first run)
-#          Use just the filename: shader retro_wave.glsl
+#          Use just the filename: shader neon_city.glsl
 #
 # Problem: Black screen with shader
 # Solution: Check logs with: neowall -f -v

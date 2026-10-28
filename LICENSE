@@ -19,3 +19,17 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Some files carry their own license, stated in an SPDX header at the top:
+
+- examples/shaders/time.glsl: CC-BY-4.0 (Rigel)
+- examples/shaders/moon_ocean.glsl, star_next.glsl: MIT, their authors
+- protocols/plasma-shell.xml: LGPL-2.1-or-later (KDE)
+- protocols/wlr-*.xml: MIT (wlroots contributors)
+- src/terminal/vendor/stb_*.h: MIT or public domain (Sean Barrett)
+
+contrib/shaders-unlicensed/ holds third-party ports under their original
+terms (often CC BY-NC-SA or unstated). It isn't covered by this license and
+isn't installed.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: CC-BY-4.0
+// SPDX-FileCopyrightText: Rigel <rui@gil.com>
 // Author: Rigel rui@gil.com
 // licence: https://creativecommons.org/licenses/by/4.0/
 // link: https://www.shadertoy.com/view/lljfRD

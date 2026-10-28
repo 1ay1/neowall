@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // living_aurora.glsl — neowall reactive showcase (no audio needed)
 // A northern-lights sky that:
 //   - darkens to night / brightens toward noon via iSun

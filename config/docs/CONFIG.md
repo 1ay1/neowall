@@ -8,7 +8,7 @@ Edit `~/.config/neowall/config.vibe`:
 
 ```vibe
 default {
-  shader matrix_real.glsl
+  shader moon_ocean.glsl
   shader_speed 1.0
 }
 ```
@@ -20,7 +20,7 @@ Save and changes apply automatically.
 - User config: `~/.config/neowall/config.vibe`
 - System config: `/etc/neowall/config.vibe` (fallback)
 
-Config is auto-created on first run with Matrix rain as default.
+Config is auto-created on first run with the `garden` shader as default.
 
 ## VIBE Syntax
 
@@ -47,7 +47,7 @@ Applies to all monitors unless overridden by `output`.
 
 ```vibe
 default {
-  shader matrix_real.glsl
+  shader moon_ocean.glsl
   shader_speed 1.0
   mode fill
 }
@@ -60,7 +60,7 @@ Override settings for specific monitors:
 ```vibe
 output {
   eDP-1 {
-    shader matrix_real.glsl
+    shader moon_ocean.glsl
   }
   HDMI-A-1 {
     path ~/Pictures/wallpaper.png
@@ -82,20 +82,20 @@ Get monitor names:
 Run GPU shader as wallpaper:
 
 ```vibe
-shader matrix_real.glsl           # From ~/.config/neowall/shaders/
+shader moon_ocean.glsl           # From ~/.config/neowall/shaders/
 shader ~/custom/shader.glsl       # Absolute path
 shader /usr/share/shaders/x.glsl  # System path
 ```
 
-Included shaders:
-- `matrix_real.glsl` - Matrix rain with detail
-- `matrix_rain.glsl` - Classic Matrix effect
-- `plasma.glsl` - Flowing plasma waves
-- `aurora.glsl` - Northern lights
-- `2d_clouds.glsl` - Procedural clouds
-- `sunrise.glsl` - Dynamic sky
-- `fractal_land.glsl` - Fractal landscapes
-- `mandelbrot.glsl` - Mandelbrot zoom
+Included shaders (all freely licensed):
+- `garden.glsl` - A garden that grows over days, keyed to your clock
+- `circadian_sky.glsl` - Sky that follows your real time of day
+- `living_aurora.glsl` - Northern lights that react to your system
+- `moon_ocean.glsl` - Moonlit ocean
+- `rain_window.glsl` - Rain on glass
+- `audio_pulse.glsl` - Audio-reactive neon tunnel
+- `window_light.glsl` - Light leaking from behind your windows
+- `plasma_touch.glsl` - Plasma you push around with the mouse
 - And more in `~/.config/neowall/shaders/`
 
 #### `shader_speed` - Animation Speed
@@ -464,11 +464,11 @@ zones (waybar etc.), so those don't count toward "uncovered wallpaper".
 
 ## Example Configurations
 
-### Matrix Rain (Default)
+### Moonlit ocean
 
 ```vibe
 default {
-  shader matrix_real.glsl
+  shader moon_ocean.glsl
   shader_speed 1.0
 }
 ```
@@ -516,11 +516,11 @@ also enables spanning.
 ```vibe
 output {
   DP-1 {
-    shader matrix_real.glsl
+    shader moon_ocean.glsl
     span_group desk
   }
   HDMI-A-1 {
-    shader matrix_real.glsl
+    shader moon_ocean.glsl
     span_group desk
   }
 }
@@ -532,7 +532,7 @@ Named groups must share the same wallpaper type.
 ```vibe
 output {
   eDP-1 {
-    shader matrix_real.glsl
+    shader moon_ocean.glsl
   }
   HDMI-A-1 {
     path ~/Pictures/monitor.png
@@ -577,13 +577,13 @@ default {
 
 ```vibe
 default {
-  shader plasma.glsl
+  shader plasma_touch.glsl
   shader_speed 0.5
 }
 
 output {
   eDP-1 {
-    shader matrix_real.glsl
+    shader moon_ocean.glsl
     shader_speed 2.0
   }
   HDMI-A-1 {
@@ -612,7 +612,7 @@ Don't mix these in the same section:
 **Valid:**
 ```vibe
 default {
-  shader matrix_real.glsl
+  shader moon_ocean.glsl
   shader_speed 1.0
   duration 0
 }
@@ -622,7 +622,7 @@ default {
 ```vibe
 default {
   path ~/Pictures/wallpaper.png
-  shader matrix_real.glsl  # ERROR: Can't use both
+  shader moon_ocean.glsl  # ERROR: Can't use both
 }
 ```
 
@@ -723,13 +723,13 @@ Browse shaders: [shadertoy.com](https://www.shadertoy.com/)
 
 ### Shader not found
 - Shaders in: `~/.config/neowall/shaders/`
-- Use filename only: `shader matrix_real.glsl`
-- Or full path: `shader ~/.config/neowall/shaders/matrix_real.glsl`
+- Use filename only: `shader moon_ocean.glsl`
+- Or full path: `shader ~/.config/neowall/shaders/moon_ocean.glsl`
 
 ### Black screen with shader
 - Check logs: `neowall -fv`
 - Verify GPU supports OpenGL ES 2.0+
-- Try different shader: `shader plasma.glsl`
+- Try different shader: `shader plasma_touch.glsl`
 - Check shader syntax errors in logs
 
 ### Image not showing

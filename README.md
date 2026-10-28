@@ -74,7 +74,7 @@ wallpaper compiles fine and then silently has no keyboard input — install it.
 
 ```
 default {
-  shader retro_wave.glsl
+  shader garden.glsl
   shader_speed 0.8
 }
 ```
@@ -93,7 +93,7 @@ Per-output:
 
 ```
 output {
-  DP-1     { shader matrix_rain.glsl }
+  DP-1     { shader moon_ocean.glsl }
   HDMI-A-1 { path ~/Pictures/ duration 600 }
 }
 ```
@@ -129,15 +129,21 @@ neowall docs fbm            # look up a built-in helper or uniform
 
 ## Shaders
 
-30+ in the box. Bring your own — neowall accepts unmodified [Shadertoy](https://www.shadertoy.com/) GLSL: drop a `.glsl` file into `~/.config/neowall/shaders/` and reference it from your config.
+About 20 in the box, all freely licensed. Bring your own: neowall accepts unmodified [Shadertoy](https://www.shadertoy.com/) GLSL. Drop a `.glsl` file into `~/.config/neowall/shaders/` and reference it from your config.
 
 | Vibe | A few |
 |------|-------|
-| Synthwave | `retro_wave` · `synthwave` · `neonwave_sunrise` |
-| Nature | `moon_ocean` · `living_aurora` · `sunrise` |
-| Cyber | `matrix_rain` · `matrix_real` · `glowing_triangles` |
-| Abstract | `fractal_land` · `plasma_touch` · `mandelbrot` |
-| Space | `star_next` · `starship_reentry` |
+| Living | `garden` · `circadian_sky` · `living_aurora` |
+| Nature | `moon_ocean` · `rain_window` · `fireflies` |
+| Reactive | `audio_pulse` · `audio_bars` · `system_deck` |
+| Desktop-aware | `window_light` · `window_forge` · `mouse_ripples` |
+| Abstract | `plasma_touch` · `neon_city` · `time` |
+| Space | `star_next` · `starfield_warp` |
+
+More community ports whose licenses don't allow redistribution live in
+[`contrib/shaders-unlicensed/`](contrib/shaders-unlicensed/); they're not
+installed, but copy any of them into `~/.config/neowall/shaders/` for
+personal use.
 
 Pair it with [**GLEditor**](https://github.com/1ay1/gleditor) for a live-preview shader workflow that one-clicks into neowall.
 

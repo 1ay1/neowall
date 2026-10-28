@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // fireflies.glsl — a swarm of fireflies that drift through the dark and are
 // drawn toward your cursor. Interactive: move the mouse and the swarm gathers
 // around it; on a music beat they all flare at once. Warm at night, cooler by

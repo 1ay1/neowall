@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // system_monitor.glsl — your machine's vitals as living abstract art.
 // Interactive with what your COMPUTER does:
 //   iCpu      → turbulent heat-haze; the screen "boils" under load

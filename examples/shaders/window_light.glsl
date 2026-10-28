@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // window_light.glsl — the wallpaper knows where your windows are.
 //
 // Light leaks out from behind every window and pools on the desktop. Move a

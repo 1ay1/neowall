@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: afl_ext
 // afl_ext 2017-2024
 // MIT License
 

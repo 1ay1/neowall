@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // garden.glsl — a wallpaper that grows over days.
 //
 // Every plant runs a real multi-day life cycle keyed to the system calendar:

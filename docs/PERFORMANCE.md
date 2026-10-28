@@ -61,8 +61,8 @@ Several monitors add up: every output draws its own frames.
 What's expensive, roughly in order:
 
 - **Raymarch loops.** A `for` loop calling `map()` 64–128 times per pixel,
-  plus normals (3–6 more calls), soft shadows and AO. `train_journey.glsl`
-  and `fractal_land.glsl` are in this class.
+  plus normals (3–6 more calls), soft shadows and AO. `neon_city.glsl` and
+  `moon_ocean.glsl` are in this class.
 - **Reflections and volumetrics.** A second march per pixel, or a march
   through fog.
 - **Deep noise.** `nwFbm` with 6+ octaves, especially nested inside a loop.
@@ -77,8 +77,8 @@ What's expensive, roughly in order:
 
    ```vibe
    output {
-     DP-1     { shader retro_wave.glsl }      # 4K: something light
-     HDMI-A-1 { shader train_journey.glsl }   # 1080p: can afford it
+     DP-1     { shader plasma_touch.glsl }    # 4K: something light
+     HDMI-A-1 { shader neon_city.glsl }       # 1080p: can afford it
    }
    ```
 
@@ -86,7 +86,7 @@ What's expensive, roughly in order:
 
    ```vibe
    default {
-     shader train_journey.glsl
+     shader neon_city.glsl
      vsync false
      shader_fps 30
    }
@@ -94,7 +94,7 @@ What's expensive, roughly in order:
 
    With `vsync true` (the default) the display's refresh paces the shader.
 
-3. **Use a lighter shader.** `retro_wave`, `synthwave`, `neonwave_sunrise`
+3. **Use a lighter shader.** `plasma_touch`, `starfield_warp`, `fireflies`
    and most of the reactive examples run at 4K on modest GPUs.
 
 4. **Profile your own shader** with `neowall watch myshader.glsl`: it

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // scene_demo.glsl — a complete lit 3D scene, reactive to the machine.
 //
 // This is the whole shader. No raymarch loop, no normal estimation, no shadow

@@ -6,7 +6,7 @@
  * carry named presets. It reuses the project's VIBE parser so the syntax is the
  * same as config.vibe.
  *
- *   shader   train_journey.glsl     # optional; defaults to <name>.glsl
+ *   shader   garden.glsl            # optional; defaults to <name>.glsl
  *   channel0 audio                  # iChannel0 = live audio texture
  *   channel1 self                   # iChannel1 = previous frame
  *   uniform  uWind   cpu            # float uWind = live CPU load

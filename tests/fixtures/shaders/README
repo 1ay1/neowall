@@ -1,0 +1,4 @@
+Shader test fixtures: not wallpapers, not installed.
+
+- test_assignment.glsl, test_conflict.glsl: inputs for the GLSL shadow
+  scanner / alias-conflict paths.

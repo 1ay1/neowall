@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // starfield_warp.glsl — fly through stars; speed up by moving the mouse.
 // Interactive: mouse motion (iMouseEnergy) and audio (iAudioLevel/beat) push
 // the warp speed; the cursor position steers the direction of travel. Beats

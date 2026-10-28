@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // circadian_sky.glsl — a sky that tracks your real clock: dawn, noon, dusk,
 // night, all driven by iTimeOfDay / iSun. Sun arcs across by day; at night the
 // stars come out and a moon rises. Clouds drift faster with the wind of network

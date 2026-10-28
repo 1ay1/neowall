@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // neon_city.glsl — chrome, neon and rain, in about 60 lines.
 //
 // Everything expensive is done for you by neowall's scene kit: the march,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // mouse_ripples.glsl — water ripples that emanate from your cursor.
 // Interactive: move the mouse to draw trails on the water; the surface ripples
 // and settles. A wave-equation simulation in Buffer A (self-feedback), shaded

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: NeoWall contributors
 # system_deck.neowall — channel bindings for the command-deck HUD.
 # Buffer A is the scrolling history ring buffer (self-feedback).
 # The Image pass reads the live buffers: ch0=self isn't needed, ch1=Buffer A.

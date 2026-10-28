@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: NeoWall contributors
 # audio_pulse.neowall — manifest for audio_pulse.glsl
 #
 # Sidecar manifest: lives next to the shader. neowall auto-loads it when you

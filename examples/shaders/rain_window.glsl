@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // rain_window.glsl — rain running down a dark glass pane.
 // Interactive: rain intensity rises with network activity (iNetDown), lightning
 // flashes on audio beats, and the glass fogs/clears with the mouse (wipe it!).

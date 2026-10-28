@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: Pablo Roman Andrioli
 // Star Nest by Pablo Roman Andrioli
 // License: MIT
 

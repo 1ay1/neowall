@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // audio_pulse.glsl — neowall reactive showcase
 // An audio-reactive neon tunnel that breathes with your music and warms with
 // the time of day. Demonstrates the neowall std-lib (no #include needed):

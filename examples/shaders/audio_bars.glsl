@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // audio_bars.glsl — a glowing spectrum analyzer that reacts to system audio.
 // Interactive: play music and the bars dance; bass slams the floor glow,
 // treble lights the tips, beats flash the whole field. Uses iAudio (FFT),

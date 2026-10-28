@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: NeoWall contributors
 // plasma_touch.glsl — classic plasma you can push around with the mouse.
 // Interactive: the cursor warps the plasma field (a gravity well that bends the
 // flow), mouse motion energy speeds it up, and audio bass swells the colors.
