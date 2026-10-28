@@ -1031,12 +1031,13 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
         return nw_ok();
     }
 
-    /* X11 backend uses backend_data instead of egl_window */
+    /* What rendering needs is an EGL surface; how the backend got one (a
+     * wl_egl_window, an X11 window, a pbuffer) doesn't matter here. */
     if (!output->compositor_surface ||
-        (!output->compositor_surface->egl_window && !output->compositor_surface->backend_data)) {
-        log_error("EGL window not created for output %s, cannot set shader",
+        output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
+        log_error("EGL surface not created for output %s, cannot set shader",
                   output->model[0] ? output->model : "unknown");
-        return nw_err(NW_ERR_GL, "EGL window not created");
+        return nw_err(NW_ERR_GL, "EGL surface not created");
     }
 
     /* Validate EGL display and surface before operations */
@@ -1044,12 +1045,6 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
         log_error("EGL display not available for output %s (display may be disconnected)",
                   output->model[0] ? output->model : "unknown");
         return nw_err(NW_ERR_GL, "EGL display unavailable");
-    }
-
-    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
-        log_error("EGL surface not available for output %s (display may be disconnected)",
-                  output->model[0] ? output->model : "unknown");
-        return nw_err(NW_ERR_GL, "EGL surface unavailable");
     }
 
     /* Make EGL context current before creating shader program */
@@ -2311,8 +2306,8 @@ void output_apply_deferred_config(struct output_state *output) {
         return;
     }
 
-    /* Check if output is ready for rendering */
-    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE || !output->compositor_surface->egl_window) {
+    /* Ready means an EGL surface exists (see output_set_shader). */
+    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         log_debug("Output %s not ready for deferred config application",
                   output->model[0] ? output->model : "unknown");
         return;

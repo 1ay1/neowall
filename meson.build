@@ -1012,6 +1012,25 @@ test('multipass_gl', executable('test_multipass_gl',
 ), env: {'NW_SHADER_DIR': meson.project_source_root() / 'examples/shaders'},
    timeout: 300)
 
+# output.c + render.c end to end: a fake backend hands out pbuffers on a
+# surfaceless Mesa display, so images, fit modes, a shader, a directory cycle
+# and a bad image are all applied and drawn for real. Skips (77) without GL.
+if has_wayland
+  test('output_render', executable('test_output_render',
+    files('tests/test_output_render.c', 'src/utils.c', 'src/clock.c',
+          'src/config/vibe_impl.c', 'src/config/config.c', 'src/config/shuffle.c',
+          'src/output/output.c', 'src/output/frame_clock.c', 'src/output/span.c',
+          'src/render/render.c', 'src/compositor/compositor_surface.c') +
+      shader_sources + texture_sources + image_sources + source_sources +
+      gfx_sources + graph_sources + terminal_sources + transition_sources,
+    include_directories: [inc_dirs, inc_dirs_build,
+                          include_directories('src/terminal', 'src/compositor/backends/wayland')],
+    dependencies: deps,
+    link_with: has_terminal ? [terminal_glyph_lib] : [],
+    build_by_default: false,
+  ), timeout: 120)
+endif
+
 # =============================================================================
 # Fuzzers
 # =============================================================================
