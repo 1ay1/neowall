@@ -938,37 +938,54 @@ if has_terminal
 endif
 
 # =============================================================================
-# Fuzzers (opt-in: -Dfuzz=true, clang only)
+# Fuzzers
 # =============================================================================
 
-# libFuzzer harness over the VIBE config parser — untrusted user input, so it
-# must not crash/leak on garbage. Not part of the default test set; build and
-# run it manually under ASan/UBSan. See tests/fuzz_vibe.c for invocation.
-if get_option('fuzz')
-  if cc.get_id() != 'clang'
-    error('Fuzzing requires clang (set CC=clang or use a native file)')
-  endif
-  fuzz_args = ['-fsanitize=fuzzer']
-  executable('fuzz_vibe',
-    files('tests/fuzz_vibe.c', 'src/config/vibe_impl.c'),
-    include_directories: [inc_dirs, inc_dirs_build],
-    c_args: fuzz_args,
-    link_args: fuzz_args,
-    build_by_default: true,
-  )
-
-  # Fuzz the multipass GLSL parser — also untrusted user input.
-  executable('fuzz_multipass',
-    files(
-      'tests/fuzz_multipass.c',
-      'src/shader/multipass_parse.c',
-    ),
-    include_directories: [inc_dirs, inc_dirs_build],
-    c_args: fuzz_args,
-    link_args: fuzz_args,
-    build_by_default: true,
-  )
+# Each harness parses untrusted input. They always build against
+# tests/fuzz_driver.c (a small mutation driver) and run briefly as part of
+# `meson test --suite fuzz`, so they can't rot. With -Dfuzz=true under clang
+# they also build as real libFuzzer binaries for long runs:
+#   ./build/fuzz_terminal -max_total_time=600 corpus/
+fuzz_harnesses = {
+  'vibe':      [files('tests/fuzz_vibe.c', 'src/config/vibe_impl.c'), 'config'],
+  'multipass': [files('tests/fuzz_multipass.c', 'src/shader/multipass_parse.c',
+                      'src/utils.c'), 'examples/shaders'],
+  'exif':      [files('tests/fuzz_exif.c', 'src/image/exif.c'), ''],
+}
+if has_terminal
+  fuzz_harnesses += {
+    'terminal': [files('tests/fuzz_terminal.c', 'src/terminal/screen.c',
+                       'src/terminal/vtparse.c'), ''],
+  }
 endif
+
+if get_option('fuzz') and cc.get_id() != 'clang'
+  error('-Dfuzz=true needs clang (libFuzzer); the driver smoke tests build anyway')
+endif
+
+foreach name, h : fuzz_harnesses
+  drv = executable('fuzz_' + name + '_driver',
+    h[0] + files('tests/fuzz_driver.c'),
+    include_directories: [inc_dirs, inc_dirs_build, include_directories('src/terminal')],
+    dependencies: [thread_dep],
+    build_by_default: false,
+  )
+  seed_args = ['20000']
+  if h[1] != ''
+    seed_args += [meson.project_source_root() / h[1]]
+  endif
+  test('fuzz_' + name, drv, args: seed_args, suite: 'fuzz', timeout: 120)
+
+  if get_option('fuzz')
+    executable('fuzz_' + name,
+      h[0],
+      include_directories: [inc_dirs, inc_dirs_build, include_directories('src/terminal')],
+      dependencies: [thread_dep],
+      c_args: ['-fsanitize=fuzzer'],
+      link_args: ['-fsanitize=fuzzer'],
+    )
+  endif
+endforeach
 
 # =============================================================================
 # Summary

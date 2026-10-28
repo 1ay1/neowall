@@ -79,7 +79,8 @@ static size_t mutate(const uint8_t *in, size_t in_len, uint8_t *out, size_t cap)
         case 4: {                                          /* duplicate a chunk */
             size_t off = rnd() % len, n = rnd() % 64 + 1;
             if (off + n > len) n = len - off;
-            if (len + n < cap) { memmove(out + off + n, out + off, len - off); memcpy(out + off, out + off, n); len += n; }
+            /* shifting the tail right leaves the chunk in place twice */
+            if (len + n < cap) { memmove(out + off + n, out + off, len - off); len += n; }
             break;
         }
         case 5: {                                          /* delete a chunk */
@@ -130,5 +131,7 @@ int main(int argc, char **argv) {
         if ((i % 5000) == 0) fprintf(stderr, "[driver] iter %ld\n", i);
     }
     fprintf(stderr, "[driver] done, no crashes\n");
+    free(buf);
+    for (int i = 0; i < seed_count; i++) free(seeds[i]);
     return 0;
 }

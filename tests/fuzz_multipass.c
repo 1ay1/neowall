@@ -32,14 +32,7 @@ const char *multipass_type_name(multipass_type_t type) {
     return "<fuzz>";
 }
 
-/* Logging stubs. shader_log.h sees NEOWALL_VERSION (a project-wide flag) and
- * defers to externs that live in utils.c; the fuzz harness doesn't link
- * utils.c (would pull pthread/atomics), so we provide no-op stubs. */
-#include <stdarg.h>
-void log_info (const char *fmt, ...) { (void)fmt; }
-void log_debug(const char *fmt, ...) { (void)fmt; }
-void log_warn (const char *fmt, ...) { (void)fmt; }
-void log_error(const char *fmt, ...) { (void)fmt; }
+/* Logging comes from utils.c, linked by meson. */
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     /* multipass_parse_shader expects a NUL-terminated C string; the fuzzer

@@ -76,6 +76,43 @@ jobs:
         # The refcount + foundation tests are the lock-free ones TSan cares about.
         run: meson test -C build-tsan output_refcount foundation --print-errorlogs
 
+  fuzz:
+    name: libFuzzer (untrusted-input parsers)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon clang
+
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: CC=clang meson setup build-fuzz -Dfuzz=true -Db_sanitize=address,undefined -Db_lundef=false
+
+      - name: Build
+        run: ninja -C build-fuzz fuzz_vibe fuzz_multipass fuzz_exif fuzz_terminal
+
+      - name: Fuzz each parser for 60s
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          mkdir -p crashes
+          for f in vibe multipass exif terminal; do
+            mkdir -p corpus/$f
+            echo "== $f"
+            ./build-fuzz/fuzz_$f -max_total_time=60 -artifact_prefix=crashes/$f- corpus/$f
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-crashes
+          path: crashes/
+
   static-analysis:
     name: clang static analyzer + clang-tidy
     runs-on: ubuntu-latest
