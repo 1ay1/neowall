@@ -155,6 +155,16 @@ bool neowall_parse_index(const char *s, long *out);
  * using a truncated path. Defined in utils.c. */
 bool expand_path(const char *path, char *expanded, size_t size);
 
+/* Find `rel` (e.g. "shaders/x.glsl") under neowall's data dirs, in order:
+ * $XDG_DATA_HOME/neowall, each $XDG_DATA_DIRS entry + /neowall, then the
+ * compiled-in NEOWALL_DATADIR. Writes the first existing path to `out`.
+ * Returns false if none exists or a path doesn't fit. */
+bool neowall_find_data(const char *rel, char *out, size_t size);
+
+/* Call `fn` on each existing neowall data dir, same order as above, until it
+ * returns true. Returns whether any call returned true. */
+bool neowall_each_data_dir(bool (*fn)(const char *dir, void *ctx), void *ctx);
+
 /* State file functions */
 const char *get_state_file_path(void);
 const char *get_cycle_list_file_path(void);

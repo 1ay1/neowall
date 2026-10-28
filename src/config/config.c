@@ -64,8 +64,8 @@ const char *config_get_default_path(void) {
         }
     }
 
-    /* Try /etc */
-    snprintf(path, sizeof(path), "/etc/neowall/config.vibe");
+    /* Then the system-wide config ($sysconfdir, /etc on distros) */
+    snprintf(path, sizeof(path), "%s/neowall/config.vibe", NEOWALL_SYSCONFDIR);
     if (access(path, F_OK) == 0) {
         return path;
     }
@@ -1181,330 +1181,150 @@ void config_free_wallpaper(struct wallpaper_config *config) {
  * Default Configuration Creation
  * ============================================================================ */
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-truncation"
+/* mkdir -p, 0755. */
+static bool mkdir_p(const char *path) {
+    char tmp[MAX_PATH_LENGTH];
+    int n = snprintf(tmp, sizeof(tmp), "%s", path);
+    if (n <= 0 || (size_t)n >= sizeof(tmp)) return false;
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p != '/') continue;
+        *p = '\0';
+        if (mkdir(tmp, 0755) != 0 && errno != EEXIST) return false;
+        *p = '/';
+    }
+    return mkdir(tmp, 0755) == 0 || errno == EEXIST;
+}
+
+/* Copy src to dst via a temp file + rename, so a crash never leaves a
+ * half-written config. Refuses to overwrite an existing dst. */
+static bool copy_file(const char *src, const char *dst) {
+    if (access(dst, F_OK) == 0) return false;
+    char tmp[MAX_PATH_LENGTH];
+    int n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", dst);
+    if (n <= 0 || (size_t)n >= sizeof(tmp)) return false;
+
+    FILE *in = fopen(src, "rb");
+    if (!in) return false;
+    int fd = mkstemp(tmp);
+    if (fd < 0) { fclose(in); return false; }
+    FILE *out = fdopen(fd, "wb");
+    if (!out) { close(fd); unlink(tmp); fclose(in); return false; }
+
+    char buf[8192];
+    size_t got;
+    bool ok = true;
+    while (ok && (got = fread(buf, 1, sizeof(buf), in)) > 0) {
+        ok = fwrite(buf, 1, got, out) == got;
+    }
+    ok = ok && !ferror(in);
+    fclose(in);
+    ok = (fflush(out) == 0) && ok;
+    ok = (fsync(fileno(out)) == 0) && ok;
+    ok = (fclose(out) == 0) && ok;
+    if (ok) ok = chmod(tmp, 0644) == 0 && rename(tmp, dst) == 0;
+    if (!ok) unlink(tmp);
+    return ok;
+}
+
+/* Copy every *.glsl / *.neowall / README.md from one installed shader dir. */
+static bool copy_shaders_from(const char *datadir, void *vdst) {
+    const char *dst_dir = vdst;
+    char src_dir[MAX_PATH_LENGTH];
+    int n = snprintf(src_dir, sizeof(src_dir), "%s/shaders", datadir);
+    if (n <= 0 || (size_t)n >= sizeof(src_dir)) return false;
+    DIR *dir = opendir(src_dir);
+    if (!dir) return false;
+
+    int copied = 0;
+    struct dirent *e;
+    while ((e = readdir(dir)) != NULL) {
+        size_t len = strlen(e->d_name);
+        bool want = (len > 5 && strcmp(e->d_name + len - 5, ".glsl") == 0) ||
+                    (len > 8 && strcmp(e->d_name + len - 8, ".neowall") == 0) ||
+                    strcmp(e->d_name, "README.md") == 0;
+        if (!want) continue;
+        char s[MAX_PATH_LENGTH], d[MAX_PATH_LENGTH];
+        int a = snprintf(s, sizeof(s), "%s/%s", src_dir, e->d_name);
+        int b = snprintf(d, sizeof(d), "%s/%s", dst_dir, e->d_name);
+        if (a <= 0 || (size_t)a >= sizeof(s) || b <= 0 || (size_t)b >= sizeof(d)) continue;
+        if (copy_file(s, d)) copied++;
+    }
+    closedir(dir);
+    if (copied > 0) log_info("Copied %d example shader(s) to %s", copied, dst_dir);
+    return true;   /* only take shaders from the first data dir that has them */
+}
+
 static bool config_create_default(const char *config_path) {
-    if (!config_path) {
+    if (!config_path) return false;
+
+    char dir_path[MAX_PATH_LENGTH];
+    int n = snprintf(dir_path, sizeof(dir_path), "%s", config_path);
+    if (n <= 0 || (size_t)n >= sizeof(dir_path)) return false;
+    char *slash = strrchr(dir_path, '/');
+    if (slash && slash != dir_path) *slash = '\0';
+    if (!mkdir_p(dir_path)) {
+        log_error("Failed to create directory %s: %s", dir_path, strerror(errno));
         return false;
     }
 
-    /* Get directory path */
-    char dir_path[MAX_PATH_LENGTH];
-    snprintf(dir_path, sizeof(dir_path), "%s", config_path);
+    /* The sample configs and shaders ship in neowall's data dir. */
+    char src[MAX_PATH_LENGTH];
+    bool copied_config = neowall_find_data("config.vibe", src, sizeof(src)) &&
+                         copy_file(src, config_path);
+    if (copied_config) log_info("Created configuration file from example: %s", config_path);
 
-    /* Find last slash to get directory */
-    char *last_slash = strrchr(dir_path, '/');
-    if (last_slash) {
-        *last_slash = '\0';
+    char path[MAX_PATH_LENGTH];
+    n = snprintf(path, sizeof(path), "%s/neowall.vibe", dir_path);
+    if (n > 0 && (size_t)n < sizeof(path) &&
+        neowall_find_data("neowall.vibe", src, sizeof(src)) && copy_file(src, path)) {
+        log_info("Copied the commented example config to %s", path);
     }
 
-    /* Create directory if it doesn't exist */
-    struct stat st;
-    if (stat(dir_path, &st) == -1) {
-        /* Create directory recursively */
-        char tmp[MAX_PATH_LENGTH];
-        char *p = NULL;
-        snprintf(tmp, sizeof(tmp), "%s", dir_path);
-
-        for (p = tmp + 1; *p; p++) {
-            if (*p == '/') {
-                *p = '\0';
-                if (mkdir(tmp, 0755) == -1 && errno != EEXIST) {
-                    log_error("Failed to create directory %s: %s", tmp, strerror(errno));
-                    return false;
-                }
-                *p = '/';
-            }
-        }
-
-        if (mkdir(tmp, 0755) == -1 && errno != EEXIST) {
-            log_error("Failed to create directory %s: %s", tmp, strerror(errno));
-            return false;
-        }
-    }
-
-    /* Get the installation path or use built-in default */
-    const char *default_wallpaper_path = NULL;
-
-    /* Copy default wallpaper to user's local directory if it doesn't exist */
-    const char *home = getenv("HOME");
-    if (home) {
-        char user_wallpaper_dir[MAX_PATH_LENGTH];
-        char user_wallpaper_path[MAX_PATH_LENGTH];
-        int ret1 = snprintf(user_wallpaper_dir, sizeof(user_wallpaper_dir),
-                           "%s/.local/share/neowall", home);
-        if (ret1 < 0 || (size_t)ret1 >= sizeof(user_wallpaper_dir)) {
-            log_error("Path too long for user wallpaper directory");
-            default_wallpaper_path = "~/Pictures/wallpaper.png";
-        } else {
-            int ret2 = snprintf(user_wallpaper_path, sizeof(user_wallpaper_path),
-                               "%s/default.png", user_wallpaper_dir);
-            if (ret2 < 0 || (size_t)ret2 >= sizeof(user_wallpaper_path)) {
-                log_error("Path too long for user wallpaper path");
-                default_wallpaper_path = "~/Pictures/wallpaper.png";
-            } else {
-                /* Check if user already has the default wallpaper */
-                if (access(user_wallpaper_path, F_OK) != 0) {
-                    /* Try to find and copy the default wallpaper from installation */
-                    const char *source_paths[] = {
-                        "/usr/share/neowall/default.png",
-                        "/usr/local/share/neowall/default.png",
-                        NULL
-                    };
-
-                    for (int i = 0; source_paths[i] != NULL; i++) {
-                        if (access(source_paths[i], R_OK) == 0) {
-                            /* Create user wallpaper directory recursively */
-                            char tmp[MAX_PATH_LENGTH];
-                            snprintf(tmp, sizeof(tmp), "%s/.local", home);
-                            mkdir(tmp, 0755);
-                            snprintf(tmp, sizeof(tmp), "%s/.local/share", home);
-                            mkdir(tmp, 0755);
-                            mkdir(user_wallpaper_dir, 0755);
-
-                            /* Copy the file */
-                            FILE *src = fopen(source_paths[i], "rb");
-                            if (src) {
-                                FILE *dst = fopen(user_wallpaper_path, "wb");
-                                if (dst) {
-                                    char buffer[4096];
-                                    size_t bytes;
-                                    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
-                                        if (fwrite(buffer, 1, bytes, dst) != bytes) {
-                                            log_error("Failed to write to %s", user_wallpaper_path);
-                                            break;
-                                        }
-                                    }
-                                    fclose(dst);
-                                    log_info("Copied default wallpaper to %s", user_wallpaper_path);
-                                }
-                                fclose(src);
-                            }
-                            break;
-                        }
-                    }
-                }
-
-                /* Use the user's local copy if it exists */
-                if (access(user_wallpaper_path, F_OK) == 0) {
-                    default_wallpaper_path = "~/.local/share/neowall/default.png";
-                } else {
-                    default_wallpaper_path = "~/Pictures/wallpaper.png";
-                }
-            }
-        }
-    } else {
-        default_wallpaper_path = "~/Pictures/wallpaper.png";
-    }
-
-    /* Try to copy config from installation as the main config */
-    const char *example_config_paths[] = {
-        "/usr/share/neowall/config.vibe",
-        "/usr/local/share/neowall/config.vibe",
-        NULL
-    };
-
-    bool copied_config = false;
-    for (int i = 0; example_config_paths[i] != NULL; i++) {
-        if (access(example_config_paths[i], R_OK) == 0) {
-            /* Copy example config as the main config file */
-            FILE *src = fopen(example_config_paths[i], "rb");
-            if (src) {
-                FILE *dst = fopen(config_path, "wb");
-                if (dst) {
-                    char buffer[4096];
-                    size_t bytes;
-                    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
-                        if (fwrite(buffer, 1, bytes, dst) != bytes) {
-                            log_error("Failed to write to %s", config_path);
-                            break;
-                        }
-                    }
-                    fclose(dst);
-                    log_info("Created configuration file from example: %s", config_path);
-                    copied_config = true;
-                }
-                fclose(src);
-            }
-            break;
-        }
-    }
-
-    /* Copy detailed example config (neowall.vibe) if available */
-    if (home) {
-        const char *detailed_config_paths[] = {
-            "/usr/share/neowall/neowall.vibe",
-            "/usr/local/share/neowall/neowall.vibe",
-            NULL
-        };
-
-        char detailed_config_path[MAX_PATH_LENGTH];
-        snprintf(detailed_config_path, sizeof(detailed_config_path),
-                "%s/.config/neowall/neowall.vibe", home);
-
-        for (int i = 0; detailed_config_paths[i] != NULL; i++) {
-            if (access(detailed_config_paths[i], R_OK) == 0) {
-                FILE *src = fopen(detailed_config_paths[i], "rb");
-                if (src) {
-                    FILE *dst = fopen(detailed_config_path, "wb");
-                    if (dst) {
-                        char buffer[4096];
-                        size_t bytes;
-                        while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
-                            fwrite(buffer, 1, bytes, dst);
-                        }
-                        fclose(dst);
-                        log_info("Copied detailed example config to %s", detailed_config_path);
-                    }
-                    fclose(src);
-                }
-                break;
-            }
-        }
-    }
-
-    /* Try to copy example shaders from installation if available */
-    if (home) {
-        const char *shader_install_paths[] = {
-            "/usr/share/neowall/shaders",
-            "/usr/local/share/neowall/shaders",
-            NULL
-        };
-
-        bool copied_shaders = false;
-        for (int i = 0; shader_install_paths[i] != NULL; i++) {
-            if (access(shader_install_paths[i], R_OK) == 0) {
-                /* Create user shader directory */
-                char user_shader_dir[MAX_PATH_LENGTH];
-                snprintf(user_shader_dir, sizeof(user_shader_dir),
-                        "%s/.config/neowall/shaders", home);
-
-                /* Create directory structure */
-                char tmp[MAX_PATH_LENGTH];
-                snprintf(tmp, sizeof(tmp), "%s/.config", home);
-                mkdir(tmp, 0755);
-                snprintf(tmp, sizeof(tmp), "%s/.config/neowall", home);
-                mkdir(tmp, 0755);
-                mkdir(user_shader_dir, 0755);
-
-                /* Copy all shader files */
-                DIR *dir = opendir(shader_install_paths[i]);
-                if (dir) {
-                    struct dirent *entry;
-                    int shader_count = 0;
-                    while ((entry = readdir(dir)) != NULL) {
-                        if (entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
-                            /* Check if it's a .glsl or README file */
-                            size_t len = strlen(entry->d_name);
-                            if ((len > 5 && strcmp(entry->d_name + len - 5, ".glsl") == 0) ||
-                                strcmp(entry->d_name, "README.md") == 0) {
-
-                                /* Check path lengths */
-                                if (strlen(shader_install_paths[i]) + len + 2 >= MAX_PATH_LENGTH ||
-                                    strlen(user_shader_dir) + len + 2 >= MAX_PATH_LENGTH) {
-                                    log_error("Shader path too long: %s", entry->d_name);
-                                    continue;
-                                }
-
-                                char src_path[MAX_PATH_LENGTH];
-                                char dst_path[MAX_PATH_LENGTH];
-                                (void)snprintf(src_path, sizeof(src_path), "%s/%s",
-                                        shader_install_paths[i], entry->d_name);
-                                (void)snprintf(dst_path, sizeof(dst_path), "%s/%s",
-                                        user_shader_dir, entry->d_name);
-
-                                FILE *src = fopen(src_path, "rb");
-                                if (src) {
-                                    FILE *dst = fopen(dst_path, "wb");
-                                    if (dst) {
-                                        char buffer[4096];
-                                        size_t bytes;
-                                        while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
-                                            if (fwrite(buffer, 1, bytes, dst) != bytes) {
-                                                log_error("Failed to write shader to %s", dst_path);
-                                                break;
-                                            }
-                                        }
-                                        fclose(dst);
-                                        shader_count++;
-                                    }
-                                    fclose(src);
-                                }
-                            }
-                        }
-                    }
-                    closedir(dir);
-
-                    if (shader_count > 0) {
-                        log_info("Copied %d example shader(s) to %s",
-                                shader_count, user_shader_dir);
-                        copied_shaders = true;
-                    }
-                }
-                break;
-            }
-        }
-
-        if (copied_shaders) {
-            log_info("Example shaders available at ~/.config/neowall/shaders/");
-        }
-    }
-
-    /* If we couldn't copy the example config, create a minimal fallback */
-    if (!copied_config) {
-        log_info("Could not find example config, creating minimal fallback");
-
-        const char *fallback_config =
-            "# NeoWall Configuration\n"
-            "# This is a minimal fallback config\n"
-            "#\n"
-            "# IMPORTANT: 'path' and 'shader' are MUTUALLY EXCLUSIVE\n"
-            "# - Use 'path' for images (PNG, JPEG)\n"
-            "# - Use 'shader' for GLSL shaders\n"
-            "# - DO NOT use both in the same config block\n"
-            "#\n"
-            "# Image example:\n"
-            "#   default {\n"
-            "#     path ~/Pictures/wallpaper.png\n"
-            "#     mode fill\n"
-            "#   }\n"
-            "#\n"
-            "# Shader example:\n"
-            "#   default {\n"
-            "#     shader ~/.config/neowall/shaders/plasma.glsl\n"
-            "#     shader_speed 1.0\n"
-            "#   }\n"
-            "#\n"
-            "# Directory cycling (add / at end or specify duration):\n"
-            "#   default {\n"
-            "#     path ~/Pictures/Wallpapers/\n"
-            "#     duration 300\n"
-            "#     transition fade\n"
-            "#   }\n\n"
-            "default {\n"
-            "  path %s\n"
-            "  mode fill\n"
-            "}\n";
-
-        FILE *fp = fopen(config_path, "w");
-        if (!fp) {
-            log_error("Failed to create default config file: %s", strerror(errno));
-            return false;
-        }
-
-        fprintf(fp, fallback_config, default_wallpaper_path);
-        fclose(fp);
-
-        log_info("Created minimal configuration file: %s", config_path);
+    n = snprintf(path, sizeof(path), "%s/shaders", dir_path);
+    if (n > 0 && (size_t)n < sizeof(path) && mkdir_p(path)) {
+        neowall_each_data_dir(copy_shaders_from, path);
     }
 
     if (copied_config) {
         log_info("Edit %s to customize your wallpaper setup", config_path);
+        return true;
     }
 
-return true;
+    /* Nothing installed (running from a build tree): write a minimal config
+     * that points at a shader we know works without any files. */
+    log_info("No example config installed, writing a minimal one");
+    static const char fallback_config[] =
+        "# NeoWall configuration. See neowall.vibe next to this file, or\n"
+        "# `man neowall.vibe`, for every option.\n"
+        "#\n"
+        "# Image:      default { path ~/Pictures/wallpaper.png  mode fill }\n"
+        "# Slideshow:  default { path ~/Pictures/Wallpapers/  duration 300 }\n"
+        "# Shader:     default { shader garden.glsl }\n"
+        "\n"
+        "default {\n"
+        "  path ~/Pictures/wallpaper.png\n"
+        "  mode fill\n"
+        "}\n";
+    char tmp[MAX_PATH_LENGTH];
+    n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", config_path);
+    if (n <= 0 || (size_t)n >= sizeof(tmp)) return false;
+    int fd = mkstemp(tmp);
+    if (fd < 0) {
+        log_error("Failed to create default config file: %s", strerror(errno));
+        return false;
+    }
+    size_t len = sizeof(fallback_config) - 1;
+    bool ok = write(fd, fallback_config, len) == (ssize_t)len && fsync(fd) == 0;
+    ok = (close(fd) == 0) && ok;
+    ok = ok && chmod(tmp, 0644) == 0 && rename(tmp, config_path) == 0;
+    if (!ok) {
+        unlink(tmp);
+        log_error("Failed to write default config file %s", config_path);
+        return false;
+    }
+    log_info("Created minimal configuration file: %s", config_path);
+    return true;
 }
-#pragma GCC diagnostic pop
 
 /* ============================================================================
  * Built-in fallback configuration (used when config file fails)

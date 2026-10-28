@@ -215,6 +215,66 @@ bool expand_path(const char *path, char *expanded, size_t size) {
     return true;
 }
 
+bool neowall_each_data_dir(bool (*fn)(const char *dir, void *ctx), void *ctx) {
+    char dir[PATH_MAX];
+    int n;
+
+    const char *dh = getenv("XDG_DATA_HOME");
+    const char *home = getenv("HOME");
+    if (dh && dh[0] == '/') {
+        n = snprintf(dir, sizeof(dir), "%s/neowall", dh);
+    } else if (home && home[0]) {
+        n = snprintf(dir, sizeof(dir), "%s/.local/share/neowall", home);
+    } else {
+        n = -1;
+    }
+    if (n > 0 && (size_t)n < sizeof(dir) && access(dir, F_OK) == 0 && fn(dir, ctx)) return true;
+
+    /* XDG says relative entries are invalid, and an unset/empty value means
+     * /usr/local/share:/usr/share. */
+    const char *dirs = getenv("XDG_DATA_DIRS");
+    if (!dirs || !dirs[0]) dirs = "/usr/local/share:/usr/share";
+    bool seen_builtin = false;
+    for (const char *p = dirs; *p;) {
+        const char *end = strchr(p, ':');
+        size_t len = end ? (size_t)(end - p) : strlen(p);
+        if (len > 0 && p[0] == '/') {
+            n = snprintf(dir, sizeof(dir), "%.*s/neowall", (int)len, p);
+            if (n > 0 && (size_t)n < sizeof(dir)) {
+                if (strcmp(dir, NEOWALL_DATADIR) == 0) seen_builtin = true;
+                if (access(dir, F_OK) == 0 && fn(dir, ctx)) return true;
+            }
+        }
+        p += len;
+        if (*p == ':') p++;
+    }
+
+    if (!seen_builtin && access(NEOWALL_DATADIR, F_OK) == 0 && fn(NEOWALL_DATADIR, ctx)) {
+        return true;
+    }
+    return false;
+}
+
+struct find_data_ctx {
+    const char *rel;
+    char *out;
+    size_t size;
+};
+
+static bool find_data_in(const char *dir, void *vctx) {
+    struct find_data_ctx *c = vctx;
+    int n = snprintf(c->out, c->size, "%s/%s", dir, c->rel);
+    return n > 0 && (size_t)n < c->size && access(c->out, F_OK) == 0;
+}
+
+bool neowall_find_data(const char *rel, char *out, size_t size) {
+    if (!rel || !out || size == 0) return false;
+    struct find_data_ctx c = {rel, out, size};
+    if (neowall_each_data_dir(find_data_in, &c)) return true;
+    out[0] = '\0';
+    return false;
+}
+
 /* Check if file exists */
 bool file_exists(const char *path) {
     return access(path, F_OK) == 0;

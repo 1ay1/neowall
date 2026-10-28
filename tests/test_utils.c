@@ -36,6 +36,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
 int restore_cycle_index_from_state(const char *output_name);
 bool remove_wallpaper_state(const char *output_name);
 bool prune_wallpaper_state(const char *const *output_names, size_t output_count);
+bool neowall_find_data(const char *rel, char *out, size_t size);
 
 static int failures = 0;
 static int checks = 0;
@@ -245,6 +246,51 @@ static void test_persisted_state_pruning(void) {
     unsetenv("XDG_STATE_HOME");
 }
 
+static void touch(const char *path) {
+    FILE *f = fopen(path, "w");
+    if (f) fclose(f);
+}
+
+/* neowall_find_data(): $XDG_DATA_HOME first, then $XDG_DATA_DIRS in order,
+ * relative entries ignored, missing files reported as not found. */
+static void test_find_data(void) {
+    char base[256];
+    snprintf(base, sizeof(base), "/tmp/nw-data-test-%d-%ld", (int)getpid(), (long)time(NULL));
+    char d[1200], p[1200], out[1200];
+    const char *subs[] = {"home", "home/neowall", "a", "a/neowall", "a/neowall/shaders",
+                          "b", "b/neowall", "b/neowall/shaders"};
+    mkdir(base, 0700);
+    for (size_t i = 0; i < sizeof(subs) / sizeof(subs[0]); i++) {
+        snprintf(d, sizeof(d), "%s/%s", base, subs[i]);
+        mkdir(d, 0700);
+    }
+    snprintf(p, sizeof(p), "%s/a/neowall/shaders/x.glsl", base); touch(p);
+    snprintf(p, sizeof(p), "%s/b/neowall/shaders/x.glsl", base); touch(p);
+    snprintf(p, sizeof(p), "%s/b/neowall/shaders/only_b.glsl", base); touch(p);
+    snprintf(p, sizeof(p), "%s/home/neowall/config.vibe", base); touch(p);
+
+    snprintf(d, sizeof(d), "%s/home", base);
+    setenv("XDG_DATA_HOME", d, 1);
+    snprintf(d, sizeof(d), "relative/dir:%s/a:%s/b", base, base);
+    setenv("XDG_DATA_DIRS", d, 1);
+
+    snprintf(p, sizeof(p), "%s/a/neowall/shaders/x.glsl", base);
+    CHECK(neowall_find_data("shaders/x.glsl", out, sizeof(out)) && strcmp(out, p) == 0);
+    snprintf(p, sizeof(p), "%s/b/neowall/shaders/only_b.glsl", base);
+    CHECK(neowall_find_data("shaders/only_b.glsl", out, sizeof(out)) && strcmp(out, p) == 0);
+    snprintf(p, sizeof(p), "%s/home/neowall/config.vibe", base);
+    CHECK(neowall_find_data("config.vibe", out, sizeof(out)) && strcmp(out, p) == 0);
+    CHECK(!neowall_find_data("shaders/missing.glsl", out, sizeof(out)) && out[0] == '\0');
+    char tiny[8];
+    CHECK(!neowall_find_data("shaders/x.glsl", tiny, sizeof(tiny)));
+
+    unsetenv("XDG_DATA_HOME");
+    unsetenv("XDG_DATA_DIRS");
+    char cmd[400];
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", base);
+    CHECK(system(cmd) == 0);
+}
+
 int main(void) {
     test_lerp();
     test_clamp();
@@ -254,6 +300,7 @@ int main(void) {
     test_parse_index();
     test_secure_runtime_dir();
     test_persisted_state_pruning();
+    test_find_data();
 
     if (failures == 0) {
         printf("ok - %d checks passed\n", checks);

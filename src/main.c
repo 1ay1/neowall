@@ -666,7 +666,10 @@ static void print_usage(const char *program_name) {
     printf("Configuration file locations (in order of preference):\n");
     printf("  1. $XDG_CONFIG_HOME/neowall/config.vibe\n");
     printf("  2. $HOME/.config/neowall/config.vibe\n");
-    printf("  3. /etc/neowall/config.vibe\n");
+    printf("  3. %s/neowall/config.vibe\n", NEOWALL_SYSCONFDIR);
+    printf("\n");
+    printf("Shaders are looked up in ~/.config/neowall/shaders, then\n");
+    printf("$XDG_DATA_HOME/neowall/shaders, $XDG_DATA_DIRS/neowall/shaders and %s/shaders.\n", NEOWALL_DATADIR);
     printf("\n");
     printf("Example config.vibe:\n");
     printf("  default {\n");

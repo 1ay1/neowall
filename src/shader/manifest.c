@@ -176,12 +176,9 @@ bool manifest_apply(multipass_shader_t *shader, const char *shader_path) {
             content = slurp(cand);
         }
         if (!content) {
-            snprintf(cand, sizeof(cand), "/usr/share/neowall/shaders/%s", mname);
-            content = slurp(cand);
-        }
-        if (!content) {
-            snprintf(cand, sizeof(cand), "/usr/local/share/neowall/shaders/%s", mname);
-            content = slurp(cand);
+            char rel[300];
+            snprintf(rel, sizeof(rel), "shaders/%s", mname);
+            if (neowall_find_data(rel, cand, sizeof(cand))) content = slurp(cand);
         }
     }
     if (!content) return false;   /* no manifest — heuristic stays in charge */

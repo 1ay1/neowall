@@ -122,6 +122,8 @@ version_h = configure_file(
     'VERSION_MAJOR': version_parts[0],
     'VERSION_MINOR': version_parts.length() > 1 ? version_parts[1] : '0',
     'VERSION_PATCH': version_parts.length() > 2 ? version_parts[2] : '0',
+    'DATADIR': get_option('prefix') / get_option('datadir') / 'neowall',
+    'SYSCONFDIR': get_option('prefix') / get_option('sysconfdir'),
   },
 )
 

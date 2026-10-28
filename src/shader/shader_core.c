@@ -16,6 +16,9 @@
 #include "neowall/shader/shader_error_log.h"
 #include "neowall/shader/shader_multipass.h"
 
+/* utils.c; declared here so this file doesn't pull in all of neowall.h. */
+bool neowall_find_data(const char *rel, char *out, size_t size);
+
 /* Maximum path length */
 #ifndef MAX_PATH_LENGTH
 #define MAX_PATH_LENGTH 4096
@@ -212,46 +215,36 @@ bool shader_resolve_path(const char *shader_name, char *resolved_path, size_t re
         return true;
     }
 
-    /* Search in multiple locations for just the shader name */
+    /* User shaders win: $XDG_CONFIG_HOME, then ~/.config. */
     const char *home = getenv("HOME");
     const char *xdg_config_home = getenv("XDG_CONFIG_HOME");
-
-    /* List of directories to search (in order of preference) */
-    char search_paths[4][MAX_PATH_LENGTH];
-    int num_paths = 0;
-
-    /* 1. XDG_CONFIG_HOME/neowall/shaders/ */
-    if (xdg_config_home && xdg_config_home[0] != '\0') {
-        snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "%s/neowall/shaders/%s", xdg_config_home, shader_name);
+    char cand[MAX_PATH_LENGTH];
+    int n = -1;
+    if (xdg_config_home && xdg_config_home[0] == '/') {
+        n = snprintf(cand, sizeof(cand), "%s/neowall/shaders/%s", xdg_config_home, shader_name);
+        if (n > 0 && (size_t)n < sizeof(cand) && access(cand, R_OK) == 0) goto found;
+    }
+    if (home && home[0]) {
+        n = snprintf(cand, sizeof(cand), "%s/.config/neowall/shaders/%s", home, shader_name);
+        if (n > 0 && (size_t)n < sizeof(cand) && access(cand, R_OK) == 0) goto found;
     }
 
-    /* 2. ~/.config/neowall/shaders/ */
-    if (home && home[0] != '\0') {
-        snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "%s/.config/neowall/shaders/%s", home, shader_name);
-    }
-
-    /* 3. /usr/share/neowall/shaders/ */
-    snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "/usr/share/neowall/shaders/%s", shader_name);
-
-    /* 4. /usr/local/share/neowall/shaders/ */
-    snprintf(search_paths[num_paths++], MAX_PATH_LENGTH, "/usr/local/share/neowall/shaders/%s", shader_name);
-
-    /* Check each path */
-    for (int i = 0; i < num_paths; i++) {
-        if (access(search_paths[i], R_OK) == 0) {
-            size_t len = strlen(search_paths[i]);
-            if (len >= resolved_size) {
-                log_error("Resolved shader path too long: %s", search_paths[i]);
-                continue;
-            }
-            snprintf(resolved_path, resolved_size, "%s", search_paths[i]);
-            log_debug("Resolved shader '%s' to: %s", shader_name, resolved_path);
-            return true;
-        }
-    }
+    /* Then the data dirs ($XDG_DATA_HOME, $XDG_DATA_DIRS, install prefix). */
+    char rel[MAX_PATH_LENGTH];
+    n = snprintf(rel, sizeof(rel), "shaders/%s", shader_name);
+    if (n > 0 && (size_t)n < sizeof(rel) && neowall_find_data(rel, cand, sizeof(cand))) goto found;
 
     log_error("Shader not found: %s", shader_name);
     return false;
+
+found:
+    if (strlen(cand) >= resolved_size) {
+        log_error("Resolved shader path too long: %s", cand);
+        return false;
+    }
+    snprintf(resolved_path, resolved_size, "%s", cand);
+    log_debug("Resolved shader '%s' to: %s", shader_name, resolved_path);
+    return true;
 }
 
 /**
