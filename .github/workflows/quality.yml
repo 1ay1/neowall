@@ -76,6 +76,31 @@ jobs:
         # The refcount + foundation tests are the lock-free ones TSan cares about.
         run: meson test -C build-tsan output_refcount foundation --print-errorlogs
 
+  coverage:
+    name: Test coverage
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon gcovr
+      - uses: actions/checkout@v4
+      - run: meson setup build-cov -Db_coverage=true --buildtype=debug
+      - run: ninja -C build-cov
+      - run: meson test -C build-cov --print-errorlogs
+      - name: Report
+        run: |
+          gcovr -r . build-cov --filter src/ --exclude 'src/terminal/vendor/' \
+            --txt-summary --txt coverage.txt --html-details coverage/index.html
+          tail -n 30 coverage.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+
   fuzz:
     name: libFuzzer (untrusted-input parsers)
     runs-on: ubuntu-latest
