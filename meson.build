@@ -1029,6 +1029,12 @@ if has_wayland
     link_with: has_terminal ? [terminal_glyph_lib] : [],
     build_by_default: false,
   ), timeout: 120)
+
+  # The whole daemon on a real compositor (sway headless), driven through
+  # every control command. Skips (77) where sway isn't installed.
+  test('e2e_wayland', find_program('tests/e2e_wayland.sh'),
+    args: [neowall_exe.full_path(), meson.project_source_root()],
+    depends: neowall_exe, suite: 'e2e', timeout: 180, is_parallel: false)
 endif
 
 # =============================================================================

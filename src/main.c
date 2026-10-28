@@ -659,6 +659,7 @@ static void print_usage(const char *program_name) {
     /* Shader-animation freeze controls (handled outside the table — RT signals). */
     printf("  %-21s %s\n", "pause-shader", "Freeze the shader animation in place");
     printf("  %-21s %s\n", "resume-shader", "Resume a frozen shader animation");
+    printf("  %-21s %s\n", "ping", "Exit 0 if a daemon is running and answering");
     printf("  %-21s %s\n", "set-terminal <cmd>", "Swap the live terminal-wallpaper command");
     printf("\n");
     printf("Note: By default, neowall runs as a daemon. Use -f for foreground.\n");
@@ -1074,6 +1075,14 @@ static int cmd_set_terminal_signal(int argc, char *argv[]) {
 static int cmd_control(int argc, char *argv[]) {
     const char *cmd = argv[1];
 
+    if (strcmp(cmd, "ping") == 0) {
+        /* For scripts: exit 0 only when a daemon answers. */
+        int rc;
+        if (ipc_command("ping", NULL, &rc)) return rc;
+        fprintf(stderr, "No running neowall daemon\n");
+        return EXIT_FAILURE;
+    }
+
     static const char *const socket_cmds[] = {
         "next", "pause", "resume", "reload", "pause-shader", "resume-shader", NULL};
     for (size_t i = 0; socket_cmds[i]; i++) {
@@ -1127,7 +1136,7 @@ static int cmd_control(int argc, char *argv[]) {
     for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
         fprintf(stderr, ", %s", daemon_commands[i].name);
     }
-    fprintf(stderr, ", pause-shader, resume-shader, set-terminal");
+    fprintf(stderr, ", ping, pause-shader, resume-shader, set-terminal");
     fprintf(stderr, "\n\nRun '%s --help' for more information.\n", argv[0]);
     return EXIT_FAILURE;
 }

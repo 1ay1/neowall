@@ -95,6 +95,10 @@ Replace the program running in a terminal wallpaper.
 .TP
 .B kill
 Stop the daemon.
+.TP
+.B ping
+Exit 0 if a daemon is running and answering, 1 otherwise.
+Useful in scripts.
 .SS Shader authoring
 .TP
 .BI new " name"

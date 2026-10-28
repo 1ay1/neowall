@@ -34,10 +34,10 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
-            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon clang
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon clang \
+            sway python
 
       - uses: actions/checkout@v4
-
       - name: Configure (ASan + UBSan)
         run: meson setup build-asan -Dwerror=true -Db_sanitize=address,undefined -Db_lundef=false --buildtype=debug
 
@@ -50,17 +50,18 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: |
           meson test -C build-asan --print-errorlogs
-          # mesa is installed here, so the GL tests must really run, not skip.
+          # mesa and sway are installed here, so the GL tests and the daemon
+          # end-to-end test must really run, not skip.
           python3 - <<'EOF'
           import json, sys
-          gl = {"neowall:multipass_gl", "neowall:output_render"}
+          must_run = {"neowall:multipass_gl", "neowall:output_render", "neowall:e2e_wayland"}
           seen = {}
           for line in open("build-asan/meson-logs/testlog.json"):
               t = json.loads(line)
-              if t["name"] in gl:
+              if t["name"] in must_run:
                   seen[t["name"]] = t["result"]
           print(seen)
-          sys.exit(0 if seen and all(r == "OK" for r in seen.values()) else 1)
+          sys.exit(0 if set(seen) == must_run and all(r == "OK" for r in seen.values()) else 1)
           EOF
 
   threadsanitizer:
@@ -73,7 +74,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
-            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon sway
 
       - uses: actions/checkout@v4
 
@@ -83,11 +84,10 @@ jobs:
       - name: Build
         run: ninja -C build-tsan
 
-      - name: Run concurrency tests under TSan
+      - name: Run every test under TSan, including the whole daemon
         env:
           TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
-        # The refcount + foundation tests are the lock-free ones TSan cares about.
-        run: meson test -C build-tsan output_refcount foundation --print-errorlogs
+        run: meson test -C build-tsan --print-errorlogs
 
   coverage:
     name: Test coverage
