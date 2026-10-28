@@ -90,6 +90,125 @@ static void output_swap_terminal(struct output_state *output, const char *cmd) {
     }
 }
 
+/* The rect this output actually changed, for damage-aware present. Only a
+ * crisp terminal that moved a few rows reports a band (GL bottom-left
+ * origin); everything else is the full surface. Returns whether it's partial. */
+static bool output_damage_rect(const struct neowall_state *state, struct output_state *output,
+                               EGLint rect[4]) {
+    rect[0] = 0; rect[1] = 0; rect[2] = INT32_MAX; rect[3] = INT32_MAX;
+    if (!state->swap_damage_supported || output->config->type != WALLPAPER_TERMINAL ||
+        !output->multipass_shader || output->config->shader_path[0] != '\0') {
+        return false;
+    }
+    int px, py, pw, ph;
+    if (!multipass_last_damage(output->multipass_shader, true, output->width, output->height,
+                               &px, &py, &pw, &ph)) {
+        return false;
+    }
+    rect[0] = px; rect[1] = py; rect[2] = pw; rect[3] = ph;
+    return true;
+}
+
+/* Present one rendered output: damage, present feedback, frame request,
+ * swap, commit, pacing, and the post-frame bookkeeping. */
+static void output_present(struct app *a, struct output_state *output, uint64_t frame_time) {
+    struct neowall_state *state = a->state;
+    EGLSurface surf = output->compositor_surface->egl_surface;
+
+    /* On the common single-output path the render phase left this current;
+     * skipping a redundant eglMakeCurrent avoids Mesa's implicit flush. */
+    if ((eglGetCurrentContext() != state->egl_context || eglGetCurrentSurface(EGL_DRAW) != surf) &&
+        !eglMakeCurrent(state->egl_display, surf, surf, state->egl_context)) {
+        log_error("Failed to make context current before swap for output %s: 0x%x",
+                  output->model, eglGetError());
+        return;
+    }
+
+    /* wl_surface damage (top-left origin) must be queued before the commit
+     * that publishes the buffer; the same rect drives swap-with-damage. */
+    EGLint rect[4];
+    bool partial = output_damage_rect(state, output, rect);
+    if (partial) {
+        compositor_surface_damage(output->compositor_surface, rect[0],
+                                  output->height - (rect[1] + rect[3]), rect[2], rect[3]);
+    } else {
+        compositor_surface_damage(output->compositor_surface, 0, 0, INT32_MAX, INT32_MAX);
+    }
+
+    /* Present feedback and frame callbacks ride the swap's commit, so they're
+     * requested before it. */
+#ifdef HAVE_WAYLAND_BACKEND
+    if (wallpaper_is_animated(output->config->type)) wayland_request_present_feedback(output);
+#endif
+    if (output->config->vsync && compositor_surface_supports_frame_pacing(output->compositor_surface)) {
+        compositor_surface_frame_request(output->compositor_surface);
+    }
+
+    bool swap_ok;
+    if (partial && state->swap_with_damage) {
+        typedef EGLBoolean (*swap_dmg_fn)(EGLDisplay, EGLSurface, const EGLint *, EGLint);
+        /* eglGetProcAddress returns a function address as void*; a union keeps
+         * the conversion out of ISO C's object->function cast rule. */
+        union { void *obj; swap_dmg_fn fn; } u = { .obj = state->swap_with_damage };
+        swap_ok = u.fn(state->egl_display, surf, rect, 1);
+    } else {
+        swap_ok = eglSwapBuffers(state->egl_display, surf);
+    }
+    if (!swap_ok) {
+        EGLint err = eglGetError();
+        log_error("Failed to swap buffers for output %s: 0x%x", output->model, err);
+        state->errors_count++;
+        /* A lost context, or a surface that keeps failing, won't heal by
+         * retrying every frame. Hand it to the restart path. */
+        if (err == EGL_CONTEXT_LOST || gpu_health_swap_result(&output->swap_fail_streak, false)) {
+            a->gpu_lost = true;
+        }
+        return;
+    }
+    gpu_health_swap_result(&output->swap_fail_streak, true);
+    compositor_surface_commit(output->compositor_surface);
+
+    /* Phase-lock vsync-off animated outputs to this present (no-op otherwise). */
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    output_pace_advance(output, (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec);
+
+    output->last_frame_time = frame_time;
+    state->frames_rendered++;
+
+    if (output->transition_start_time > 0 && output->transition_progress >= 1.0f) {
+        output->transition_start_time = 0;
+        output_cleanup_transition(output);
+        if (output->config->cycle && output->config->cycle_count > 1 &&
+            output->config->type == WALLPAPER_IMAGE) {
+            output_preload_next_wallpaper(output);
+        }
+    }
+
+    /* Animated wallpapers keep needs_redraw set so the loop draws them every
+     * frame, except a settled terminal, which sleeps until its child writes. */
+    bool term_settled = output->config->type == WALLPAPER_TERMINAL &&
+                        output->multipass_shader && output->frames_rendered > 0 &&
+                        !multipass_terminal_animating(output->multipass_shader, kTermFxSettleMs);
+    if ((output->transition_start_time == 0 || output->config->transition == TRANSITION_NONE) &&
+        (!wallpaper_is_animated(output->config->type) || term_settled)) {
+        atomic_store_explicit(&output->needs_redraw, false, memory_order_release);
+    }
+}
+
+/* `next` asked for but nothing could cycle: say why. */
+static void explain_no_cycle(int total_outputs) {
+    if (total_outputs == 0) {
+        log_info("Cannot cycle wallpaper: no outputs are configured");
+    } else if (total_outputs == 1) {
+        log_info("Cannot cycle wallpaper: only a single wallpaper is configured. "
+                 "Point path/shader at a directory (ending in '/') to cycle.");
+    } else {
+        log_info("Cannot cycle wallpaper: none of the %d outputs cycle. "
+                 "Point path/shader at a directory (ending in '/') to cycle.", total_outputs);
+    }
+}
+
 static void render_outputs(struct app *a) {
     struct neowall_state *state = a->state;
 
@@ -285,175 +404,12 @@ static void render_outputs(struct app *a) {
                  processed_set_index ? "" : " (none eligible)");
     }
     for (size_t i = 0; i < swaps.len; i++) {
-        struct output_state *output = swaps.data[i].output;
-        if (!swaps.data[i].render_success) {
-            continue;
-        }
-
-        /* Make current before swap. On the common single-output path the
-         * render phase already left this context/surface current; skipping
-         * the redundant eglMakeCurrent avoids Mesa's implicit flush. */
-        if (eglGetCurrentContext() != state->egl_context ||
-            eglGetCurrentSurface(EGL_DRAW) != output->compositor_surface->egl_surface) {
-            if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
-                               output->compositor_surface->egl_surface, state->egl_context)) {
-                log_error("Failed to make context current before swap for output %s: 0x%x",
-                         output->model, eglGetError());
-                continue;
-            }
-        }
-
-        /* Compute the changed screen region for damage-aware presentation. A
-         * crisp terminal that only moved a few rows reports a pixel band (GL
-         * bottom-left origin); everything else damages the full surface. The
-         * same rect drives BOTH the wl_surface damage (what the compositor
-         * recomposites) and eglSwapBuffersWithDamage (the buffer sub-region). */
-        int dmg_x = 0, dmg_y = 0, dmg_w = INT32_MAX, dmg_h = INT32_MAX;
-        bool partial = false;
-        if (state->swap_damage_supported &&
-            output->config->type == WALLPAPER_TERMINAL &&
-            output->multipass_shader &&
-            output->config->shader_path[0] == '\0' /* crisp built-in, no post-shader */) {
-            int px, py, pw, ph;
-            if (multipass_last_damage(output->multipass_shader, true,
-                                      output->width, output->height,
-                                      &px, &py, &pw, &ph)) {
-                dmg_x = px; dmg_y = py; dmg_w = pw; dmg_h = ph;
-                partial = true;
-            }
-        }
-
-        /* Damage BEFORE swap+commit — wl_surface damage must be queued before
-         * the commit that publishes the new buffer (audit fix #17). wl_surface
-         * damage is in SURFACE (top-left origin) coords; convert the GL
-         * bottom-left band back for the partial case. */
-        if (partial) {
-            int surf_y = output->height - (dmg_y + dmg_h);   /* flip to top-left */
-            compositor_surface_damage(output->compositor_surface,
-                                      dmg_x, surf_y, dmg_w, dmg_h);
-        } else {
-            compositor_surface_damage(output->compositor_surface, 0, 0, INT32_MAX, INT32_MAX);
-        }
-
-        /* Ask the compositor for a real present timestamp for the frame we are
-         * about to publish (wp_presentation). The feedback attaches to the next
-         * commit on this surface — and eglSwapBuffers itself performs that
-         * commit on Wayland — so it must be requested BEFORE the swap. Every
-         * animated output: the pacer and the frame clock both use it. No-op
-         * without the protocol. Wayland-only. */
-#ifdef HAVE_WAYLAND_BACKEND
-        if (wallpaper_is_animated(output->config->type)) {
-            wayland_request_present_feedback(output);
-        }
-#endif
-
-        /* Paced vsync: the callback rides the swap's commit. */
-        if (output->config->vsync &&
-            compositor_surface_supports_frame_pacing(output->compositor_surface)) {
-            compositor_surface_frame_request(output->compositor_surface);
-        }
-
-        /* Present. With EGL_EXT/KHR_swap_buffers_with_damage we hand the driver
-         * the exact changed rect (GL bottom-left origin) so it re-scans/
-         * recomposites only those scanlines; otherwise a plain full swap. Swap
-         * can block waiting for vsync; we hold no locks here. */
-        bool swap_ok;
-        if (partial && state->swap_with_damage) {
-            typedef EGLBoolean (*swap_dmg_fn)(EGLDisplay, EGLSurface, const EGLint *, EGLint);
-            /* Launder the void* through a union: a direct object->function
-             * pointer cast is ISO-C-undefined (-Wpedantic), but eglGetProcAddress
-             * hands back a function address, so this is safe on every real ABI. */
-            union { void *obj; swap_dmg_fn fn; } u = { .obj = state->swap_with_damage };
-            EGLint rect[4] = { dmg_x, dmg_y, dmg_w, dmg_h };
-            swap_ok = u.fn(state->egl_display,
-                           output->compositor_surface->egl_surface, rect, 1);
-        } else {
-            swap_ok = eglSwapBuffers(state->egl_display,
-                                     output->compositor_surface->egl_surface);
-        }
-        if (!swap_ok) {
-            EGLint err = eglGetError();
-            log_error("Failed to swap buffers for output %s: 0x%x", output->model, err);
-            state->errors_count++;
-            /* A lost context, or a surface that keeps failing, won't heal by
-             * retrying every frame. Hand it to the restart path. */
-            if (err == EGL_CONTEXT_LOST ||
-                gpu_health_swap_result(&output->swap_fail_streak, false)) {
-                a->gpu_lost = true;
-            }
-            continue;
-        }
-        gpu_health_swap_result(&output->swap_fail_streak, true);
-
-        static uint64_t swap_counter = 0;
-        swap_counter++;
-        if (swap_counter % 600 == 0) {
-            log_debug("Buffer swap #%lu successful for output %s", swap_counter, output->model);
-        }
-
-        compositor_surface_commit(output->compositor_surface);
-
-        /* Phase-lock the next frame to this present. Re-arms the per-output
-         * frame timer as a one-shot absolute deadline one period ahead, anchored
-         * to the instant the swap completed, so vsync-off animated wallpapers
-         * hold a stable cadence instead of drifting against the display's vblank
-         * (which a fixed recurring interval does, producing periodic judder).
-         * No-op for vsync / static / non-timed outputs. */
-        {
-            struct timespec pace_now;
-            clock_gettime(CLOCK_MONOTONIC, &pace_now);
-            uint64_t pace_now_ns = (uint64_t)pace_now.tv_sec * 1000000000ULL +
-                                   (uint64_t)pace_now.tv_nsec;
-            output_pace_advance(output, pace_now_ns);
-        }
-
-        output->last_frame_time = current_time;
-        state->frames_rendered++;
-
-        /* Clean up transition after final frame is rendered */
-        if (output->transition_start_time > 0 &&
-            output->transition_progress >= 1.0f) {
-            output->transition_start_time = 0;
-            output_cleanup_transition(output);
-            if (output->config->cycle && output->config->cycle_count > 1 &&
-                output->config->type == WALLPAPER_IMAGE) {
-                output_preload_next_wallpaper(output);
-            }
-        }
-
-        /* Reset needs_redraw unless we're in a transition or using an animated
-         * (shader / terminal) wallpaper. Animated wallpapers keep needs_redraw
-         * set so the loop re-renders them every frame. A terminal that has
-         * settled is the exception: it clears the bit so the loop can sleep
-         * until the child writes (mark_animated sets it again then). Leaving it
-         * set redrew an idle terminal every frame-callback timeout, forever. */
-        bool term_settled = output->config->type == WALLPAPER_TERMINAL &&
-                            output->multipass_shader && output->frames_rendered > 0 &&
-                            !multipass_terminal_animating(output->multipass_shader,
-                                                          kTermFxSettleMs);
-        if ((output->transition_start_time == 0 ||
-             output->config->transition == TRANSITION_NONE) &&
-            (!wallpaper_is_animated(output->config->type) || term_settled)) {
-            atomic_store_explicit(&output->needs_redraw, false, memory_order_release);
-        }
+        if (swaps.data[i].render_success) output_present(a, swaps.data[i].output, current_time);
     }
 
     /* If we had a next request but couldn't process it, inform the user */
     if (next_count > 0 && !processed_next) {
-        if (!has_cycleable_output) {
-            if (total_outputs == 0) {
-                log_info("Cannot cycle wallpaper: No outputs are configured");
-            } else if (total_outputs == 1) {
-                log_info("Cannot cycle wallpaper: Current configuration has only a single wallpaper (no cycling enabled)");
-                log_info("To enable cycling:");
-                log_info("  - Use a directory path ending with '/' (e.g., path ~/Pictures/Wallpapers/)");
-                log_info("  - Or configure a 'duration' to cycle through multiple wallpapers");
-                log_info("  - Or specify multiple 'shader' files in a directory");
-            } else {
-                log_info("Cannot cycle wallpaper: None of the %d outputs have cycling enabled", total_outputs);
-                log_info("Hint: Configure cycling with directory paths or duration settings");
-            }
-        }
+        if (!has_cycleable_output) explain_no_cycle(total_outputs);
         a->next_pending--;
     }
 
