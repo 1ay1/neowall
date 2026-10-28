@@ -90,6 +90,7 @@ int watch_init(const char *path) {
     }
 
     printf("Watching %s for changes (Ctrl-C to stop)\n", resolved);
+    fflush(stdout);   /* the log goes to stderr; keep this in order when piped */
     return fd;
 }
 

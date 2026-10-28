@@ -1311,6 +1311,7 @@ int main(int argc, char *argv[]) {
         snprintf(config_path, sizeof(config_path), "%s", preview_config);
         daemon_mode = false;
         printf("Previewing %s (Ctrl-C to stop)\n", resolved);
+        fflush(stdout);
     }
 
     /* Determine config file path */

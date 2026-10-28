@@ -46,7 +46,7 @@ cleanup() {
         kill -9 "$comp_pid" 2>/dev/null
     fi
     wait 2>/dev/null
-    [ -n "${KEEP:-}" ] && cp "$tmp/comp.log" "$tmp/nw.log" /tmp/nwtest/ 2>/dev/null; cp "$tmp"/home/.cache/hyprland/hyprlandCrashReport*.txt /tmp/nwtest/crash.txt 2>/dev/null; rm -rf "$tmp"
+    [ -n "${KEEP:-}" ] && cp "$tmp/comp.log" "$tmp/nw.log" "$tmp/watch.log" /tmp/nwtest/ 2>/dev/null; cp "$tmp"/home/.cache/hyprland/hyprlandCrashReport*.txt /tmp/nwtest/crash.txt 2>/dev/null; rm -rf "$tmp"
 }
 trap cleanup EXIT INT TERM
 
@@ -293,6 +293,51 @@ expect "ping with no daemon"            1 "."                       "$nw" ping
 grep -q -E 'ERROR: AddressSanitizer|runtime error|ThreadSanitizer' "$tmp/nw.log" \
     && bad "no sanitizer reports" "$(grep -m1 -E 'Sanitizer|runtime error' "$tmp/nw.log")" \
     || ok "no sanitizer reports"
+
+# ---- watch mode -------------------------------------------------------------
+# The authoring loop: edit a shader, it recompiles; break it, the last good one
+# stays up with a readable error; fix it, it comes back (shaders use iTime, so
+# they animate and keep drawing). And it must survive
+# the editor's save dance (write a temp file, rename over the original).
+shader="$tmp/live.glsl"
+printf 'void mainImage(out vec4 c, in vec2 p) { c = vec4(fract(iTime), 0.0, 0.0, 1.0); }\n' > "$shader"
+nw_env "$nw" watch "$shader" >"$tmp/watch.log" 2>&1 &
+watch_pid=$!
+nw_pid=$watch_pid
+wait_for 15 grep -q 'Watching' "$tmp/watch.log" && ok "watch starts" || bad "watch starts" "$(tail -3 "$tmp/watch.log" | tr '\n' ' ')"
+wait_for 10 grep -q 'FPS \[' "$tmp/watch.log" && ok "watch draws" || bad "watch draws"
+
+reloads() { grep -c -- '--- reloading' "$tmp/watch.log"; }
+n=$(reloads)
+printf 'void mainImage(out vec4 c, in vec2 p) { c = vec4(0.0, fract(iTime), 0.0, 1.0); }\n' > "$shader"
+wait_for 10 sh -c "[ \$(grep -c -- '--- reloading' '$tmp/watch.log') -gt $n ]" && ok "an edit reloads" || bad "an edit reloads"
+wait_for 10 sh -c "grep -- 'compiled OK' '$tmp/watch.log' | grep -q ." && ok "good edit compiles" || bad "good edit compiles"
+
+n=$(reloads)
+printf 'void mainImage(out vec4 c, in vec2 p) { c = vec4(nope, 0.0, 0.0, 1.0); }\n' > "$shader"
+wait_for 10 grep -q 'keeping the previous shader' "$tmp/watch.log" \
+    && ok "a broken edit keeps the old shader" || bad "a broken edit keeps the old shader"
+grep -q 'nope' "$tmp/watch.log" && ok "the error names the problem" || bad "the error names the problem"
+kill -0 "$watch_pid" 2>/dev/null && ok "watch survives a broken shader" || bad "watch survives a broken shader"
+
+# fix it the way editors save: temp file + rename
+ok_before=$(grep -c 'compiled OK' "$tmp/watch.log")
+printf 'void mainImage(out vec4 c, in vec2 p) { c = vec4(0.0, 0.0, fract(iTime), 1.0); }\n' > "$tmp/.live.glsl.swp"
+mv "$tmp/.live.glsl.swp" "$shader"
+wait_for 10 sh -c "[ \$(grep -c 'compiled OK' '$tmp/watch.log') -gt $ok_before ]" \
+    && ok "an atomic-rename save recovers" || bad "an atomic-rename save recovers"
+
+n=$(reloads)
+printf 'unrelated\n' > "$tmp/other.txt"
+sleep 1
+[ "$(reloads)" -eq "$n" ] && ok "other files in the folder are ignored" || bad "other files in the folder are ignored"
+
+kill "$watch_pid" 2>/dev/null
+wait_for 10 sh -c "! kill -0 $watch_pid 2>/dev/null" && ok "watch stops on SIGTERM" || bad "watch stops on SIGTERM"
+nw_pid=""
+grep -q -E 'ERROR: AddressSanitizer|runtime error|ThreadSanitizer' "$tmp/watch.log" \
+    && bad "no sanitizer reports in watch" "$(grep -m1 -E 'Sanitizer|runtime error' "$tmp/watch.log")" \
+    || ok "no sanitizer reports in watch"
 
 echo "e2e_wayland: $checks checks, $fails failures"
 [ "$fails" -eq 0 ] && kill -0 "$comp_pid" 2>/dev/null || { [ "$fails" -eq 0 ] && echo "compositor died during the run"; exit 1; }
