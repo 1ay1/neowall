@@ -606,6 +606,21 @@ static void x11_backend_cleanup(void *backend_data) {
 
     log_info("Cleaning up X11 backend");
 
+    /* Free the outputs we created (each unref destroys its surface, so the
+     * display must still be open). The Wayland backend does the same in
+     * wayland_cleanup(). */
+    struct neowall_state *state = backend->state;
+    if (state) {
+        pthread_rwlock_wrlock(&state->output_list_lock);
+        while (state->outputs) {
+            struct output_state *next = state->outputs->next;
+            output_unref(state->outputs);
+            state->outputs = next;
+        }
+        state->output_count = 0;
+        pthread_rwlock_unlock(&state->output_list_lock);
+    }
+
     if (backend->x_display) {
         /* Shutdown does not tear surfaces down one by one — main() cleans up EGL
          * and then closes the display — so this is the only place the root-pixmap
