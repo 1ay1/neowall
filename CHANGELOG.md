@@ -19,6 +19,11 @@ All notable changes to neowall. Dates are release dates.
 - A monitor that appeared before the compositor had sized it was dropped
   for good ("no dimensions"); it now waits and comes up once sized.
 - X11: the outputs were never freed on shutdown.
+- `neowall watch` / `preview` printed their banner without flushing, so in
+  a log file it showed up late or not at all.
+
+### Removed
+- The unregistered generic Wayland fallback backend (dead code).
 
 ### Added
 - GPU reset and lost-surface recovery: the GL context is created robust,
@@ -36,7 +41,9 @@ All notable changes to neowall. Dates are release dates.
   decision across modes and load shapes.
 - An end-to-end test runs the real daemon on a real compositor (sway, or
   nested Hyprland) and on X11 (Xvfb), through every control command, a
-  terminal wallpaper and monitor hotplug. CI runs it under ASan and TSan.
+  terminal wallpaper, monitor hotplug and `neowall watch`, on both the
+  layer-shell and KDE backends. CI runs it under ASan and TSan.
+- Every image transition and the Hyprland window-coverage logic have tests.
 - `neowall ping`: exit 0 only if a daemon answers.
 
 ### Changed
