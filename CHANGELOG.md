@@ -16,6 +16,9 @@ All notable changes to neowall. Dates are release dates.
   was set up (and its shader compiled) twice on every load and reload.
 - A shader could be refused on a backend whose surface wasn't a
   wl_egl_window or an X11 window, though an EGL surface existed.
+- A monitor that appeared before the compositor had sized it was dropped
+  for good ("no dimensions"); it now waits and comes up once sized.
+- X11: the outputs were never freed on shutdown.
 
 ### Added
 - GPU reset and lost-surface recovery: the GL context is created robust,
@@ -31,6 +34,10 @@ All notable changes to neowall. Dates are release dates.
   the pixels are checked. CI fails if these tests skip.
 - The adaptive resolution controller is pinned by a golden trace of every
   decision across modes and load shapes.
+- An end-to-end test runs the real daemon on a real compositor (sway, or
+  nested Hyprland) and on X11 (Xvfb), through every control command, a
+  terminal wallpaper and monitor hotplug. CI runs it under ASan and TSan.
+- `neowall ping`: exit 0 only if a daemon answers.
 
 ### Changed
 - Only freely licensed shaders are installed. Ports whose license forbids
