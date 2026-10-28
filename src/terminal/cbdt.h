@@ -38,6 +38,5 @@ bool cbdt_has(const cbdt_font *f, uint32_t cp);
 uint8_t *cbdt_render(const cbdt_font *f, uint32_t cp, int *out_w, int *out_h);
 
 /* Native strike size in pixels (ppem), for scale planning. */
-int cbdt_ppem(const cbdt_font *f);
 
 #endif /* NEOWALL_TERMINAL_CBDT_H */

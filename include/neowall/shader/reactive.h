@@ -113,7 +113,6 @@ void reactive_sample(void);
 
 /* Feed input-activity energy (called from pointer/key handlers). dt_ms is the
  * time since the last call; speed is in pixels for mouse. */
-void reactive_note_key(void);
 void reactive_note_mouse(float dx, float dy);
 
 /* Copy the current frame-coherent snapshot. Cheap; call once per frame. */
@@ -128,6 +127,5 @@ void reactive_get(reactive_snapshot_t *out);
 void reactive_audio_start(void);
 
 /* True if audio capture is live (a monitor source was opened). */
-bool reactive_audio_available(void);
 
 #endif /* NEOWALL_REACTIVE_H */

@@ -243,7 +243,6 @@ typedef struct {
 /* Lifecycle */
 void adaptive_init(adaptive_state_t *state, const adaptive_config_t *config);
 void adaptive_destroy(adaptive_state_t *state);
-void adaptive_reset(adaptive_state_t *state);
 
 /* Configuration */
 adaptive_config_t adaptive_default_config(void);
@@ -269,12 +268,10 @@ float adaptive_get_scale(const adaptive_state_t *state);
 float adaptive_get_target_scale(const adaptive_state_t *state);
 float adaptive_get_current_fps(const adaptive_state_t *state);
 bool adaptive_is_stable(const adaptive_state_t *state);
-bool adaptive_needs_resize(const adaptive_state_t *state);
 adaptive_stats_t adaptive_get_stats(const adaptive_state_t *state);
 
 /* Force scale (for debugging/override) */
 void adaptive_force_scale(adaptive_state_t *state, float scale);
-void adaptive_unlock(adaptive_state_t *state);
 
 /* Thermal monitoring (Linux-specific) */
 float adaptive_read_gpu_temperature(void);

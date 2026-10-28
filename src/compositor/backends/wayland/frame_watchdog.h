@@ -8,8 +8,7 @@
  * presumed obscured (spec: compositors MAY throttle frame callbacks for
  * non-visible surfaces). Self-perpetuating: each done re-arms a new request.
  *
- * Used by KDE, GNOME, and fallback Wayland backends. The wlroots backend
- * uses this too plus additional signals. */
+ * Used by the KDE and wlroots backends; wlroots ORs it with other signals. */
 
 #include <stdbool.h>
 
@@ -36,14 +35,6 @@ void frame_watchdog_arm(struct output_state *o);
  * entry and, worse, hold a dangling pointer that the next arm/cleanup will
  * dereference. The output's pending wl_callback (if any) is destroyed here. */
 void frame_watchdog_remove(struct output_state *o);
-
-/* --- per-frame render throttle (compositor-paced rendering) ---
- * Arm with each swap; render_allowed() gates the next frame on the
- * compositor's frame callback. Prevents rendering frames the compositor
- * will never present (output off / throttled / overlapped). A 200ms safety
- * timeout guarantees forward progress if a callback is withheld. */
-void frame_watchdog_throttle_arm(struct output_state *o);
-bool frame_watchdog_render_allowed(struct output_state *o);
 
 void frame_watchdog_cleanup(void);
 

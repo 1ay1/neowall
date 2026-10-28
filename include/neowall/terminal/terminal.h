@@ -216,6 +216,5 @@ size_t           term_screen_take_reply(term_screen *s, char *out, size_t cap);
 /* Render the visible grid to a UTF-8 string (glyphs only, no colour), one line
  * per row, trailing blanks trimmed. Caller frees. For the headless harness so
  * we can diff our grid against what a reference terminal would show. */
-char *term_screen_dump_text(const term_screen *s);
 
 #endif /* NEOWALL_TERMINAL_TERMINAL_H */

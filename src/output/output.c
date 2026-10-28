@@ -212,8 +212,6 @@ static bool output_configure_frame_timer(struct output_state *output) {
     return true;
 }
 
-
-
 struct output_state *output_create(struct neowall_state *state,
                                    void *native_output, uint32_t name) {
     if (!state) {
@@ -471,8 +469,6 @@ bool output_create_egl_surface(struct output_state *output) {
                   output->width, output->height);
         return false;
     }
-
-
 
     /* Check if EGL surface already exists */
     if (output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
@@ -2066,38 +2062,8 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
 }
 
 /* Find output by name */
-struct output_state *output_find_by_name(struct neowall_state *state, uint32_t name) {
-    if (!state) {
-        return NULL;
-    }
-
-    struct output_state *output = state->outputs;
-    while (output) {
-        if (output->name == name) {
-            return output;
-        }
-        output = output->next;
-    }
-
-    return NULL;
-}
 
 /* Find output by model string */
-struct output_state *output_find_by_model(struct neowall_state *state, const char *model) {
-    if (!state || !model) {
-        return NULL;
-    }
-
-    struct output_state *output = state->outputs;
-    while (output) {
-        if (strcmp(output->model, model) == 0) {
-            return output;
-        }
-        output = output->next;
-    }
-
-    return NULL;
-}
 
 /* Apply wallpaper configuration to an output */
 /* Apply wallpaper configuration to an output */
@@ -2360,28 +2326,8 @@ void output_apply_deferred_config(struct output_state *output) {
 }
 
 /* Get output count */
-uint32_t output_get_count(struct neowall_state *state) {
-    if (!state) {
-        return 0;
-    }
-    return state->output_count;
-}
 
 /* Iterate through all outputs and apply a function */
-void output_foreach(struct neowall_state *state,
-                   void (*callback)(struct output_state *, void *),
-                   void *userdata) {
-    if (!state || !callback) {
-        return;
-    }
-
-    struct output_state *output = state->outputs;
-    while (output) {
-        struct output_state *next = output->next;
-        callback(output, userdata);
-        output = next;
-    }
-}
 
 /* ============================================================================
  * Rendering Wrappers - Hide render module from the runtime
@@ -2508,9 +2454,6 @@ bool output_init_render(struct output_state *output) {
  * Destroy a texture
  * Wrapper around render_destroy_texture()
  */
-void output_destroy_texture(GLuint texture) {
-    render_destroy_texture(texture);
-}
 
 /**
  * Get frame timer file descriptor for precise frame pacing

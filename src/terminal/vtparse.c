@@ -180,16 +180,6 @@ void vtparse_init(vtparser *p, const vt_callbacks *cb, void *user) {
     utf8_reset(&p->utf8);
 }
 
-void vtparse_reset(vtparser *p) {
-    vt_callbacks cb = p->cb;
-    void *user = p->user;
-    memset(p, 0, sizeof(*p));
-    p->cb = cb;
-    p->user = user;
-    p->state = VT_GROUND;
-    utf8_reset(&p->utf8);
-}
-
 static void feed_byte(vtparser *p, uint8_t b);
 
 void vtparse_feed(vtparser *p, const uint8_t *bytes, size_t len) {

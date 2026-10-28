@@ -46,9 +46,6 @@ static const size_t transition_count = sizeof(transitions) / sizeof(transitions[
  * Currently no initialization needed, but provides hook for future
  * enhancements like dynamic registration or shader precompilation.
  */
-void transitions_init(void) {
-    log_debug("Transition system initialized with %zu transitions", transition_count);
-}
 
 /**
  * Render a transition effect

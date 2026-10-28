@@ -20,8 +20,6 @@ typedef atomic_int atomic_int_t;
 #define MAX_OUTPUTS 16
 #define MAX_WALLPAPERS 256
 
-
-
 /* Forward declarations */
 struct neowall_state;
 struct compositor_backend;
@@ -128,9 +126,7 @@ void detect_gl_capabilities(struct neowall_state *state);
 uint64_t get_time_ms(void);
 uint64_t get_time_us(void);
 const char *wallpaper_mode_to_string(enum wallpaper_mode mode);
-enum wallpaper_mode wallpaper_mode_from_string(const char *str);
 const char *transition_type_to_string(enum transition_type type);
-enum transition_type transition_type_from_string(const char *str);
 
 /* Logging */
 #define LOG_LEVEL_ERROR 0

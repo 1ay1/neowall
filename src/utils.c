@@ -142,9 +142,6 @@ int log_get_level(void) {
 }
 
 /* Enable/disable colors */
-void log_set_colors(bool enabled) {
-    use_colors = enabled;
-}
 
 /* NOTE: strcasecmp(3) is provided by POSIX <strings.h>; we used to ship a
  * locale-ignorant duplicate here that shadowed the libc symbol. Removed in
@@ -295,18 +292,6 @@ bool file_exists(const char *path) {
 }
 
 /* Get file size */
-long file_size(const char *path) {
-    FILE *fp = fopen(path, "rb");
-    if (!fp) {
-        return -1;
-    }
-
-    fseek(fp, 0, SEEK_END);
-    long size = ftell(fp);
-    fclose(fp);
-
-    return size;
-}
 
 /* Format bytes to human readable string */
 void format_bytes(uint64_t bytes, char *buf, size_t size) {

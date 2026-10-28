@@ -52,6 +52,5 @@ void app_request_redraw(struct neowall_state *state);
 void app_request_output_redraw(struct output_state *output);
 
 /* Ask the daemon to stop (any thread). */
-void app_stop(struct neowall_state *state);
 
 #endif /* NEOWALL_APP_H */

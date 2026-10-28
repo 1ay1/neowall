@@ -597,10 +597,3 @@ void compositor_backend_cleanup(struct compositor_backend *backend) {
 }
 
 /* Get backend capabilities */
-compositor_capabilities_t compositor_backend_get_capabilities(struct compositor_backend *backend) {
-    if (!backend) {
-        return COMPOSITOR_CAP_NONE;
-    }
-
-    return backend->capabilities;
-}

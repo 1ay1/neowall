@@ -132,14 +132,6 @@ static bool parse_wallpaper_mode(const char *str, enum wallpaper_mode *mode) {
     return false;
 }
 
-enum wallpaper_mode wallpaper_mode_from_string(const char *str) {
-    enum wallpaper_mode mode;
-    if (parse_wallpaper_mode(str, &mode)) return mode;
-    log_error("Invalid wallpaper mode '%s', using 'fill' as default",
-              str ? str : "(null)");
-    return MODE_FILL;
-}
-
 const char *wallpaper_mode_to_string(enum wallpaper_mode mode) {
     for (size_t i = 0; i < mode_mapping_count; i++) {
         if (mode_mappings[i].mode == mode) {
@@ -160,14 +152,6 @@ static bool parse_transition_type(const char *str, enum transition_type *type) {
         }
     }
     return false;
-}
-
-enum transition_type transition_type_from_string(const char *str) {
-    enum transition_type type;
-    if (parse_transition_type(str, &type)) return type;
-    log_error("Invalid transition type '%s', using 'fade' as default",
-              str ? str : "(null)");
-    return TRANSITION_FADE;
 }
 
 const char *transition_type_to_string(enum transition_type type) {
@@ -957,7 +941,6 @@ static bool parse_wallpaper_config(VibeValue *obj, struct wallpaper_config *conf
     if (!parse_common_keys(obj, config, context_name)) return false;
     if (!parse_channels(obj, config, context_name)) return false;
     warn_unknown_keys(obj, context_name);
-
 
     return true;
 }

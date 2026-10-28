@@ -332,8 +332,6 @@ cbdt_font *cbdt_open(const uint8_t *data, size_t len) {
 
 void cbdt_close(cbdt_font *f) { free(f); }
 
-int cbdt_ppem(const cbdt_font *f) { return f ? f->ppem : 0; }
-
 bool cbdt_has(const cbdt_font *f, uint32_t cp) {
     if (!f) return false;
     uint32_t gid = cmap_lookup(&f->cmap, cp);

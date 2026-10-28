@@ -112,7 +112,6 @@ typedef struct vtparser {
 } vtparser;
 
 void vtparse_init(vtparser *p, const vt_callbacks *cb, void *user);
-void vtparse_reset(vtparser *p);
 
 /* Feed a run of raw bytes. Fully resumable: a sequence split across calls is
  * handled. */

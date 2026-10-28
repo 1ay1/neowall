@@ -656,14 +656,6 @@ void compositor_surface_destroy_egl(struct compositor_surface *surface,
                                     EGLDisplay egl_display);
 
 /**
- * Get backend capabilities
- * 
- * @param backend Compositor backend
- * @return Capability flags
- */
-compositor_capabilities_t compositor_backend_get_capabilities(struct compositor_backend *backend);
-
-/**
  * Get compositor type name as string
  * 
  * @param type Compositor type
@@ -678,24 +670,6 @@ const char *compositor_type_to_string(compositor_type_t type);
  * @return Default configuration
  */
 compositor_surface_config_t compositor_surface_config_default(void *native_output);
-
-/**
- * Check if surface is ready for rendering
- * 
- * @param surface Surface to check
- * @return true if ready, false otherwise
- */
-bool compositor_surface_is_ready(struct compositor_surface *surface);
-
-/**
- * Get surface dimensions
- * 
- * @param surface Surface to query
- * @param width Output parameter for width (can be NULL)
- * @param height Output parameter for height (can be NULL)
- */
-void compositor_surface_get_size(struct compositor_surface *surface,
-                                int32_t *width, int32_t *height);
 
 /**
  * Resize EGL window

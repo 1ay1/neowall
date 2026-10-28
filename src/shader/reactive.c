@@ -996,10 +996,6 @@ static void *sys_thread_fn(void *arg) {
     return NULL;
 }
 
-void reactive_note_key(void) {
-    atomic_fetch_add(&g_key_hits, 1);
-}
-
 void reactive_note_mouse(float dx, float dy) {
     float d = sqrtf(dx * dx + dy * dy);
     /* relaxed atomic float add */
@@ -1015,6 +1011,3 @@ void reactive_get(reactive_snapshot_t *out) {
     pthread_mutex_unlock(&g_lock);
 }
 
-bool reactive_audio_available(void) {
-    return atomic_load(&g_audio_live);
-}

@@ -803,28 +803,3 @@ bool term_screen_resize(term_screen *s, int cols, int rows) {
     return true;
 }
 
-char *term_screen_dump_text(const term_screen *s) {
-    /* Worst case: every cell a 4-byte UTF-8 char + newline per row + NUL. */
-    size_t cap = (size_t)s->rows * (s->cols * 4 + 1) + 1;
-    char *out = malloc(cap);
-    if (!out) return NULL;
-    size_t o = 0;
-    for (int y = 0; y < s->rows; y++) {
-        const term_cell *row = &s->cells[(size_t)y * s->cols];
-        int last = -1;
-        for (int x = 0; x < s->cols; x++) if (row[x].cp != 0) last = x;
-        for (int x = 0; x <= last; x++) {
-            uint32_t cp = row[x].cp;
-            if (row[x].attr & TERM_ATTR_WIDE_TAIL) continue;
-            if (cp == 0) { out[o++] = ' '; continue; }
-            /* encode UTF-8 */
-            if (cp < 0x80) out[o++] = (char)cp;
-            else if (cp < 0x800) { out[o++] = (char)(0xC0|(cp>>6)); out[o++] = (char)(0x80|(cp&0x3F)); }
-            else if (cp < 0x10000) { out[o++] = (char)(0xE0|(cp>>12)); out[o++] = (char)(0x80|((cp>>6)&0x3F)); out[o++] = (char)(0x80|(cp&0x3F)); }
-            else { out[o++] = (char)(0xF0|(cp>>18)); out[o++] = (char)(0x80|((cp>>12)&0x3F)); out[o++] = (char)(0x80|((cp>>6)&0x3F)); out[o++] = (char)(0x80|(cp&0x3F)); }
-        }
-        out[o++] = '\n';
-    }
-    out[o] = 0;
-    return out;
-}

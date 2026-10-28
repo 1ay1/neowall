@@ -31,4 +31,3 @@ void shader_error_log_append(const char *fmt, ...) {
 }
 
 const char *shader_error_log_get(void) { return g_buf; }
-size_t      shader_error_log_size(void) { return g_pos; }

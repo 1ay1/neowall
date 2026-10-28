@@ -25,7 +25,6 @@ void shader_destroy_program(GLuint program);
 
 /* Transition-specific shader creation functions (defined in transition files) */
 bool shader_create_fade_program(GLuint *program);
-bool shader_create_slide_program(GLuint *program);
 bool shader_create_glitch_program(GLuint *program);
 bool shader_create_pixelate_program(GLuint *program);
 
@@ -44,6 +43,8 @@ const char *shader_get_last_error_log(void);
  */
 char *shader_load_file(const char *path);
 
+#include <stddef.h>
+
 /**
  * Resolve a shader name to a full path (checks config dir, then system dirs).
  * Absolute / ~ / contains-slash paths are returned as-is.
@@ -53,7 +54,6 @@ char *shader_load_file(const char *path);
  * @param resolved_size Buffer size
  * @return true if resolved (found, or used verbatim), false otherwise
  */
-#include <stddef.h>
 bool shader_resolve_path(const char *shader_name, char *resolved_path, size_t resolved_size);
 
 #endif /* SHADER_H */

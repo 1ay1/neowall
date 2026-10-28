@@ -264,22 +264,6 @@ void adaptive_destroy(adaptive_state_t *state) {
     memset(state, 0, sizeof(adaptive_state_t));
 }
 
-void adaptive_reset(adaptive_state_t *state) {
-    if (!state) return;
-    
-    adaptive_config_t saved_config = state->config;
-    GLuint saved_queries[ADAPTIVE_GPU_QUERY_COUNT];
-    memcpy(saved_queries, state->timer_queries, sizeof(saved_queries));
-    bool had_gpu_timing = state->gpu_timing_available;
-    
-    adaptive_init(state, &saved_config);
-    
-    if (had_gpu_timing) {
-        memcpy(state->timer_queries, saved_queries, sizeof(saved_queries));
-        state->gpu_timing_available = true;
-    }
-}
-
 /* ============================================================================
  * Configuration
  * ============================================================================ */
@@ -884,11 +868,6 @@ bool adaptive_is_stable(const adaptive_state_t *state) {
     return state ? state->is_locked : false;
 }
 
-bool adaptive_needs_resize(const adaptive_state_t *state) {
-    if (!state) return false;
-    return fabsf(state->current_scale - state->target_scale) > 0.005f;
-}
-
 adaptive_stats_t adaptive_get_stats(const adaptive_state_t *state) {
     adaptive_stats_t stats = {0};
     if (!state) return stats;
@@ -937,11 +916,3 @@ void adaptive_force_scale(adaptive_state_t *state, float scale) {
     }
 }
 
-void adaptive_unlock(adaptive_state_t *state) {
-    if (!state) return;
-    
-    state->is_locked = false;
-    state->consecutive_stable_frames = 0;
-    state->oscillation_count = 0;
-    state->oscillation_damping = 1.0f;
-}

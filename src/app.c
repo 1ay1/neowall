@@ -139,11 +139,6 @@ void app_request_output_redraw(struct output_state *output) {
         app_post(NW_MSG_REDRAW, 0, 0);
 }
 
-void app_stop(struct neowall_state *state) {
-    if (state) atomic_store_explicit(&state->running, false, memory_order_release);
-    app_post(NW_MSG_QUIT, 0, 0);
-}
-
 /* ── rendering ────────────────────────────────────────────────────────── */
 
 struct swap_info {

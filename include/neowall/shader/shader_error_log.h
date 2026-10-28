@@ -30,7 +30,6 @@ void shader_error_log_append(const char *fmt, ...)
 const char *shader_error_log_get(void);
 
 /* Bytes written so far (excluding NUL). */
-size_t shader_error_log_size(void);
 
 #ifdef __cplusplus
 }

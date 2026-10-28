@@ -182,26 +182,18 @@ typedef struct {
 void multipass_optimizer_init(multipass_optimizer_t *opt);
 
 /* Reset optimizer state (but keep settings) */
-void multipass_optimizer_reset(multipass_optimizer_t *opt);
 
 /* ============================================================================
  * Configuration
  * ============================================================================ */
 
 /* Enable/disable optimizer entirely */
-void multipass_optimizer_set_enabled(multipass_optimizer_t *opt, bool enabled);
 
 /* Enable/disable specific features */
-void multipass_optimizer_set_half_rate(multipass_optimizer_t *opt, bool enabled);
-void multipass_optimizer_set_static_skip(multipass_optimizer_t *opt, bool enabled);
-void multipass_optimizer_set_smart_resolution(multipass_optimizer_t *opt, bool enabled);
 
 /* Set global quality (affects all resolution scaling) */
-void multipass_optimizer_set_quality(multipass_optimizer_t *opt, float quality);
 
 /* Override settings for a specific pass */
-void multipass_optimizer_set_pass_scale(multipass_optimizer_t *opt, int pass_index, float scale);
-void multipass_optimizer_set_pass_update_rate(multipass_optimizer_t *opt, int pass_index, int divisor);
 
 /* ============================================================================
  * Analysis - Call once when shader is loaded
@@ -268,11 +260,9 @@ void multipass_optimizer_end_frame(multipass_optimizer_t *opt);
 /* Get effective workload factor for this frame (0.0-1.0)
  * Returns the fraction of "full" work that was actually done.
  * adaptive_scale can use this to adjust its scaling decisions. */
-float multipass_optimizer_get_effective_workload(const multipass_optimizer_t *opt);
 
 /* Get pixel reduction factor (0.0-1.0)
  * Returns fraction of pixels saved by smart per-buffer resolution */
-float multipass_optimizer_get_pixel_reduction(const multipass_optimizer_t *opt);
 
 /* Reset per-frame workload tracking (call at start of frame) */
 void multipass_optimizer_reset_frame_workload(multipass_optimizer_t *opt);

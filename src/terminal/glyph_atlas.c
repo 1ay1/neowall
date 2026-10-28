@@ -704,8 +704,6 @@ const glyph_slot *glyph_atlas_get(glyph_atlas *a, uint32_t cp) {
 const uint8_t *glyph_atlas_bitmap(const glyph_atlas *a) { return a ? a->bitmap : NULL; }
 int  glyph_atlas_width(const glyph_atlas *a)  { (void)a; return ATLAS_W; }
 int  glyph_atlas_height(const glyph_atlas *a) { (void)a; return ATLAS_H; }
-int  glyph_atlas_cell_w(const glyph_atlas *a) { return a ? a->cell_w : 0; }
-int  glyph_atlas_cell_h(const glyph_atlas *a) { return a ? a->cell_h : 0; }
 bool glyph_atlas_dirty(const glyph_atlas *a)  { return a ? a->dirty : false; }
 void glyph_atlas_clear_dirty(glyph_atlas *a)  { if (a) { a->dirty = false; a->dirty_y0 = a->dirty_y1 = 0; } }
 

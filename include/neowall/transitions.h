@@ -14,7 +14,6 @@ struct transition {
 };
 
 /* Transition registry functions */
-void transitions_init(void);
 bool transition_render(struct output_state *output, enum transition_type type, float progress);
 
 /* Transition context for managing OpenGL state across draws */

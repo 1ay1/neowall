@@ -506,28 +506,6 @@ void multipass_set_uniforms(multipass_shader_t *shader,
  */
 void multipass_bind_textures(multipass_shader_t *shader, int pass_index);
 
-/**
- * Swap ping-pong buffers for a pass (for feedback effects)
- * 
- * @param shader Multipass shader
- * @param pass_index Index of pass
- */
-void multipass_swap_buffers(multipass_shader_t *shader, int pass_index);
-
-/**
- * Reset shader state (time, frame count, clear buffers)
- * 
- * @param shader Multipass shader
- */
-void multipass_reset(multipass_shader_t *shader);
-
-/**
- * Set resolution scale for buffer passes (performance optimization)
- * Lower values = faster but less detail
- * 
- * @param shader Multipass shader
- * @param scale Resolution scale (1.0 = full, 0.5 = half, 0.25 = quarter)
- */
 /* Publish this frame's window layout to the shader (iWindows/iWindowCount/
  * iFocusedWindow).
  *
@@ -540,16 +518,6 @@ void multipass_reset(multipass_shader_t *shader);
 void multipass_set_windows(multipass_shader_t *shader,
                            const float *rects, int count,
                            const float *focused);
-
-void multipass_set_resolution_scale(multipass_shader_t *shader, float scale);
-
-/**
- * Get current resolution scale
- * 
- * @param shader Multipass shader
- * @return Current resolution scale
- */
-float multipass_get_resolution_scale(const multipass_shader_t *shader);
 
 /**
  * Enable/disable adaptive resolution scaling
@@ -568,30 +536,10 @@ void multipass_set_adaptive_resolution(multipass_shader_t *shader,
                                         float max_scale);
 
 /* Configure adaptive resolution with full options */
-void multipass_configure_adaptive(multipass_shader_t *shader,
-                                  const adaptive_config_t *config);
 
 /* Set adaptive scaling mode preset */
-void multipass_set_adaptive_mode(multipass_shader_t *shader, adaptive_mode_t mode);
 
 /* Get performance statistics */
-adaptive_stats_t multipass_get_adaptive_stats(const multipass_shader_t *shader);
-
-/**
- * Check if adaptive resolution is enabled
- * 
- * @param shader Multipass shader
- * @return true if adaptive resolution is enabled
- */
-bool multipass_is_adaptive_resolution(const multipass_shader_t *shader);
-
-/**
- * Get current measured FPS
- * 
- * @param shader Multipass shader
- * @return Current FPS (smoothed average)
- */
-float multipass_get_current_fps(const multipass_shader_t *shader);
 
 /**
  * Update adaptive resolution (called internally each frame)
@@ -607,56 +555,12 @@ void multipass_update_adaptive_resolution(multipass_shader_t *shader, double cur
  * ============================================ */
 
 /**
- * Get compilation error for a pass
- * 
- * @param shader Multipass shader
- * @param pass_index Index of pass
- * @return Error message or NULL if no error
- */
-const char *multipass_get_error(const multipass_shader_t *shader, int pass_index);
-
-/**
  * Get combined error message for all passes
  * 
  * @param shader Multipass shader
  * @return Combined error message (caller must free) or NULL
  */
 char *multipass_get_all_errors(const multipass_shader_t *shader);
-
-/**
- * Check if shader has any compilation errors
- * 
- * @param shader Multipass shader
- * @return true if any pass has errors
- */
-bool multipass_has_errors(const multipass_shader_t *shader);
-
-/**
- * Check if shader is ready to render
- * 
- * @param shader Multipass shader
- * @return true if all passes are compiled and GL is initialized
- */
-bool multipass_is_ready(const multipass_shader_t *shader);
-
-/**
- * Get pass by type
- * 
- * @param shader Multipass shader
- * @param type Pass type to find
- * @return Pointer to pass or NULL if not found
- */
-multipass_pass_t *multipass_get_pass_by_type(multipass_shader_t *shader, 
-                                              multipass_type_t type);
-
-/**
- * Get pass index by type
- * 
- * @param shader Multipass shader
- * @param type Pass type to find
- * @return Pass index or -1 if not found
- */
-int multipass_get_pass_index(const multipass_shader_t *shader, multipass_type_t type);
 
 /**
  * Get texture for a buffer pass (for reading in other passes)
@@ -692,28 +596,12 @@ bool multipass_last_damage(const multipass_shader_t *shader, bool crisp,
 const char *multipass_type_name(multipass_type_t type);
 
 /**
- * Parse pass type from string
- * 
- * @param name Pass name (e.g., "Buffer A", "Image")
- * @return Pass type or PASS_TYPE_NONE if unknown
- */
-multipass_type_t multipass_type_from_name(const char *name);
-
-/**
  * Get channel source name as string
  * 
  * @param source Channel source
  * @return Name string (static, do not free)
  */
 const char *multipass_channel_source_name(channel_source_t source);
-
-/**
- * Create default channel configuration
- * 
- * @param source Channel source
- * @return Default channel configuration
- */
-multipass_channel_t multipass_default_channel(channel_source_t source);
 
 /**
  * Dump shader structure to log for debugging
@@ -800,7 +688,6 @@ bool multipass_terminal_mouse(multipass_shader_t *shader, int px, int py,
                               int button, bool pressed, bool motion);
 
 /* True if an attached terminal has mouse reporting enabled. */
-bool multipass_terminal_wants_mouse(const multipass_shader_t *shader);
 
 /* True while an attached terminal is visually animating: the child changed the
  * grid or the cursor moved within the last fx_settle_ms (the window over which

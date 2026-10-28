@@ -641,8 +641,6 @@ static void x11_backend_cleanup(void *backend_data) {
  * WINDOW PROPERTY SETUP
  * ============================================================================ */
 
-
-
 /* ============================================================================
  * SURFACE CREATION
  * ============================================================================ */
@@ -1087,104 +1085,8 @@ static void x11_update_mouse_position(x11_backend_data_t *backend) {
  * ============================================================================ */
 
 /* Get X11 connection file descriptor for event polling */
-static int x11_get_connection_fd(x11_backend_data_t *backend) {
-    if (!backend || !backend->x_display) {
-        return -1;
-    }
-    return ConnectionNumber(backend->x_display);
-}
 
 /* Handle X11 events (mouse, keyboard, etc.) */
-static bool x11_handle_events(x11_backend_data_t *backend) {
-    if (!backend || !backend->x_display) {
-        return false;
-    }
-
-    /* Process all pending X11 events */
-    while (XPending(backend->x_display) > 0) {
-        XEvent event;
-        XNextEvent(backend->x_display, &event);
-
-        /* Skip mouse-related events entirely if the user disabled mouse
-         * interaction — we still drain the event queue (we have to, the X
-         * server won't unblock us otherwise) but we don't touch any output
-         * state, so iMouse stays at its initial -1 (which render.c maps to
-         * the screen center). */
-        bool mouse_on = backend->state &&
-            atomic_load_explicit(&backend->state->mouse_interaction, memory_order_acquire);
-
-        switch (event.type) {
-            case ButtonPress:
-                log_debug("X11 mouse button pressed: button %d at (%d, %d)",
-                         event.xbutton.button,
-                         event.xbutton.x_root,
-                         event.xbutton.y_root);
-
-                if (!mouse_on) break;
-                x11_distribute_mouse(backend, event.xbutton.x_root, event.xbutton.y_root);
-                break;
-
-            case ButtonRelease:
-                log_debug("X11 mouse button released: button %d at (%d, %d)",
-                         event.xbutton.button,
-                         event.xbutton.x_root,
-                         event.xbutton.y_root);
-
-                if (!mouse_on) break;
-                x11_distribute_mouse(backend, event.xbutton.x_root, event.xbutton.y_root);
-                break;
-
-            case MotionNotify: {
-                if (!mouse_on) break;
-                /* Update mouse position for motion events
-                 * Use throttling to avoid log spam */
-                static uint64_t last_motion_log = 0;
-                uint64_t now = get_time_ms();
-                if (now - last_motion_log > 2000) {
-                    log_debug("X11 mouse motion: (%d, %d)",
-                             event.xmotion.x_root,
-                             event.xmotion.y_root);
-                    last_motion_log = now;
-                }
-
-                x11_distribute_mouse(backend, event.xmotion.x_root, event.xmotion.y_root);
-                break;
-            }
-
-            case Expose:
-                log_debug("X11 Expose event received");
-                break;
-
-            case ConfigureNotify:
-                log_debug("X11 ConfigureNotify event: %dx%d",
-                         event.xconfigure.width,
-                         event.xconfigure.height);
-                break;
-
-            case ReparentNotify:
-                log_debug("X11 ReparentNotify event");
-                break;
-
-            case MapNotify:
-                log_debug("X11 MapNotify event");
-                break;
-
-            case UnmapNotify:
-                log_debug("X11 UnmapNotify event");
-                break;
-
-            default:
-                /* XRandR layout changes are handled in x11_dispatch_events
-                 * (the live event pump). This legacy handler is unused. */
-                break;
-        }
-    }
-
-    /* Flush any pending requests */
-    XFlush(backend->x_display);
-
-    return true;
-}
 
 /* ============================================================================
  * COMMIT SURFACE
@@ -1961,7 +1863,6 @@ static void x11_reconcile_outputs(x11_backend_data_t *backend) {
     }
 }
 
-
 /* ============================================================================
  * WM APPEARED LATE (heal override-redirect -> managed)
  * ============================================================================ */
@@ -2291,7 +2192,6 @@ static bool x11_dispatch_events(void *backend_data) {
     return true;
 }
 
-
 static compositor_flush_result_t x11_flush(void *backend_data) {
     x11_backend_data_t *backend = backend_data;
     if (!backend || !backend->x_display) {
@@ -2413,20 +2313,3 @@ struct compositor_backend *compositor_backend_x11_init(struct neowall_state *sta
  * PUBLIC API FUNCTIONS
  * ============================================================================ */
 
-int x11_backend_get_fd(struct compositor_backend *backend) {
-    if (!backend || !backend->data) {
-        return -1;
-    }
-
-    x11_backend_data_t *x11_backend = (x11_backend_data_t *)backend->data;
-    return x11_get_connection_fd(x11_backend);
-}
-
-bool x11_backend_handle_events(struct compositor_backend *backend) {
-    if (!backend || !backend->data) {
-        return false;
-    }
-
-    x11_backend_data_t *x11_backend = (x11_backend_data_t *)backend->data;
-    return x11_handle_events(x11_backend);
-}

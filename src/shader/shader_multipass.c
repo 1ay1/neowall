@@ -196,8 +196,6 @@ static bool shader_create_program_from_sources(const char *vertex_src,
     return true;
 }
 
-
-
 /* ============================================
  * Internal Helper Functions
  *
@@ -227,28 +225,6 @@ const char *multipass_type_name(multipass_type_t type) {
         case PASS_TYPE_SOUND:    return "Sound";
         default:                 return "None";
     }
-}
-
-multipass_type_t multipass_type_from_name(const char *name) {
-    if (!name) return PASS_TYPE_NONE;
-
-    /* Case-insensitive comparison */
-    if (strcasecmp(name, "Buffer A") == 0 || strcasecmp(name, "BufferA") == 0)
-        return PASS_TYPE_BUFFER_A;
-    if (strcasecmp(name, "Buffer B") == 0 || strcasecmp(name, "BufferB") == 0)
-        return PASS_TYPE_BUFFER_B;
-    if (strcasecmp(name, "Buffer C") == 0 || strcasecmp(name, "BufferC") == 0)
-        return PASS_TYPE_BUFFER_C;
-    if (strcasecmp(name, "Buffer D") == 0 || strcasecmp(name, "BufferD") == 0)
-        return PASS_TYPE_BUFFER_D;
-    if (strcasecmp(name, "Image") == 0)
-        return PASS_TYPE_IMAGE;
-    if (strcasecmp(name, "Common") == 0)
-        return PASS_TYPE_COMMON;
-    if (strcasecmp(name, "Sound") == 0)
-        return PASS_TYPE_SOUND;
-
-    return PASS_TYPE_NONE;
 }
 
 const char *multipass_channel_source_name(channel_source_t source) {
@@ -431,15 +407,6 @@ bool multipass_terminal_mouse(multipass_shader_t *shader, int px, int py,
 #endif
 }
 
-bool multipass_terminal_wants_mouse(const multipass_shader_t *shader) {
-#ifdef NEOWALL_HAVE_TERMINAL
-    return shader && shader->term && term_render_wants_mouse(shader->term);
-#else
-    (void)shader;
-    return false;
-#endif
-}
-
 bool multipass_terminal_animating(const multipass_shader_t *shader,
                                   unsigned fx_settle_ms) {
 #ifdef NEOWALL_HAVE_TERMINAL
@@ -489,25 +456,12 @@ bool multipass_terminal_write(multipass_shader_t *shader, const void *bytes, siz
 #endif
 }
 
-
-multipass_channel_t multipass_default_channel(channel_source_t source) {
-    multipass_channel_t channel = {
-        .source = source,
-        .texture_id = 0,
-        .vflip = false,
-        .filter = GL_LINEAR,
-        .wrap = GL_CLAMP_TO_EDGE
-    };
-    return channel;
-}
-
 /* ============================================
  * Shader Parsing Functions
  *
  * The actual parser lives in multipass_parse.c; declarations are in
  * shader_multipass.h. Kept here as a signpost.
  * ============================================ */
-
 
 /* ============================================
  * Shader wrapper for each pass
@@ -2201,16 +2155,6 @@ void multipass_bind_textures(multipass_shader_t *shader, int pass_index) {
 #endif
 }
 
-void multipass_swap_buffers(multipass_shader_t *shader, int pass_index) {
-    /*
-     * NOTE: This function is now deprecated as ping-pong swapping
-     * is handled directly in multipass_render_pass after rendering.
-     * Kept for API compatibility.
-     */
-    (void)shader;
-    (void)pass_index;
-}
-
 void multipass_render_pass(multipass_shader_t *shader,
                            int pass_index,
                            float time,
@@ -2646,18 +2590,6 @@ void multipass_set_windows(multipass_shader_t *shader,
     }
 }
 
-void multipass_set_resolution_scale(multipass_shader_t *shader, float scale) {
-    if (!shader) return;
-    adaptive_force_scale(&shader->adaptive, scale);
-    shader->resolution_scale = adaptive_get_scale(&shader->adaptive);
-    shader->scaled_width = 0;
-    shader->scaled_height = 0;
-}
-
-float multipass_get_resolution_scale(const multipass_shader_t *shader) {
-    return shader ? adaptive_get_scale(&shader->adaptive) : 1.0f;
-}
-
 void multipass_set_adaptive_resolution(multipass_shader_t *shader, 
                                         bool enabled,
                                         float target_fps,
@@ -2674,56 +2606,9 @@ void multipass_set_adaptive_resolution(multipass_shader_t *shader,
     shader->max_resolution_scale = shader->adaptive.config.max_scale;
 }
 
-void multipass_configure_adaptive(multipass_shader_t *shader,
-                                  const adaptive_config_t *config) {
-    if (!shader || !config) return;
-    shader->adaptive.config = *config;
-    shader->min_resolution_scale = config->min_scale;
-    shader->max_resolution_scale = config->max_scale;
-}
-
-void multipass_set_adaptive_mode(multipass_shader_t *shader, adaptive_mode_t mode) {
-    if (!shader) return;
-    adaptive_set_mode(&shader->adaptive, mode);
-}
-
-bool multipass_is_adaptive_resolution(const multipass_shader_t *shader) {
-    return shader ? shader->adaptive.enabled : false;
-}
-
-float multipass_get_current_fps(const multipass_shader_t *shader) {
-    return shader ? adaptive_get_current_fps(&shader->adaptive) : 0.0f;
-}
-
-adaptive_stats_t multipass_get_adaptive_stats(const multipass_shader_t *shader) {
-    if (!shader) {
-        adaptive_stats_t empty = {0};
-        return empty;
-    }
-    return adaptive_get_stats(&shader->adaptive);
-}
-
-void multipass_reset(multipass_shader_t *shader) {
-    if (!shader) return;
-
-    shader->frame_count = 0;
-
-    for (int i = 0; i < shader->pass_count; i++) {
-        shader->passes[i].ping_pong_index = 0;
-        shader->passes[i].needs_clear = true;
-    }
-}
-
 /* ============================================
  * Query Functions
  * ============================================ */
-
-const char *multipass_get_error(const multipass_shader_t *shader, int pass_index) {
-    if (!shader || pass_index < 0 || pass_index >= shader->pass_count) {
-        return NULL;
-    }
-    return shader->passes[pass_index].compile_error;
-}
 
 char *multipass_get_all_errors(const multipass_shader_t *shader) {
     if (!shader) return NULL;
@@ -2752,55 +2637,6 @@ char *multipass_get_all_errors(const multipass_shader_t *shader) {
     }
 
     return result;
-}
-
-bool multipass_has_errors(const multipass_shader_t *shader) {
-    if (!shader) return true;
-
-    for (int i = 0; i < shader->pass_count; i++) {
-        if (shader->passes[i].compile_error) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-bool multipass_is_ready(const multipass_shader_t *shader) {
-    if (!shader || !shader->is_initialized) return false;
-
-    for (int i = 0; i < shader->pass_count; i++) {
-        if (!shader->passes[i].is_compiled) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-multipass_pass_t *multipass_get_pass_by_type(multipass_shader_t *shader,
-                                              multipass_type_t type) {
-    if (!shader) return NULL;
-
-    for (int i = 0; i < shader->pass_count; i++) {
-        if (shader->passes[i].type == type) {
-            return &shader->passes[i];
-        }
-    }
-
-    return NULL;
-}
-
-int multipass_get_pass_index(const multipass_shader_t *shader, multipass_type_t type) {
-    if (!shader) return -1;
-
-    for (int i = 0; i < shader->pass_count; i++) {
-        if (shader->passes[i].type == type) {
-            return i;
-        }
-    }
-
-    return -1;
 }
 
 GLuint multipass_get_buffer_texture(const multipass_shader_t *shader,

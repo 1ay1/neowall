@@ -77,8 +77,6 @@ const glyph_slot *glyph_atlas_get_styled(glyph_atlas *a, uint32_t cp,
 const uint8_t *glyph_atlas_bitmap(const glyph_atlas *a);
 int            glyph_atlas_width(const glyph_atlas *a);
 int            glyph_atlas_height(const glyph_atlas *a);
-int            glyph_atlas_cell_w(const glyph_atlas *a);
-int            glyph_atlas_cell_h(const glyph_atlas *a);
 bool           glyph_atlas_dirty(const glyph_atlas *a);
 void           glyph_atlas_clear_dirty(glyph_atlas *a);
 

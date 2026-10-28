@@ -100,13 +100,6 @@ static int clampi(int val, int min_val, int max_val) {
     return val;
 }
 
-/* Clamp float to range */
-static float clampf(float val, float min_val, float max_val) {
-    if (val < min_val) return min_val;
-    if (val > max_val) return max_val;
-    return val;
-}
-
 /* ============================================================================
  * Content Type Names
  * ============================================================================ */
@@ -166,55 +159,9 @@ void multipass_optimizer_init(multipass_optimizer_t *opt) {
     opt->initialized = true;
 }
 
-void multipass_optimizer_reset(multipass_optimizer_t *opt) {
-    if (!opt) return;
-    
-    /* Reset statistics */
-    opt->passes_rendered = 0;
-    opt->passes_skipped = 0;
-    opt->pixels_saved = 0;
-    opt->frame_number = 0;
-    
-    /* Reset static detection state */
-    opt->static_detect.scene_is_static = false;
-    opt->static_detect.consecutive_static_frames = 0;
-}
-
 /* ============================================================================
  * Configuration
  * ============================================================================ */
-
-void multipass_optimizer_set_enabled(multipass_optimizer_t *opt, bool enabled) {
-    if (opt) opt->enabled = enabled;
-}
-
-void multipass_optimizer_set_half_rate(multipass_optimizer_t *opt, bool enabled) {
-    if (opt) opt->half_rate_enabled = enabled;
-}
-
-void multipass_optimizer_set_static_skip(multipass_optimizer_t *opt, bool enabled) {
-    if (opt) opt->static_skip_enabled = enabled;
-}
-
-void multipass_optimizer_set_smart_resolution(multipass_optimizer_t *opt, bool enabled) {
-    if (opt) opt->smart_resolution_enabled = enabled;
-}
-
-void multipass_optimizer_set_quality(multipass_optimizer_t *opt, float quality) {
-    if (opt) opt->global_quality = clampf(quality, 0.0f, 1.0f);
-}
-
-void multipass_optimizer_set_pass_scale(multipass_optimizer_t *opt, int pass_index, float scale) {
-    if (opt && pass_index >= 0 && pass_index < MOPT_MAX_PASSES) {
-        opt->passes[pass_index].recommended_scale = clampf(scale, 0.1f, 1.0f);
-    }
-}
-
-void multipass_optimizer_set_pass_update_rate(multipass_optimizer_t *opt, int pass_index, int divisor) {
-    if (opt && pass_index >= 0 && pass_index < MOPT_MAX_PASSES) {
-        opt->passes[pass_index].update_divisor = clampi(divisor, 1, 8);
-    }
-}
 
 /* ============================================================================
  * Source Code Analysis
@@ -679,40 +626,3 @@ void multipass_optimizer_record_pass(multipass_optimizer_t *opt,
     }
 }
 
-float multipass_optimizer_get_effective_workload(const multipass_optimizer_t *opt) {
-    if (!opt) return 1.0f;
-    
-    /* If no passes recorded, assume full workload */
-    if (opt->workload.pixels_full_resolution <= 0) {
-        return 1.0f;
-    }
-    
-    /* Effective workload = pixels actually rendered / pixels at full resolution */
-    float workload = (float)opt->workload.pixels_rendered_this_frame / 
-                     (float)opt->workload.pixels_full_resolution;
-    
-    /* Clamp to valid range */
-    if (workload < 0.0f) workload = 0.0f;
-    if (workload > 1.0f) workload = 1.0f;
-    
-    return workload;
-}
-
-float multipass_optimizer_get_pixel_reduction(const multipass_optimizer_t *opt) {
-    if (!opt) return 0.0f;
-    
-    /* If no passes recorded, no reduction */
-    if (opt->workload.pixels_full_resolution <= 0) {
-        return 0.0f;
-    }
-    
-    /* Reduction = 1 - (actual / full) */
-    float reduction = 1.0f - (float)opt->workload.pixels_rendered_this_frame / 
-                             (float)opt->workload.pixels_full_resolution;
-    
-    /* Clamp to valid range */
-    if (reduction < 0.0f) reduction = 0.0f;
-    if (reduction > 1.0f) reduction = 1.0f;
-    
-    return reduction;
-}

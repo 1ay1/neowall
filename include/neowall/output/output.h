@@ -430,7 +430,6 @@ bool output_terminal_key(struct output_state *output, const void *bytes, size_t 
 GLuint output_upload_preload_texture(struct output_state *output);
 void output_cleanup_transition(struct output_state *output);
 bool output_init_render(struct output_state *output);
-void output_destroy_texture(GLuint texture);
 
 /* Frame timing */
 int output_get_frame_timer_fd(struct output_state *output);

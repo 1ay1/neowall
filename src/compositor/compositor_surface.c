@@ -330,28 +330,8 @@ compositor_surface_config_t compositor_surface_config_default(void *native_outpu
 }
 
 /* Check if surface is ready for rendering */
-bool compositor_surface_is_ready(struct compositor_surface *surface) {
-    if (!surface) {
-        return false;
-    }
-
-    return surface->configured &&
-           surface->committed &&
-           surface->egl_surface != EGL_NO_SURFACE;
-}
 
 /* Get surface dimensions */
-void compositor_surface_get_size(struct compositor_surface *surface,
-                                int32_t *width, int32_t *height) {
-    if (!surface) {
-        if (width) *width = 0;
-        if (height) *height = 0;
-        return;
-    }
-
-    if (width) *width = surface->width;
-    if (height) *height = surface->height;
-}
 
 /* Resize EGL window */
 bool compositor_surface_resize_egl(struct compositor_surface *surface,

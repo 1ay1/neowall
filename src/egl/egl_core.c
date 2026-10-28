@@ -37,18 +37,6 @@ const char *egl_error_string(EGLint error) {
     }
 }
 
-bool egl_check_error(const char *context) {
-    EGLint error = eglGetError();
-    if (error != EGL_SUCCESS) {
-        log_error("EGL error in %s: %s (0x%x)",
-                  context ? context : "unknown",
-                  egl_error_string(error),
-                  error);
-        return true;
-    }
-    return false;
-}
-
 bool egl_core_init(struct neowall_state *state) {
     if (!state) {
         log_error("Invalid state");
@@ -323,9 +311,3 @@ bool egl_core_make_current(struct neowall_state *state, struct output_state *out
                          output->compositor_surface->egl_surface, state->egl_context);
 }
 
-bool egl_core_swap_buffers(struct neowall_state *state, struct output_state *output) {
-    if (!state || !output || state->egl_display == EGL_NO_DISPLAY) return false;
-    if (!output->compositor_surface || 
-        output->compositor_surface->egl_surface == EGL_NO_SURFACE) return false;
-    return eglSwapBuffers(state->egl_display, output->compositor_surface->egl_surface);
-}
