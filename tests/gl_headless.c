@@ -18,9 +18,12 @@ static EGLContext g_ctx = EGL_NO_CONTEXT;
 
 const char *gl_headless_init(void) {
     /* Force Mesa + software rendering so the test is the same everywhere
-     * (an NVIDIA box would otherwise pick its own driver). */
+     * (an NVIDIA box would otherwise pick its own driver). llvmpipe's worker
+     * threads aren't instrumented, so TSan reports races inside Mesa; render
+     * on one thread instead. */
     setenv("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/share/glvnd/egl_vendor.d/50_mesa.json", 0);
     setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
+    setenv("LP_NUM_THREADS", "0", 0);
     setenv("EGL_PLATFORM", "surfaceless", 0);
 
     PFNEGLGETPLATFORMDISPLAYEXTPROC get_dpy =

@@ -66,6 +66,7 @@ static struct compositor_backend fake_backend = {.name = "fake", .ops = &fake_op
 static const char *egl_up(void) {
     setenv("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/share/glvnd/egl_vendor.d/50_mesa.json", 0);
     setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
+    setenv("LP_NUM_THREADS", "0", 0);   /* llvmpipe threads aren't TSan-instrumented */
     PFNEGLGETPLATFORMDISPLAYEXTPROC get =
         (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
     if (!get) return "no eglGetPlatformDisplayEXT";
