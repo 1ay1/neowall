@@ -44,6 +44,8 @@ struct neowall_state {
      * damage the full surface. */
     void *swap_with_damage;   /* PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC, NULL if unsupported */
     bool swap_damage_supported;
+    bool gl_robust;           /* context created with reset notification */
+    bool gpu_health_pending;  /* gpu_health_init waits for a surface (no surfaceless) */
 
     /* ===== OUTPUTS ===== */
     struct output_state *outputs;
@@ -142,6 +144,7 @@ void log_warn(const char *format, ...);
 void log_info(const char *format, ...);
 void log_debug(const char *format, ...);
 void log_set_level(int level);
+int log_get_level(void);
 float ease_in_out_cubic(float t);
 
 /* Parse a non-negative decimal index (wallpaper index, cycle_total, ...) from a

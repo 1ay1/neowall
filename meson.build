@@ -190,6 +190,7 @@ core_sources = files(
 # EGL sources (desktop OpenGL 3.3)
 egl_sources = files(
   'src/egl/egl_core.c',
+  'src/egl/gpu_health.c',
 )
 
 # Data-plane sources (open provider registry; see
@@ -624,6 +625,14 @@ test('ipc', test_ipc_exe)
 test('sd_notify', executable('test_sd_notify',
   files('tests/test_sd_notify.c', 'src/sd_notify.c'),
   include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+))
+
+# GPU health: reset-status classification and the swap-failure streak.
+test('gpu_health', executable('test_gpu_health',
+  files('tests/test_gpu_health.c', 'src/egl/gpu_health.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  dependencies: [egl_dep, gl_dep],
   build_by_default: false,
 ))
 

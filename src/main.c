@@ -32,6 +32,7 @@
 #include "neowall/constants.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/egl/egl_core.h"
+#include "neowall/egl/gpu_health.h"
 #include "neowall/output/output.h"
 
 /* Get path to the set-index command file */
@@ -784,6 +785,28 @@ static void remove_preview_files(void) {
     g_preview_config[0] = '\0';
 }
 
+/* Allow a GPU-loss restart unless we've already restarted several times in
+ * quick succession; a GPU that never comes back shouldn't loop forever. */
+static bool gpu_restart_allowed(void) {
+    const char *v = getenv("NEOWALL_GPU_RESTARTS");
+    const char *t = getenv("NEOWALL_GPU_RESTART_AT");
+    long count = 0, at = 0;
+    if (v) neowall_parse_index(v, &count);
+    if (t) neowall_parse_index(t, &at);
+    long now = (long)(get_time_ms() / 1000);   /* monotonic, survives exec */
+    if (now - at > 60) count = 0;              /* a minute of health resets it */
+    if (count >= 3) {
+        log_error("GPU lost %ld times in a minute; not restarting", count);
+        return false;
+    }
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", count + 1);
+    setenv("NEOWALL_GPU_RESTARTS", buf, 1);
+    snprintf(buf, sizeof(buf), "%ld", now);
+    setenv("NEOWALL_GPU_RESTART_AT", buf, 1);
+    return true;
+}
+
 static bool daemonize(void) {
     pid_t pid = fork();
 
@@ -1473,7 +1496,7 @@ int main(int argc, char *argv[]) {
     log_info("Initialization complete, entering main loop...");
 
     /* Run the program on the runtime loop until it's told to stop. */
-    app_run(&state);
+    int run_code = app_run(&state);
 
     /* Cleanup */
     log_info("Shutting down...");
@@ -1518,6 +1541,18 @@ int main(int argc, char *argv[]) {
 
     /* Cancel alarm - we finished cleanup in time */
     alarm(0);
+
+    if (run_code == NW_EXIT_GPU_LOST) {
+        /* systemd restarts us (Restart=on-failure). Otherwise start over in
+         * this pid: a new process gets a new GL context. The restart counter
+         * in the environment stops a GPU that never recovers from looping. */
+        if (!nw_under_systemd() && !preview_shader && gpu_restart_allowed()) {
+            log_info("Restarting neowall after GPU loss");
+            execv("/proc/self/exe", argv);
+            log_error("Restart failed: %s", strerror(errno));
+        }
+        return NW_EXIT_GPU_LOST;
+    }
 
     log_info("NeoWall terminated successfully");
 

@@ -8,6 +8,7 @@
 #include "neowall/neowall.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/egl/egl_core.h"
+#include "neowall/egl/gpu_health.h"
 
 /**
  * EGL Core - Simple Desktop OpenGL 3.3 Context Management
@@ -158,25 +159,31 @@ bool egl_core_init(struct neowall_state *state) {
         return false;
     }
 
-    /* Create OpenGL 3.3 Core context */
-    const EGLint context_attribs[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 3,
-        EGL_CONTEXT_MINOR_VERSION, 3,
-        EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
-        EGL_NONE
-    };
+    /* Create OpenGL 3.3 Core context, robust when the driver can do it so a
+     * GPU reset is reported instead of silently leaving us drawing garbage. */
+    EGLint context_attribs[16];
+    bool robust = gpu_health_context_attribs(state->egl_display, context_attribs, 16);
 
     state->egl_context = eglCreateContext(state->egl_display,
                                           state->egl_config,
                                           EGL_NO_CONTEXT,
                                           context_attribs);
+    if (state->egl_context == EGL_NO_CONTEXT && robust) {
+        /* Some drivers advertise the extension but reject the attribs. */
+        log_info("Robust GL context refused, falling back to a plain one");
+        robust = false;
+        context_attribs[6] = EGL_NONE;   /* keep version + profile, drop robustness */
+        state->egl_context = eglCreateContext(state->egl_display, state->egl_config,
+                                              EGL_NO_CONTEXT, context_attribs);
+    }
     if (state->egl_context == EGL_NO_CONTEXT) {
         log_error("Failed to create OpenGL 3.3 context");
         eglTerminate(state->egl_display);
         return false;
     }
+    state->gl_robust = robust;
 
-    log_info("Created OpenGL 3.3 Core context (full Shadertoy compatibility)");
+    log_info("Created OpenGL 3.3 Core context%s", robust ? " (robust)" : "");
 
     /* Create surfaces for outputs */
     pthread_rwlock_rdlock(&state->output_list_lock);
@@ -197,6 +204,19 @@ bool egl_core_init(struct neowall_state *state) {
 
     pthread_rwlock_unlock(&state->output_list_lock);
 
+    /* Context-wide setup can't wait for an output surface: on Wayland outputs
+     * usually have no size yet. Make the context current surfaceless for it. */
+    if (eglMakeCurrent(state->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, state->egl_context)) {
+        const char *gl_version = (const char *)glGetString(GL_VERSION);
+        const char *gl_renderer = (const char *)glGetString(GL_RENDERER);
+        log_info("OpenGL: %s", gl_version ? gl_version : "unknown");
+        log_info("Renderer: %s", gl_renderer ? gl_renderer : "unknown");
+        gpu_health_init(state->gl_robust, log_get_level() >= LOG_LEVEL_DEBUG);
+    } else {
+        log_debug("Surfaceless context unsupported; GPU health starts with the first surface");
+        state->gpu_health_pending = true;
+    }
+
     /* Make context current and enable vsync */
     pthread_rwlock_rdlock(&state->output_list_lock);
 
@@ -211,12 +231,10 @@ bool egl_core_init(struct neowall_state *state) {
         }
 
         if (eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
-                          output->compositor_surface->egl_surface, state->egl_context)) {
-            /* Log OpenGL info */
-            const char *gl_version = (const char *)glGetString(GL_VERSION);
-            const char *gl_renderer = (const char *)glGetString(GL_RENDERER);
-            log_info("OpenGL: %s", gl_version ? gl_version : "unknown");
-            log_info("Renderer: %s", gl_renderer ? gl_renderer : "unknown");
+                          output->compositor_surface->egl_surface, state->egl_context) &&
+            state->gpu_health_pending) {
+            gpu_health_init(state->gl_robust, log_get_level() >= LOG_LEVEL_DEBUG);
+            state->gpu_health_pending = false;
         }
     }
 

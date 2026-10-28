@@ -383,11 +383,18 @@ static void render_outputs(struct app *a) {
                                      output->compositor_surface->egl_surface);
         }
         if (!swap_ok) {
-            log_error("Failed to swap buffers for output %s: 0x%x",
-                     output->model, eglGetError());
+            EGLint err = eglGetError();
+            log_error("Failed to swap buffers for output %s: 0x%x", output->model, err);
             state->errors_count++;
+            /* A lost context, or a surface that keeps failing, won't heal by
+             * retrying every frame. Hand it to the restart path. */
+            if (err == EGL_CONTEXT_LOST ||
+                gpu_health_swap_result(&output->swap_fail_streak, false)) {
+                a->gpu_lost = true;
+            }
             continue;
         }
+        gpu_health_swap_result(&output->swap_fail_streak, true);
 
         static uint64_t swap_counter = 0;
         swap_counter++;
@@ -470,6 +477,12 @@ static void render_outputs(struct app *a) {
     output_ptr_vec_free(&snapshot);
     swap_vec_free(&swaps);
 
+    /* One cheap query per rendered step: did the GPU reset under us? */
+    if (state->gpu_health_pending) {
+        gpu_health_init(state->gl_robust, log_get_level() >= LOG_LEVEL_DEBUG);
+        state->gpu_health_pending = false;
+    }
+    if (gpu_health_lost()) a->gpu_lost = true;
 }
 
 /* Bring freshly-appeared outputs (reconnected monitors / DPMS-on / hotplug)

@@ -38,8 +38,9 @@ enum {
 };
 
 /* Run neowall until it's told to stop. Takes over from main() once the
- * compositor, EGL and outputs are up. */
-void app_run(struct neowall_state *state);
+ * compositor, EGL and outputs are up. Returns the process exit code:
+ * EXIT_SUCCESS, or NW_EXIT_GPU_LOST when graphics died. */
+int app_run(struct neowall_state *state);
 
 /* Wake the loop from another thread with a message. False if it isn't
  * running. Safe to call before app_run (the message is dropped). */

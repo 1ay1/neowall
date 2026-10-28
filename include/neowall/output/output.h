@@ -296,6 +296,7 @@ struct output_state {
     float transition_progress;
     uint64_t frames_rendered;
     bool shader_load_failed;            /* Set to true after 3 failed shader load attempts */
+    uint32_t swap_fail_streak;          /* consecutive failed swaps (gpu_health) */
     
     /* FPS measurement */
     uint64_t fps_last_log_time;         /* Last time we logged FPS */

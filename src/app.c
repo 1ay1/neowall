@@ -30,6 +30,7 @@
 #include "neowall/config/config_access.h"
 #include "neowall/config/config.h"
 #include "neowall/egl/egl_core.h"
+#include "neowall/egl/gpu_health.h"
 #include "neowall/output/output.h"
 #include "neowall/shader/reactive.h"
 #include "neowall/constants.h"
@@ -55,6 +56,10 @@ static const unsigned kTermFxSettleMs = 700;
 struct app {
     struct neowall_state *state;
     rt_loop *loop;
+
+    /* The GL context or a surface is unrecoverable: stop and exit with
+     * NW_EXIT_GPU_LOST so we come back in a fresh process. */
+    bool gpu_lost;
 
     /* Commands waiting for the next frame. */
     int next_pending;
@@ -543,7 +548,6 @@ static void app_subscribe(void *self, rt_subs *subs) {
 /* ── present ──────────────────────────────────────────────────────────── */
 
 static void app_present(void *self, rt_loop *loop) {
-    (void)loop;
     struct app *a = self;
     struct neowall_state *state = a->state;
 
@@ -568,6 +572,12 @@ static void app_present(void *self, rt_loop *loop) {
         pthread_rwlock_unlock(&state->output_list_lock);
     }
     if (any) render_outputs(a);
+    if (a->gpu_lost) {
+        log_error("Graphics can't recover in this process; exiting to restart cleanly");
+        nw_sd_notify("STOPPING=1");
+        rt_quit(loop, NW_EXIT_GPU_LOST);
+        return;
+    }
 
     a->stats_frames++;
     uint64_t now = get_time_ms();
@@ -732,10 +742,10 @@ static void on_watch(void *ctx, rt_loop *loop, int fd, unsigned ev) {
 
 /* ── run ──────────────────────────────────────────────────────────────── */
 
-void app_run(struct neowall_state *state) {
+int app_run(struct neowall_state *state) {
     if (!state) {
         log_error("Invalid state for the runtime");
-        return;
+        return EXIT_FAILURE;
     }
 
     struct app a = {.state = state, .set_index = -1, .compositor_fd = -1};
@@ -743,7 +753,7 @@ void app_run(struct neowall_state *state) {
     a.loop = rt_loop_new();
     if (!a.loop) {
         log_error("Failed to create the runtime loop");
-        return;
+        return EXIT_FAILURE;
     }
 
     /* Signals: the old signalfd's set, each now a message. They were blocked
@@ -798,7 +808,7 @@ void app_run(struct neowall_state *state) {
     };
     log_info("Entering main loop");
     nw_sd_notify("READY=1");
-    rt_run(a.loop, &prog);
+    int code = rt_run(a.loop, &prog);
     log_info("Main loop stopped");
 
     atomic_store(&g_loop, NULL);
@@ -811,4 +821,5 @@ void app_run(struct neowall_state *state) {
     if (a.has_occlusion) occlusion_cleanup(state);
     reactive_shutdown();
     rt_loop_free(a.loop);
+    return code;
 }

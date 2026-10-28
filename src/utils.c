@@ -137,6 +137,10 @@ void log_set_level(int level) {
     }
 }
 
+int log_get_level(void) {
+    return log_level;
+}
+
 /* Enable/disable colors */
 void log_set_colors(bool enabled) {
     use_colors = enabled;
