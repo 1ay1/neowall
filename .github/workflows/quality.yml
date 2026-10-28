@@ -55,7 +55,7 @@ jobs:
           python3 - <<'EOF'
           import json, sys
           must_run = {"neowall:multipass_gl", "neowall:output_render",
-                      "neowall:e2e_wayland", "neowall:e2e_x11"}
+                      "neowall:e2e_wayland", "neowall:e2e_kde", "neowall:e2e_x11"}
           seen = {}
           for line in open("build-asan/meson-logs/testlog.json"):
               t = json.loads(line)

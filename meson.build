@@ -1035,6 +1035,12 @@ if has_wayland
   test('e2e_wayland', find_program('tests/e2e_wayland.sh'),
     args: [neowall_exe.full_path(), meson.project_source_root()],
     depends: neowall_exe, suite: 'e2e', timeout: 180, is_parallel: false)
+  # The same run through the kde-plasma backend (selected as on a KDE desktop;
+  # it speaks the same layer-shell protocol, so sway serves).
+  test('e2e_kde', find_program('tests/e2e_wayland.sh'),
+    args: [neowall_exe.full_path(), meson.project_source_root()],
+    env: {'NEOWALL_E2E_DESKTOP': 'KDE'},
+    depends: neowall_exe, suite: 'e2e', timeout: 180, is_parallel: false)
 endif
 
 # The same end-to-end run on the X11 backend (Xvfb). Skips without Xvfb.

@@ -133,7 +133,16 @@ fi
 export WAYLAND_DISPLAY=$(sock_ready)
 
 # The daemon must only ever see our compositor, never the user's session.
-nw_env() { env -u DISPLAY WAYLAND_DISPLAY="$WAYLAND_DISPLAY" "$@"; }
+nw_env() {
+    # NEOWALL_E2E_DESKTOP picks the backend the daemon selects (KDE ->
+    # kde-plasma); both speak layer shell, so any compositor here serves.
+    if [ -n "${NEOWALL_E2E_DESKTOP:-}" ]; then
+        env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u SWAYSOCK XDG_CURRENT_DESKTOP="$NEOWALL_E2E_DESKTOP" \
+            XDG_SESSION_DESKTOP="$NEOWALL_E2E_DESKTOP" WAYLAND_DISPLAY="$WAYLAND_DISPLAY" "$@"
+    else
+        env -u DISPLAY WAYLAND_DISPLAY="$WAYLAND_DISPLAY" "$@"
+    fi
+}
 if [ "${NEOWALL_E2E_HYPRLAND:-0}" = 1 ]; then
     hypr_sig=$(ls -t "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | head -1)
 fi
@@ -165,6 +174,11 @@ else bad "daemon starts and answers ping" "$(tail -5 "$tmp/nw.log" | tr '\n' ' '
 nw_pid=$("$nw" ping | sed -n 's/.* pid \([0-9]*\).*/\1/p')
 kill -0 "$comp_pid" 2>/dev/null && ok "test compositor still running" \
     || { bad "test compositor still running" "it died; refusing to test against anything else"; exit 1; }
+if [ -n "${NEOWALL_E2E_DESKTOP:-}" ]; then
+    want=$(case "$NEOWALL_E2E_DESKTOP" in KDE) echo kde-plasma ;; *) echo wlr-layer-shell ;; esac)
+    grep -q "Using compositor backend '$want'" "$tmp/nw.log" && ok "selected the $want backend" \
+        || bad "selected the $want backend" "$(grep -m1 'Using compositor backend' "$tmp/nw.log")"
+fi
 
 expect "ping names the version and pid" 0 "neowall .* pid $nw_pid" "$nw" ping
 wait_for 10 grep -q 'FPS \[' "$tmp/nw.log" && ok "frames are being drawn" || bad "frames are being drawn"
