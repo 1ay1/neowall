@@ -380,7 +380,6 @@ if has_wayland
     'src/compositor/backends/wayland/wayland_core.c',
     'src/compositor/backends/wayland/compositors/wlr_layer_shell.c',
     'src/compositor/backends/wayland/compositors/kde_plasma.c',
-    'src/compositor/backends/wayland/compositors/fallback.c',
   )
 endif
 

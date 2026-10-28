@@ -53,8 +53,7 @@ compositor/
 ├── compositor_surface.c      # Surface management API
 └── backends/
     ├── wlr_layer_shell.c     # wlroots compositor support
-    ├── kde_plasma.c          # KDE Plasma support
-    └── fallback.c            # dev only, not registered
+    └── kde_plasma.c          # KDE Plasma support
 ```
 
 ### Key Concepts
@@ -184,26 +183,8 @@ Application Startup
 Not supported on Wayland. Mutter offers no wallpaper surface role to clients
 (no layer shell, no plasma shell), so the registry refuses with a clear error
 instead of mapping a surface that would never show. GNOME on X11 works through
-the X11 backend.
-
-### 3. Fallback (Priority: 10), development only
-
-**Compositors:** Any Wayland compositor
-
-**Protocol:** Core Wayland + optional subsurfaces
-
-**Features:**
-- ✅ Basic surface creation
-- ✅ EGL window support
-- ✅ Click pass-through
-- ⚠️ No layer management
-- ⚠️ No z-order control
-
-**Status:** Fully implemented - last resort option
-
-**File:** `backends/fallback.c`
-
-**When Used:** When no other backend succeeds
+the X11 backend. There's no generic fallback for the same reason: a bare
+`wl_surface` has no role a compositor will show as a wallpaper.
 
 ## 🛠️ Adding New Backends
 
@@ -305,7 +286,6 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     compositor_backend_wlr_layer_shell_init(state);
     compositor_backend_kde_plasma_init(state);
     compositor_backend_my_compositor_init(state);  // Add here
-    compositor_backend_fallback_init(state);
     
     // ... rest of code ...
 }
@@ -321,7 +301,6 @@ wayland_sources = files(
   'src/compositor/backends/wayland/compositors/wlr_layer_shell.c',
   'src/compositor/backends/wayland/compositors/kde_plasma.c',
   'src/compositor/backends/wayland/compositors/my_compositor.c',
-  'src/compositor/backends/wayland/compositors/fallback.c',
 )
 ```
 

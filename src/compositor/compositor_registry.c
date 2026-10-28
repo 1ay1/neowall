@@ -28,8 +28,7 @@
  * BACKEND PRIORITY SYSTEM:
  * - Higher priority = preferred backend
  * - wlr-layer-shell: 100 (best for wlroots compositors)
- * - KDE Plasma: 90 (native KDE support)
- * - Fallback: 10 (works everywhere, limited features)
+ * - KDE Plasma: 110 (layer shell with click pass-through)
  */
 
 /* Maximum number of backends that can be registered */
@@ -521,8 +520,8 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     log_debug("Registering available Wayland backends...");
     compositor_backend_wlr_layer_shell_init(state);
     compositor_backend_kde_plasma_init(state);
-    /* The generic fallback remains buildable for development, but is not
-     * registered: its raw/subsurface surfaces have no mappable top-level role. */
+    /* No generic fallback: a bare wl_surface has no role a compositor will
+     * map as a wallpaper, so it could only ever show nothing. */
 
     /* Select best backend */
     struct compositor_backend *backend = select_wayland_backend(state, &info);

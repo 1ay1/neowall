@@ -34,7 +34,6 @@ compositor_backend  ◀── auto-detected from $XDG_SESSION_TYPE +
     │
     ├─ wlr_layer_shell    (wlroots: Sway, Hyprland, river, …)
     ├─ kde_plasma         (Plasma's org_kde_plasma_shell)
-    ├─ fallback           (dev only, not registered)
     └─ x11                (EWMH root-window + per-output viewports)
 ```
 

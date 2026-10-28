@@ -26,7 +26,7 @@ config.vibe ─► config_load ─► output_state(s)
    timers / worker posts ────┘  └─────────────────────────┬───────────────────────┘
                                                     ▼
                               compositor backend vtable  ◄──►  EGL / OpenGL 3.3
-                              (wlr-layer-shell │ kde │ fallback │ x11)
+                              (wlr-layer-shell │ kde │ x11)
 ```
 
 ---
@@ -108,11 +108,11 @@ vtable of function pointers; each backend implements it and registers itself.
   of hard-coding per-compositor behaviour.
 - **Registration + selection.** Backends call `compositor_backend_register()`;
   `compositor_registry.c` detects the running compositor (env vars + protocol
-  probe) and picks the highest-priority backend that fits, with a `fallback`
-  backend as the floor.
+  probe) and picks the highest-priority backend that fits, or refuses with a
+  clear error when nothing can show a wallpaper there.
 
-Backends: `wlr-layer-shell` (Hyprland/Sway/River/wlroots), `kde-plasma`,
-`fallback` (development only, not registered), and `x11` (EWMH + root window).
+Backends: `wlr-layer-shell` (Hyprland/Sway/River/wlroots), `kde-plasma`
+and `x11` (EWMH + root window).
 GNOME/Mutter on Wayland is refused with a clear error: it has no wallpaper
 surface role for clients.
 
