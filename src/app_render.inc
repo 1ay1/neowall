@@ -449,82 +449,65 @@ static void render_outputs(struct app *a) {
  *   3. per output: apply just that output's wallpaper/shader config
  */
 #ifdef HAVE_WAYLAND_BACKEND
-static void reinit_reconnected_outputs(struct neowall_state *state) {
-    if (!state || !state->compositor_backend) {
+static const char *output_display_name(const struct output_state *o) {
+    const char *n = o->connector_name[0] ? o->connector_name : o->model;
+    return n[0] ? n : "unknown";
+}
+
+/* Finish one output whose surface the compositor has sized: EGL surface, GL
+ * state, then only this output's config (live outputs are untouched). */
+static void bring_up_output(struct neowall_state *state, struct output_state *o) {
+    const char *name = output_display_name(o);
+    if (!o->compositor_surface) return;   /* surface creation failed */
+    if (o->width <= 0 || o->height <= 0) {
+        /* The configure that sizes it posts a retry (output_on_configure_callback). */
+        log_info("Reconnect: output %s has no size yet, waiting for the compositor", name);
         return;
     }
+    if (!output_create_egl_surface(o) || !egl_core_make_current(state, o) || !output_init_render(o)) {
+        log_error("Reconnect: GL bring-up failed for output %s", name);
+        return;
+    }
+    if (config_apply_to_output(state, o)) {
+        atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+        log_info("Reconnect: output %s online (%dx%d)", name, o->width, o->height);
+    }
+}
+
+/* Bring up outputs that appeared (hotplug, DPMS) or are still waiting for a
+ * size. Surfaces are created first and one roundtrip collects all their
+ * configures, then each is finished. */
+static void reinit_reconnected_outputs(struct neowall_state *state) {
+    if (!state || !state->compositor_backend) return;
     const compositor_backend_ops_t *ops = state->compositor_backend->ops;
     void *backend_data = state->compositor_backend->data;
 
-    /* Snapshot surface-less outputs under the read lock, taking a transient ref
-     * on each so a concurrent hotplug-removal can't free them while we work
-     * with the lock dropped (surface roundtrips + GL init are slow). */
+    /* A ref on each, so a removal can't free it while the lock is dropped
+     * for the slow surface/GL work. */
     struct output_state *pending[MAX_OUTPUTS];
     int n = 0;
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o && n < MAX_OUTPUTS; o = o->next) {
-        /* No surface yet, or a surface still waiting for its size (bring-up
-         * was attempted before the compositor configured it). */
         if (!o->compositor_surface || o->compositor_surface->egl_surface == EGL_NO_SURFACE) {
             output_ref(o);
             pending[n++] = o;
         }
     }
     pthread_rwlock_unlock(&state->output_list_lock);
+    if (n == 0) return;
 
-    if (n == 0) {
-        return;
-    }
-
-    /* Phase 1: create every missing surface, then a single roundtrip so all
-     * configure events (which set width/height + configured) arrive at once. */
     for (int i = 0; i < n; i++) {
-        struct output_state *o = pending[i];
-        const char *name = o->connector_name[0] ? o->connector_name : o->model;
-        log_info("Reconnect: bringing up output %s", name[0] ? name : "unknown");
-        if (!output_configure_compositor_surface(o)) {
+        log_info("Reconnect: bringing up output %s", output_display_name(pending[i]));
+        if (!output_configure_compositor_surface(pending[i])) {
             log_error("Reconnect: failed to create surface for output %s",
-                      name[0] ? name : "unknown");
+                      output_display_name(pending[i]));
         }
     }
-    if (ops && ops->sync) {
-        ops->sync(backend_data);
-    }
-    if (ops && ops->dispatch_events) {
-        ops->dispatch_events(backend_data);
-    }
-
-    /* Phase 2 + 3: per output, finish GL bring-up and apply its config. */
-    for (int i = 0; i < n; i++) {
-        struct output_state *o = pending[i];
-        const char *name = o->connector_name[0] ? o->connector_name : o->model;
-
-        if (!o->compositor_surface) {
-            continue; /* surface creation failed above */
-        }
-        if (o->width <= 0 || o->height <= 0) {
-            /* Not configured yet; the configure that sizes it triggers a
-             * retry (output_on_configure_callback). */
-            log_info("Reconnect: output %s has no size yet, waiting for the compositor",
-                     name[0] ? name : "unknown");
-            continue;
-        }
-        if (!output_create_egl_surface(o) || !egl_core_make_current(state, o) ||
-            !output_init_render(o)) {
-            log_error("Reconnect: GL bring-up failed for output %s",
-                      name[0] ? name : "unknown");
-            continue;
-        }
-
-        /* Apply ONLY this output's config — live outputs are untouched. */
-        if (config_apply_to_output(state, o)) {
-            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
-            log_info("Reconnect: output %s online (%dx%d)",
-                     name[0] ? name : "unknown", o->width, o->height);
-        }
-    }
+    if (ops && ops->sync) ops->sync(backend_data);
+    if (ops && ops->dispatch_events) ops->dispatch_events(backend_data);
 
     for (int i = 0; i < n; i++) {
+        bring_up_output(state, pending[i]);
         output_unref(pending[i]);
     }
 }

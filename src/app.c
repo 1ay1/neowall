@@ -242,6 +242,72 @@ static void mark_animated(struct app *a) {
 
 static bool app_update(void *self, rt_loop *loop, const rt_msg *m);
 
+/* What the outputs can do right now, for answering commands honestly. */
+struct output_summary {
+    size_t longest_cycle;   /* largest cycle on any output (0/1 = nothing to cycle) */
+    bool has_terminal;
+};
+
+static struct output_summary summarize_outputs(struct neowall_state *state) {
+    struct output_summary s = {0};
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (o->config->cycle && o->config->cycle_count > s.longest_cycle) {
+            s.longest_cycle = o->config->cycle_count;
+        }
+        if (o->config->type == WALLPAPER_TERMINAL) s.has_terminal = true;
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+    return s;
+}
+
+/* `set <index>`: answered for real, since an index no output can take is
+ * an error, not an "ok" the daemon then quietly drops. */
+static void ipc_set_index(struct app *a, rt_loop *loop, const nw_ipc_request_t *r) {
+    char text[NW_IPC_MAX_LINE];
+    char *end = NULL;
+    long idx = strtol(r->arg, &end, 10);
+    if (!r->arg[0] || *end || idx < 0 || idx > 100000) {
+        ipc_server_reply(a->ipc, r->conn, false, "usage: set <index>");
+        return;
+    }
+    size_t most = summarize_outputs(a->state).longest_cycle;
+    if (most <= 1) {
+        ipc_server_reply(a->ipc, r->conn, false,
+                         "nothing to set: only one wallpaper or shader is configured");
+        return;
+    }
+    if ((size_t)idx >= most) {
+        snprintf(text, sizeof(text), "index %ld is out of range (0-%zu)", idx, most - 1);
+        ipc_server_reply(a->ipc, r->conn, false, text);
+        return;
+    }
+    rt_msg m = {.kind = NW_MSG_SET_INDEX};
+    m.v.i = idx;
+    rt_send(loop, &m);
+    snprintf(text, sizeof(text), "setting wallpaper %ld", idx);
+    ipc_server_reply(a->ipc, r->conn, true, text);
+}
+
+/* `set-terminal <command>` */
+static void ipc_set_terminal(struct app *a, rt_loop *loop, const nw_ipc_request_t *r) {
+    if (!r->arg[0] || strlen(r->arg) >= sizeof(a->terminal_cmd)) {
+        ipc_server_reply(a->ipc, r->conn, false,
+                         r->arg[0] ? "command too long" : "usage: set-terminal <command>");
+        return;
+    }
+    if (!summarize_outputs(a->state).has_terminal) {
+        ipc_server_reply(a->ipc, r->conn, false, "no output is running a terminal wallpaper");
+        return;
+    }
+    /* The command is too long for a message; it rides in the model and the
+     * message says it's there. */
+    snprintf(a->ipc_terminal_cmd, sizeof(a->ipc_terminal_cmd), "%s", r->arg);
+    rt_msg m = {.kind = NW_MSG_SET_TERMINAL, .id = 1};
+    rt_send(loop, &m);
+    ipc_server_reply(a->ipc, r->conn, true, "swapping terminal wallpaper");
+}
+
 /* A request off the control socket. The command verbs fold through the same
  * messages the signals do, so there is one path for each command. */
 static void ipc_answer(struct app *a, rt_loop *loop, const nw_ipc_request_t *r) {
@@ -261,18 +327,11 @@ static void ipc_answer(struct app *a, rt_loop *loop, const nw_ipc_request_t *r) 
         return;
     }
 
-    if (strcmp(r->verb, "next") == 0) {
+    if (strcmp(r->verb, "next") == 0 && summarize_outputs(a->state).longest_cycle <= 1) {
         /* Say so instead of pretending: nothing to cycle is an answer. */
-        bool cyclable = false;
-        pthread_rwlock_rdlock(&a->state->output_list_lock);
-        for (struct output_state *o = a->state->outputs; o; o = o->next)
-            if (o->config->cycle && o->config->cycle_count > 1) { cyclable = true; break; }
-        pthread_rwlock_unlock(&a->state->output_list_lock);
-        if (!cyclable) {
-            ipc_server_reply(a->ipc, r->conn, false,
-                             "nothing to cycle: only one wallpaper or shader is configured");
-            return;
-        }
+        ipc_server_reply(a->ipc, r->conn, false,
+                         "nothing to cycle: only one wallpaper or shader is configured");
+        return;
     }
 
     if (strcmp(r->verb, "reload") == 0) {
@@ -298,59 +357,11 @@ static void ipc_answer(struct app *a, rt_loop *loop, const nw_ipc_request_t *r) 
     }
 
     if (strcmp(r->verb, "set") == 0) {
-        char *end = NULL;
-        long idx = strtol(r->arg, &end, 10);
-        if (!r->arg[0] || *end || idx < 0 || idx > 100000) {
-            ipc_server_reply(a->ipc, r->conn, false, "usage: set <index>");
-            return;
-        }
-        /* Answer for real: an index no output can take is an error, not an
-         * "ok" the daemon then quietly drops. */
-        size_t most = 0;
-        pthread_rwlock_rdlock(&a->state->output_list_lock);
-        for (struct output_state *o = a->state->outputs; o; o = o->next)
-            if (o->config->cycle && o->config->cycle_count > most) most = o->config->cycle_count;
-        pthread_rwlock_unlock(&a->state->output_list_lock);
-        if (most <= 1) {
-            ipc_server_reply(a->ipc, r->conn, false,
-                             "nothing to set: only one wallpaper or shader is configured");
-            return;
-        }
-        if ((size_t)idx >= most) {
-            snprintf(text, sizeof(text), "index %ld is out of range (0-%zu)", idx, most - 1);
-            ipc_server_reply(a->ipc, r->conn, false, text);
-            return;
-        }
-        rt_msg m = {.kind = NW_MSG_SET_INDEX};
-        m.v.i = idx;
-        rt_send(loop, &m);
-        snprintf(text, sizeof(text), "setting wallpaper %ld", idx);
-        ipc_server_reply(a->ipc, r->conn, true, text);
+        ipc_set_index(a, loop, r);
         return;
     }
-
     if (strcmp(r->verb, "set-terminal") == 0) {
-        if (!r->arg[0] || strlen(r->arg) >= sizeof(a->terminal_cmd)) {
-            ipc_server_reply(a->ipc, r->conn, false,
-                             r->arg[0] ? "command too long" : "usage: set-terminal <command>");
-            return;
-        }
-        bool has_terminal = false;
-        pthread_rwlock_rdlock(&a->state->output_list_lock);
-        for (struct output_state *o = a->state->outputs; o; o = o->next)
-            if (o->config->type == WALLPAPER_TERMINAL) { has_terminal = true; break; }
-        pthread_rwlock_unlock(&a->state->output_list_lock);
-        if (!has_terminal) {
-            ipc_server_reply(a->ipc, r->conn, false,
-                             "no output is running a terminal wallpaper");
-            return;
-        }
-        /* The command text is too long for a message; it rides in the model,
-         * and the message says it's there. */
-        snprintf(a->ipc_terminal_cmd, sizeof(a->ipc_terminal_cmd), "%s", r->arg);
-        rt_msg m = {.kind = NW_MSG_SET_TERMINAL, .id = 1};
-        rt_send(loop, &m);
-        ipc_server_reply(a->ipc, r->conn, true, "swapping terminal wallpaper");
+        ipc_set_terminal(a, loop, r);
         return;
     }
 
