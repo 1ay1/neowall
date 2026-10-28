@@ -7,6 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  build-clang:
+    name: Arch Linux (clang, -Werror)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
+            egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon clang
+      - uses: actions/checkout@v4
+      - run: CC=clang meson setup build -Dwerror=true
+      - run: ninja -C build
+      - run: meson test -C build --print-errorlogs
+
   build-arch-full:
     name: Arch Linux (Wayland + X11)
     runs-on: ubuntu-latest
@@ -24,7 +40,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup build
-        run: meson setup build
+        run: meson setup build -Dwerror=true
 
       - name: Build
         run: ninja -C build
@@ -61,7 +77,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup build (Wayland only)
-        run: meson setup build -Dx11_backend=disabled
+        run: meson setup build -Dwerror=true -Dx11_backend=disabled
 
       - name: Build
         run: ninja -C build
@@ -92,7 +108,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup build (X11 only)
-        run: meson setup build -Dwayland_backend=disabled
+        run: meson setup build -Dwerror=true -Dwayland_backend=disabled
 
       - name: Build
         run: ninja -C build
@@ -126,7 +142,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup build
-        run: meson setup build
+        run: meson setup build -Dwerror=true
 
       - name: Build
         run: ninja -C build
@@ -161,7 +177,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup build (X11 only)
-        run: meson setup build -Dwayland_backend=disabled
+        run: meson setup build -Dwerror=true -Dwayland_backend=disabled
 
       - name: Build
         run: ninja -C build
@@ -193,7 +209,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup build
-        run: meson setup build
+        run: meson setup build -Dwerror=true
 
       - name: Build
         run: ninja -C build
@@ -236,7 +252,7 @@ jobs:
 
       - name: Build (X11 only)
         run: |
-          meson setup build -Dwayland_backend=disabled
+          meson setup build -Dwerror=true -Dwayland_backend=disabled
           ninja -C build
 
       # Boot a headless X server and try to bind a custom-named RandR 1.5

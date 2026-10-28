@@ -1,27 +1,20 @@
 # NeoWall - GPU-Accelerated Live Wallpapers for Wayland & X11
-# Copyright (C) 2025
-#
-# This meson.build replicates the functionality of the Makefile exactly.
 
 project('neowall', 'c',
   version: '0.8.0',
   license: 'MIT',
+  meson_version: '>= 0.64.0',
   default_options: [
     'c_std=c11',
     'warning_level=3',
-    'werror=true',
     'optimization=2',
   ],
 )
 
+# Warnings are errors in CI (-Dwerror=true), not by default: a new compiler
+# release shouldn't break a distro build.
+
 cc = meson.get_compiler('c')
-
-# =============================================================================
-# Session Detection (for helpful error messages)
-# =============================================================================
-
-session_type = run_command('sh', '-c', 'echo $XDG_SESSION_TYPE', check: false).stdout().strip()
-message('Detected session type: ' + (session_type != '' ? session_type : 'unknown'))
 
 # =============================================================================
 # Required Dependencies
@@ -113,33 +106,6 @@ endif
 # Error if no backends available
 if not has_wayland and not has_x11
   error('No display server backend available. Install wayland-client/wayland-egl or libx11-dev')
-endif
-
-# Error if on Wayland session but Wayland backend not available
-if session_type == 'wayland' and not has_wayland
-  error('''
-================================================================================
-FATAL: You are running a Wayland session but Wayland dependencies are missing!
-
-NeoWall requires native Wayland support to work correctly on Wayland sessions.
-The X11/XWayland fallback will NOT work properly (causes black window issues).
-
-Please install the following packages:
-
-  Arch/Garuda:   sudo pacman -S wayland wayland-protocols
-
-  Debian/Ubuntu: sudo apt install libwayland-dev wayland-protocols
-
-  Fedora:        sudo dnf install wayland-devel wayland-protocols-devel
-
-Then run: meson setup build --wipe
-================================================================================
-''')
-endif
-
-# Warn if on X11 session but X11 backend not available
-if session_type == 'x11' and not has_x11
-  warning('You are on an X11 session but X11 backend is not available. Install libx11-dev and libxrandr-dev.')
 endif
 
 # =============================================================================
@@ -997,7 +963,6 @@ summary({
 }, section: 'Project')
 
 summary({
-  'Session Type': session_type != '' ? session_type : 'unknown',
   'Wayland Backend': has_wayland,
   'X11 Backend': has_x11,
 }, section: 'Backends')

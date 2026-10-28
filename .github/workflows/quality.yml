@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure (ASan + UBSan)
-        run: meson setup build-asan -Db_sanitize=address,undefined -Db_lundef=false --buildtype=debug
+        run: meson setup build-asan -Dwerror=true -Db_sanitize=address,undefined -Db_lundef=false --buildtype=debug
 
       - name: Build
         run: ninja -C build-asan
@@ -65,7 +65,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure (TSan)
-        run: meson setup build-tsan -Db_sanitize=thread -Db_lundef=false --buildtype=debug
+        run: meson setup build-tsan -Dwerror=true -Db_sanitize=thread -Db_lundef=false --buildtype=debug
 
       - name: Build
         run: ninja -C build-tsan
