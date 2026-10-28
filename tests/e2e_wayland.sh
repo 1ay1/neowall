@@ -6,8 +6,9 @@
 # NEOWALL_E2E_HYPRLAND=1), runs neowall against it with a throwaway HOME and
 # runtime dir, and checks what the CLI answers and what the daemon does:
 # start-up, ping, status, cycling (next/set/list), pause/resume, shader
-# pause/resume, reload with a good and a bad config, unknown commands, kill,
-# and a clean exit. Skips (77) when no suitable compositor is installed.
+# pause/resume, reload with a good and a bad config, a terminal wallpaper
+# (spawn, swap, no orphaned children), unknown commands, kill, and a clean
+# exit. Skips (77) when no suitable compositor is installed.
 #
 # Usage: e2e_wayland.sh <neowall binary> <source root>
 
@@ -164,6 +165,27 @@ cp "$tmp/bad.vibe" "$cfg"
 expect "reload a bad config is refused" 1 "previous configuration"  "$nw" reload
 expect "daemon still alive after bad reload" 0 "pid $nw_pid"        "$nw" ping
 cp "$tmp/good.vibe" "$cfg"
+
+# ---- terminal wallpaper -------------------------------------------------------
+# A real program under a PTY; set-terminal swaps it and the old child must be
+# gone (no orphans), and leaving terminal mode stops the child too.
+cat > "$cfg" <<EOF
+default {
+  terminal "sleep 600"
+}
+EOF
+expect "reload into a terminal wallpaper" 0 "configuration reloaded" "$nw" reload
+wait_for 10 pgrep -f '^sleep 600$' && ok "terminal child is running" || bad "terminal child is running"
+old_child=$(pgrep -n -f '^sleep 600$')
+expect "set-terminal swaps the program"  0 "swapping terminal"       "$nw" set-terminal "sleep 700"
+wait_for 10 pgrep -f '^sleep 700$' && ok "new terminal child runs" || bad "new terminal child runs"
+wait_for 10 sh -c "! kill -0 ${old_child:-0} 2>/dev/null" && ok "old terminal child is gone" \
+    || bad "old terminal child is gone" "pid $old_child still alive"
+new_child=$(pgrep -n -f '^sleep 700$')
+cp "$tmp/good.vibe" "$cfg"
+expect "reload back to shaders"         0 "configuration reloaded"  "$nw" reload
+wait_for 10 sh -c "! kill -0 ${new_child:-0} 2>/dev/null" && ok "terminal child stopped on reload" \
+    || bad "terminal child stopped on reload" "pid $new_child still alive"
 
 # ---- errors and stop ----------------------------------------------------------
 expect "unknown command"                1 "Unknown command"         "$nw" frobnicate
