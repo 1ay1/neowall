@@ -16,7 +16,6 @@
 #include "neowall/result.h"
 #include "neowall/shader/platform_compat.h"
 #include "neowall/shader/adaptive_scale.h"
-#include "neowall/shader/render_optimizer.h"
 #include "neowall/shader/multipass_optimizer.h"
 #include "neowall/shader/reactive.h"
 #include "neowall/shader/shader_state.h"
@@ -245,17 +244,10 @@ typedef struct {
     
     /* Industry-grade adaptive resolution scaling */
     adaptive_state_t adaptive;
-    
-    /* GPU state optimization */
-    render_optimizer_t optimizer;
-    
+
     /* Smart multipass optimization (per-buffer resolution, half-rate updates) */
     multipass_optimizer_t multipass_opt;
-    
-    /* Per-buffer resolution analysis (legacy - use multipass_opt instead) */
-    buffer_analysis_t buffer_analysis[MULTIPASS_MAX_BUFFERS];
-    bool use_smart_buffer_sizing;            /* Auto-detect optimal buffer resolutions */
-    
+
     bool is_initialized;                     /* OpenGL resources initialized */
     bool is_animated;                        /* False = no time/mouse/audio refs: render once, then sleep */
 

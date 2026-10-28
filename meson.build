@@ -233,7 +233,6 @@ shader_sources = files(
   'src/shader/shader_scaffold.c',
   'src/shader/shader_clock.c',
   'src/shader/adaptive_scale.c',
-  'src/shader/render_optimizer.c',
   'src/shader/multipass_optimizer.c',
   'src/shader/reactive.c',
   'src/shader/manifest.c',

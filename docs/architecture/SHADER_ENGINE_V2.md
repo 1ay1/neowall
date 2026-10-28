@@ -286,7 +286,6 @@ shadertoy_compat.c    -> frontend/shadertoy.c
 manifest.c            -> frontend/manifest.c
 reactive.c            -> source/builtin_*.c
 adaptive_scale.c      -> engine/adaptive.c
-render_optimizer.c    -> engine/throttle.c
 multipass_optimizer.c -> engine/throttle.c
 glsl_shadow.c         -> glsl/shadow.c
 shader_stdlib.h       -> glsl/stdlib.h

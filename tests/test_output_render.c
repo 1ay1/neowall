@@ -237,6 +237,27 @@ int main(void) {
     CHECK(draw(o), "render shader");
     CHECK(close_rgb(read_rgb(W / 2, H / 2), 0xff8000), "shader orange: %06x", read_rgb(W / 2, H / 2));
 
+    /* 4b. Something else on the shared context (transitions, the FPS
+     *     watermark, another output) leaves blending on between frames. A
+     *     half-transparent shader must still draw opaque over whatever was
+     *     there: the shader path has to set the state it needs, not trust a
+     *     cache of what it set last frame. */
+    FILE *ts = fopen(shader, "w");
+    fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(1.0, 0.0, 0.0, 0.25); }\n", ts);
+    fclose(ts);
+    CHECK(output_apply_config(o, &s), "apply translucent shader");
+    CHECK(draw(o), "render translucent shader");
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+    glClearColor(0, 0, 1, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    CHECK(draw(o), "render after foreign GL state");
+    CHECK(close_rgb(read_rgb(W / 2, H / 2), 0xff0000),
+          "shader draws opaque despite leftover blend: %06x", read_rgb(W / 2, H / 2));
+    glDisable(GL_BLEND);
+
     /* 5. Back to images, from a directory cycle. */
     struct wallpaper_config d;
     memset(&d, 0, sizeof(d));

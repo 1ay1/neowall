@@ -1,9 +1,8 @@
 /* Multipass Optimizer — per-frame render-plan strategist for multipass shaders.
  *
- * SCOPE NOTE (vs. render_optimizer.h): this module is the HIGH-LEVEL planner.
  * It decides per-buffer resolution, which passes to skip this frame (half-rate /
  * static-scene), and reports the workload reduction to adaptive_scale. It does
- * NOT issue GL calls — those are batched / deduped by render_optimizer.
+ * not issue GL calls.
  *
  * This module provides REAL performance optimizations for multipass shaders:
  * 

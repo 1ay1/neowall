@@ -7,7 +7,6 @@
 
 #include "neowall/shader/shader_multipass.h"
 #include "neowall/shader/adaptive_scale.h"
-#include "neowall/shader/render_optimizer.h"
 #include "neowall/shader/multipass_optimizer.h"
 #include "neowall/shader/shadertoy_compat.h"
 #include "neowall/shader/shader_log.h"
@@ -912,10 +911,6 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
     /* Initialize industry-grade adaptive resolution system */
     adaptive_init(&shader->adaptive, NULL);  /* Use default config */
     
-    /* Initialize render optimizer (will be fully initialized in multipass_init_gl) */
-    memset(&shader->optimizer, 0, sizeof(shader->optimizer));
-    shader->use_smart_buffer_sizing = true;
-    
     /* Initialize multipass optimizer for smart per-buffer resolution and half-rate updates */
     multipass_optimizer_init(&shader->multipass_opt);
 
@@ -1061,11 +1056,6 @@ bool multipass_init_gl(multipass_shader_t *shader, int width, int height) {
      * - FBOs - change every pass
      * - Uniforms - many change every frame (iTime, iFrame, etc.)
      */
-    render_optimizer_init(&shader->optimizer);
-    shader->optimizer.enabled = true;
-    shader->optimizer.aggressive_mode = false;  /* Conservative mode */
-    
-    shader->use_smart_buffer_sizing = true;  /* Enable by default */
 
     /* Get the default framebuffer ID (GTK may use non-zero FBO) */
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &shader->default_framebuffer);
@@ -1778,9 +1768,6 @@ void multipass_destroy(multipass_shader_t *shader) {
     
     /* Cleanup adaptive resolution system */
     adaptive_destroy(&shader->adaptive);
-    
-    /* Cleanup render optimizer */
-    render_optimizer_destroy(&shader->optimizer);
 
     free(shader->common_source);
     free(shader->state_path);
@@ -2236,9 +2223,6 @@ void multipass_render_pass(multipass_shader_t *shader,
     if (!pass->is_compiled || !pass->program) {
         return;
     }
-    
-    /* Track pass rendering for statistics */
-    shader->optimizer.stats.passes_rendered++;
 
     log_debug_frame(shader->frame_count, "Rendering pass %d: %s (program=%u, fbo=%u, size=%dx%d)",
               pass_index, pass->name, pass->program, pass->fbo, pass->width, pass->height);
@@ -2383,10 +2367,7 @@ void multipass_render(multipass_shader_t *shader,
 
     /* Start GPU timing for this frame (if enabled) */
     adaptive_begin_frame(&shader->adaptive);
-    
-    /* Begin optimizer frame for state caching and temporal analysis */
-    render_optimizer_begin_frame(&shader->optimizer, time, mouse_x, mouse_y, mouse_click);
-    
+
     /* Begin multipass optimizer frame for static scene detection */
     multipass_optimizer_begin_frame(&shader->multipass_opt, time, mouse_x, mouse_y, mouse_click);
     
@@ -2516,14 +2497,15 @@ void multipass_render(multipass_shader_t *shader,
     }
 #endif
 
-    /* Set optimal render state ONCE at start of frame
-     * These are the ONLY things worth caching - they're set once and never change */
-    opt_disable(&shader->optimizer, GL_DEPTH_TEST);
-    opt_disable(&shader->optimizer, GL_BLEND);
-    opt_disable(&shader->optimizer, GL_CULL_FACE);
-    opt_disable(&shader->optimizer, GL_SCISSOR_TEST);
-    opt_depth_mask(&shader->optimizer, GL_FALSE);
-    opt_color_mask(&shader->optimizer, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    /* The GL context is shared with transitions, the FPS watermark and other
+     * outputs, any of which may leave blending or masks set; establish what
+     * the passes need every frame rather than trusting a cache of it. */
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_SCISSOR_TEST);
+    glDepthMask(GL_FALSE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     /*
      * Setup vertex state ONCE for all passes: the quad layout was baked into
@@ -2626,10 +2608,7 @@ void multipass_render(multipass_shader_t *shader,
 
     /* End GPU timing for this frame */
     adaptive_end_frame(&shader->adaptive);
-    
-    /* End optimizer frame - updates statistics and temporal state */
-    render_optimizer_end_frame(&shader->optimizer);
-    
+
     /* End multipass optimizer frame */
     multipass_optimizer_end_frame(&shader->multipass_opt);
     
