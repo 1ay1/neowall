@@ -187,6 +187,71 @@ expect "reload back to shaders"         0 "configuration reloaded"  "$nw" reload
 wait_for 10 sh -c "! kill -0 ${new_child:-0} 2>/dev/null" && ok "terminal child stopped on reload" \
     || bad "terminal child stopped on reload" "pid $new_child still alive"
 
+# ---- monitor hotplug ----------------------------------------------------------
+# Add an output while running: it must come up with its own config block, and
+# removing it must not take the daemon down. Needs a compositor that can add
+# outputs at runtime (hyprctl / swaymsg).
+hot_cmd=""
+if [ -n "${hypr_sig:-}" ]; then
+    # nested Hyprland gives "headless" outputs no mode; a wayland one gets a real size
+    hot_add()    { HYPRLAND_INSTANCE_SIGNATURE=$hypr_sig hyprctl output create wayland NW-HOT >/dev/null; }
+    hot_remove() { HYPRLAND_INSTANCE_SIGNATURE=$hypr_sig hyprctl output remove NW-HOT >/dev/null; }
+    hot_cmd=hyprctl
+elif command -v swaymsg >/dev/null; then
+    hot_add()    { swaymsg create_output >/dev/null; }
+    hot_remove() { swaymsg output HEADLESS-2 unplug >/dev/null; }
+    hot_cmd=swaymsg
+fi
+if [ -n "$hot_cmd" ]; then
+    cat > "$cfg" <<EOF
+default {
+  shader $src/examples/shaders/
+  duration 3600
+  shuffle false
+}
+output {
+  NW-HOT { shader $src/examples/shaders/plasma_touch.glsl }
+  HEADLESS-2 { shader $src/examples/shaders/plasma_touch.glsl }
+}
+EOF
+    expect "reload with a block for the new output" 0 "configuration reloaded" "$nw" reload
+    hot_add
+    if wait_for 15 grep -q 'Reconnect: output .* online' "$tmp/nw.log"; then
+        ok "hotplugged output comes online"
+    else
+        bad "hotplugged output comes online" "$(grep -E 'Reconnect|New output' "$tmp/nw.log" | tail -3 | tr '\n' ' ')"
+    fi
+    wait_for 10 grep -q -E '\[output\.(NW-HOT|HEADLESS-2)\] SHADER MODE: .*plasma_touch' "$tmp/nw.log" \
+        && ok "it gets its own config block" || bad "it gets its own config block"
+    expect "status lists both outputs"   0 "NW-HOT|HEADLESS-2"        "$nw" current
+    hot_remove
+    sleep 1
+    expect "daemon survives the unplug"  0 "pid $nw_pid"              "$nw" ping
+    hot_add
+    wait_for 15 sh -c "[ \$(grep -c 'Reconnect: output .* online' '$tmp/nw.log') -ge 2 ]" \
+        && ok "replugged output comes back" || bad "replugged output comes back"
+    hot_remove
+    # An output that shows up before it has a size (a headless output in
+    # nested Hyprland stays 0x0 until a mode is set) must wait, then come up
+    # once the compositor sizes it, not be dropped.
+    if [ -n "${hypr_sig:-}" ]; then
+        H() { HYPRLAND_INSTANCE_SIGNATURE=$hypr_sig hyprctl "$@" >/dev/null; }
+        before_online=$(grep -c 'Reconnect: output .* online' "$tmp/nw.log")
+        H output create headless NW-LATE
+        wait_for 10 grep -q 'NW-LATE has no size yet' "$tmp/nw.log" \
+            && ok "unsized output waits" || bad "unsized output waits"
+        H output remove NW-LATE
+        H output create wayland NW-LATE
+        wait_for 15 sh -c "[ \$(grep -c 'Reconnect: output .* online' '$tmp/nw.log') -gt $before_online ]" \
+            && ok "it comes up once sized" || bad "it comes up once sized"
+        H output remove NW-LATE
+    fi
+    cp "$tmp/good.vibe" "$cfg"
+    expect "daemon still answers"        0 "pid $nw_pid"              "$nw" ping
+else
+    echo "  skip hotplug: no hyprctl/swaymsg"
+fi
+
 # ---- errors and stop ----------------------------------------------------------
 expect "unknown command"                1 "Unknown command"         "$nw" frobnicate
 expect "kill"                           0 "stopping|Stopping|killed|Sent" "$nw" kill

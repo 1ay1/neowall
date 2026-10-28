@@ -416,6 +416,13 @@ static void output_on_configure_callback(struct compositor_surface *surface,
                   output->model[0] ? output->model : "unknown");
         output_apply_deferred_config(output);
     }
+
+    /* A hotplugged output whose bring-up ran before the compositor gave it a
+     * size is still waiting; now that it has one, retry. */
+    if (output->width > 0 && output->height > 0 && output->compositor_surface &&
+        output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
+        app_post(NW_MSG_OUTPUTS_NEW, 0, 0);
+    }
 }
 
 /* Compositor surface closed callback */

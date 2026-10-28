@@ -463,7 +463,9 @@ static void reinit_reconnected_outputs(struct neowall_state *state) {
     int n = 0;
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o && n < MAX_OUTPUTS; o = o->next) {
-        if (!o->compositor_surface) {
+        /* No surface yet, or a surface still waiting for its size (bring-up
+         * was attempted before the compositor configured it). */
+        if (!o->compositor_surface || o->compositor_surface->egl_surface == EGL_NO_SURFACE) {
             output_ref(o);
             pending[n++] = o;
         }
@@ -501,8 +503,10 @@ static void reinit_reconnected_outputs(struct neowall_state *state) {
             continue; /* surface creation failed above */
         }
         if (o->width <= 0 || o->height <= 0) {
-            log_error("Reconnect: output %s has no dimensions (%dx%d), skipping",
-                      name[0] ? name : "unknown", o->width, o->height);
+            /* Not configured yet; the configure that sizes it triggers a
+             * retry (output_on_configure_callback). */
+            log_info("Reconnect: output %s has no size yet, waiting for the compositor",
+                     name[0] ? name : "unknown");
             continue;
         }
         if (!output_create_egl_surface(o) || !egl_core_make_current(state, o) ||
