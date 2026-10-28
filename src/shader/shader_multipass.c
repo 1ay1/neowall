@@ -770,6 +770,127 @@ multipass_shader_t *multipass_create(const char *source) {
     return shader;
 }
 
+/* Does any pass source, or the common source, contain one of `tokens`? A
+ * plain substring match, comments included. */
+static bool sources_mention_any(const char *const *sources, int count, const char *common,
+                                const char *const *tokens, size_t ntokens) {
+    for (int i = 0; i <= count; i++) {
+        const char *src = i < count ? sources[i] : common;
+        if (!src) continue;
+        for (size_t t = 0; t < ntokens; t++) {
+            if (strstr(src, tokens[t])) return true;
+        }
+    }
+    return false;
+}
+
+/* Shadertoy convention for a buffer pass: iChannel0 is itself, 1..3 read
+ * buffers A..C. */
+static channel_source_t buffer_channel_convention(int c) {
+    switch (c) {
+    case 0:  return CHANNEL_SOURCE_SELF;
+    case 1:  return CHANNEL_SOURCE_BUFFER_A;
+    case 2:  return CHANNEL_SOURCE_BUFFER_B;
+    default: return CHANNEL_SOURCE_BUFFER_C;
+    }
+}
+
+/*
+ * Guess what feeds iChannel`c` of a buffer pass.
+ *
+ * Shadertoy declares bindings out of band (in the website UI), so a bare .glsl
+ * file has none. This scores the source for usage idioms: big-power-of-two
+ * divisors and single-component reads suggest a noise texture; fragCoord, uv
+ * and temporal mixing suggest a screen-space buffer read or self-feedback.
+ * It's a best-effort guess; a .neowall sidecar gives exact bindings.
+ */
+static channel_source_t guess_buffer_channel(const char *src, int c, const char *pass_name) {
+    int noise_score = 0, buffer_score = 0, self_score = 0;
+    bool channel_used = false;
+    char channel_name[16];
+    snprintf(channel_name, sizeof(channel_name), "iChannel%d", c);
+
+    for (const char *usage = src; usage && (usage = strstr(usage, channel_name)) != NULL; usage++) {
+        channel_used = true;
+        const char *line_start = usage;
+        while (line_start > src && line_start[-1] != '\n') line_start--;
+        const char *line_end = usage;
+        while (*line_end && *line_end != '\n' && *line_end != ';') line_end++;
+
+        /* noise: division by a large power of two (atlas lookup) */
+        if (strstr(usage, "/1024") || strstr(usage, "/ 1024") ||
+            strstr(usage, "/512") || strstr(usage, "/ 512") ||
+            strstr(usage, "/256") || strstr(usage, "/ 256")) {
+            noise_score += 100;
+        }
+        /* noise: multiplied by a tiny constant */
+        for (const char *p = usage; p < usage + 60 && *p; p++) {
+            if ((strncmp(p, "*0.00", 5) == 0 || strncmp(p, "* 0.00", 6) == 0) &&
+                !strstr(line_start, "mix") && !strstr(line_start, "smoothstep")) {
+                noise_score += 80;
+                break;
+            }
+        }
+        /* noise: a single .x / .r component read */
+        const char *p = usage + strlen(channel_name);
+        while (*p == ' ' || *p == ',') p++;
+        if (*p == ')') {
+            p++;
+            while (*p == ' ') p++;
+            if (*p == '.' && (p[1] == 'x' || p[1] == 'r') &&
+                (p[2] == ';' || p[2] == ')' || p[2] == ',' || p[2] == ' ' ||
+                 p[2] == '*' || p[2] == '+' || p[2] == '-' || p[2] == '/')) {
+                noise_score += 30;
+            }
+        }
+        /* buffer: screen-space coordinates on the same line */
+        for (p = line_start; p < line_end; p++) {
+            if (strncmp(p, "fragCoord", 9) == 0 || strncmp(p, "iResolution", 11) == 0) {
+                buffer_score += 50;
+                break;
+            }
+        }
+        /* buffer: a uv-like coordinate argument */
+        for (p = usage; p < usage + 40 && *p; p++) {
+            if (p[0] == 'u' && p[1] == 'v' &&
+                (p[2] == ')' || p[2] == '.' || p[2] == ',' || p[2] == ' ' || p[2] == '*' || p[2] == '+')) {
+                buffer_score += 40;
+                break;
+            }
+            if (strncmp(p, "coord", 5) == 0 || strncmp(p, "pos", 3) == 0 ||
+                strncmp(p, "st)", 3) == 0 || strncmp(p, "st,", 3) == 0) {
+                buffer_score += 30;
+                break;
+            }
+        }
+        /* self: temporal mixing or accumulation */
+        if (strstr(line_start, "mix") && strstr(line_start, channel_name)) self_score += 60;
+        if (strstr(line_start, "+=") || strstr(line_start, "*=")) self_score += 20;
+    }
+
+    if (!channel_used) return CHANNEL_SOURCE_NOISE;   /* unused: harmless default */
+
+    if (noise_score > buffer_score && noise_score > self_score && noise_score >= 50) {
+        log_info("  %s iChannel%d: noise (score: noise=%d, buffer=%d, self=%d)",
+                 pass_name, c, noise_score, buffer_score, self_score);
+        return CHANNEL_SOURCE_NOISE;
+    }
+    if (buffer_score == 0 && self_score == 0) {
+        log_info("  %s iChannel%d: convention default (channel used, pattern unclear)",
+                 pass_name, c);
+        return buffer_channel_convention(c);
+    }
+    /* iChannel0 of a buffer pass is almost always self-feedback. */
+    if ((c == 0 && noise_score < 50) || self_score > buffer_score) {
+        log_info("  %s iChannel%d: self (score: noise=%d, buffer=%d, self=%d)",
+                 pass_name, c, noise_score, buffer_score, self_score);
+        return CHANNEL_SOURCE_SELF;
+    }
+    log_info("  %s iChannel%d: buffer (score: noise=%d, buffer=%d, self=%d)",
+             pass_name, c, noise_score, buffer_score, self_score);
+    return buffer_channel_convention(c);
+}
+
 multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t *parse_result) {
     if (!parse_result) return NULL;
 
@@ -803,33 +924,20 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
      * paint it once and stop the redraw loop entirely (0% GPU at idle).
      * Conservative: any time/frame/interactive/buffer reference counts as
      * animated; buffers imply feedback which can evolve without iTime. */
-    shader->is_animated = (parse_result->pass_count > 1);
-    {
-        const char *animate_tokens[] = {
-            "iTime", "iGlobalTime", "iFrame", "iDate", "iMouse",
-            "iChannel", "iAudio", "iKeyEnergy", "iMouseEnergy",
-            "iCpu", "iRam", "iNet", "iLoad", "iGpu", "iDisk", "iSwap",
-            "iBattery", "iCharging", "iTimeOfDay", "iSun", "iDayFraction",
-            "iProcs", "iUptime", "iTemp", "iNv", "iThermal", "iActivity",
-            "iPulse", "iCpuMax", "iCpuSpread", "iActivity"
-        };
-        for (int i = 0; !shader->is_animated && i < parse_result->pass_count; i++) {
-            const char *src = parse_result->pass_sources[i];
-            if (!src) continue;
-            for (size_t t = 0; t < sizeof(animate_tokens)/sizeof(animate_tokens[0]); t++) {
-                if (strstr(src, animate_tokens[t])) { shader->is_animated = true; break; }
-            }
-        }
-        if (!shader->is_animated && parse_result->common_source) {
-            for (size_t t = 0; t < sizeof(animate_tokens)/sizeof(animate_tokens[0]); t++) {
-                if (strstr(parse_result->common_source, animate_tokens[t])) {
-                    shader->is_animated = true; break;
-                }
-            }
-        }
-        if (!shader->is_animated) {
-            log_info("Static shader detected (no time/interactive inputs) - will render once and idle");
-        }
+    static const char *const animate_tokens[] = {
+        "iTime", "iGlobalTime", "iFrame", "iDate", "iMouse",
+        "iChannel", "iAudio", "iKeyEnergy", "iMouseEnergy",
+        "iCpu", "iRam", "iNet", "iLoad", "iGpu", "iDisk", "iSwap",
+        "iBattery", "iCharging", "iTimeOfDay", "iSun", "iDayFraction",
+        "iProcs", "iUptime", "iTemp", "iNv", "iThermal", "iActivity",
+        "iPulse", "iCpuMax", "iCpuSpread",
+    };
+    shader->is_animated = parse_result->pass_count > 1 ||
+        sources_mention_any((const char *const *)parse_result->pass_sources,
+                            parse_result->pass_count, parse_result->common_source,
+                            animate_tokens, sizeof(animate_tokens) / sizeof(animate_tokens[0]));
+    if (!shader->is_animated) {
+        log_info("Static shader detected (no time/interactive inputs) - will render once and idle");
     }
 
     for (int i = 0; i < parse_result->pass_count; i++) {
@@ -841,27 +949,6 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
         pass->first_line = parse_result->pass_first_line[i];
         pass->is_compiled = false;
 
-        /*
-         * CHANNEL BINDING (heuristic, best-effort)
-         *
-         * Shadertoy shaders declare which texture feeds each iChannelN out of
-         * band (in the website UI), so a bare .glsl file carries no binding
-         * metadata. We recover the intent by scoring the source text for
-         * tell-tale usage patterns (noise lookups, self-feedback, buffer
-         * reads). This is correct for the overwhelmingly common Shadertoy
-         * idioms but is fundamentally a guess: an exotic shader can still be
-         * bound wrong, in which case it renders incorrectly rather than
-         * crashing. If you hit that, the per-channel decision is logged below
-         * (noise/buffer/self with scores) so it can be diagnosed, and an
-         * explicit binding syntax in the config is the proper long-term fix.
-         *
-         * Heuristics:
-         * 1. Noise texture: /1024, /512, /256, *0.001, .x only (single channel read)
-         * 2. Self-feedback: uv, fragCoord/iResolution, temporal mixing patterns
-         * 3. Buffer read: texture(iChannelN, uv) where N matches buffer index pattern
-         * 4. Shadertoy conventions: iChannel0 often = self for buffers
-         */
-        
         if (pass->type == PASS_TYPE_IMAGE) {
             shader->image_pass_index = i;
             /* Image pass reads from buffers in order */
@@ -871,161 +958,8 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
             pass->channels[3].source = CHANNEL_SOURCE_BUFFER_D;
         } else {
             shader->has_buffers = true;
-            
-            const char *src = pass->source;
-            
             for (int c = 0; c < MULTIPASS_MAX_CHANNELS; c++) {
-                /* Confidence scores: positive = noise, negative = buffer/self */
-                int noise_score = 0;
-                int buffer_score = 0;
-                int self_score = 0;
-                bool channel_used = false;
-                
-                if (src) {
-                    char channel_name[16];
-                    snprintf(channel_name, sizeof(channel_name), "iChannel%d", c);
-                    
-                    const char *usage = src;
-                    while ((usage = strstr(usage, channel_name)) != NULL) {
-                        channel_used = true;
-                        
-                        /* Scan context around this usage (before and after) */
-                        const char *line_start = usage;
-                        while (line_start > src && *(line_start-1) != '\n') line_start--;
-                        
-                        const char *line_end = usage;
-                        while (*line_end && *line_end != '\n' && *line_end != ';') line_end++;
-                        
-                        /* Check for noise texture patterns */
-                        /* Pattern: division by large power of 2 (texture atlas/noise) */
-                        if (strstr(usage, "/1024") || strstr(usage, "/ 1024") ||
-                            strstr(usage, "/512") || strstr(usage, "/ 512") ||
-                            strstr(usage, "/256") || strstr(usage, "/ 256")) {
-                            noise_score += 100;  /* Very strong noise indicator */
-                        }
-                        
-                        /* Pattern: multiplication by very small number */
-                        const char *p = usage;
-                        while (p < usage + 60 && *p) {
-                            if ((strncmp(p, "*0.00", 5) == 0 || strncmp(p, "* 0.00", 6) == 0) &&
-                                !strstr(line_start, "mix") && !strstr(line_start, "smoothstep")) {
-                                noise_score += 80;
-                                break;
-                            }
-                            p++;
-                        }
-                        
-                        /* Pattern: .x, .y, .z, .r only access (noise often single channel) */
-                        p = usage + strlen(channel_name);
-                        while (*p == ' ' || *p == ',') p++;
-                        if (*p == ')') {
-                            p++;
-                            while (*p == ' ') p++;
-                            if (*p == '.' && (p[1] == 'x' || p[1] == 'r') && 
-                                (p[2] == ';' || p[2] == ')' || p[2] == ',' || p[2] == ' ' ||
-                                 p[2] == '*' || p[2] == '+' || p[2] == '-' || p[2] == '/')) {
-                                noise_score += 30;  /* Moderate noise indicator */
-                            }
-                        }
-                        
-                        /* Check for buffer/screen-space read patterns */
-                        /* Pattern: fragCoord or iResolution nearby */
-                        p = line_start;
-                        while (p < line_end) {
-                            if (strncmp(p, "fragCoord", 9) == 0 ||
-                                strncmp(p, "iResolution", 11) == 0) {
-                                buffer_score += 50;
-                                break;
-                            }
-                            p++;
-                        }
-                        
-                        /* Pattern: simple uv variable (very common for feedback) */
-                        p = usage;
-                        while (p < usage + 40 && *p) {
-                            if (p[0] == 'u' && p[1] == 'v' && 
-                                (p[2] == ')' || p[2] == '.' || p[2] == ',' || p[2] == ' ' || p[2] == '*' || p[2] == '+')) {
-                                buffer_score += 40;
-                                break;
-                            }
-                            /* Also check for common coordinate variable names */
-                            if (strncmp(p, "coord", 5) == 0 || strncmp(p, "pos", 3) == 0 ||
-                                strncmp(p, "st)", 3) == 0 || strncmp(p, "st,", 3) == 0) {
-                                buffer_score += 30;
-                                break;
-                            }
-                            p++;
-                        }
-                        
-                        /* Pattern: temporal mixing (strong self-feedback indicator) */
-                        if (strstr(line_start, "mix") && strstr(line_start, channel_name)) {
-                            self_score += 60;
-                        }
-                        if (strstr(line_start, "+=") || strstr(line_start, "*=")) {
-                            self_score += 20;  /* Accumulation pattern */
-                        }
-                        
-                        usage++;
-                    }
-                }
-                
-                /* Determine channel source based on scores and conventions */
-                if (!channel_used) {
-                    /* Channel not used at all - default to noise (harmless) */
-                    pass->channels[c].source = CHANNEL_SOURCE_NOISE;
-                } else if (noise_score > buffer_score && noise_score > self_score && noise_score >= 50) {
-                    /* Clear noise texture usage */
-                    pass->channels[c].source = CHANNEL_SOURCE_NOISE;
-                    log_info("  %s iChannel%d: noise (score: noise=%d, buffer=%d, self=%d)", 
-                             pass->name, c, noise_score, buffer_score, self_score);
-                } else if (buffer_score > 0 || self_score > 0) {
-                    /* Screen-space read detected - determine if self or other buffer */
-                    
-                    /*
-                     * Shadertoy convention: For buffer passes, iChannel0 is usually self-feedback
-                     * UNLESS there's strong evidence of noise texture usage.
-                     * This is the most common pattern in Shadertoy.
-                     */
-                    if (c == 0 && noise_score < 50) {
-                        /* iChannel0 in buffer pass = almost always self-feedback */
-                        pass->channels[c].source = CHANNEL_SOURCE_SELF;
-                        log_info("  %s iChannel%d: self (convention + scores: noise=%d, buffer=%d, self=%d)", 
-                                 pass->name, c, noise_score, buffer_score, self_score);
-                    } else if (self_score > buffer_score) {
-                        /* Temporal/accumulation pattern detected */
-                        pass->channels[c].source = CHANNEL_SOURCE_SELF;
-                        log_info("  %s iChannel%d: self (score: noise=%d, buffer=%d, self=%d)", 
-                                 pass->name, c, noise_score, buffer_score, self_score);
-                    } else {
-                        /* Reading from another buffer */
-                        /* Map channel index to buffer: ch1->BufA, ch2->BufB, etc. for non-zero channels */
-                        if (c == 0) {
-                            pass->channels[c].source = CHANNEL_SOURCE_SELF;
-                        } else if (c == 1) {
-                            pass->channels[c].source = CHANNEL_SOURCE_BUFFER_A;
-                        } else if (c == 2) {
-                            pass->channels[c].source = CHANNEL_SOURCE_BUFFER_B;
-                        } else {
-                            pass->channels[c].source = CHANNEL_SOURCE_BUFFER_C;
-                        }
-                        log_info("  %s iChannel%d: buffer (score: noise=%d, buffer=%d, self=%d)", 
-                                 pass->name, c, noise_score, buffer_score, self_score);
-                    }
-                } else {
-                    /* Channel used but pattern unclear - use Shadertoy conventions */
-                    if (c == 0) {
-                        /* iChannel0 = self for buffer passes (most common convention) */
-                        pass->channels[c].source = CHANNEL_SOURCE_SELF;
-                    } else if (c == 1) {
-                        pass->channels[c].source = CHANNEL_SOURCE_BUFFER_A;
-                    } else if (c == 2) {
-                        pass->channels[c].source = CHANNEL_SOURCE_BUFFER_B;
-                    } else {
-                        pass->channels[c].source = CHANNEL_SOURCE_BUFFER_C;
-                    }
-                    log_info("  %s iChannel%d: convention default (channel used, pattern unclear)", 
-                             pass->name, c);
-                }
+                pass->channels[c].source = guess_buffer_channel(pass->source, c, pass->name);
             }
         }
 
@@ -1061,33 +995,18 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
      * when NONE of those move, so without this the optimizer can decide the
      * scene is static and gate its passes while its real inputs are changing
      * every sample — which looks exactly like stutter. */
-    {
-        static const char *reactive_tokens[] = {
-            "iCpu", "iRam", "iSwap", "iNet", "iDisk", "iLoad", "iGpu",
-            "iTemp", "iThermal", "iNv", "iBattery", "iCharging",
-            "iTimeOfDay", "iSun", "iDayFraction", "iUptime", "iProcs",
-            "iKeyEnergy", "iMouseEnergy", "iActivity", "iPulse",
-            "iAudio", "iState", "iTerm", "iWindow", "iFocusedWindow"
-        };
-        bool reactive = false;
-        for (int i = 0; !reactive && i < shader->pass_count; i++) {
-            const char *src = shader->passes[i].source;
-            if (!src) continue;
-            for (size_t t = 0; t < sizeof(reactive_tokens)/sizeof(reactive_tokens[0]); t++) {
-                if (strstr(src, reactive_tokens[t])) { reactive = true; break; }
-            }
-        }
-        if (!reactive && shader->common_source) {
-            for (size_t t = 0; t < sizeof(reactive_tokens)/sizeof(reactive_tokens[0]); t++) {
-                if (strstr(shader->common_source, reactive_tokens[t])) {
-                    reactive = true; break;
-                }
-            }
-        }
-        shader->multipass_opt.shader_is_reactive = reactive;
-        if (reactive) {
-            log_info("Optimizer: shader reads live system data - static-scene skipping disabled");
-        }
+    static const char *const reactive_tokens[] = {
+        "iCpu", "iRam", "iSwap", "iNet", "iDisk", "iLoad", "iGpu",
+        "iTemp", "iThermal", "iNv", "iBattery", "iCharging",
+        "iTimeOfDay", "iSun", "iDayFraction", "iUptime", "iProcs",
+        "iKeyEnergy", "iMouseEnergy", "iActivity", "iPulse",
+        "iAudio", "iState", "iTerm", "iWindow", "iFocusedWindow",
+    };
+    shader->multipass_opt.shader_is_reactive =
+        sources_mention_any(pass_sources, shader->pass_count, shader->common_source,
+                            reactive_tokens, sizeof(reactive_tokens) / sizeof(reactive_tokens[0]));
+    if (shader->multipass_opt.shader_is_reactive) {
+        log_info("Optimizer: shader reads live system data - static-scene skipping disabled");
     }
 
     /* Audio is opt-in. Spawning the capture child registers a recording stream
@@ -1095,42 +1014,23 @@ multipass_shader_t *multipass_create_from_parsed(const multipass_parse_result_t 
      * shader is known to actually read audio (issue #84). Scan for the audio
      * uniforms, the stdlib helpers and their unprefixed aliases, plus any
      * iChannel wired to the audio texture. */
-    {
-        static const char *audio_tokens[] = {
-            "iAudio",                                  /* iAudioLevel/Bass/Mid/Treble/Beat */
-            "nwAudioBand", "nwSpectrum", "nwWaveform", "nwBeat",
-            "audioBand", "spectrum", "waveform", "beat"
-        };
-        bool uses_audio = false;
-
-        for (int i = 0; !uses_audio && i < shader->pass_count; i++) {
-            for (int c = 0; c < MULTIPASS_MAX_CHANNELS; c++) {
-                if (shader->passes[i].channels[c].source == CHANNEL_SOURCE_AUDIO) {
-                    uses_audio = true;
-                    break;
-                }
-            }
+    static const char *const audio_tokens[] = {
+        "iAudio",                                  /* iAudioLevel/Bass/Mid/Treble/Beat */
+        "nwAudioBand", "nwSpectrum", "nwWaveform", "nwBeat",
+        "audioBand", "spectrum", "waveform", "beat",
+    };
+    bool uses_audio = false;
+    for (int i = 0; !uses_audio && i < shader->pass_count; i++) {
+        for (int c = 0; c < MULTIPASS_MAX_CHANNELS; c++) {
+            if (shader->passes[i].channels[c].source == CHANNEL_SOURCE_AUDIO) uses_audio = true;
         }
-
-        for (int i = 0; !uses_audio && i < shader->pass_count; i++) {
-            const char *src = shader->passes[i].source;
-            if (!src) continue;
-            for (size_t t = 0; t < sizeof(audio_tokens)/sizeof(audio_tokens[0]); t++) {
-                if (strstr(src, audio_tokens[t])) { uses_audio = true; break; }
-            }
-        }
-        if (!uses_audio && shader->common_source) {
-            for (size_t t = 0; t < sizeof(audio_tokens)/sizeof(audio_tokens[0]); t++) {
-                if (strstr(shader->common_source, audio_tokens[t])) {
-                    uses_audio = true; break;
-                }
-            }
-        }
-
-        if (uses_audio) {
-            log_info("Shader reads audio - starting capture (desktop output monitor)");
-            reactive_audio_start();
-        }
+    }
+    uses_audio = uses_audio ||
+        sources_mention_any(pass_sources, shader->pass_count, shader->common_source,
+                            audio_tokens, sizeof(audio_tokens) / sizeof(audio_tokens[0]));
+    if (uses_audio) {
+        log_info("Shader reads audio - starting capture (desktop output monitor)");
+        reactive_audio_start();
     }
 
     return shader;
