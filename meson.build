@@ -995,6 +995,23 @@ if has_terminal
   test('glyph_synth', test_glyph_synth_exe)
 endif
 
+# The shader engine rendering for real: a GL 3.3 context with no display
+# (Mesa surfaceless + llvmpipe), pixels read back and checked, and every
+# shipped shader compiled and drawn. Skips (77) without software GL.
+test('multipass_gl', executable('test_multipass_gl',
+  files('tests/test_multipass_gl.c', 'tests/gl_headless.c', 'src/utils.c',
+        'src/clock.c', 'src/config/vibe_impl.c') +
+    shader_sources + texture_sources + image_sources + source_sources +
+    gfx_sources + graph_sources + terminal_sources,
+  include_directories: has_terminal
+    ? [inc_dirs, inc_dirs_build, include_directories('src/terminal', 'tests')]
+    : [inc_dirs, inc_dirs_build, include_directories('tests')],
+  dependencies: deps,
+  link_with: has_terminal ? [terminal_glyph_lib] : [],
+  build_by_default: false,
+), env: {'NW_SHADER_DIR': meson.project_source_root() / 'examples/shaders'},
+   timeout: 300)
+
 # =============================================================================
 # Fuzzers
 # =============================================================================
