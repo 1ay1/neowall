@@ -1030,6 +1030,18 @@ if has_wayland
     build_by_default: false,
   ), timeout: 120)
 
+  # Hyprland coverage + window reporting against a fake Hyprland IPC socket:
+  # the real IPC, JSON scanner and coverage maths, no Hyprland needed.
+  test('hyprland_coverage', executable('test_hyprland_coverage',
+    files('tests/test_hyprland_coverage.c',
+          'src/compositor/backends/wayland/hyprland_coverage.c', 'src/utils.c'),
+    include_directories: [inc_dirs, inc_dirs_build,
+                          include_directories('src/compositor/backends/wayland')],
+    c_args: ['-DHAVE_WAYLAND_BACKEND'],
+    dependencies: [m_dep, thread_dep],
+    build_by_default: false,
+  ), timeout: 60)
+
   # The whole daemon on a real compositor (sway headless), driven through
   # every control command. Skips (77) where sway isn't installed.
   test('e2e_wayland', find_program('tests/e2e_wayland.sh'),
