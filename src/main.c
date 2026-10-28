@@ -911,6 +911,227 @@ static bool create_config_directory(void) {
     return true;
 }
 
+/* ── one-shot tools: never touch the daemon, config or pid file ─────── */
+
+/* `neowall new <name> [--template=scene|flat|reactive] [--force] [--list]` */
+static int cmd_new(int argc, char *argv[]) {
+    const char *shader_name = NULL;
+    const char *tmpl = NULL;
+    bool force = false;
+
+    for (int i = 2; i < argc; i++) {
+        if (strncmp(argv[i], "--template=", 11) == 0) {
+            tmpl = argv[i] + 11;
+        } else if (strcmp(argv[i], "--template") == 0 && i + 1 < argc) {
+            tmpl = argv[++i];
+        } else if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0) {
+            force = true;
+        } else if (strcmp(argv[i], "--list") == 0) {
+            neowall_scaffold_list_templates(stdout);
+            return EXIT_SUCCESS;
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "Unknown option for 'new': %s\n", argv[i]);
+            return EXIT_FAILURE;
+        } else if (!shader_name) {
+            shader_name = argv[i];
+        }
+    }
+
+    if (!shader_name) {
+        fprintf(stderr, "Usage: %s new <name> [--template=NAME] [--force]\n\n", argv[0]);
+        neowall_scaffold_list_templates(stderr);
+        fprintf(stderr, "\nExample: %s new aurora --template=scene\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+    return neowall_scaffold_create(shader_name, tmpl, force) ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+/* `neowall docs [query]`: every helper and uniform, from the real GLSL. */
+static int cmd_docs(int argc, char *argv[]) {
+    const char *chunks[32];
+    size_t nc = multipass_preamble_chunks(chunks, 32);
+    static shader_doc_entry entries[1024];
+    size_t n = shader_docs_collect(chunks, nc, entries, 1024);
+    const char *q = argc >= 3 ? argv[2] : NULL;
+    bool color = isatty(STDOUT_FILENO) && !getenv("NO_COLOR");
+    size_t shown = shader_docs_print(stdout, entries, n, q, color);
+    if (!shown) {
+        fprintf(stderr, "Nothing matches '%s'. Try `%s docs` for everything.\n", q, argv[0]);
+        return EXIT_FAILURE;
+    }
+    if (!q) printf("Search with: %s docs <word>   e.g. noise, palette, audio, window\n", argv[0]);
+    return EXIT_SUCCESS;
+}
+
+/* ── controlling a running daemon ─────────────────────────────────────── */
+
+/* Read the daemon's pid from its pid file. Prints why when there's none. */
+static bool running_daemon_pid(pid_t *out) {
+    FILE *fp = fopen(get_pid_file_path(), "r");
+    if (!fp) {
+        printf("No running neowall daemon found.\n");
+        printf("Start the daemon first with: neowall\n");
+        return false;
+    }
+    pid_t pid;
+    if (fscanf(fp, "%d", &pid) != 1) {
+        fclose(fp);
+        fprintf(stderr, "Failed to read PID\n");
+        return false;
+    }
+    fclose(fp);
+    if (kill(pid, 0) == -1 && errno == ESRCH) {
+        printf("NeoWall daemon (PID %d) is not running.\n", pid);
+        remove_stale_pid_file();
+        return false;
+    }
+    *out = pid;
+    return true;
+}
+
+/* `set <index>` for a daemon without the control socket. */
+static int cmd_set_index_signal(int argc, char *argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s set <index>\n", argv[0]);
+        fprintf(stderr, "  <index>  Wallpaper index (0-based)\n");
+        fprintf(stderr, "\nUse '%s current' to see available wallpapers and their indices.\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+    /* atoi() can't report failure and is undefined on overflow. */
+    const char *index_str = argv[2];
+    long parsed = 0;
+    if (!neowall_parse_index(index_str, &parsed) || parsed > INT_MAX) {
+        fprintf(stderr, "Error: Index must be a non-negative integer, got '%s'\n", index_str);
+        return EXIT_FAILURE;
+    }
+
+    pid_t pid;
+    if (!running_daemon_pid(&pid)) return EXIT_FAILURE;
+
+    int cycle_total = state_max_cycle_total();
+    if (cycle_total <= 1) {
+        printf("Cannot set wallpaper index: Only one wallpaper/shader configured.\n");
+        return EXIT_FAILURE;
+    }
+    /* Otherwise the CLI reports success for an index no output can honour. */
+    if (parsed >= cycle_total) {
+        fprintf(stderr, "Error: Index %ld is out of range (0-%d)\n", parsed, cycle_total - 1);
+        return EXIT_FAILURE;
+    }
+    int index = (int)parsed;
+
+    if (!write_set_index_file(index)) return EXIT_FAILURE;
+    if (kill(pid, SIGRTMIN) == -1) {
+        fprintf(stderr, "Failed to send signal to daemon: %s\n", strerror(errno));
+        unlink(get_set_index_file_path());
+        return EXIT_FAILURE;
+    }
+    printf("Setting wallpaper to index %d...\n", index);
+    return EXIT_SUCCESS;
+}
+
+/* `set-terminal <command...>` for a daemon without the control socket. The
+ * daemon kills the old terminal's process group before spawning the new one. */
+static int cmd_set_terminal_signal(int argc, char *argv[]) {
+    if (argc < 3 || argv[2][0] == '\0') {
+        fprintf(stderr, "Usage: %s set-terminal \"<command>\"\n", argv[0]);
+        fprintf(stderr, "  <command>  Program to run as the terminal wallpaper,\n");
+        fprintf(stderr, "             e.g. %s set-terminal \"htop\"\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+    /* Join argv[2..] so an unquoted `set-terminal htop --tree` still works. */
+    char cmd_buf[512];
+    size_t off = 0;
+    for (int i = 2; i < argc; i++) {
+        int w = snprintf(cmd_buf + off, sizeof(cmd_buf) - off,
+                         "%s%s", (i > 2) ? " " : "", argv[i]);
+        if (w < 0 || (size_t)w >= sizeof(cmd_buf) - off) {
+            fprintf(stderr, "Error: terminal command too long\n");
+            return EXIT_FAILURE;
+        }
+        off += (size_t)w;
+    }
+    /* Newlines would break the single-line command file protocol. */
+    if (strchr(cmd_buf, '\n') || strchr(cmd_buf, '\r')) {
+        fprintf(stderr, "Error: terminal command must not contain newlines\n");
+        return EXIT_FAILURE;
+    }
+
+    pid_t pid;
+    if (!running_daemon_pid(&pid)) return EXIT_FAILURE;
+    if (!write_set_terminal_file(cmd_buf)) return EXIT_FAILURE;
+    if (kill(pid, SIGRTMIN + 3) == -1) {
+        fprintf(stderr, "Failed to send signal to daemon: %s\n", strerror(errno));
+        unlink(get_set_terminal_file_path());
+        return EXIT_FAILURE;
+    }
+    printf("Setting terminal wallpaper to: %s\n", cmd_buf);
+    return EXIT_SUCCESS;
+}
+
+/* `neowall <command>` with a daemon running: the control socket first (one
+ * request, one real answer), then the signal paths for an older daemon. */
+static int cmd_control(int argc, char *argv[]) {
+    const char *cmd = argv[1];
+
+    static const char *const socket_cmds[] = {
+        "next", "pause", "resume", "reload", "pause-shader", "resume-shader", NULL};
+    for (size_t i = 0; socket_cmds[i]; i++) {
+        int rc;
+        if (strcmp(cmd, socket_cmds[i]) == 0 && ipc_command(cmd, NULL, &rc)) return rc;
+    }
+    if (strcmp(cmd, "set") == 0 && argc >= 3) {
+        long parsed = 0;
+        if (neowall_parse_index(argv[2], &parsed) && parsed <= INT_MAX) {
+            int rc;
+            if (ipc_command("set", argv[2], &rc)) return rc;
+        }
+    }
+    if (strcmp(cmd, "set-terminal") == 0 && argc >= 3 && argv[2][0]) {
+        int rc;
+        if (ipc_command("set-terminal", argv[2], &rc)) return rc;
+    }
+
+    if (strcmp(cmd, "kill") == 0) return kill_daemon() ? EXIT_SUCCESS : EXIT_FAILURE;
+    if (strcmp(cmd, "list") == 0) return read_cycle_list() ? EXIT_SUCCESS : EXIT_FAILURE;
+
+    /* Real-time signals aren't compile-time constants, so these can't live
+     * in the daemon_commands table. */
+    if (strcmp(cmd, "pause-shader") == 0) {
+        return send_daemon_signal(SIGRTMIN + 1, "Freezing shader animation...", false)
+               ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+    if (strcmp(cmd, "resume-shader") == 0) {
+        return send_daemon_signal(SIGRTMIN + 2, "Resuming shader animation...", false)
+               ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+    if (strcmp(cmd, "set") == 0) return cmd_set_index_signal(argc, argv);
+    if (strcmp(cmd, "set-terminal") == 0) return cmd_set_terminal_signal(argc, argv);
+
+    for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
+        if (strcmp(cmd, daemon_commands[i].name) != 0) continue;
+        if (daemon_commands[i].needs_state_check) {
+            bool ok = read_wallpaper_state();
+            report_daemon_version();
+            return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
+        return send_daemon_signal(daemon_commands[i].signal,
+                                  daemon_commands[i].action_message,
+                                  daemon_commands[i].check_cycle)
+               ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    fprintf(stderr, "Unknown command: %s\n\n", cmd);
+    fprintf(stderr, "Available commands:\n");
+    fprintf(stderr, "  kill");
+    for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
+        fprintf(stderr, ", %s", daemon_commands[i].name);
+    }
+    fprintf(stderr, ", pause-shader, resume-shader, set-terminal");
+    fprintf(stderr, "\n\nRun '%s --help' for more information.\n", argv[0]);
+    return EXIT_FAILURE;
+}
+
 int main(int argc, char *argv[]) {
 
     struct neowall_state state = {0};
@@ -922,73 +1143,12 @@ int main(int argc, char *argv[]) {
     bool watch_mode = false;             /* `watch <shader>`: recompile on save */
     int opt;
 
-    /* ========================================================================
-     * Command Dispatch - Table-driven lookup (Command Pattern)
-     * ======================================================================== */
-    /* Preview is handled before the daemon-command table: it is not an IPC
-     * command but a run mode, and it consumes its own argument.
-     *
-     *   neowall preview garden.glsl --date=+6d
-     *   neowall preview garden.glsl --timelapse=30d/20s
-     *
-     * Runs in the foreground alongside your real wallpaper without touching
-     * the config, the saved state, or the daemon's pid file. */
-    /* `neowall new <name> [--template=scene|flat|reactive] [--force]`
-     *
-     * Scaffolding, handled before the daemon/option machinery because it never
-     * touches the daemon, the config or the pid file -- it writes one file and
-     * exits. */
-    if (argc >= 2 && strcmp(argv[1], "new") == 0) {
-        const char *shader_name = NULL;
-        const char *tmpl = NULL;
-        bool force = false;
+    if (argc >= 2 && strcmp(argv[1], "new") == 0) return cmd_new(argc, argv);
+    if (argc >= 2 && strcmp(argv[1], "docs") == 0) return cmd_docs(argc, argv);
 
-        for (int i = 2; i < argc; i++) {
-            if (strncmp(argv[i], "--template=", 11) == 0) {
-                tmpl = argv[i] + 11;
-            } else if (strcmp(argv[i], "--template") == 0 && i + 1 < argc) {
-                tmpl = argv[++i];
-            } else if (strcmp(argv[i], "--force") == 0 || strcmp(argv[i], "-f") == 0) {
-                force = true;
-            } else if (strcmp(argv[i], "--list") == 0) {
-                neowall_scaffold_list_templates(stdout);
-                return EXIT_SUCCESS;
-            } else if (argv[i][0] == '-') {
-                fprintf(stderr, "Unknown option for 'new': %s\n", argv[i]);
-                return EXIT_FAILURE;
-            } else if (!shader_name) {
-                shader_name = argv[i];
-            }
-        }
-
-        if (!shader_name) {
-            fprintf(stderr, "Usage: %s new <name> [--template=NAME] [--force]\n\n", argv[0]);
-            neowall_scaffold_list_templates(stderr);
-            fprintf(stderr, "\nExample: %s new aurora --template=scene\n", argv[0]);
-            return EXIT_FAILURE;
-        }
-
-        return neowall_scaffold_create(shader_name, tmpl, force)
-               ? EXIT_SUCCESS : EXIT_FAILURE;
-    }
-
-    /* `neowall docs [query]`: every helper and uniform, from the real GLSL. */
-    if (argc >= 2 && strcmp(argv[1], "docs") == 0) {
-        const char *chunks[32];
-        size_t nc = multipass_preamble_chunks(chunks, 32);
-        static shader_doc_entry entries[1024];
-        size_t n = shader_docs_collect(chunks, nc, entries, 1024);
-        const char *q = argc >= 3 ? argv[2] : NULL;
-        bool color = isatty(STDOUT_FILENO) && !getenv("NO_COLOR");
-        size_t shown = shader_docs_print(stdout, entries, n, q, color);
-        if (!shown) {
-            fprintf(stderr, "Nothing matches '%s'. Try `%s docs` for everything.\n", q, argv[0]);
-            return EXIT_FAILURE;
-        }
-        if (!q) printf("Search with: %s docs <word>   e.g. noise, palette, audio, window\n", argv[0]);
-        return EXIT_SUCCESS;
-    }
-
+    /* `preview`/`watch` are run modes, not daemon commands: they run one
+     * shader in the foreground alongside the real wallpaper without touching
+     * the config, the saved state or the daemon's pid file. */
     if (argc >= 2 && (strcmp(argv[1], "preview") == 0 || strcmp(argv[1], "watch") == 0)) {
         bool is_watch = (argv[1][0] == 'w');
         if (argc < 3 || argv[2][0] == '-') {
@@ -999,230 +1159,14 @@ int main(int argc, char *argv[]) {
         preview_shader = argv[2];
         watch_mode = is_watch;
 
-        /* Drop the subcommand and its argument so the option parser sees only
-         * flags. getopt scans from index 1, so argv[0] must stay a program
-         * name. */
+        /* Drop the subcommand and its argument so getopt sees only flags;
+         * it scans from index 1, so argv[0] must stay a program name. */
         argv[2] = argv[0];
         argv += 2;
         argc -= 2;
     }
 
-    if (!preview_shader && argc >= 2 && argv[1][0] != '-') {
-        const char *cmd = argv[1];
-
-        /* Commands that drive the daemon go over the control socket first: one
-         * request, one real answer. The signal paths below remain only for a
-         * daemon too old to have the socket. */
-        static const char *const socket_cmds[] = {
-            "next", "pause", "resume", "reload", "pause-shader", "resume-shader", NULL};
-        for (size_t i = 0; socket_cmds[i]; i++) {
-            int rc;
-            if (strcmp(cmd, socket_cmds[i]) == 0 && ipc_command(cmd, NULL, &rc)) return rc;
-        }
-        if (strcmp(cmd, "set") == 0 && argc >= 3) {
-            long parsed = 0;
-            if (neowall_parse_index(argv[2], &parsed) && parsed <= INT_MAX) {
-                int rc;
-                if (ipc_command("set", argv[2], &rc)) return rc;
-            }
-        }
-        if (strcmp(cmd, "set-terminal") == 0 && argc >= 3 && argv[2][0]) {
-            int rc;
-            if (ipc_command("set-terminal", argv[2], &rc)) return rc;
-        }
-
-        /* Special case: kill command */
-        if (strcmp(cmd, "kill") == 0) {
-            return kill_daemon() ? EXIT_SUCCESS : EXIT_FAILURE;
-        }
-
-        /* Special case: list command shows all wallpapers with indices */
-        if (strcmp(cmd, "list") == 0) {
-            return read_cycle_list() ? EXIT_SUCCESS : EXIT_FAILURE;
-        }
-
-        /* Special cases: freeze/resume the shader animation. Delivered via
-         * real-time signals (SIGRTMIN+N), which aren't compile-time constants
-         * and so can't live in the daemon_commands table. */
-        if (strcmp(cmd, "pause-shader") == 0) {
-            return send_daemon_signal(SIGRTMIN + 1, "Freezing shader animation...", false)
-                   ? EXIT_SUCCESS : EXIT_FAILURE;
-        }
-        if (strcmp(cmd, "resume-shader") == 0) {
-            return send_daemon_signal(SIGRTMIN + 2, "Resuming shader animation...", false)
-                   ? EXIT_SUCCESS : EXIT_FAILURE;
-        }
-
-        /* Special case: set command requires an index argument */
-        if (strcmp(cmd, "set") == 0) {
-            if (argc < 3) {
-                fprintf(stderr, "Usage: %s set <index>\n", argv[0]);
-                fprintf(stderr, "  <index>  Wallpaper index (0-based)\n");
-                fprintf(stderr, "\nUse '%s current' to see available wallpapers and their indices.\n", argv[0]);
-                return EXIT_FAILURE;
-            }
-            /* Validate index is a number. atoi() cannot report failure and is
-             * undefined on overflow, so parse with a checked helper: "9999999999"
-             * is all digits but does not fit in an int. */
-            const char *index_str = argv[2];
-            long parsed = 0;
-            if (!neowall_parse_index(index_str, &parsed) || parsed > INT_MAX) {
-                fprintf(stderr, "Error: Index must be a non-negative integer, got '%s'\n", index_str);
-                return EXIT_FAILURE;
-            }
-
-            /* Send set-index command to daemon */
-            const char *pid_path = get_pid_file_path();
-            FILE *fp = fopen(pid_path, "r");
-            if (!fp) {
-                printf("No running neowall daemon found.\n");
-                printf("Start the daemon first with: neowall\n");
-                return EXIT_FAILURE;
-            }
-
-            pid_t pid;
-            if (fscanf(fp, "%d", &pid) != 1) {
-                fclose(fp);
-                fprintf(stderr, "Failed to read PID\n");
-                return EXIT_FAILURE;
-            }
-            fclose(fp);
-
-            /* Check if process exists */
-            if (kill(pid, 0) == -1 && errno == ESRCH) {
-                printf("NeoWall daemon (PID %d) is not running.\n", pid);
-                remove_stale_pid_file();
-                return EXIT_FAILURE;
-            }
-
-            /* Check if cycling is possible */
-            int cycle_total = state_max_cycle_total();
-            if (cycle_total <= 1) {
-                printf("Cannot set wallpaper index: Only one wallpaper/shader configured.\n");
-                return EXIT_FAILURE;
-            }
-
-            /* Bound the index against what the daemon actually has. Without this
-             * the CLI reports success for an index no output can honour, and the
-             * daemon silently drops the request. */
-            if (parsed >= cycle_total) {
-                fprintf(stderr, "Error: Index %ld is out of range (0-%d)\n", parsed, cycle_total - 1);
-                return EXIT_FAILURE;
-            }
-            int index = (int)parsed;
-
-            /* Write the index to a file for the daemon to read */
-            if (!write_set_index_file(index)) {
-                return EXIT_FAILURE;
-            }
-
-            /* Send SIGRTMIN to notify daemon */
-            if (kill(pid, SIGRTMIN) == -1) {
-                fprintf(stderr, "Failed to send signal to daemon: %s\n", strerror(errno));
-                unlink(get_set_index_file_path());
-                return EXIT_FAILURE;
-            }
-
-            printf("Setting wallpaper to index %d...\n", index);
-            return EXIT_SUCCESS;
-        }
-
-        /* Special case: set-terminal swaps the live terminal-wallpaper command.
-         * Takes the command string as its argument. The daemon kills the old
-         * terminal child (and its process group) before spawning the new one,
-         * so nothing is orphaned. */
-        if (strcmp(cmd, "set-terminal") == 0) {
-            if (argc < 3 || argv[2][0] == '\0') {
-                fprintf(stderr, "Usage: %s set-terminal \"<command>\"\n", argv[0]);
-                fprintf(stderr, "  <command>  Program to run as the terminal wallpaper,\n");
-                fprintf(stderr, "             e.g. %s set-terminal \"htop\"\n", argv[0]);
-                return EXIT_FAILURE;
-            }
-            /* Join argv[2..] with spaces so an unquoted multi-word command
-             * (neowall set-terminal htop --tree) still works, while a quoted
-             * one arrives as a single argv element unchanged. */
-            char cmd_buf[512];
-            size_t off = 0;
-            for (int i = 2; i < argc; i++) {
-                int w = snprintf(cmd_buf + off, sizeof(cmd_buf) - off,
-                                 "%s%s", (i > 2) ? " " : "", argv[i]);
-                if (w < 0 || (size_t)w >= sizeof(cmd_buf) - off) {
-                    fprintf(stderr, "Error: terminal command too long\n");
-                    return EXIT_FAILURE;
-                }
-                off += (size_t)w;
-            }
-            /* Newlines would break the single-line command file protocol. */
-            if (strchr(cmd_buf, '\n') || strchr(cmd_buf, '\r')) {
-                fprintf(stderr, "Error: terminal command must not contain newlines\n");
-                return EXIT_FAILURE;
-            }
-
-            const char *pid_path = get_pid_file_path();
-            FILE *fp = fopen(pid_path, "r");
-            if (!fp) {
-                printf("No running neowall daemon found.\n");
-                printf("Start the daemon first with: neowall\n");
-                return EXIT_FAILURE;
-            }
-            pid_t pid;
-            if (fscanf(fp, "%d", &pid) != 1) {
-                fclose(fp);
-                fprintf(stderr, "Failed to read PID\n");
-                return EXIT_FAILURE;
-            }
-            fclose(fp);
-
-            if (kill(pid, 0) == -1 && errno == ESRCH) {
-                printf("NeoWall daemon (PID %d) is not running.\n", pid);
-                remove_stale_pid_file();
-                return EXIT_FAILURE;
-            }
-
-            if (!write_set_terminal_file(cmd_buf)) {
-                return EXIT_FAILURE;
-            }
-
-            if (kill(pid, SIGRTMIN + 3) == -1) {
-                fprintf(stderr, "Failed to send signal to daemon: %s\n", strerror(errno));
-                unlink(get_set_terminal_file_path());
-                return EXIT_FAILURE;
-            }
-
-            printf("Setting terminal wallpaper to: %s\n", cmd_buf);
-            return EXIT_SUCCESS;
-        }
-
-        /* Lookup command in table and dispatch */
-        for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
-            if (strcmp(cmd, daemon_commands[i].name) == 0) {
-                /* Command found - execute it */
-                if (daemon_commands[i].needs_state_check) {
-                    /* Commands like "current" that read state */
-                    bool ok = read_wallpaper_state();
-                    report_daemon_version();
-                    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
-                } else {
-                    /* Commands that send signals to daemon */
-                    return send_daemon_signal(daemon_commands[i].signal,
-                                            daemon_commands[i].action_message,
-                                            daemon_commands[i].check_cycle)
-                           ? EXIT_SUCCESS : EXIT_FAILURE;
-                }
-            }
-        }
-
-        /* Command not found - print error with available commands */
-        fprintf(stderr, "Unknown command: %s\n\n", cmd);
-        fprintf(stderr, "Available commands:\n");
-        fprintf(stderr, "  kill");
-        for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
-            fprintf(stderr, ", %s", daemon_commands[i].name);
-        }
-        fprintf(stderr, ", pause-shader, resume-shader, set-terminal");
-        fprintf(stderr, "\n\nRun '%s --help' for more information.\n", argv[0]);
-        return EXIT_FAILURE;
-    }
+    if (!preview_shader && argc >= 2 && argv[1][0] != '-') return cmd_control(argc, argv);
 
     static struct option long_options[] = {
         {"config",     required_argument, 0, 'c'},
