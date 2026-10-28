@@ -94,7 +94,9 @@ int main(void) {
              "output {\n  HDMI-A-1 {\n    shader %s\n    vsync false\n    shader_fps 30\n  }\n}\n",
              a, b);
     write_cfg(text);
+    g_applied = 0;
     CHECK(config_load(&st, cfg));
+    CHECK(g_applied == 2);   /* one apply per output, not default-then-override */
     CHECK(left.config && left.config->type == WALLPAPER_SHADER);
     CHECK(left.config && strstr(left.config->shader_path, "a.glsl"));
     CHECK(left.config && left.config->shader_speed == 0.5f);
