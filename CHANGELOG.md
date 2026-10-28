@@ -24,6 +24,12 @@ All notable changes to neowall. Dates are release dates.
 
 ### Removed
 - The unregistered generic Wayland fallback backend (dead code).
+- The render optimizer (2.1k lines). Its GL state cache was wrong on a
+  shared context: after a transition or the FPS overlay left blending on, a
+  translucent shader drew blended over the previous frame. State is set
+  directly each frame now, with no measurable FPS change.
+- 74 functions nothing called. CI now fails on new ones
+  (`scripts/check-unused.sh`).
 
 ### Added
 - GPU reset and lost-surface recovery: the GL context is created robust,
