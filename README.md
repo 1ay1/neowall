@@ -50,7 +50,7 @@ sudo ninja -C build install
 
 ```bash
 # Debian/Ubuntu
-sudo apt install build-essential meson ninja-build libwayland-dev \
+sudo apt install build-essential meson ninja-build libwayland-dev libwayland-bin \
     libgles2-mesa-dev libpng-dev libjpeg-dev wayland-protocols \
     libx11-dev libxrandr-dev libxkbcommon-dev
 

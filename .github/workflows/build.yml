@@ -133,7 +133,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y build-essential git pkg-config meson ninja-build \
-            libwayland-dev wayland-protocols libwayland-egl1-mesa \
+            libwayland-dev libwayland-bin wayland-protocols libwayland-egl1-mesa \
             libx11-dev libxrandr-dev \
             libegl1-mesa-dev libgles2-mesa-dev \
             libpng-dev libjpeg-dev libxkbcommon-dev
@@ -200,7 +200,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential git pkg-config meson ninja-build \
-            libwayland-dev wayland-protocols libwayland-egl1-mesa \
+            libwayland-dev libwayland-bin wayland-protocols libwayland-egl1-mesa \
             libx11-dev libxrandr-dev \
             libegl1-mesa-dev libgles2-mesa-dev \
             libpng-dev libjpeg-dev libxkbcommon-dev

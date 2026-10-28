@@ -4,7 +4,7 @@
 option('wayland_backend',
   type: 'feature',
   value: 'auto',
-  description: 'Build Wayland backend (requires wayland-client, wayland-egl, wayland-protocols)'
+  description: 'Build Wayland backend (requires wayland-client, wayland-egl, wayland-cursor, wayland-protocols, wayland-scanner)'
 )
 
 option('x11_backend',
