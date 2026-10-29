@@ -118,7 +118,7 @@ static void output_present(struct app *a, struct output_state *output, uint64_t 
     /* On the common single-output path the render phase left this current;
      * skipping a redundant eglMakeCurrent avoids Mesa's implicit flush. */
     if ((eglGetCurrentContext() != state->egl_context || eglGetCurrentSurface(EGL_DRAW) != surf) &&
-        !eglMakeCurrent(state->egl_display, surf, surf, state->egl_context)) {
+        !egl_make_surface_current(state->egl_display, surf, state->egl_context)) {
         log_error("Failed to make context current before swap for output %s: 0x%x",
                   output->model, eglGetError());
         return;
@@ -346,8 +346,7 @@ static void render_outputs(struct app *a) {
 
         /* Make EGL context current for this output. Note: eglMakeCurrent can
          * synchronize with the GPU — we are NOT holding output_list_lock here. */
-        if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
-                           output->compositor_surface->egl_surface, state->egl_context)) {
+        if (!egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface, state->egl_context)) {
             log_error("Failed to make EGL context current for output %s: 0x%x",
                      output->model, eglGetError());
             continue;

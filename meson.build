@@ -190,6 +190,7 @@ core_sources = files(
 # EGL sources (desktop OpenGL 3.3)
 egl_sources = files(
   'src/egl/egl_core.c',
+  'src/egl/egl_bind.c',
   'src/egl/gpu_health.c',
 )
 
@@ -1018,7 +1019,7 @@ if has_wayland
     files('tests/test_output_render.c', 'src/utils.c', 'src/clock.c',
           'src/config/vibe_impl.c', 'src/config/config.c', 'src/config/shuffle.c',
           'src/output/output.c', 'src/output/frame_clock.c', 'src/output/span.c',
-          'src/render/render.c', 'src/compositor/compositor_surface.c') +
+          'src/render/render.c', 'src/compositor/compositor_surface.c', 'src/egl/egl_bind.c') +
       shader_sources + texture_sources + image_sources + source_sources +
       gfx_sources + graph_sources + terminal_sources + transition_sources,
     include_directories: [inc_dirs, inc_dirs_build,

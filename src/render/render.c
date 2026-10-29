@@ -17,6 +17,7 @@
 #include "neowall/image/image.h"    /* Only for legacy wrapper functions */
 #include "neowall/config/config_access.h"
 #include "neowall/constants.h"
+#include "neowall/egl/egl_core.h"
 #include "neowall/transitions.h"
 #include "neowall/shader/shader.h"
 #include "neowall/shader/shader_multipass.h"
@@ -57,7 +58,7 @@ static bool ensure_egl_current(struct output_state *output) {
         eglGetCurrentDisplay() == dpy) {
         return true;
     }
-    return eglMakeCurrent(dpy, surf, surf, ctx);
+    return egl_make_surface_current(dpy, surf, ctx);
 }
 
 /* Note: Each transition manages its own shader sources in src/transitions/ */
@@ -827,8 +828,7 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
     }
 
     /* CRITICAL: Ensure EGL context is current before GL operations */
-    if (!output->compositor_surface || !eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
-                       output->compositor_surface->egl_surface, output->state->egl_context)) {
+    if (!output->compositor_surface || !egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for texture update");
         return false;
     }

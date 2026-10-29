@@ -16,6 +16,7 @@
 #include "neowall/shader/shader.h"
 #include "neowall/shader/shader_multipass.h"
 #include "neowall/shader/manifest.h"
+#include "neowall/egl/egl_core.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 
 /* Helper function to get the preferred output identifier
@@ -66,10 +67,7 @@ static void output_configure_vsync(struct output_state *output) {
     }
 
     /* Make EGL context current */
-    if (!eglMakeCurrent(output->state->egl_display,
-                       output->compositor_surface->egl_surface,
-                       output->compositor_surface->egl_surface,
-                       output->state->egl_context)) {
+    if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for vsync config");
         return;
     }
@@ -830,8 +828,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     }
 
     /* CRITICAL: Ensure EGL context is current for this thread before any GL operations */
-    if (!output->compositor_surface || !eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
-                       output->compositor_surface->egl_surface, output->state->egl_context)) {
+    if (!output->compositor_surface || !egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for wallpaper set");
         image_free(new_image);
         return;
@@ -866,8 +863,7 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
     }
 
     /* Make EGL context current before creating textures */
-    if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
-                       output->compositor_surface->egl_surface, output->state->egl_context)) {
+    if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
         EGLint egl_error = eglGetError();
         log_error("Failed to make EGL context current for output %s: 0x%x (display may be disconnected)",
                   output->model[0] ? output->model : "unknown", egl_error);
@@ -1005,8 +1001,7 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
     }
 
     /* CRITICAL: Ensure EGL context is current before any GL operations */
-    if (!output->compositor_surface || !eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
-                       output->compositor_surface->egl_surface, output->state->egl_context)) {
+    if (!output->compositor_surface || !egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for shader set");
         return nw_err(NW_ERR_GL, "eglMakeCurrent failed for shader set");
     }
@@ -1044,8 +1039,7 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
     }
 
     /* Make EGL context current before creating shader program */
-    if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
-                       output->compositor_surface->egl_surface, output->state->egl_context)) {
+    if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
         EGLint egl_error = eglGetError();
         log_error("Failed to make EGL context current for output %s: 0x%x (display may be disconnected)",
                   output->model[0] ? output->model : "unknown", egl_error);
@@ -1182,8 +1176,7 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
 
     /* Configure vsync based on shader_fps setting */
     if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-        if (!eglMakeCurrent(output->state->egl_display, output->compositor_surface->egl_surface,
-                           output->compositor_surface->egl_surface, output->state->egl_context)) {
+        if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
             log_error("Failed to make EGL context current for vsync config");
         } else {
             /* Configure vsync for shader rendering */
@@ -1257,10 +1250,7 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
         return nw_ok();
     }
 
-    if (!eglMakeCurrent(output->state->egl_display,
-                        output->compositor_surface->egl_surface,
-                        output->compositor_surface->egl_surface,
-                        output->state->egl_context)) {
+    if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
         return nw_err(NW_ERR_GL, "eglMakeCurrent failed for terminal set");
     }
 
@@ -2380,10 +2370,7 @@ GLuint output_upload_preload_texture(struct output_state *output) {
     }
 
     /* Make EGL context current */
-    if (!eglMakeCurrent(output->state->egl_display,
-                       output->compositor_surface->egl_surface,
-                       output->compositor_surface->egl_surface,
-                       output->state->egl_context)) {
+    if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for preload upload");
         return 0;
     }

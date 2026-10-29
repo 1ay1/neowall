@@ -5,6 +5,10 @@ All notable changes to neowall. Dates are release dates.
 ## Unreleased
 
 ### Fixed
+- On NVIDIA every wallpaper was black (at a steady 60 fps) since the GPU
+  reset work: the GL context was first bound with no window, and the
+  driver kept drawing to no buffer after a window was bound. The e2e test
+  now checks the screen's pixels, not just the frame counter.
 - Terminal wallpaper: a cursor saved before a monitor shrink could write past
   the cell grid when restored (heap overflow). A long OSC number no longer
   overflows. Both found by fuzzing.

@@ -197,8 +197,7 @@ bool egl_core_init(struct neowall_state *state) {
             log_info("Enabled vsync");
         }
 
-        if (eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
-                          output->compositor_surface->egl_surface, state->egl_context) &&
+        if (egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface, state->egl_context) &&
             state->gpu_health_pending) {
             gpu_health_init(state->gl_robust, log_get_level() >= LOG_LEVEL_DEBUG);
             state->gpu_health_pending = false;
@@ -215,8 +214,7 @@ bool egl_core_init(struct neowall_state *state) {
         if (output->compositor_surface && 
             output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
             
-            if (!eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
-                               output->compositor_surface->egl_surface, state->egl_context)) {
+            if (!egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface, state->egl_context)) {
                 log_error("Failed to make context current for output %s",
                          output->model[0] ? output->model : "unknown");
                 output = output->next;
@@ -286,7 +284,6 @@ bool egl_core_make_current(struct neowall_state *state, struct output_state *out
     if (!output->compositor_surface || 
         output->compositor_surface->egl_surface == EGL_NO_SURFACE) return false;
 
-    return eglMakeCurrent(state->egl_display, output->compositor_surface->egl_surface,
-                         output->compositor_surface->egl_surface, state->egl_context);
+    return egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface, state->egl_context);
 }
 

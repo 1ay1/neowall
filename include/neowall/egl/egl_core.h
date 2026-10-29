@@ -37,4 +37,9 @@ void egl_core_cleanup(struct neowall_state *state);
 bool egl_core_make_current(struct neowall_state *state, 
                            struct output_state *output);
 
+/* eglMakeCurrent on a window surface, then point the default framebuffer at
+ * GL_BACK: a context first made current without a surface keeps GL_NONE
+ * there on NVIDIA, and draws go nowhere. Use this for every window bind. */
+bool egl_make_surface_current(EGLDisplay dpy, EGLSurface surf, EGLContext ctx);
+
 #endif /* EGL_CORE_H */

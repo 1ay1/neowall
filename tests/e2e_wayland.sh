@@ -24,8 +24,13 @@ export XDG_DATA_DIRS="$tmp/share" XDG_STATE_HOME="$tmp/state"
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR" "$XDG_STATE_HOME" "$tmp/share/neowall" "$tmp/walls"
 chmod 700 "$XDG_RUNTIME_DIR"
 # Software GL everywhere, so this behaves the same on every machine and CI.
+# NEOWALL_E2E_REAL_GL=1 keeps the machine's own driver for neowall instead:
+# some bugs only show on one vendor (NVIDIA kept a GL_NONE draw buffer).
+if [ "${NEOWALL_E2E_REAL_GL:-0}" != 1 ]; then
 export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
-export LIBGL_ALWAYS_SOFTWARE=1 WLR_RENDERER=pixman WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1
+export LIBGL_ALWAYS_SOFTWARE=1
+fi
+export WLR_RENDERER=pixman WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1
 # llvmpipe's worker threads aren't TSan-instrumented; keep its rendering on
 # the calling thread so a sanitizer build reports only neowall's own races.
 export LP_NUM_THREADS=0
@@ -182,6 +187,43 @@ fi
 
 expect "ping names the version and pid" 0 "neowall .* pid $nw_pid" "$nw" ping
 wait_for 10 grep -q 'FPS \[' "$tmp/nw.log" && ok "frames are being drawn" || bad "frames are being drawn"
+# ...and reach the screen. An FPS counter ticks just the same when every
+# frame goes nowhere (GL_NONE draw buffer on NVIDIA: black at 60 fps).
+if [ "$x11" = 0 ] && command -v grim >/dev/null && command -v python3 >/dev/null; then
+    sleep 1
+    if nw_env grim "$tmp/shot.png" 2>/dev/null; then
+        lit=$(python3 -c '
+import struct, sys, zlib
+# a tiny PNG reader: enough for grim output, no PIL needed
+d = open(sys.argv[1], "rb").read()
+w, h, depth, ctype = struct.unpack(">IIBB", d[16:26])
+raw, i = b"", 8
+while i < len(d):
+    n, t = struct.unpack(">I4s", d[i:i + 8])
+    if t == b"IDAT": raw += d[i + 8:i + 8 + n]
+    i += 12 + n
+bpp = {2: 3, 6: 4}[ctype]
+rows, prev, out = zlib.decompress(raw), bytearray(w * bpp), 0
+for y in range(h):
+    f, line = rows[y * (w * bpp + 1)], bytearray(rows[y * (w * bpp + 1) + 1:(y + 1) * (w * bpp + 1)])
+    for x in range(len(line)):
+        a = line[x - bpp] if x >= bpp else 0
+        b, c = prev[x], prev[x - bpp] if x >= bpp else 0
+        if f == 1: line[x] = (line[x] + a) & 255
+        elif f == 2: line[x] = (line[x] + b) & 255
+        elif f == 3: line[x] = (line[x] + (a + b) // 2) & 255
+        elif f == 4:
+            p = a + b - c; pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+            line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+    out += sum(1 for x in range(0, len(line), bpp) if line[x] + line[x + 1] + line[x + 2] > 24
+               and h // 4 <= y < 3 * h // 4 and w // 4 <= x // bpp < 3 * w // 4)
+    prev = line
+# share of the middle half of the screen that is lit
+print(out * 100 // max(1, (h // 2) * (w // 2)))' "$tmp/shot.png" 2>/dev/null)
+        [ "${lit:-0}" -ge 50 ] && ok "the wallpaper reaches the screen ($lit% lit)" \
+            || bad "the wallpaper reaches the screen" "only ${lit:-?}% of the middle is lit"
+    fi
+fi
 expect "status shows the output"        0 "Output:"                 "$nw" current
 
 # ---- cycling ----------------------------------------------------------------
