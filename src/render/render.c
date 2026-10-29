@@ -20,7 +20,7 @@
 #include "neowall/egl/egl_core.h"
 #include "neowall/transitions.h"
 #include "neowall/shader/shader.h"
-#include "neowall/shader/shader_multipass.h"
+#include "neowall/shader/wallshader.h"
 #include "neowall/shader/shader_clock.h"
 #include "neowall/textures.h"
 #include "neowall/compositor/compositor.h"
@@ -342,11 +342,6 @@ bool render_init_output(struct output_state *output) {
     output->shader_uniforms.u_time = -2;
     output->shader_uniforms.u_speed = -2;
 
-    /* Initialize iChannel arrays to NULL (will be allocated when needed) */
-    output->channel_textures = NULL;
-    output->channel_count = 0;
-    output->shader_uniforms.iChannel = NULL;
-
     /* Create simple color shader for overlays (once, shared across outputs) */
     if (color_overlay_program == 0) {
         if (!shader_create_program_from_sources(color_vertex_shader, color_fragment_shader, &color_overlay_program)) {
@@ -444,24 +439,10 @@ void render_cleanup_output(struct output_state *output) {
         output->next_texture = 0;
     }
 
-    /* Delete iChannel textures */
-    if (output->channel_textures) {
-        for (size_t i = 0; i < output->channel_count; i++) {
-            if (output->channel_textures[i] != 0) {
-                glDeleteTextures(1, &output->channel_textures[i]);
-            }
-        }
-        free(output->channel_textures);
-        output->channel_textures = NULL;
+    for (size_t i = 0; i < 4; i++) {
+        if (output->channel_tex[i]) glDeleteTextures(1, &output->channel_tex[i]);
+        output->channel_tex[i] = 0;
     }
-
-    /* Free iChannel uniform array */
-    if (output->shader_uniforms.iChannel) {
-        free(output->shader_uniforms.iChannel);
-        output->shader_uniforms.iChannel = NULL;
-    }
-
-    output->channel_count = 0;
 
     /* Delete VBO */
     if (output->vbo != 0) {
@@ -485,17 +466,8 @@ void render_cleanup_output(struct output_state *output) {
         output->pixelate_program = 0;
     }
 
-    /* Clean up multipass shader */
-    if (output->multipass_shader != NULL) {
-        multipass_destroy(output->multipass_shader);
-        output->multipass_shader = NULL;
-    }
-
-    /* Clean up legacy shader program */
-    if (output->live_shader_program != 0) {
-        shader_destroy_program(output->live_shader_program);
-        output->live_shader_program = 0;
-    }
+    wallshader_free(output->shader);
+    output->shader = NULL;
 }
 
 /**
@@ -661,142 +633,59 @@ void render_destroy_texture(GLuint texture) {
     }
 }
 
-/**
- * Load iChannel textures based on configuration
- *
- * @param output Output state
- * @param config Wallpaper configuration with channel paths
- * @return true on success, false on failure
- */
+/* Create the texture for one `channels` entry: a built-in name or an image
+ * file, with its size in w and h. 0 on failure. */
+static GLuint channel_texture(const char *path, int *w, int *h) {
+    static const struct {
+        const char *name;
+        GLuint (*make)(int, int);
+    } builtin[] = {
+        {TEXTURE_NAME_RGBA_NOISE, texture_create_rgba_noise}, {"default", texture_create_rgba_noise},
+        {TEXTURE_NAME_GRAY_NOISE, texture_create_gray_noise}, {TEXTURE_NAME_BLUE_NOISE, texture_create_blue_noise},
+        {TEXTURE_NAME_WOOD, texture_create_wood},             {TEXTURE_NAME_ABSTRACT, texture_create_abstract},
+        {TEXTURE_NAME_FONT, texture_create_font_atlas},
+    };
+    for (size_t k = 0; k < sizeof(builtin) / sizeof(builtin[0]); k++) {
+        if (!strcmp(path, builtin[k].name)) {
+            *w = *h = DEFAULT_TEXTURE_SIZE;
+            return builtin[k].make(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
+        }
+    }
+    struct image_data *img = image_load(path, 0, 0, MODE_FILL);
+    if (!img) return 0;
+    /* flipped: images are top-down, GL textures bottom-up */
+    GLuint texture = render_create_texture_flipped(img);
+    *w = (int)img->width;
+    *h = (int)img->height;
+    image_free(img);
+    return texture;
+}
+
+/* The config's `channels` as iChannel textures. A channel the config
+ * leaves out (or sets to "_") stays 0, so the shader's own binding is used. */
 bool render_load_channel_textures(struct output_state *output, struct wallpaper_config *config) {
     if (!output) {
         log_error("Invalid output for render_load_channel_textures");
         return false;
     }
 
-    /* Clean up existing channels */
-    if (output->channel_textures) {
-        for (size_t i = 0; i < output->channel_count; i++) {
-            if (output->channel_textures[i] != 0) {
-                glDeleteTextures(1, &output->channel_textures[i]);
-            }
-        }
-        free(output->channel_textures);
-        output->channel_textures = NULL;
+    for (size_t i = 0; i < 4; i++) {
+        if (output->channel_tex[i]) glDeleteTextures(1, &output->channel_tex[i]);
+        output->channel_tex[i] = 0;
+        output->channel_w[i] = output->channel_h[i] = 0;
     }
+    if (!config || !config->channel_paths) return true;
 
-    if (output->shader_uniforms.iChannel) {
-        free(output->shader_uniforms.iChannel);
-        output->shader_uniforms.iChannel = NULL;
-    }
-
-    /* Determine channel count - always at least 5 for default textures */
-    size_t channel_count = 5;  /* Minimum 5 channels for default textures */
-    if (config && config->channel_paths && config->channel_count > 5) {
-        /* If config specifies MORE than 5 channels, use that count */
-        channel_count = config->channel_count;
-    }
-    /* Note: If config specifies fewer than 5 channels, we still allocate 5
-     * and fill the remaining with default textures */
-
-    /* Allocate arrays */
-    output->channel_textures = calloc(channel_count, sizeof(GLuint));
-    output->shader_uniforms.iChannel = malloc(channel_count * sizeof(GLint));
-
-    if (!output->channel_textures || !output->shader_uniforms.iChannel) {
-        log_error("Failed to allocate memory for iChannel arrays");
-        free(output->channel_textures);
-        free(output->shader_uniforms.iChannel);
-        output->channel_textures = NULL;
-        output->shader_uniforms.iChannel = NULL;
-        return false;
-    }
-
-    output->channel_count = channel_count;
-
-    /* Initialize uniform locations to -2 (uninitialized) */
-    for (size_t i = 0; i < channel_count; i++) {
-        output->shader_uniforms.iChannel[i] = -2;
-    }
-
-    /* Load textures */
-    for (size_t i = 0; i < channel_count; i++) {
-        const char *path = NULL;
-        bool is_default = true;
-
-        /* Get path from config if available */
-        if (config && config->channel_paths && i < config->channel_count) {
-            path = config->channel_paths[i];
-            /* Check if it's "_" (skip this channel) */
-            if (path && strcmp(path, "_") == 0) {
-                output->channel_textures[i] = 0;
-                continue;
-            }
-            is_default = false;
-        }
-
-        GLuint texture = 0;
-
-        /* Try to load texture */
-        if (path && !is_default) {
-            /* Check if it's a named default texture */
-            if (strcmp(path, TEXTURE_NAME_RGBA_NOISE) == 0 || strcmp(path, "default") == 0) {
-                texture = texture_create_rgba_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-            } else if (strcmp(path, TEXTURE_NAME_GRAY_NOISE) == 0) {
-                texture = texture_create_gray_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-            } else if (strcmp(path, TEXTURE_NAME_BLUE_NOISE) == 0) {
-                texture = texture_create_blue_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-            } else if (strcmp(path, TEXTURE_NAME_WOOD) == 0) {
-                texture = texture_create_wood(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-            } else if (strcmp(path, TEXTURE_NAME_ABSTRACT) == 0) {
-                texture = texture_create_abstract(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-            } else if (strcmp(path, TEXTURE_NAME_FONT) == 0) {
-                texture = texture_create_font_atlas(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-            } else {
-                /* Try to load as image file */
-                struct image_data *img = image_load(path, 0, 0, MODE_FILL);
-                if (img) {
-                    /* Use flipped version for shader textures (OpenGL coordinates) */
-                    texture = render_create_texture_flipped(img);
-                    log_info("iChannel%zu: loaded from %s (%ux%u)", i, path, img->width, img->height);
-                    image_free(img);
-                } else {
-                    log_error("Failed to load iChannel%zu texture from: %s", i, path);
-                }
-            }
+    for (size_t i = 0; i < config->channel_count && i < 4; i++) {
+        const char *path = config->channel_paths[i];
+        if (!path || !path[0] || !strcmp(path, "_")) continue;
+        output->channel_tex[i] = channel_texture(path, &output->channel_w[i], &output->channel_h[i]);
+        if (output->channel_tex[i]) {
+            log_info("iChannel%zu: %s (%dx%d)", i, path, output->channel_w[i], output->channel_h[i]);
         } else {
-            /* Every slot owns its texture. Do not alias defaults between slots
-             * or outputs: channel arrays are independently destroyed and may
-             * also replace one slot during a live shader update. */
-            switch (i) {
-                case 0:
-                    texture = texture_create_rgba_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    break;
-                case 1:
-                    texture = texture_create_gray_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    break;
-                case 2:
-                    texture = texture_create_blue_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    break;
-                case 3:
-                    texture = texture_create_wood(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    break;
-                case 4:
-                    texture = texture_create_abstract(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    break;
-                default:
-                    texture = texture_create_rgba_noise(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE);
-                    break;
-            }
-        }
-
-        output->channel_textures[i] = texture;
-
-        if (texture == 0) {
-            log_error("iChannel%zu: failed to create texture, will be empty/black", i);
+            log_error("iChannel%zu: can't load %s", i, path);
         }
     }
-
     return true;
 }
 
@@ -817,13 +706,8 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
         return false;
     }
 
-    if (channel_index >= output->channel_count) {
-        log_error("Channel index %zu out of bounds (max %zu)", channel_index, output->channel_count);
-        return false;
-    }
-
-    if (!output->channel_textures) {
-        log_error("Channel textures not initialized");
+    if (channel_index >= 4) {
+        log_error("Channel index %zu out of range", channel_index);
         return false;
     }
 
@@ -840,11 +724,6 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
         return false;
     }
 
-    /* Delete old texture if it exists */
-    if (output->channel_textures[channel_index] != 0) {
-        glDeleteTextures(1, &output->channel_textures[channel_index]);
-    }
-
     /* Create new flipped texture for shader use */
     GLuint texture = render_create_texture_flipped(img);
     if (texture == 0) {
@@ -853,8 +732,13 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
         return false;
     }
 
-    /* Update the channel texture */
-    output->channel_textures[channel_index] = texture;
+    /* swap only once the new one exists: a failed load keeps the old image */
+    if (output->channel_tex[channel_index] != 0) {
+        glDeleteTextures(1, &output->channel_tex[channel_index]);
+    }
+    output->channel_tex[channel_index] = texture;
+    output->channel_w[channel_index] = (int)img->width;
+    output->channel_h[channel_index] = (int)img->height;
 
     log_info("Updated iChannel%zu with image: %s (%ux%u) -> texture ID %u",
              channel_index, image_path, img->width, img->height, texture);
@@ -974,9 +858,54 @@ static void clock_fade_release(struct output_state *output) {
     output->clock_fade_start = 0;
 }
 
+/* About to replace the shader on screen: draw it once more into the fade
+ * texture, so the new one fades in over it instead of popping. Needs the
+ * output's context current. */
+void render_snapshot_for_swap(struct output_state *output) {
+    if (!output || !output->shader || output->width <= 0 || output->height <= 0 ||
+        output->frames_rendered == 0) {
+        return;
+    }
+    int w = output->width, h = output->height;
+    if (!output->clock_fade_tex) glGenTextures(1, &output->clock_fade_tex);
+    glBindTexture(GL_TEXTURE_2D, output->clock_fade_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, output->clock_fade_tex, 0);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+        glViewport(0, 0, w, h);
+        wallshader_frame f = {.width = w, .height = h, .time = output->last_shader_time,
+                              .span_w = output->spanned ? output->span.virt_w : 0,
+                              .span_h = output->spanned ? output->span.virt_h : 0,
+                              .span_x = output->spanned ? output->span.off_x : 0,
+                              .span_y = output->spanned ? output->span.off_y : 0};
+        for (int c = 0; c < 4; c++) {
+            f.channels[c] = output->channel_tex[c];
+            f.channel_w[c] = output->channel_w[c];
+            f.channel_h[c] = output->channel_h[c];
+        }
+        wallshader_draw(output->shader, &f);
+        /* the new shader's first frame starts the fade */
+        output->clock_fade_rebased = false;
+        output->clock_fade_start = 0;
+        output->swap_fade_pending = true;
+    } else {
+        clock_fade_release(output);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &fbo);
+    while (glGetError() != GL_NO_ERROR) {}
+}
+
 bool render_frame_shader(struct output_state *output) {
-    if (!output || !output->multipass_shader) {
-        log_error("Invalid output or multipass shader for render_frame_shader");
+    if (!output || !output->shader) {
+        log_error("Invalid output or shader for render_frame_shader");
         return false;
     }
 
@@ -1006,20 +935,7 @@ bool render_frame_shader(struct output_state *output) {
 
     int width = output->width;
     int height = output->height;
-
-    /* Hand the shader this output's slice of the scene its span group shares.
-     * Cleared to zero for an output that spans nothing, which is every
-     * single-monitor setup and leaves the sizing and uniforms below untouched. */
-    if (output->spanned) {
-        multipass_set_span(output->multipass_shader,
-                           output->span.virt_w, output->span.virt_h,
-                           output->span.off_x, output->span.off_y);
-    } else {
-        multipass_set_span(output->multipass_shader, 0, 0, 0, 0);
-    }
-
-    /* Resize multipass buffers if needed */
-    multipass_resize(output->multipass_shader, width, height);
+    double present_at = 0;
 
     /* Calculate shader time at MICROSECOND precision. shader_start_time is
      * stored in ms (shared with pause/resume bookkeeping); ms*1000 == µs on
@@ -1042,7 +958,7 @@ bool render_frame_shader(struct output_state *output) {
                                                     &output->frame_latency_used);
     if (output->frame_target_ns) {
         current_time_us = output->frame_target_ns / 1000ull;
-        output->multipass_shader->frame_stamp = (double)output->frame_target_ns / 1e9;
+        present_at = (double)output->frame_target_ns / 1e9;
     }
     uint64_t start_time_us = epoch_ms > 0
         ? epoch_ms * 1000ull
@@ -1161,14 +1077,14 @@ bool render_frame_shader(struct output_state *output) {
      *
      * Compositors that expose no geometry report zero windows, which shaders
      * are required to treat as an empty desktop rather than an error. */
-    {
-        float rects[NW_SHADER_MAX_WINDOWS * 4];
-        float focused[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        int n = 0;
+    float rects[NW_SHADER_MAX_WINDOWS * 4];
+    float focused[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    int nwin = 0;
 #ifdef HAVE_WAYLAND_BACKEND
+    {
         nw_window_rect wins[NW_SHADER_MAX_WINDOWS];
-        n = hyprland_output_windows(output, wins, NW_SHADER_MAX_WINDOWS);
-        for (int i = 0; i < n; i++) {
+        nwin = hyprland_output_windows(output, wins, NW_SHADER_MAX_WINDOWS);
+        for (int i = 0; i < nwin; i++) {
             rects[i*4 + 0] = wins[i].x;
             rects[i*4 + 1] = wins[i].y;
             rects[i*4 + 2] = wins[i].w;
@@ -1178,15 +1094,39 @@ bool render_frame_shader(struct output_state *output) {
                 focused[2] = wins[i].w; focused[3] = wins[i].h;
             }
         }
-#endif
-        multipass_set_windows(output->multipass_shader, rects, n, focused);
     }
+#endif
 
-    /* Render all passes using multipass system */
-    multipass_render(output->multipass_shader,
-                     (float)current_time,
-                     mouse_x, mouse_y,
-                     false);  /* mouse_click */
+    /* A spanned output draws its slice of the scene the span group shares;
+     * every other output passes 0x0, which leaves sizing alone. */
+    wallshader_frame frame = {
+        .width = width,
+        .height = height,
+        .time = current_time,
+        .present_at = present_at,
+        .mouse = {mouse_x, mouse_y},
+        .span_w = output->spanned ? output->span.virt_w : 0,
+        .span_h = output->spanned ? output->span.virt_h : 0,
+        .span_x = output->spanned ? output->span.off_x : 0,
+        .span_y = output->spanned ? output->span.off_y : 0,
+        .windows = rects,
+        .window_count = nwin,
+        .focused = focused,
+    };
+    for (int c = 0; c < 4; c++) {
+        frame.channels[c] = output->channel_tex[c];
+        frame.channel_w[c] = output->channel_w[c];
+        frame.channel_h[c] = output->channel_h[c];
+    }
+    wallshader_draw(output->shader, &frame);
+    output->last_shader_time = current_time;
+
+    /* first frame of a new shader: fade the old one out over it */
+    bool swap_fade = output->swap_fade_pending;
+    if (swap_fade) {
+        output->swap_fade_pending = false;
+        if (output->clock_fade_tex) output->clock_fade_start = get_time_ms();
+    }
 
     if (output->clock_fade_start) {
         float k = (float)(get_time_ms() - output->clock_fade_start) / (float)SHADER_TIME_FADE_MS;
@@ -1196,7 +1136,7 @@ bool render_frame_shader(struct output_state *output) {
             float a = 1.0f - k;
             clock_fade_draw(output, width, height, a * a * (3.0f - 2.0f * a));
         }
-    } else if (!did_rebase && !output->clock_fade_rebased &&
+    } else if (!swap_fade && !did_rebase && !output->clock_fade_rebased &&
                shader_clock_should_fade_rebase(&clock_st, SHADER_TIME_FADE_REBASE_SECONDS)) {
         /* Visible for hours with no hidden window to rebase in, so float32
          * iTime is getting coarse. Keep this frame (still on the old clock)
@@ -1208,15 +1148,8 @@ bool render_frame_shader(struct output_state *output) {
     static int frame_count = 0;
     frame_count++;
     if (frame_count % 600 == 0) {
-        log_debug("Multipass shader render frame %d (time=%.2f, passes=%d)", 
-                 frame_count, (float)current_time, output->multipass_shader->pass_count);
-    }
-
-    /* Handle cross-fade transition when switching shaders - simplified for multipass */
-    if (output->shader_fade_start_time > 0) {
-        /* For now, just clear the fade state - multipass handles transitions differently */
-        output->shader_fade_start_time = 0;
-        output->pending_shader_path[0] = '\0';
+        log_debug("Shader render frame %d (time=%.2f, passes=%d)",
+                 frame_count, (float)current_time, wallshader_pass_count(output->shader));
     }
 
     /* Check for errors */
@@ -1281,7 +1214,7 @@ bool render_frame(struct output_state *output) {
      * render path. Without this they fall through to the image path below,
      * find no texture, and draw a black screen. */
     if (output->config->type == WALLPAPER_TERMINAL) {
-        if (output->multipass_shader != NULL) {
+        if (output->shader != NULL) {
             return render_frame_shader(output);
         }
         /* Not attached yet (surface still coming up) — nothing to draw. */
@@ -1296,8 +1229,8 @@ bool render_frame(struct output_state *output) {
             return false;
         }
 
-        /* Defensive check: ensure multipass shader is actually loaded */
-        if (output->multipass_shader == NULL && output->live_shader_program == 0) {
+        /* Defensive check: ensure the shader is actually loaded */
+        if (output->shader == NULL) {
             /* Track reload attempts to prevent infinite spam */
             static uint64_t last_reload_attempt_time = 0;
             static int consecutive_failures = 0;
@@ -1315,7 +1248,7 @@ bool render_frame(struct output_state *output) {
                 /* Try to load the shader if we have a path */
                 if (output->config->shader_path[0] != '\0') {
                     output_set_shader(output, output->config->shader_path);
-                    if (output->multipass_shader == NULL && output->live_shader_program == 0) {
+                    if (output->shader == NULL) {
                         consecutive_failures++;
                         log_error("Failed to reload shader (attempt %d/3), skipping frame", consecutive_failures);
 
@@ -1356,8 +1289,7 @@ bool render_frame(struct output_state *output) {
         return render_frame_shader(output);
     }
 
-    /* Check for multipass shader (new system) */
-    if (output->config->type == WALLPAPER_SHADER && output->multipass_shader != NULL) {
+    if (output->config->type == WALLPAPER_SHADER && output->shader != NULL) {
         return render_frame_shader(output);
     }
 
@@ -1521,7 +1453,7 @@ bool render_frame_transition(struct output_state *output, float progress) {
         return render_frame(output);
     }
 
-    log_debug("Calling transition_render: type=%d, progress=%.2f, duration=%ums",
+    log_debug("Calling transition_render: type=%d, progress=%.2f, duration=%.2fs",
              output->config->transition, progress, output->config->transition_duration);
 
     /* Dispatch to modular transition renderer */

@@ -54,6 +54,8 @@ char *shader_load_file(const char *path);
  * @param resolved_size Buffer size
  * @return true if resolved (found, or used verbatim), false otherwise
  */
+/* Find a shader: a path is used as given (~ expanded); a bare name is
+ * looked up in the user's shader dirs, then the data dirs. */
 bool shader_resolve_path(const char *shader_name, char *resolved_path, size_t resolved_size);
 
 #endif /* SHADER_H */

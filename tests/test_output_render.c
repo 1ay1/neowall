@@ -247,6 +247,9 @@ int main(void) {
     fclose(ts);
     CHECK(output_apply_config(o, &s), "apply translucent shader");
     CHECK(draw(o), "render translucent shader");
+    /* a swap crossfades from the old shader; that's covered in 4c */
+    CHECK(o->clock_fade_start > 0, "a shader swap starts a crossfade");
+    o->clock_fade_start = 1;
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
@@ -257,6 +260,21 @@ int main(void) {
     CHECK(close_rgb(read_rgb(W / 2, H / 2), 0xff0000),
           "shader draws opaque despite leftover blend: %06x", read_rgb(W / 2, H / 2));
     glDisable(GL_BLEND);
+
+    /* 4c. Mid-crossfade the old shader still shows through; once it's done
+     *     only the new one is left. */
+    ts = fopen(shader, "w");
+    fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(0.0, 0.0, 1.0, 1.0); }\n", ts);
+    fclose(ts);
+    CHECK(output_apply_config(o, &s), "apply blue shader");
+    CHECK(draw(o), "first frame of the new shader");
+    unsigned mid = read_rgb(W / 2, H / 2);
+    CHECK((mid >> 16) > 0x80 && (mid & 0xff) < 0x80, "old red still shows at the start: %06x", mid);
+    o->clock_fade_start = 1; /* long ago: the fade is over */
+    CHECK(draw(o), "frame after the fade");
+    CHECK(close_rgb(read_rgb(W / 2, H / 2), 0x0000ff), "only the new shader is left: %06x",
+          read_rgb(W / 2, H / 2));
+    CHECK(o->clock_fade_tex == 0, "fade texture released");
 
     /* 5. Back to images, from a directory cycle. */
     struct wallpaper_config d;

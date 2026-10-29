@@ -8,7 +8,7 @@
 #include <GL/gl.h>
 #include "neowall/result.h"        /* For nw_result */
 #include "neowall/image/image.h"   /* For struct image_data and enum image_format */
-#include "neowall/shader/shader_multipass.h"  /* For multipass_shader_t */
+#include "neowall/shader/wallshader.h"
 #include "neowall/shader/shader_clock.h"      /* For shader_clock_tracker */
 #include "neowall/output/frame_clock.h"
 #include "neowall/output/span.h"   /* For struct span_view */
@@ -226,15 +226,14 @@ struct output_state {
     struct image_data *preload_decoded_image; /* Image decoded in background, ready for GPU upload */
     atomic_bool_t preload_upload_pending; /* Background thread finished, main thread should upload */
     
-    /* iChannel textures for shader inputs (dynamic count) */
-    GLuint *channel_textures;           /* Dynamic array of channel textures */
-    size_t channel_count;               /* Number of allocated channels */
+    /* the config's `channels` as iChannel0..3 (0 = the shader's own binding) */
+    GLuint channel_tex[4];
+    int channel_w[4], channel_h[4];
     
     GLuint program;
     GLuint glitch_program;              /* Shader program for glitch transition */
     GLuint pixelate_program;            /* Shader program for pixelate transition */
-    GLuint live_shader_program;         /* Shader program for live wallpaper (legacy, kept for compatibility) */
-    multipass_shader_t *multipass_shader; /* Multipass shader for live wallpaper (new) */
+    wallshader *shader;                 /* the running shader (shader and terminal wallpapers) */
     GLuint vao;                         /* Vertex array object (required for OpenGL 3.3 Core) */
     GLuint vbo;
 
@@ -246,7 +245,6 @@ struct output_state {
         GLint u_resolution;
         GLint u_time;
         GLint u_speed;
-        GLint *iChannel;    /* Dynamic array of iChannel sampler locations */
     } shader_uniforms;
 
     struct {
@@ -285,14 +283,14 @@ struct output_state {
                                          * without anyone seeing the discontinuity — iTime is
                                          * a float32 and loses frame resolution after ~a day
                                          * of uptime. Main-thread only. */
-    uint64_t shader_fade_start_time;    /* Time when shader fade started (for cross-fade) */
     shader_clock_tracker clock_tracker; /* Watches iTime for backward steps so a
                                          * visible "jumps back in time" glitch is
                                          * reported with its cause. Main-thread only. */
-    GLuint   clock_fade_tex;            /* Last frame before a visible clock reset */
+    GLuint   clock_fade_tex;            /* Last frame before a clock reset or shader swap */
     uint64_t clock_fade_start;          /* ms; >0 while it fades out over the new clock */
     bool     clock_fade_rebased;        /* Tell the tracker the next jump is a rebase */
-    char pending_shader_path[OUTPUT_MAX_PATH_LENGTH];  /* Next shader to load after fade-out */
+    bool     swap_fade_pending;         /* a shader swap's fade starts on the next frame */
+    double   last_shader_time;          /* iTime of the last drawn frame */
     float transition_progress;
     uint64_t frames_rendered;
     bool shader_load_failed;            /* Set to true after 3 failed shader load attempts */

@@ -26,7 +26,7 @@
 #include "neowall/sd_notify.h"
 #include "neowall/runtime/rt.h"
 #include "neowall/watch.h"
-#include "neowall/shader/shader_multipass.h"
+#include "neowall/shader/wallshader.h"
 #include "neowall/config/config_access.h"
 #include "neowall/config/config.h"
 #include "neowall/egl/egl_core.h"
@@ -215,16 +215,16 @@ static void mark_animated(struct app *a) {
         }
         if (!wallpaper_is_animated(o->config->type)) continue;
         if (o->shader_load_failed) continue;
-        if (o->live_shader_program == 0 && o->multipass_shader == NULL) continue;
+        if (o->shader == NULL) continue;
         if (o->config->type == WALLPAPER_SHADER && a->shader_paused) continue;
 
         /* A static shader painted its one frame. */
-        bool is_static = o->config->type == WALLPAPER_SHADER && o->multipass_shader &&
-                         !o->multipass_shader->is_animated && o->frames_rendered > 0;
+        bool is_static = o->config->type == WALLPAPER_SHADER &&
+                         !wallshader_animated(o->shader) && o->frames_rendered > 0;
         /* A settled terminal only redraws when its child writes. */
-        bool term_idle = o->config->type == WALLPAPER_TERMINAL && o->multipass_shader &&
+        bool term_idle = o->config->type == WALLPAPER_TERMINAL &&
                          o->frames_rendered > 0 &&
-                         !multipass_terminal_animating(o->multipass_shader, kTermFxSettleMs);
+                         !term_gpu_animating(wallshader_terminal(o->shader), kTermFxSettleMs);
         /* An output with a frame timer (vsync off, or vsync without frame
          * callbacks) is driven by FRAME_DUE. Anything else is paced by its
          * frame callback, so mark it every step. */
@@ -475,9 +475,9 @@ static bool app_update(void *self, rt_loop *loop, const rt_msg *m) {
         pthread_rwlock_rdlock(&state->output_list_lock);
         struct output_state *o = output_by_id(state, m->id);
         if (o && !(o->config->type == WALLPAPER_SHADER && a->shader_paused)) {
-            bool idle = o->config->type == WALLPAPER_TERMINAL && o->multipass_shader &&
+            bool idle = o->config->type == WALLPAPER_TERMINAL && o->shader &&
                         o->frames_rendered > 0 &&
-                        !multipass_terminal_animating(o->multipass_shader, kTermFxSettleMs);
+                        !term_gpu_animating(wallshader_terminal(o->shader), kTermFxSettleMs);
             if (!idle) atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
             /* A frame that won't render (idle terminal) must still move the
              * pacer on, or its timer fires once and goes silent. A frame that
@@ -541,8 +541,8 @@ static void app_subscribe(void *self, rt_subs *subs) {
         if (!occluded && o->pace_period_ns > 0 && output_get_frame_timer_fd(o) >= 0 &&
             wallpaper_is_animated(o->config->type) &&
             !(o->config->type == WALLPAPER_SHADER && a->shader_paused) &&
-            !(o->config->type == WALLPAPER_SHADER && o->multipass_shader &&
-              !o->multipass_shader->is_animated && o->frames_rendered > 0)) {
+            !(o->config->type == WALLPAPER_SHADER && o->shader &&
+              !wallshader_animated(o->shader) && o->frames_rendered > 0)) {
             rt_sub_at(subs, NW_MSG_FRAME_DUE, o->name, (int64_t)o->pace_next_deadline_ns);
         }
     }

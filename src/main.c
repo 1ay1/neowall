@@ -27,7 +27,8 @@
 #include "neowall/shader/shader_scaffold.h"
 #include "neowall/shader/shader.h"
 #include "neowall/shader/shader_docs.h"
-#include "neowall/shader/shader_multipass.h"
+#include "neowall/shader/shader_source.h"
+#include "neowall/shader/wallshader.h"
 #include "neowall/config/config_access.h"
 #include "neowall/constants.h"
 #include "neowall/compositor/compositor.h"
@@ -950,7 +951,7 @@ static int cmd_new(int argc, char *argv[]) {
 /* `neowall docs [query]`: every helper and uniform, from the real GLSL. */
 static int cmd_docs(int argc, char *argv[]) {
     const char *chunks[32];
-    size_t nc = multipass_preamble_chunks(chunks, 32);
+    size_t nc = nw_shader_preamble_chunks(chunks, 32);
     static shader_doc_entry entries[1024];
     size_t n = shader_docs_collect(chunks, nc, entries, 1024);
     const char *q = argc >= 3 ? argv[2] : NULL;
@@ -1428,10 +1429,8 @@ int main(int argc, char *argv[]) {
         loaded = config_load(&state, config_path);
         log_quiet_errors(false);
         if (!loaded) {
-            char *src = shader_load_file(preview_resolved);
             printf("\n%s doesn't compile yet:\n", preview_resolved);
-            if (src) watch_print_errors(src, preview_resolved);
-            free(src);
+            watch_print_errors();
             printf("showing a placeholder - fix and save to load it\n");
             fflush(stdout);
             loaded = watch_load_placeholder(&state, preview_config);
@@ -1456,15 +1455,13 @@ int main(int argc, char *argv[]) {
     log_info("Shutting down...");
 
     /* Kill any terminal-wallpaper children FIRST, before the alarm and GL
-     * teardown. The normal multipass_destroy path (which frees the terminal)
-     * is NOT reached on this exit path, so without this the child is orphaned
-     * to init and a TUI keeps spinning on its dead PTY. This only signals a
-     * process group, so it's fast and must not be skipped. */
+     * teardown. Freeing the shader (which frees the terminal) is NOT reached
+     * on this exit path, so without this the child is orphaned to init and a
+     * TUI keeps spinning on its dead PTY. This only signals a process group,
+     * so it's fast and must not be skipped. */
     pthread_rwlock_rdlock(&state.output_list_lock);
     for (struct output_state *o = state.outputs; o; o = o->next) {
-        if (o->multipass_shader) {
-            multipass_terminal_shutdown(o->multipass_shader);
-        }
+        term_gpu_shutdown(wallshader_terminal(o->shader));
     }
     pthread_rwlock_unlock(&state.output_list_lock);
 

@@ -56,7 +56,7 @@ jobs:
           # end-to-end runs must really run, not skip.
           python3 - <<'EOF'
           import json, sys
-          must_run = {"neowall:multipass_gl", "neowall:output_render",
+          must_run = {"neowall:shader_gl", "neowall:output_render",
                       "neowall:e2e_wayland", "neowall:e2e_kde", "neowall:e2e_x11"}
           seen = {}
           for line in open("build-asan/meson-logs/testlog.json"):
@@ -138,20 +138,22 @@ jobs:
         run: CC=clang meson setup build-fuzz -Dfuzz=true -Db_sanitize=address,undefined -Db_lundef=false
 
       - name: Build
-        run: ninja -C build-fuzz fuzz_vibe fuzz_multipass fuzz_exif fuzz_terminal fuzz_image fuzz_glsl fuzz_cbdt
+        run: ninja -C build-fuzz fuzz_vibe fuzz_shader fuzz_exif fuzz_terminal fuzz_image fuzz_glsl fuzz_cbdt
 
       - name: Fuzz each parser for 60s
         env:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: |
           mkdir -p crashes
-          for f in vibe multipass exif terminal image glsl cbdt; do
+          for f in vibe shader exif terminal image glsl cbdt; do
             mkdir -p corpus/$f
             # start from the checked-in seeds where there are some
             case $f in
               image) cp tests/fixtures/images/* corpus/$f/ ;;
               cbdt) cp tests/fixtures/fonts/* corpus/$f/ ;;
-              glsl|multipass) cp examples/shaders/*.glsl corpus/$f/ ;;
+              glsl) cp examples/shaders/*.glsl corpus/$f/ ;;
+              # a shader, a NUL, then its manifest
+              shader) cp examples/shaders/*.glsl tests/fixtures/fuzz-shader/* corpus/$f/ ;;
             esac
             echo "== $f"
             ./build-fuzz/fuzz_$f -max_total_time=60 -artifact_prefix=crashes/$f- corpus/$f

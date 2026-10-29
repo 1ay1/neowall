@@ -1,11 +1,14 @@
 # Shader engine v2 — a render graph with pluggable data
 
-Status: design, in progress. Slice 1 (the source layer) has landed —
-`include/neowall/source/source.h`, `src/source/`, `tests/test_source.c`
-(103 checks, headless, ASan+UBSan clean).
+Status: the old engine is gone. `src/shader/` now runs the rewrite's shader
+system (`source.c`, `assemble.c`, `engine.c`, `wallshader.c`, `term_gpu.c`;
+see docs/ARCHITECTURE.md §8). It already has what §1 asked for: any number of
+passes in dependency order, passes named rather than enumerated, manifest
+uniforms bound through `nw_source` providers, and a GL-free source model
+tested without a display. What's left from this plan is moving the engine
+onto `graph/` and the frontend vtable (§7).
 
-This replaces the whole of `src/shader/` over several steps. Read this before
-touching anything in there.
+The sections below are the original design, kept for the reasoning.
 
 ---
 
@@ -269,30 +272,12 @@ Slices, each one shippable and green on its own. No big-bang branch.
 | # | slice | state |
 |---|---|---|
 | 1 | `source/` — open data plane, registry, exec + file providers | **landed** |
-| 2 | port `reactive.c`'s 24 binds to builtin providers, delete `uniform_bind_t` | **landed** (providers in; old enums die with slice 5, when the render path switches over) |
-| 3 | `gfx/` — pull GL object handling out of `shader_multipass.c` | **landed** |
-| 4 | `graph/` — N passes, M bindings, topo order; `channel_source_t` dies | **landed** (graph has no such limits; the old enums stay until slice 5 rewires the render path) |
-| 5 | `frontend/shadertoy.c` — move the parser behind the vtable | next |
-| 6 | `glsl/` — prelude + stdlib + shadow, currently three places | |
-| 7 | `engine/` — adaptive + optimizer as policy over the graph | (both are switched off since 0.8: nothing lowers what's drawn; only timing stats and the identical-frame skip remain) |
-| 8 | layers: viewport + blend per pass, the actual "canvas" | |
+| 2 | port `reactive.c`'s 24 binds to builtin providers, delete `uniform_bind_t` | **landed** |
+| 3 | `gfx/` — GL objects out of the old engine | **landed** |
+| 4 | `graph/` — N passes, M bindings, topo order | **landed** (not yet used by the engine) |
+| 5 | replace the old engine | **landed**: the rewrite's source model + engine. `shader_multipass.c`, `multipass_parse.c`, `manifest.c`, `adaptive_scale.c`, `multipass_optimizer.c`, `program_cache.c` and `shader_diag.c` are deleted; `uniform_bind_t` and `channel_source_t` died with them |
+| 6 | run the engine on `graph/` and a frontend vtable | next |
+| 7 | layers: viewport + blend per pass, the actual "canvas" | |
 
-Old file → new home:
-
-```
-shader_multipass.c    -> gfx/ + graph/ + engine/ + frontend/shadertoy.c
-multipass_parse.c     -> frontend/shadertoy.c
-shadertoy_compat.c    -> frontend/shadertoy.c
-manifest.c            -> frontend/manifest.c
-reactive.c            -> source/builtin_*.c
-adaptive_scale.c      -> engine/adaptive.c
-multipass_optimizer.c -> engine/throttle.c
-glsl_shadow.c         -> glsl/shadow.c
-shader_stdlib.h       -> glsl/stdlib.h
-program_cache.c       -> gfx/program_cache.c
-shader_clock.c        -> source/builtin_clock.c
-```
-
-Compatibility: existing `.glsl` and `.neowall` files keep working. The
-Shadertoy frontend is a superset of what the current parser accepts, and the
-manifest grammar only gains `name(args)` provider syntax.
+Compatibility: existing `.glsl` and `.neowall` files keep working, including
+the old `bufferA { ch0 self }`, `channelN`, `texture:FILE` and `state` forms.

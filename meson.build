@@ -221,22 +221,23 @@ graph_sources = files(
 
 # Shader engine sources
 shader_sources = files(
+  'src/base.c',
+  'src/shader/source.c',
+  'src/shader/assemble.c',
+  'src/shader/compat.c',
+  'src/shader/engine.c',
+  'src/shader/wallshader.c',
+  'src/shader/term_gpu.c',
+  'src/shader/shader_hint.c',
+  'src/shader/program_cache.c',
   'src/shader/shader_core.c',
   'src/shader/shader_state.c',
-  'src/shader/shader_error_log.c',
-  'src/shader/shader_diag.c',
   'src/shader/shader_docs.c',
-  'src/shader/shader_multipass.c',
-  'src/shader/program_cache.c',
-  'src/shader/multipass_parse.c',
   'src/shader/shadertoy_compat.c',
   'src/shader/glsl_shadow.c',
   'src/shader/shader_scaffold.c',
   'src/shader/shader_clock.c',
-  'src/shader/adaptive_scale.c',
-  'src/shader/multipass_optimizer.c',
   'src/shader/reactive.c',
-  'src/shader/manifest.c',
 )
 
 # Transition sources
@@ -624,14 +625,6 @@ test_frame_clock_exe = executable('test_frame_clock',
 
 test('frame_clock', test_frame_clock_exe)
 
-test_shader_diag_exe = executable('test_shader_diag',
-  files('tests/test_shader_diag.c', 'src/shader/shader_diag.c'),
-  include_directories: [inc_dirs, inc_dirs_build],
-  build_by_default: false,
-)
-
-test('shader_diag', test_shader_diag_exe)
-
 # The control socket end to end: request/reply, a stuck client can't wedge it,
 # oversize and malformed lines are refused, a live socket isn't stolen and a
 # stale one is replaced.
@@ -656,29 +649,6 @@ test('gpu_health', executable('test_gpu_health',
   files('tests/test_gpu_health.c', 'src/egl/gpu_health.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [egl_dep, gl_dep],
-  build_by_default: false,
-))
-
-# The adaptive resolution controller with a simulated 60 Hz clock and stubbed
-# GPU timer queries: a cheap shader must stay at full resolution, a slow one
-# must still be scaled down, and it must recover when the load goes away.
-test_adaptive_exe = executable('test_adaptive_scale',
-  files('tests/test_adaptive_scale.c', 'src/shader/adaptive_scale.c'),
-  include_directories: [inc_dirs, inc_dirs_build],
-  dependencies: [m_dep],
-  build_by_default: false,
-)
-
-test('adaptive_scale', test_adaptive_exe)
-
-# Every controller decision, hashed: modes x quantized x eight load shapes.
-# -ffp-contract=off keeps the float math (and so the hash) the same on
-# targets that fuse multiply-adds by default, like aarch64.
-test('adaptive_golden', executable('test_adaptive_golden',
-  files('tests/test_adaptive_golden.c', 'src/shader/adaptive_scale.c'),
-  include_directories: [inc_dirs, inc_dirs_build],
-  c_args: cc.get_supported_arguments('-ffp-contract=off'),
-  dependencies: [m_dep],
   build_by_default: false,
 ))
 
@@ -742,12 +712,22 @@ test_compat_exe = executable('test_shadertoy_compat',
 
 test('shadertoy_compat', test_compat_exe)
 
+# The shader source model: passes, common, includes, params, manifests,
+# default bindings, pass order, line maps. GL-free.
+test('shader_source', executable('test_shader_source',
+  files('tests/test_shader_source.c', 'src/base.c', 'src/shader/source.c',
+        'src/shader/assemble.c', 'src/shader/compat.c', 'src/shader/shadertoy_compat.c',
+        'src/shader/shader_hint.c',
+        'src/shader/glsl_shadow.c', 'src/config/vibe_impl.c', 'src/utils.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+))
+
 # Shader-authoring plumbing: pass-marker detection, the virtual shader clock,
 # and the `#pragma neowall requires` floor. All GL-free, so they run in CI.
 test_authoring_exe = executable('test_shader_authoring',
-  files('tests/test_shader_authoring.c',
-        'src/shader/multipass_parse.c',
-        'src/clock.c'),
+  files('tests/test_shader_authoring.c', 'src/base.c', 'src/shader/source.c',
+        'src/config/vibe_impl.c', 'src/utils.c', 'src/clock.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
   build_by_default: false,
@@ -997,10 +977,10 @@ endif
 # The shader engine rendering for real: a GL 3.3 context with no display
 # (Mesa surfaceless + llvmpipe), pixels read back and checked, and every
 # shipped shader compiled and drawn. Skips (77) without software GL.
-test('multipass_gl', executable('test_multipass_gl',
-  files('tests/test_multipass_gl.c', 'tests/gl_headless.c', 'src/utils.c',
+test('shader_gl', executable('test_shader_gl',
+  files('tests/test_shader_gl.c', 'tests/gl_headless.c', 'src/utils.c',
         'src/clock.c', 'src/config/vibe_impl.c') +
-    shader_sources + texture_sources + image_sources + source_sources +
+    shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
     gfx_sources + graph_sources + terminal_sources,
   include_directories: has_terminal
     ? [inc_dirs, inc_dirs_build, include_directories('src/terminal', 'tests')]
@@ -1011,6 +991,22 @@ test('multipass_gl', executable('test_multipass_gl',
 ), env: {'NW_SHADER_DIR': meson.project_source_root() / 'examples/shaders'},
    timeout: 300)
 
+# Build time per shader, cold and from the program cache. Run by hand.
+foreach tool : ['bench_shader_build', 'probe_shaders']
+executable(tool,
+  files('tests' / tool + '.c', 'tests/gl_headless.c', 'src/utils.c',
+        'src/clock.c', 'src/config/vibe_impl.c') +
+    shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
+    gfx_sources + graph_sources + terminal_sources,
+  include_directories: has_terminal
+    ? [inc_dirs, inc_dirs_build, include_directories('src/terminal', 'tests')]
+    : [inc_dirs, inc_dirs_build, include_directories('tests')],
+  dependencies: deps,
+  link_with: has_terminal ? [terminal_glyph_lib] : [],
+  build_by_default: false,
+)
+endforeach
+
 # output.c + render.c end to end: a fake backend hands out pbuffers on a
 # surfaceless Mesa display, so images, fit modes, a shader, a directory cycle
 # and a bad image are all applied and drawn for real. Skips (77) without GL.
@@ -1020,7 +1016,7 @@ if has_wayland
           'src/config/vibe_impl.c', 'src/config/config.c', 'src/config/shuffle.c',
           'src/output/output.c', 'src/output/frame_clock.c', 'src/output/span.c',
           'src/render/render.c', 'src/compositor/compositor_surface.c', 'src/egl/egl_bind.c') +
-      shader_sources + texture_sources + image_sources + source_sources +
+      shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
       gfx_sources + graph_sources + terminal_sources + transition_sources,
     include_directories: [inc_dirs, inc_dirs_build,
                           include_directories('src/terminal', 'src/compositor/backends/wayland')],
@@ -1073,8 +1069,10 @@ endif
 #   ./build/fuzz_terminal -max_total_time=600 corpus/
 fuzz_harnesses = {
   'vibe':      [files('tests/fuzz_vibe.c', 'src/config/vibe_impl.c'), 'config', []],
-  'multipass': [files('tests/fuzz_multipass.c', 'src/shader/multipass_parse.c',
-                      'src/utils.c'), 'examples/shaders', []],
+  'shader':    [files('tests/fuzz_shader.c', 'src/base.c', 'src/shader/source.c',
+                      'src/shader/assemble.c', 'src/shader/compat.c',
+                      'src/shader/shadertoy_compat.c', 'src/shader/glsl_shadow.c',
+                      'src/config/vibe_impl.c', 'src/utils.c'), 'examples/shaders', []],
   'exif':      [files('tests/fuzz_exif.c', 'src/image/exif.c'), '', []],
   'image':     [files('tests/fuzz_image.c', 'src/image/image.c', 'src/image/exif.c',
                       'src/utils.c'), 'tests/fixtures/images',

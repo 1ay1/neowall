@@ -18,8 +18,8 @@
 #ifndef NEOWALL_SHADER_STDLIB_H
 #define NEOWALL_SHADER_STDLIB_H
 
-/* The reactive uniform declarations. These are filled every frame by
- * multipass_set_uniforms() from the reactive snapshot. A shader that never uses
+/* The reactive uniform declarations. wallshader.c fills them every frame
+ * from the reactive snapshot. A shader that never uses
  * them pays nothing (the GLSL compiler strips unused uniforms). */
 static const char *neowall_reactive_uniforms =
     "// --- neowall reactive uniforms (live system + audio) ---\n"
@@ -693,7 +693,7 @@ static const char *neowall_glsl_stdlib8a2 =
  * and are a single unit semantically. */
 /* Per-hook defaults for the scene kit. Kept as separate strings, not one
  * chunk, so a shader overriding nwMaterial still gets the stock nwGloss and
- * nwEmissive. Index order must match `scene_hooks` in shader_multipass.c. */
+ * nwEmissive. Index order must match `hooks` in assemble.c. */
 static const char *const neowall_scene_hook_defaults[] = {
     /* nwMaterial */
     "vec3 nwMaterial(vec3 p, vec3 n){ return vec3(0.62); }\n",

@@ -284,6 +284,8 @@ bool egl_core_make_current(struct neowall_state *state, struct output_state *out
     if (!output->compositor_surface || 
         output->compositor_surface->egl_surface == EGL_NO_SURFACE) return false;
 
-    return egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface, state->egl_context);
+    return egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface,
+                                    state->egl_context);
 }
+
 

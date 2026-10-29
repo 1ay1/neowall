@@ -14,8 +14,7 @@
 #include "neowall/config/config.h"  /* config_shuffle_cycle_paths() */
 #include "neowall/constants.h"
 #include "neowall/shader/shader.h"
-#include "neowall/shader/shader_multipass.h"
-#include "neowall/shader/manifest.h"
+#include "neowall/shader/wallshader.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 
@@ -299,10 +298,8 @@ struct output_state *output_create(struct neowall_state *state,
     out->config->channel_paths = NULL;
     out->config->channel_count = 0;
 
-    out->shader_fade_start_time = 0;
     nw_frame_clock_init(&out->frame_clock);
     out->shader_paused_at = 0;
-    out->pending_shader_path[0] = '\0';
 
     /* Initialize FPS tracking */
     out->fps_last_log_time = 0;
@@ -338,17 +335,8 @@ void output_destroy(struct output_state *output) {
     /* Clean up rendering resources */
     render_cleanup_output(output);
 
-    /* Clean up multipass shader */
-    if (output->multipass_shader != NULL) {
-        multipass_destroy(output->multipass_shader);
-        output->multipass_shader = NULL;
-    }
-
-    /* Clean up legacy shader programs */
-    if (output->live_shader_program != 0) {
-        shader_destroy_program(output->live_shader_program);
-        output->live_shader_program = 0;
-    }
+    wallshader_free(output->shader);
+    output->shader = NULL;
 
     /* Free wallpaper config */
     if (output->config) {
@@ -738,7 +726,7 @@ void output_process_geometry_change(struct output_state *output) {
         }
         output_preload_next_wallpaper(output);
     } else if (output->config && output->config->type == WALLPAPER_TERMINAL &&
-               output->multipass_shader) {
+               output->shader) {
         int cell_h = output->config->term_font_size > 0 ? output->config->term_font_size : 18;
         if (cell_h < 6) cell_h = 6;
         if (cell_h > 96) cell_h = 96;
@@ -748,7 +736,7 @@ void output_process_geometry_change(struct output_state *output) {
         int rows = output->terminal_auto_rows ? output->height / cell_h : output->config->term_rows;
         if (cols < 1) cols = 1;
         if (rows < 1) rows = 1;
-        multipass_resize_terminal(output->multipass_shader, cols, rows);
+        term_gpu_resize(wallshader_terminal(output->shader), cols, rows);
         if (output->terminal_auto_cols) output->config->term_cols = cols;
         if (output->terminal_auto_rows) output->config->term_rows = rows;
     }
@@ -964,18 +952,7 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
         return nw_err(NW_ERR_INVALID_ARG, "NULL output or shader path");
     }
 
-    /* If asked to load a .neowall manifest directly, resolve the .glsl it names
-     * and load that instead (the manifest is re-read below to apply bindings). */
-    char resolved_path[MAX_PATH_LENGTH];
-    const char *manifest_path = shader_path;  /* used to apply bindings later */
-    if (manifest_resolve_shader_path(shader_path, resolved_path, sizeof(resolved_path))) {
-        log_info("Manifest %s -> shader %s", shader_path, resolved_path);
-        shader_path = resolved_path;
-        /* manifest_path stays pointing at the .neowall file */
-    } else {
-        /* Ordinary .glsl: manifest_apply() will look for a <base>.neowall sidecar. */
-        manifest_path = shader_path;
-    }
+    /* A .neowall manifest or a .glsl with a sidecar: the loader handles both. */
 
     /* Copy the model string under the state mutex to avoid a data race with
      * the registry/output-destroy paths that can rewrite it concurrently. */
@@ -1049,90 +1026,20 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
     log_debug("EGL context made current for output %s",
               output->model[0] ? output->model : "unknown");
 
-    /* If there's an existing multipass shader, destroy it first */
-    if (output->multipass_shader != NULL) {
-        /* Prevent re-entrant shader changes */
-        if (output->shader_fade_start_time > 0 && output->pending_shader_path[0] != '\0') {
-            log_debug("Shader change already in progress, ignoring new request for: %s", shader_path);
-            return nw_err(NW_ERR_AGAIN, "shader change already in progress");
-        }
-
-        log_debug("Destroying existing multipass shader before loading: %s", shader_path);
-        multipass_destroy(output->multipass_shader);
-        output->multipass_shader = NULL;
+    /* Build the new one before dropping the old: a shader that doesn't
+     * compile leaves what's on screen alone. */
+    wallshader *fresh = NULL;
+    nw_result lr = wallshader_load(shader_path, &fresh);
+    if (nw_is_err(lr)) {
+        log_error("Failed to load shader: %s", shader_path);
+        return lr;
     }
-
-    /* Also clean up legacy single-pass shader if present */
-    if (output->live_shader_program != 0) {
-        shader_destroy_program(output->live_shader_program);
-        output->live_shader_program = 0;
-    }
-
-    /* Load shader source from file */
-    char *shader_source = shader_load_file(shader_path);
-    if (!shader_source) {
-        log_error("Failed to load shader source from: %s", shader_path);
-        return nw_err(NW_ERR_IO, "cannot read shader source");
-    }
-
-    log_info("Loaded shader source: %zu bytes from %s", strlen(shader_source), shader_path);
-
-    /* Honour `#pragma neowall requires X.Y` before doing any GL work. Without
-     * this the shader would compile happily against an old daemon and simply
-     * receive nothing for uniforms it was written against — an invisible
-     * failure that looks like a broken shader rather than an old binary. */
-    if (!shader_check_required_version(shader_source, shader_path)) {
-        free(shader_source);
-        return nw_err(NW_ERR_UNSUPPORTED, "shader requires a newer neowall");
-    }
-
-    /* Create multipass shader from source */
-    output->multipass_shader = multipass_create(shader_source);
-    free(shader_source);
-
-    if (!output->multipass_shader) {
-        log_error("Failed to create multipass shader from: %s", shader_path);
-        return nw_err(NW_ERR_PARSE, "multipass_create failed");
-    }
-
-    /* Bind persistent state (iState/iStateAge) keyed by the shader path, so a
-     * shader that accumulates across sessions resumes instead of restarting. */
-    multipass_attach_state(output->multipass_shader, shader_path);
-
-    /* Apply a .neowall manifest if present: explicit channel bindings + custom
-     * reactive uniforms. Must run before compile (uniforms are injected into the
-     * wrapper) and before GL init (so buffer-channel indices are correct). */
-    manifest_apply(output->multipass_shader, manifest_path);
-
-    /* Initialize GL resources for multipass rendering */
-    if (!multipass_init_gl(output->multipass_shader, output->width, output->height)) {
-        log_error("Failed to initialize multipass GL resources for: %s", shader_path);
-        multipass_destroy(output->multipass_shader);
-        output->multipass_shader = NULL;
-        return nw_err(NW_ERR_GL, "multipass_init_gl failed");
-    }
-
-    /* Compile all passes */
-    if (!multipass_compile_all(output->multipass_shader)) {
-        char *errors = multipass_get_all_errors(output->multipass_shader);
-        log_error("Failed to compile multipass shader: %s", shader_path);
-        if (errors) {
-            log_error("Compilation errors:\n%s", errors);
-            free(errors);
-        }
-        multipass_destroy(output->multipass_shader);
-        output->multipass_shader = NULL;
-        return nw_err(NW_ERR_PARSE, "shader failed to compile");
-    }
-
-    /* Configure adaptive resolution scaling to target the config's FPS */
-    int target_fps = shader_fps_resolve(output->config->shader_fps);
-    multipass_set_adaptive_resolution(output->multipass_shader, 
-                                      true,           /* enabled */
-                                      (float)target_fps,
-                                      0.25f,          /* min_scale */
-                                      1.0f);          /* max_scale */
-    log_info("Adaptive resolution targeting %d FPS for shader: %s", target_fps, shader_path);
+    /* the old one's last frame fades out over the new one, no pop */
+    if (output->config->type == WALLPAPER_SHADER) render_snapshot_for_swap(output);
+    wallshader_free(output->shader);
+    output->shader = fresh;
+    /* the config's `channels` fill the iChannels the shader leaves open */
+    (void)render_load_channel_textures(output, output->config);
 
     output->shader_start_time = get_time_ms();
     /* Fresh shader = fresh frame count. The static-shader idle path keys off
@@ -1144,11 +1051,7 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
      * (which would underflow the elapsed-time calculation in render.c). */
     output->shader_paused_at = 0;
 
-    log_info("Successfully loaded multipass shader with %d pass(es): %s",
-             output->multipass_shader->pass_count, shader_path);
-
-    /* Debug dump shader structure */
-    multipass_debug_dump(output->multipass_shader);
+    log_info("Loaded shader with %d pass(es): %s", wallshader_pass_count(output->shader), shader_path);
 
     /* Update config with new shader path - protected by state mutex */
     pthread_mutex_lock(&output->state->state_mutex);
@@ -1264,8 +1167,8 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
      * command still swaps normally (the command-change path below), and a
      * dead child still respawns (that is the intended "restart on exit"). */
     if (output->config->type == WALLPAPER_TERMINAL &&
-        output->multipass_shader != NULL &&
-        !multipass_terminal_child_exited(output->multipass_shader) &&
+        output->shader != NULL &&
+        !term_gpu_child_exited(wallshader_terminal(output->shader)) &&
         strcmp(output->config->term_cmd, cmd) == 0) {
         log_debug("Terminal wallpaper '%s' already running on output %s; "
                   "skipping redundant respawn", cmd,
@@ -1274,24 +1177,22 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
     }
 
     /* Build the replacement off to the side.  In particular, do not tear down
-     * the current terminal here: multipass_destroy() also kills its PTY child,
-     * so every load/attach/GL/compile failure must leave it running. */
-    multipass_shader_t *candidate = NULL;
+     * the current terminal here: freeing it also kills its PTY child, so
+     * every load/attach/compile failure must leave it running. */
+    wallshader *candidate = NULL;
 
     /* Styling shader (optional) or the built-in crisp pass-through. */
-    char *shader_source = NULL;
+    nw_result lr = nw_err(NW_ERR_NOT_FOUND, "no styling shader");
     if (shader_path && shader_path[0]) {
-        shader_source = shader_load_file(shader_path);
-        if (!shader_source) {
-            log_warn("Terminal styling shader '%s' unreadable; using crisp pass-through",
+        lr = wallshader_load(shader_path, &candidate);
+        if (nw_is_err(lr)) {
+            log_warn("Terminal styling shader '%s' didn't load; using crisp pass-through",
                      shader_path);
         }
     }
-    const char *src = shader_source ? shader_source : kTermCrispShader;
-    candidate = multipass_create(src);
-    free(shader_source);
-    if (!candidate) {
-        return nw_err(NW_ERR_PARSE, "terminal multipass_create failed");
+    if (nw_is_err(lr)) lr = wallshader_load_text(kTermCrispShader, NULL, &candidate);
+    if (nw_is_err(lr)) {
+        return lr;
     }
 
     /* Derive a grid from the output size if not specified. Cell size is fixed at
@@ -1309,89 +1210,50 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd,
     if (gc < 1) gc = 80;
     if (gr < 1) gr = 24;
 
-    /* Snapshot the optional config onto the candidate.  output_set_terminal is
-     * also called with pointers into output->config during deferred re-apply;
-     * none of these reads may depend on swapping the live shader first. */
-#define DUP_TERM_FIELD(dst, src) do {                                          \
-        if ((src)[0]) {                                                        \
-            (dst) = strdup(src);                                               \
-            if (!(dst)) {                                                      \
-                multipass_destroy(candidate);                                  \
-                return nw_err(NW_ERR_OOM, "terminal option allocation failed"); \
-            }                                                                  \
-        }                                                                      \
-    } while (0)
-    DUP_TERM_FIELD(candidate->term_cwd, output->config->term_cwd);
-    DUP_TERM_FIELD(candidate->term_env, output->config->term_env);
-    DUP_TERM_FIELD(candidate->term_font_bold, output->config->term_font_bold);
-    DUP_TERM_FIELD(candidate->term_font_italic, output->config->term_font_italic);
-#undef DUP_TERM_FIELD
-    if (output->config->term_fg >= 0) {
-        candidate->term_fg = output->config->term_fg;
-        candidate->term_has_fg = true;
-    }
-    if (output->config->term_bg >= 0) {
-        candidate->term_bg = output->config->term_bg;
-        candidate->term_has_bg = true;
+    /* A settled terminal stops redrawing and lets the loop sleep. Its child's
+     * output is what wakes it: the reader thread posts a redraw for this
+     * output. */
+    term_gpu_opts to = {
+        .cmd = cmd,
+        .cols = gc,
+        .rows = gr,
+        .cell_w = cell_w,
+        .cell_h = cell_h,
+        .font_path = (font_path && font_path[0]) ? font_path : NULL,
+        .font_bold = output->config->term_font_bold[0] ? output->config->term_font_bold : NULL,
+        .font_italic = output->config->term_font_italic[0] ? output->config->term_font_italic : NULL,
+        .cwd = output->config->term_cwd,
+        .term_env = output->config->term_env,
+        .fg = output->config->term_fg >= 0 ? output->config->term_fg : -1,
+        .bg = output->config->term_bg >= 0 ? output->config->term_bg : -1,
+        .on_output = terminal_output_woke,
+        .on_output_ctx = output,
+    };
+    term_gpu *term = NULL;
+    nw_result tr = term_gpu_new(&to, &term);
+    if (nw_is_err(tr)) {
+        wallshader_free(candidate);
+        return tr;
     }
 
     /* nwTermFX intensities. A -1 config sentinel means "use the built-in
      * default": a subtle bloom so bright/bold cells glow, and the retro CRT
-     * bits (scanline/curve/chroma) off unless the user opts in. */
-    candidate->term_fx[0] =
-        output->config->term_bloom    >= 0.0f ? output->config->term_bloom    : 0.35f;
-    candidate->term_fx[1] =
-        output->config->term_scanline >= 0.0f ? output->config->term_scanline : 0.0f;
-    candidate->term_fx[2] =
-        output->config->term_crt      >= 0.0f ? output->config->term_crt      : 0.0f;
-    candidate->term_fx[3] =
-        output->config->term_chroma   >= 0.0f ? output->config->term_chroma   : 0.0f;
-    /* Change-driven fade defaults ON at a gentle level — it makes graphs and
-     * updating numbers glide, which is the biggest "feels alive" win. */
-    candidate->term_fade =
-        output->config->term_fade     >= 0.0f ? output->config->term_fade     : 0.5f;
+     * bits (scanline/curve/chroma) off unless the user opts in. The
+     * change-driven fade defaults on: graphs and numbers glide. */
+    const float fx[4] = {
+        output->config->term_bloom    >= 0.0f ? output->config->term_bloom    : 0.35f,
+        output->config->term_scanline >= 0.0f ? output->config->term_scanline : 0.0f,
+        output->config->term_crt      >= 0.0f ? output->config->term_crt      : 0.0f,
+        output->config->term_chroma   >= 0.0f ? output->config->term_chroma   : 0.0f,
+    };
+    term_gpu_set_fx(term, fx, output->config->term_fade >= 0.0f ? output->config->term_fade : 0.5f);
+    wallshader_attach_terminal(candidate, term);
 
-    /* A settled terminal stops redrawing and lets the loop sleep. Its child's
-     * output is what wakes it: the reader thread posts a redraw for this
-     * output. */
-    candidate->term_on_output = terminal_output_woke;
-    candidate->term_on_output_ctx = output;
-
-    /* Attach the terminal BEFORE init_gl (init creates the cell/atlas textures
-     * sized to the grid) and before compile (nwTerm uniforms must resolve). */
-    nw_result tr = multipass_attach_terminal(candidate, cmd,
-                                             gc, gr, cell_w, cell_h,
-                                             (font_path && font_path[0]) ? font_path : NULL);
-    if (nw_is_err(tr)) {
-        multipass_destroy(candidate);
-        return tr;
-    }
-
-    if (!multipass_init_gl(candidate, output->width, output->height)) {
-        multipass_destroy(candidate);
-        return nw_err(NW_ERR_GL, "multipass_init_gl failed (terminal)");
-    }
-    if (!multipass_compile_all(candidate)) {
-        char *errors = multipass_get_all_errors(candidate);
-        log_error("Terminal shader failed to compile:\n%s", errors ? errors : "(none)");
-        free(errors);
-        multipass_destroy(candidate);
-        return nw_err(NW_ERR_PARSE, "terminal shader failed to compile");
-    }
-
-    int target_fps = shader_fps_resolve(output->config->shader_fps);
-    multipass_set_adaptive_resolution(candidate, true,
-                                      (float)target_fps, 0.25f, 1.0f);
-
-    /* Candidate is now complete.  Publish it atomically from the output's point
-     * of view, then retire the old terminal child and GL resources. */
-    multipass_shader_t *old = output->multipass_shader;
-    output->multipass_shader = candidate;
-    if (old) multipass_destroy(old);
-    if (output->live_shader_program != 0) {
-        shader_destroy_program(output->live_shader_program);
-        output->live_shader_program = 0;
-    }
+    /* Candidate is now complete.  Publish it, then retire the old terminal
+     * child and GL resources. */
+    wallshader *old = output->shader;
+    output->shader = candidate;
+    wallshader_free(old);
 
     output->shader_start_time = get_time_ms();
     output->frames_rendered = 0;
@@ -1772,19 +1634,6 @@ void output_cycle_wallpaper(struct output_state *output) {
         return;
     }
 
-    /* Don't cycle if a shader cross-fade is in progress */
-    if (output->config->type == WALLPAPER_SHADER &&
-        output->shader_fade_start_time > 0 &&
-        output->pending_shader_path[0] != '\0') {
-        /* Use local copy of model to avoid race if output is being modified */
-        char model_copy[64];
-        snprintf(model_copy, sizeof(model_copy), "%s", output->model);
-        const char *output_name = model_copy[0] ? model_copy : "unknown";
-        log_info("Shader transition in progress on output '%s', deferring cycle request",
-                 output_name);
-        return;
-    }
-
     /* Move to next wallpaper/shader - protect cycle_paths access with mutex */
     pthread_mutex_lock(&output->state->state_mutex);
     size_t old_index = output->config->current_cycle_index;
@@ -2027,7 +1876,7 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
         return false;
     }
 
-    if (output->config->type == WALLPAPER_SHADER && output->multipass_shader == NULL && output->live_shader_program == 0) {
+    if (output->config->type == WALLPAPER_SHADER && output->shader == NULL) {
         return false;
     }
 
@@ -2272,14 +2121,14 @@ void output_apply_deferred_config(struct output_state *output) {
     /* Check if there's a deferred config to apply */
     if (output->config->type == WALLPAPER_SHADER && output->config->shader_path[0] != '\0') {
         /* Check if shader is not yet loaded */
-        if (output->multipass_shader == NULL && output->live_shader_program == 0) {
+        if (output->shader == NULL) {
             log_info("Applying deferred shader config to output %s: %s",
                      output->model[0] ? output->model : "unknown",
                      output->config->shader_path);
             output_set_shader(output, output->config->shader_path);
         }
     } else if (output->config->type == WALLPAPER_TERMINAL && output->config->term_cmd[0] != '\0') {
-        if (output->multipass_shader == NULL && output->live_shader_program == 0) {
+        if (output->shader == NULL) {
             log_info("Applying deferred terminal config to output %s: %s",
                      output->model[0] ? output->model : "unknown",
                      output->config->term_cmd);
@@ -2298,7 +2147,7 @@ void output_apply_deferred_config(struct output_state *output) {
         }
     } else if (output->config->cycle && output->config->cycle_count > 0 && output->config->cycle_paths) {
         /* Handle cycling mode */
-        if (!output->current_image && output->texture == 0 && output->multipass_shader == NULL && output->live_shader_program == 0) {
+        if (!output->current_image && output->texture == 0 && output->shader == NULL) {
             const char *initial_path = output->config->cycle_paths[output->config->current_cycle_index];
             log_info("Applying deferred cycle config to output %s: %s",
                      output->model[0] ? output->model : "unknown",
@@ -2337,10 +2186,10 @@ bool output_render_frame(struct output_state *output) {
 bool output_terminal_mouse(struct output_state *output, int px, int py,
                            int button, bool pressed, bool motion) {
     if (!output || output->config->type != WALLPAPER_TERMINAL ||
-        !output->multipass_shader) {
+        !output->shader) {
         return false;
     }
-    return multipass_terminal_mouse(output->multipass_shader, px, py,
+    return term_gpu_mouse(wallshader_terminal(output->shader), px, py,
                                     button, pressed, motion);
 }
 
@@ -2348,10 +2197,10 @@ bool output_terminal_mouse(struct output_state *output, int px, int py,
  * Returns true if written. No-op unless this output hosts a terminal. */
 bool output_terminal_key(struct output_state *output, const void *bytes, size_t len) {
     if (!output || output->config->type != WALLPAPER_TERMINAL ||
-        !output->multipass_shader) {
+        !output->shader) {
         return false;
     }
-    return multipass_terminal_write(output->multipass_shader, bytes, len);
+    return term_gpu_write(wallshader_terminal(output->shader), bytes, len);
 }
 
 /* Upload preloaded image to GPU and return texture ID */

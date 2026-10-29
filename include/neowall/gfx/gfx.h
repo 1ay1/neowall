@@ -5,14 +5,15 @@
  * The bottom layer of the v2 shader engine (see
  * docs/architecture/SHADER_ENGINE_V2.md). Programs, textures, render targets.
  * It knows about OpenGL and knows nothing about Shadertoy, passes, channels,
- * multipass, reactive data, or wallpapers.
+ * multipass, reactive data, or wallpapers. The shader engine's render targets
+ * are nw_gfx_targets.
  *
- * Today that logic lives inline in shader_multipass.c, tangled with pass
- * semantics: the FBO creation loop is inside a `pass->type >= PASS_TYPE_BUFFER_A`
- * branch, and the ping-pong pair is two raw GLuints plus an index that callers
- * flip by hand. So the same five glTexParameteri calls appear in three places
- * and the "which texture am I writing this frame" question is answered
- * differently depending on who is asking.
+ * In the old engine this logic lived inline, tangled with pass
+ * semantics: the FBO creation loop was inside a `pass->type >= PASS_TYPE_BUFFER_A`
+ * branch, and the ping-pong pair was two raw GLuints plus an index that callers
+ * flipped by hand. So the same five glTexParameteri calls appeared in three places
+ * and the "which texture am I writing this frame" question was answered
+ * differently depending on who was asking.
  *
  * Pulling it out gives the graph layer something to build on that can be
  * reasoned about on its own:

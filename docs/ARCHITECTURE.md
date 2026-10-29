@@ -53,8 +53,8 @@ include/neowall/          PUBLIC headers (the project's API surface)
   source/                    open data plane: live scalar/texture providers
                              (see architecture/SHADER_ENGINE_V2.md)
   gfx/  graph/               GL object layer, render graph (engine v2 slices)
-  shader/                    GLSL engine: multipass, shadertoy-compat, clock,
-                             diagnostics, docs, optimizers
+  shader/                    shader system: source model, engine, per-output
+                             wallshader, terminal textures, clock, docs
   terminal/                  in-tree VT/xterm emulator (terminal-as-wallpaper)
 src/                       IMPLEMENTATION (.c) + truly-private impl headers
   main.c                     CLI, daemonize, startup/shutdown
@@ -207,19 +207,28 @@ iterations × 20 rounds).
 ## 8. The shader engine (`src/shader/`)
 
 Accepts unmodified Shadertoy GLSL and compiles it under desktop `#version 330
-core`:
+core`. Four layers, each usable on its own:
 
-- `shadertoy_compat.c` — pure, GL-free source-text rewrites (`texture2D` →
-  `texture`, etc.); unit-tested headless in `tests/test_shadertoy_compat.c`.
-- `shader_multipass.c` — multi-pass (Buffer A–D + Image) rendering with
-  ping-pong FBOs, channel-binding heuristics, cached uniform locations.
-- `*_optimizer.c` / `adaptive_scale.c` — GL state caching, and timing stats.
-  They **never lower what's drawn**: every pass renders every frame at full
-  resolution; the only skip left is a frame identical to the last. Adaptive
-  resolution is off by default and the scale is pinned to 1.0.
-- `shader_diag.c` — turns driver compile logs (NVIDIA, Mesa, ANGLE) into
-  `file:line` errors with a caret and "did you mean"; each pass carries
-  `#line` directives so numbers are real file lines.
+- `source.c` (`shader_source.h`) — GL-free. A `.glsl` (plus its `.neowall`
+  sidecar) becomes passes, channel bindings, `// @param`s and manifest
+  uniform bindings, with every `#include` expanded and a map from each
+  generated line back to `file:line`. Passes are ordered so each runs after
+  the ones it reads; there's no fixed Buffer A–D list. Tested headless in
+  `test_shader_source`, fuzzed by `fuzz_shader`.
+- `assemble.c` + `compat.c` — the full fragment text for a pass: uniforms,
+  stdlib, `#line`-tagged user code, `main()`. `compat.c` fixes what real
+  exported shaders do that desktop drivers reject (redeclared `iTime`,
+  `precision`, non-constant `const` globals).
+- `engine.c` (`engine.h`) — the GL half. Compiles every pass at once (in
+  parallel where the driver has `KHR_parallel_shader_compile`), owns the
+  buffer targets, draws a frame from a plain `nw_frame_in`. Driver errors
+  come back as `file:line` with the source line and a caret, including inside
+  `#include`d files. Every pass renders every frame at full resolution.
+- `wallshader.c` — one output's running shader: source + engine + manifest
+  bindings (opened as `nw_source` providers) + reactive uniforms + iState
+  persistence + an optional terminal (`term_gpu.c`, which owns the PTY and
+  the `iTerm*` textures). This is the only part `output.c` and `render.c`
+  use. A shader that fails to load leaves the current one on screen.
 
 **Shader time.** `iTime` is a float32, so two things keep it exact:
 
@@ -269,8 +278,8 @@ ones that matter most when changing the runtime:
 | `frame_clock` | vblank stamping under jitter, timestamp noise, missed vblanks, latency changes |
 | `shader_clock` | the rebase policy, exhaustively |
 | `output_refcount` | refcount protocol under concurrency (8 threads × 20 000 iterations) |
-| `adaptive_scale` | a cheap shader is never scaled down |
-| `shader_diag` | compile-log parsing across vendors |
+| `shader_source` | passes, includes, params, manifests, default bindings, pass order, line maps |
+| `shader_gl` | the engine on llvmpipe: pixels, feedback, spanning, errors as file:line, every shipped shader |
 | `foundation`, `vibe`, `utils`, `shadertoy_compat`, ... | pure units |
 
 CI (`.github/workflows/`):

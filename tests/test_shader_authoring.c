@@ -1,5 +1,5 @@
 /* Unit tests for shader-authoring plumbing that is easy to break silently:
- * multipass pass-marker detection, the virtual shader clock, and the
+ * pass-marker detection, the virtual shader clock, and the
  * `#pragma neowall requires` version floor.
  *
  * All three are GL-free, so these run headless in CI.
@@ -11,23 +11,8 @@
 #include <time.h>
 
 #include "neowall/clock.h"
-#include "neowall/shader/shader_multipass.h"
-
-/* Stub for multipass_type_name — the real one lives in shader_multipass.c,
- * which we deliberately do not link (it pulls in GL). The parser only calls it
- * for log messages, so a placeholder is fine. Mirrors fuzz_multipass.c. */
-const char *multipass_type_name(multipass_type_t type) {
-    (void)type;
-    return "<test>";
-}
-
-/* Logging stubs: the real ones live in utils.c, which would drag in pthreads
- * and the whole state machine for no benefit here. */
-#include <stdarg.h>
-void log_info (const char *fmt, ...) { (void)fmt; }
-void log_debug(const char *fmt, ...) { (void)fmt; }
-void log_warn (const char *fmt, ...) { (void)fmt; }
-void log_error(const char *fmt, ...) { (void)fmt; }
+#include "neowall/log.h"
+#include "neowall/shader/shader_source.h"
 
 static int failures = 0;
 static int checks = 0;
@@ -59,17 +44,17 @@ static void test_marker_scan_is_line_bounded(void) {
         "    c = vec4(1.0);\n"
         "}\n";
 
-    multipass_parse_result_t *r = multipass_parse_shader(src);
-    CHECK(r != NULL);
-    if (!r) return;
+    nw_shader_source *s = NULL;
+    CHECK(nw_is_ok(nw_shader_source_parse(src, NULL, NULL, &s)));
+    if (!s) return;
 
-    CHECK(r->pass_count == 2);
-    CHECK(r->pass_types[0] == PASS_TYPE_BUFFER_A);
+    CHECK(s->passes.len == 2);
     /* The trailing "Buffer A" mention must NOT drag the Image pass back to
      * being a buffer. */
-    CHECK(r->pass_types[1] == PASS_TYPE_IMAGE);
+    CHECK(nw_shader_source_find_pass(s, "Buffer A") >= 0);
+    CHECK(s->image_pass >= 0 && !strcmp(s->passes.data[s->image_pass].name, "Image"));
 
-    multipass_free_parse_result(r);
+    nw_shader_source_free(s);
 }
 
 /* A marker only counts when it is the comment on (or just above) the pass. */
@@ -78,14 +63,14 @@ static void test_marker_prefers_nearest_comment(void) {
         "// Image\n"
         "void mainImage(out vec4 c, in vec2 f) { c = vec4(0.5); }\n";
 
-    multipass_parse_result_t *r = multipass_parse_shader(src);
-    CHECK(r != NULL);
-    if (!r) return;
+    nw_shader_source *s = NULL;
+    CHECK(nw_is_ok(nw_shader_source_parse(src, NULL, NULL, &s)));
+    if (!s) return;
 
-    CHECK(r->pass_count == 1);
-    CHECK(r->pass_types[0] == PASS_TYPE_IMAGE);
+    CHECK(s->passes.len == 1);
+    CHECK(s->image_pass == 0);
 
-    multipass_free_parse_result(r);
+    nw_shader_source_free(s);
 }
 
 /* ------------------------------------------------------------------ *
@@ -157,31 +142,34 @@ static void test_clock_offset_shifts_time(void) {
 
 static void test_version_pragma(void) {
     /* No pragma: always runs. */
-    CHECK(shader_check_required_version("void mainImage() {}", "t.glsl"));
+    CHECK(nw_shader_requires_ok("void mainImage() {}", "t.glsl"));
 
     /* Ancient requirement: satisfied. */
-    CHECK(shader_check_required_version(
-        "#pragma neowall requires 0.1\nvoid mainImage() {}", "t.glsl"));
+    CHECK(nw_shader_requires_ok("#pragma neowall requires 0.1\nvoid mainImage() {}", "t.glsl"));
 
     /* Far-future requirement: refused, rather than silently rendering with
      * dead uniforms. */
-    CHECK(!shader_check_required_version(
-        "#pragma neowall requires 99.0\nvoid mainImage() {}", "t.glsl"));
+    CHECK(!nw_shader_requires_ok("#pragma neowall requires 99.0\nvoid mainImage() {}", "t.glsl"));
 
     /* Leading whitespace is legal for a preprocessor directive. */
-    CHECK(!shader_check_required_version(
-        "   #pragma neowall requires 99.0.1\nvoid mainImage() {}", "t.glsl"));
+    CHECK(!nw_shader_requires_ok("   #pragma neowall requires 99.0.1\nvoid mainImage() {}", "t.glsl"));
 
     /* A mention inside a comment is not a directive. */
-    CHECK(shader_check_required_version(
-        "// #pragma neowall requires 99.0\nvoid mainImage() {}", "t.glsl"));
+    CHECK(nw_shader_requires_ok("// #pragma neowall requires 99.0\nvoid mainImage() {}", "t.glsl"));
 
     /* Malformed version is a warning, not a hard refusal. */
-    CHECK(shader_check_required_version(
-        "#pragma neowall requires\nvoid mainImage() {}", "t.glsl"));
+    CHECK(nw_shader_requires_ok("#pragma neowall requires\nvoid mainImage() {}", "t.glsl"));
+
+    /* And the loader enforces it. */
+    nw_shader_source *s = NULL;
+    CHECK(nw_is_err(nw_shader_source_parse(
+        "#pragma neowall requires 99.0\nvoid mainImage(out vec4 c, in vec2 f) { c = vec4(1); }\n",
+        NULL, NULL, &s)));
+    CHECK(s == NULL);
 }
 
 int main(void) {
+    log_quiet_errors(true);
     test_marker_scan_is_line_bounded();
     test_marker_prefers_nearest_comment();
 

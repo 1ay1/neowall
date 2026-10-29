@@ -17,7 +17,11 @@ for f in $(git ls-files 'src/*.c' | grep -v -E '/vendor/|^src/(gfx|graph)/'); do
         | sed -E 's/.*\b([a-z_][a-z_0-9]*)\($/\1/' \
         | while read -r fn; do
             case "$fn" in main|LLVMFuzzerTestOneInput) continue ;; esac
-            n=$(grep -rn -w "$fn" src tests --include='*.c' --include='*.inc' | wc -l)
+            n=$(grep -rn -w "$fn" src tests include --include='*.c' --include='*.inc' --include='*.h' | wc -l)
+            # a prototype in a header plus its definition is still unused, unless
+            # a header macro calls it (nw_list_push -> nw_list_grow_)
+            m=$(grep -rn -w "$fn" include src --include='*.h' | grep -c '#define\|\\$' || true)
+            n=$(( n - $(grep -rln -w "$fn" include src --include='*.h' | wc -l) + m ))
             if [ "$n" -le 1 ]; then
                 echo "unused: $fn ($f)"
             fi

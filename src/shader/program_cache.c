@@ -1,212 +1,194 @@
-/* GLSL program binary cache.
+/* See neowall/shader/program_cache.h.
  *
- * Driver shader compilation dominates shader-switch latency (50-300ms for a
- * complex raymarcher). GL_ARB_get_program_binary lets us snapshot the
- * driver-compiled program to disk and reload it next time in ~1ms.
- *
- * Cache key: FNV-1a hash of the COMPLETE wrapped fragment source (which embeds
- * the wrapper version implicitly) + driver identity (GL_VENDOR/RENDERER/
- * VERSION). A driver update changes the identity string, invalidating stale
- * binaries naturally; glProgramBinary additionally rejects incompatible blobs
- * at load (we fall back to source compilation), so the worst case is a miss.
- *
- * Layout: $XDG_CACHE_HOME/neowall/shaderbin/<hash16>.bin
- *   header: u32 magic, u32 version, u32 gl_format, u32 length
- *   payload: driver binary blob
- *
- * All functions are safe to call without the extension: they degrade to
- * "always miss / never store".
- */
+ * $XDG_CACHE_HOME/neowall/programs/<key>.bin:
+ *   u32 magic, u32 version, u32 format, u32 length, then the driver's blob.
+ * Written to a temp file and renamed, so a crash never leaves half a file.
+ * Kept to the newest MAX_ENTRIES files. */
+#define _DEFAULT_SOURCE
 
+#include "neowall/shader/program_cache.h"
+
+#include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include <sys/stat.h>
-#include <errno.h>
+#include <time.h>
 #include <unistd.h>
+#include <utime.h>
 
+#include "neowall/log.h"
 #include "neowall/shader/platform_compat.h"
-#include "neowall/shader/program_cache.h"
-#include "neowall/shader/shader_log.h"
 
-#define CACHE_MAGIC   0x4E574243u  /* "NWBC" */
-#define CACHE_VERSION 1u
+#define MAGIC 0x4E575042u /* "NWPB" */
+#define VERSION 1u
+#define MAX_BLOB (64u << 20)
+#define MAX_ENTRIES 256
 
-static bool g_checked = false;
-static bool g_supported = false;
+static int g_state = -1;   /* -1 unknown, 0 off, 1 on */
 static char g_dir[512];
-static uint64_t g_driver_hash = 0;
+static uint64_t g_driver;
+static unsigned g_hits, g_misses;
 
-/* FNV-1a 64-bit */
-static uint64_t fnv1a(const void *data, size_t len, uint64_t seed) {
-    const unsigned char *p = data;
-    uint64_t h = seed ? seed : 0xcbf29ce484222325ull;
-    for (size_t i = 0; i < len; i++) {
-        h ^= p[i];
+static uint64_t fnv1a(const char *s, uint64_t h) {
+    for (; s && *s; s++) {
+        h ^= (unsigned char)*s;
         h *= 0x100000001b3ull;
     }
     return h;
 }
 
-/* One-time probe: extension support, cache dir, driver identity hash.
- * Must be called with a current GL context. */
-static void cache_init_once(void) {
-    if (g_checked) return;
-    g_checked = true;
-
-    /* GL 3.3 core: GL_ARB_get_program_binary is an extension (core in 4.1).
-     * Probe via GL_NUM_PROGRAM_BINARY_FORMATS: zero formats = can't cache. */
-    GLint num_formats = 0;
-    glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &num_formats);
-    /* Clear any error from drivers that don't know the pname at all */
-    while (glGetError() != GL_NO_ERROR) { /* drain */ }
-    if (num_formats <= 0) {
-        log_info("Program binary cache: unsupported by driver (0 binary formats)");
-        return;
+static bool mkdirs(char *path) {
+    for (char *p = path + 1; *p; p++) {
+        if (*p != '/') continue;
+        *p = '\0';
+        if (mkdir(path, 0700) != 0 && errno != EEXIST) return false;
+        *p = '/';
     }
-
-    /* Driver identity for the key: a mesa/NVIDIA update invalidates blobs */
-    const char *vendor   = (const char *)glGetString(GL_VENDOR);
-    const char *renderer = (const char *)glGetString(GL_RENDERER);
-    const char *version  = (const char *)glGetString(GL_VERSION);
-    uint64_t h = fnv1a(vendor   ? vendor   : "", vendor   ? strlen(vendor)   : 0, 0);
-    h = fnv1a(renderer ? renderer : "", renderer ? strlen(renderer) : 0, h);
-    h = fnv1a(version  ? version  : "", version  ? strlen(version)  : 0, h);
-    g_driver_hash = h;
-
-    /* Resolve cache dir: $XDG_CACHE_HOME/neowall/shaderbin or ~/.cache/... */
-    const char *xdg = getenv("XDG_CACHE_HOME");
-    if (xdg && xdg[0]) {
-        snprintf(g_dir, sizeof(g_dir), "%s/neowall/shaderbin", xdg);
-    } else {
-        const char *home = getenv("HOME");
-        if (!home || !home[0]) {
-            log_info("Program binary cache: no HOME, disabled");
-            return;
-        }
-        snprintf(g_dir, sizeof(g_dir), "%s/.cache/neowall/shaderbin", home);
-    }
-
-    /* mkdir -p (two levels) */
-    char tmp[512];
-    snprintf(tmp, sizeof(tmp), "%s", g_dir);
-    for (char *p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = '\0';
-            mkdir(tmp, 0755);
-            *p = '/';
-        }
-    }
-    if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
-        log_info("Program binary cache: cannot create %s (%s), disabled",
-                 g_dir, strerror(errno));
-        return;
-    }
-
-    g_supported = true;
-    log_info("Program binary cache enabled: %s (%d formats)", g_dir, num_formats);
+    return mkdir(path, 0700) == 0 || errno == EEXIST;
 }
 
-static void cache_path_for(uint64_t key, char *out, size_t out_len) {
-    snprintf(out, out_len, "%s/%016llx.bin", g_dir, (unsigned long long)key);
+static bool ready(void) {
+    if (g_state >= 0) return g_state == 1;
+    g_state = 0;
+    if (getenv("NEOWALL_NO_PROGRAM_CACHE")) return false;
+    GLint formats = 0;
+    glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &formats);
+    while (glGetError() != GL_NO_ERROR) {}
+    if (formats <= 0) {
+        log_debug("program cache: the driver can't save programs");
+        return false;
+    }
+    /* a driver update must never load an old blob */
+    g_driver = fnv1a((const char *)glGetString(GL_VENDOR), 0xcbf29ce484222325ull);
+    g_driver = fnv1a((const char *)glGetString(GL_RENDERER), g_driver);
+    g_driver = fnv1a((const char *)glGetString(GL_VERSION), g_driver);
+    const char *xdg = getenv("XDG_CACHE_HOME"), *home = getenv("HOME");
+    int n = xdg && xdg[0] == '/' ? snprintf(g_dir, sizeof(g_dir), "%s/neowall/programs", xdg)
+            : home && home[0]    ? snprintf(g_dir, sizeof(g_dir), "%s/.cache/neowall/programs", home)
+                                 : -1;
+    if (n <= 0 || (size_t)n >= sizeof(g_dir)) return false;
+    char tmp[sizeof(g_dir)];
+    memcpy(tmp, g_dir, sizeof(tmp));
+    if (!mkdirs(tmp)) {
+        log_debug("program cache: can't create %s (%s)", g_dir, strerror(errno));
+        return false;
+    }
+    g_state = 1;
+    return true;
 }
 
-uint64_t program_cache_key(const char *vertex_src, const char *fragment_src) {
-    uint64_t h = fnv1a(vertex_src   ? vertex_src   : "",
-                       vertex_src   ? strlen(vertex_src)   : 0, 0);
-    h = fnv1a(fragment_src ? fragment_src : "",
-              fragment_src ? strlen(fragment_src) : 0, h);
-    /* fold in driver identity (g_driver_hash is 0 until init; key consumers
-     * call load/store which init first, so fold there instead) */
-    return h;
+uint64_t program_cache_key(const char *vs, const char *fs) {
+    return fnv1a(fs, fnv1a(vs, 0xcbf29ce484222325ull));
 }
 
-bool program_cache_load(uint64_t key, GLuint *out_program) {
-    cache_init_once();
-    if (!g_supported || !out_program) return false;
+static void path_for(uint64_t key, char *out, size_t cap) {
+    snprintf(out, cap, "%s/%016llx.bin", g_dir, (unsigned long long)(key ^ g_driver));
+}
 
-    char path[600];
-    cache_path_for(key ^ g_driver_hash, path, sizeof(path));
-
+unsigned program_cache_load(uint64_t key) {
+    if (!ready()) return 0;
+    char path[640];
+    path_for(key, path, sizeof(path));
     FILE *f = fopen(path, "rb");
-    if (!f) return false;
-
-    uint32_t hdr[4];
-    bool ok = false;
+    if (!f) {
+        g_misses++;
+        return 0;
+    }
+    uint32_t h[4];
+    GLuint prog = 0;
     void *blob = NULL;
-
-    if (fread(hdr, sizeof(hdr), 1, f) == 1 &&
-        hdr[0] == CACHE_MAGIC && hdr[1] == CACHE_VERSION &&
-        hdr[3] > 0 && hdr[3] < (64u << 20)) {
-        blob = malloc(hdr[3]);
-        if (blob && fread(blob, hdr[3], 1, f) == 1) {
-            GLuint prog = glCreateProgram();
-            if (prog) {
-                glProgramBinary(prog, (GLenum)hdr[2], blob, (GLsizei)hdr[3]);
-                GLint linked = 0;
-                glGetProgramiv(prog, GL_LINK_STATUS, &linked);
-                if (linked) {
-                    *out_program = prog;
-                    ok = true;
-                } else {
-                    /* Incompatible blob (driver changed under us): delete it */
-                    glDeleteProgram(prog);
-                }
-            }
+    if (fread(h, sizeof(h), 1, f) == 1 && h[0] == MAGIC && h[1] == VERSION && h[3] && h[3] < MAX_BLOB &&
+        (blob = malloc(h[3])) && fread(blob, h[3], 1, f) == 1) {
+        prog = glCreateProgram();
+        glProgramBinary(prog, (GLenum)h[2], blob, (GLsizei)h[3]);
+        GLint ok = 0;
+        glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+        while (glGetError() != GL_NO_ERROR) {}
+        if (!ok) {
+            glDeleteProgram(prog);
+            prog = 0;
         }
     }
     free(blob);
     fclose(f);
-
-    if (!ok) {
-        unlink(path); /* stale/corrupt entry: drop so we re-store after compile */
-    } else {
-        log_debug("Program cache HIT: %s", path);
+    if (!prog) {
+        unlink(path); /* stale or corrupt: compile and store again */
+        g_misses++;
+        return 0;
     }
-    return ok;
+    utime(path, NULL); /* recently used: survives pruning */
+    g_hits++;
+    return prog;
 }
 
-void program_cache_store(uint64_t key, GLuint program) {
-    cache_init_once();
-    if (!g_supported || !program) return;
-
-    /* Hint the driver we'll snapshot this program. Set BEFORE link normally;
-     * setting after link still works on mesa/NVIDIA via re-snapshot. */
-    glProgramParameteri(program, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE);
-
-    GLint blob_len = 0;
-    glGetProgramiv(program, GL_PROGRAM_BINARY_LENGTH, &blob_len);
-    if (blob_len <= 0) return;
-
-    void *blob = malloc((size_t)blob_len);
-    if (!blob) return;
-
-    GLsizei written = 0;
-    GLenum format = 0;
-    glGetProgramBinary(program, blob_len, &written, &format, blob);
-    if (written <= 0 || glGetError() != GL_NO_ERROR) {
-        free(blob);
-        return;
+/* Drop the oldest entries past MAX_ENTRIES. */
+static void prune(void) {
+    DIR *d = opendir(g_dir);
+    if (!d) return;
+    struct ent {
+        char name[64];
+        time_t at;
+    } *ents = NULL;
+    size_t n = 0, cap = 0;
+    struct dirent *de;
+    while ((de = readdir(d))) {
+        size_t len = strlen(de->d_name);
+        if (len < 5 || len >= 64 || strcmp(de->d_name + len - 4, ".bin")) continue;
+        char p[640];
+        struct stat st;
+        snprintf(p, sizeof(p), "%s/%s", g_dir, de->d_name);
+        if (stat(p, &st) != 0) continue;
+        if (n == cap) {
+            cap = cap ? cap * 2 : 64;
+            struct ent *ne = realloc(ents, cap * sizeof(*ents));
+            if (!ne) break;
+            ents = ne;
+        }
+        snprintf(ents[n].name, sizeof(ents[n].name), "%s", de->d_name);
+        ents[n++].at = st.st_mtime;
     }
+    closedir(d);
+    while (n > MAX_ENTRIES) {
+        size_t old = 0;
+        for (size_t i = 1; i < n; i++)
+            if (ents[i].at < ents[old].at) old = i;
+        char p[640];
+        snprintf(p, sizeof(p), "%s/%s", g_dir, ents[old].name);
+        unlink(p);
+        ents[old] = ents[--n];
+    }
+    free(ents);
+}
 
-    char path[600], tmp_path[640];
-    cache_path_for(key ^ g_driver_hash, path, sizeof(path));
-    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%d", path, getpid());
-
-    FILE *f = fopen(tmp_path, "wb");
-    if (f) {
-        uint32_t hdr[4] = { CACHE_MAGIC, CACHE_VERSION, (uint32_t)format, (uint32_t)written };
-        bool wrote = fwrite(hdr, sizeof(hdr), 1, f) == 1 &&
-                     fwrite(blob, (size_t)written, 1, f) == 1;
-        fclose(f);
-        if (wrote) {
-            rename(tmp_path, path); /* atomic publish */
-            log_debug("Program cache STORE: %s (%d bytes)", path, written);
-        } else {
-            unlink(tmp_path);
+void program_cache_store(uint64_t key, unsigned prog) {
+    if (!prog || !ready()) return;
+    GLint len = 0;
+    glGetProgramiv(prog, GL_PROGRAM_BINARY_LENGTH, &len);
+    if (len <= 0 || (uint32_t)len >= MAX_BLOB) return;
+    void *blob = malloc((size_t)len);
+    if (!blob) return;
+    GLsizei got = 0;
+    GLenum fmt = 0;
+    glGetProgramBinary(prog, len, &got, &fmt, blob);
+    if (got > 0 && glGetError() == GL_NO_ERROR) {
+        char path[640], tmp[700];
+        path_for(key, path, sizeof(path));
+        snprintf(tmp, sizeof(tmp), "%s.%d.tmp", path, (int)getpid());
+        FILE *f = fopen(tmp, "wb");
+        if (f) {
+            uint32_t h[4] = {MAGIC, VERSION, (uint32_t)fmt, (uint32_t)got};
+            bool ok = fwrite(h, sizeof(h), 1, f) == 1 && fwrite(blob, (size_t)got, 1, f) == 1;
+            ok = fclose(f) == 0 && ok;
+            if (ok && rename(tmp, path) == 0) prune();
+            else unlink(tmp);
         }
     }
     free(blob);
+}
+
+void program_cache_stats(unsigned *hits, unsigned *misses) {
+    if (hits) *hits = g_hits;
+    if (misses) *misses = g_misses;
 }

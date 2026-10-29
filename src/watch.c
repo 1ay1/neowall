@@ -10,10 +10,7 @@
 #include "neowall/app.h"
 #include "neowall/neowall.h"
 #include "neowall/output/output.h"
-#include "neowall/shader/shader.h"
-#include "neowall/shader/shader_error_log.h"
-#include "neowall/shader/shader_multipass.h"
-#include "neowall/shader/shader_diag.h"
+#include "neowall/shader/wallshader.h"
 #include "neowall/config/config.h"
 
 #include <errno.h>
@@ -28,25 +25,13 @@
 static char g_watch_name[NAME_MAX + 1];
 
 /* Print the last compile errors against the user's file: file:line, the
- * message, the source line with a caret, and a "did you mean". Falls back to
- * the raw driver log if it can't be parsed. */
-void watch_print_errors(const char *source, const char *path) {
-    static bool known_loaded = false;
-    if (!known_loaded) {
-        const char *chunks[32];
-        size_t n = multipass_preamble_chunks(chunks, 32);
-        shader_diag_set_known(chunks, n);
-        known_loaded = true;
-    }
-    const char *log = shader_get_last_error_log();
-    static char out[16384];
-    bool color = isatty(STDOUT_FILENO) && !getenv("NO_COLOR");
-    if (shader_diag_format(log, source, path, color, out, sizeof(out))) {
-        fputs(out, stdout);
-    } else if (log && *log) {
-        fputs(log, stdout);
-        if (log[strlen(log) - 1] != '\n') putchar('\n');
-    }
+ * message, and the source line with a caret (the engine maps them back
+ * through #include and the injected preamble). */
+void watch_print_errors(void) {
+    const char *log = wallshader_last_errors();
+    if (!log || !*log) return;
+    fputs(log, stdout);
+    if (log[strlen(log) - 1] != '\n') putchar('\n');
 }
 
 int watch_init(const char *path) {
@@ -129,61 +114,12 @@ void watch_reload(struct neowall_state *state, const char *path) {
     printf("\n--- reloading %s ---\n", path);
     fflush(stdout);
 
-    /* Clear the compile log so anything printed below belongs to THIS attempt
-     * rather than a previous failure. */
-    shader_error_log_clear();
-
-    /* Validate FIRST, on a throwaway shader, before touching what is on screen.
-     *
-     * output_set_shader() tears down the live shader before building the new
-     * one, so calling it with broken source leaves the output with no program
-     * at all: the screen goes empty and the renderer retries every frame. A
-     * dry run keeps a failed save a non-event — which is the entire point of
-     * hot-reload while you are mid-edit. */
-    char *source = shader_load_file(path);
-    if (!source) {
-        printf("cannot read %s - keeping the previous shader on screen\n", path);
-        fflush(stdout);
-        return;
-    }
-
-    if (!shader_check_required_version(source, path)) {
-        free(source);
-        printf("version requirement not met - keeping the previous shader on screen\n");
-        fflush(stdout);
-        return;
-    }
-
-    multipass_shader_t *probe = multipass_create(source);
-    if (!probe) {
-        free(source);
-        printf("parse FAILED - keeping the previous shader on screen\n");
-        fflush(stdout);
-        return;
-    }
-
-    /* Compile against a small offscreen size: we only care whether the GLSL is
-     * accepted, not how it looks. Driver chatter goes to the debug log; the
-     * author gets the readable version below. */
-    log_quiet_errors(true);
-    bool compiles = multipass_init_gl(probe, 64, 64) && multipass_compile_all(probe);
-    log_quiet_errors(false);
-    multipass_destroy(probe);
-
-    if (!compiles) {
-        watch_print_errors(source, path);
-        free(source);
-        printf("keeping the previous shader on screen - fix and save to retry\n");
-        fflush(stdout);
-        return;
-    }
-    free(source);
-
-    /* The source is known good; now swap it in for real. */
-    shader_error_log_clear();
-
+    /* output_set_shader builds the new shader before dropping the old one,
+     * so a broken save leaves what's on screen alone. Driver chatter goes to
+     * the debug log; the author gets the readable version below. */
     int ok = 0, failed = 0;
 
+    log_quiet_errors(true);
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o; o = o->next) {
         nw_result r = output_set_shader(o, path);
@@ -192,14 +128,18 @@ void watch_reload(struct neowall_state *state, const char *path) {
             atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
         } else {
             failed++;
+            /* every output fails the same way; once is enough */
+            break;
         }
     }
     pthread_rwlock_unlock(&state->output_list_lock);
+    log_quiet_errors(false);
 
-    if (failed == 0) {
-        printf("compiled OK (%d output%s)\n", ok, ok == 1 ? "" : "s");
+    if (failed) {
+        watch_print_errors();
+        printf("keeping the previous shader on screen - fix and save to retry\n");
     } else {
-        printf("applied to %d output(s), %d failed\n", ok, failed);
+        printf("compiled OK (%d output%s)\n", ok, ok == 1 ? "" : "s");
     }
     fflush(stdout);
 

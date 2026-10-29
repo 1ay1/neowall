@@ -97,12 +97,13 @@ static bool output_damage_rect(const struct neowall_state *state, struct output_
                                EGLint rect[4]) {
     rect[0] = 0; rect[1] = 0; rect[2] = INT32_MAX; rect[3] = INT32_MAX;
     if (!state->swap_damage_supported || output->config->type != WALLPAPER_TERMINAL ||
-        !output->multipass_shader || output->config->shader_path[0] != '\0') {
+        !output->shader || output->config->shader_path[0] != '\0') {
         return false;
     }
     int px, py, pw, ph;
-    if (!multipass_last_damage(output->multipass_shader, true, output->width, output->height,
-                               &px, &py, &pw, &ph)) {
+    if (wallshader_pass_count(output->shader) != 1 ||
+        !term_gpu_damage(wallshader_terminal(output->shader), output->width, output->height,
+                         &px, &py, &pw, &ph)) {
         return false;
     }
     rect[0] = px; rect[1] = py; rect[2] = pw; rect[3] = ph;
@@ -188,8 +189,8 @@ static void output_present(struct app *a, struct output_state *output, uint64_t 
     /* Animated wallpapers keep needs_redraw set so the loop draws them every
      * frame, except a settled terminal, which sleeps until its child writes. */
     bool term_settled = output->config->type == WALLPAPER_TERMINAL &&
-                        output->multipass_shader && output->frames_rendered > 0 &&
-                        !multipass_terminal_animating(output->multipass_shader, kTermFxSettleMs);
+                        output->shader && output->frames_rendered > 0 &&
+                        !term_gpu_animating(wallshader_terminal(output->shader), kTermFxSettleMs);
     if ((output->transition_start_time == 0 || output->config->transition == TRANSITION_NONE) &&
         (!wallpaper_is_animated(output->config->type) || term_settled)) {
         atomic_store_explicit(&output->needs_redraw, false, memory_order_release);
@@ -341,6 +342,10 @@ static void render_outputs(struct app *a) {
                 current_time = get_time_ms();
             }
         }
+
+        /* a covered output's manifest sources (exec, file, ...) idle too */
+        wallshader_set_visible(output->shader,
+                               !atomic_load_explicit(&output->occluded, memory_order_acquire));
 
         if (!output_wants_frame(a, output)) continue;
 

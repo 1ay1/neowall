@@ -128,19 +128,7 @@ uint64_t get_time_us(void);
 const char *wallpaper_mode_to_string(enum wallpaper_mode mode);
 const char *transition_type_to_string(enum transition_type type);
 
-/* Logging */
-#define LOG_LEVEL_ERROR 0
-#define LOG_LEVEL_WARN  1
-#define LOG_LEVEL_INFO  2
-#define LOG_LEVEL_DEBUG 3
-
-void log_error(const char *format, ...);
-void log_quiet_errors(bool quiet);
-void log_warn(const char *format, ...);
-void log_info(const char *format, ...);
-void log_debug(const char *format, ...);
-void log_set_level(int level);
-int log_get_level(void);
+#include "neowall/log.h"
 float ease_in_out_cubic(float t);
 
 /* Parse a non-negative decimal index (wallpaper index, cycle_total, ...) from a

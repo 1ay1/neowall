@@ -1,5 +1,5 @@
 /* Standalone mutation-fuzz driver for neowall's libFuzzer harnesses.
- * Lets us run tests/fuzz_vibe.c and tests/fuzz_multipass.c under GCC+ASan
+ * Lets us run tests/fuzz_vibe.c and tests/fuzz_shader.c under GCC+ASan
  * without clang/libFuzzer. Seeds from real corpus files, then mutates.
  *
  * Build example:

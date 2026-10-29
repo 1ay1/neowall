@@ -28,6 +28,7 @@
 #define NEOWALL_RESULT_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef enum nw_status {
     NW_OK = 0,             /* Success. Must stay 0. */
