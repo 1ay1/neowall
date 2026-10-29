@@ -23,6 +23,9 @@ All notable changes to neowall. Dates are release dates.
   a log file it showed up late or not at all.
 - A corrupt or truncated PNG/JPEG leaked its decode buffers every time it
   came round in a slideshow (found by fuzzing).
+- The color-emoji font reader read past the end of malformed fonts (any
+  `term_font` a user downloads); every offset is bounds-checked now and
+  embedded images are size-capped (found by fuzzing).
 
 ### Removed
 - The unregistered generic Wayland fallback backend (dead code).
@@ -40,8 +43,8 @@ All notable changes to neowall. Dates are release dates.
 - `NEOWALL_GL_DEBUG=1` logs OpenGL driver messages.
 - The systemd unit is `Type=notify`, with readiness, reload and stop reported.
 - Man pages `neowall(1)` and `neowall.vibe(5)`, AppStream metainfo.
-- Fuzzers for the terminal, EXIF, image decoding and shader-source
-  transforms; all fuzzers run in `meson test` and in CI.
+- Fuzzers for the terminal, EXIF, image decoding, emoji fonts and
+  shader-source transforms; all run in `meson test` and in CI.
 - The shader engine and the output/render path are tested end to end with no
   display: a surfaceless Mesa GL context renders real shaders and images and
   the pixels are checked. CI fails if these tests skip.
