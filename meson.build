@@ -1071,15 +1071,20 @@ endif
 # they also build as real libFuzzer binaries for long runs:
 #   ./build/fuzz_terminal -max_total_time=600 corpus/
 fuzz_harnesses = {
-  'vibe':      [files('tests/fuzz_vibe.c', 'src/config/vibe_impl.c'), 'config'],
+  'vibe':      [files('tests/fuzz_vibe.c', 'src/config/vibe_impl.c'), 'config', []],
   'multipass': [files('tests/fuzz_multipass.c', 'src/shader/multipass_parse.c',
-                      'src/utils.c'), 'examples/shaders'],
-  'exif':      [files('tests/fuzz_exif.c', 'src/image/exif.c'), ''],
+                      'src/utils.c'), 'examples/shaders', []],
+  'exif':      [files('tests/fuzz_exif.c', 'src/image/exif.c'), '', []],
+  'image':     [files('tests/fuzz_image.c', 'src/image/image.c', 'src/image/exif.c',
+                      'src/utils.c'), 'tests/fixtures/images',
+                [libpng_dep, libjpeg_dep, m_dep]],
+  'glsl':      [files('tests/fuzz_glsl.c', 'src/shader/shadertoy_compat.c',
+                      'src/shader/glsl_shadow.c', 'src/utils.c'), 'examples/shaders', []],
 }
 if has_terminal
   fuzz_harnesses += {
     'terminal': [files('tests/fuzz_terminal.c', 'src/terminal/screen.c',
-                       'src/terminal/vtparse.c'), ''],
+                       'src/terminal/vtparse.c'), '', []],
   }
 endif
 
@@ -1091,7 +1096,7 @@ foreach name, h : fuzz_harnesses
   drv = executable('fuzz_' + name + '_driver',
     h[0] + files('tests/fuzz_driver.c'),
     include_directories: [inc_dirs, inc_dirs_build, include_directories('src/terminal')],
-    dependencies: [thread_dep],
+    dependencies: [thread_dep] + h[2],
     build_by_default: false,
   )
   seed_args = ['20000']
@@ -1104,7 +1109,7 @@ foreach name, h : fuzz_harnesses
     executable('fuzz_' + name,
       h[0],
       include_directories: [inc_dirs, inc_dirs_build, include_directories('src/terminal')],
-      dependencies: [thread_dep],
+      dependencies: [thread_dep] + h[2],
       c_args: ['-fsanitize=fuzzer'],
       link_args: ['-fsanitize=fuzzer'],
     )

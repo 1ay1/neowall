@@ -109,9 +109,18 @@ struct image_data *image_load_png(const char *path) {
         return NULL;
     }
 
-    /* Set up error handling */
+    /* Set up error handling. libpng longjmps here from any later call, so
+     * everything allocated below must be reachable from these (volatile so
+     * their values survive the longjmp). */
+    struct image_data *volatile img = NULL;
+    png_bytep *volatile row_pointers = NULL;
     if (setjmp(png_jmpbuf(png_ptr))) {
         log_error("Error reading PNG file %s", expanded_path);
+        free(row_pointers);
+        if (img) {
+            free(img->pixels);
+            free(img);
+        }
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         fclose(fp);
         return NULL;
@@ -163,7 +172,7 @@ struct image_data *image_load_png(const char *path) {
     png_read_update_info(png_ptr, info_ptr);
 
     /* Allocate image data */
-    struct image_data *img = calloc(1, sizeof(struct image_data));
+    img = calloc(1, sizeof(struct image_data));
     if (!img) {
         log_error("Failed to allocate image data: %s", strerror(errno));
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
@@ -199,7 +208,7 @@ struct image_data *image_load_png(const char *path) {
 
     /* Allocate row pointers */
     /* sizeof(png_bytep) is pointer size (8 bytes), height constrained by format */
-    png_bytep *row_pointers = malloc(sizeof(png_bytep) * height);
+    row_pointers = malloc(sizeof(png_bytep) * height);
     if (!row_pointers) {
         log_error("Failed to allocate row pointers: %s", strerror(errno));
         free(img->pixels);
@@ -215,9 +224,11 @@ struct image_data *image_load_png(const char *path) {
 
     /* Read image data */
     png_read_image(png_ptr, row_pointers);
+    png_read_end(png_ptr, NULL);   /* may longjmp on a bad trailing chunk */
 
     /* Clean up */
     free(row_pointers);
+    row_pointers = NULL;
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
     fclose(fp);
 
@@ -260,6 +271,10 @@ struct image_data *image_load_jpeg(const char *path) {
 
     struct jpeg_decompress_struct cinfo;
     struct jpeg_error_mgr_ext jerr;
+    /* libjpeg longjmps to the handler from any later call (a corrupt
+     * scanline included), so these are freed there; volatile to survive it. */
+    struct image_data *volatile img = NULL;
+    unsigned char *volatile row_buffer = NULL;
 
     /* Set up error handling */
     cinfo.err = jpeg_std_error(&jerr.pub);
@@ -267,6 +282,11 @@ struct image_data *image_load_jpeg(const char *path) {
 
     if (setjmp(jerr.setjmp_buffer)) {
         log_error("JPEG error: %s (file: %s)", jerr.error_msg, expanded_path);
+        free(row_buffer);
+        if (img) {
+            free(img->pixels);
+            free(img);
+        }
         jpeg_destroy_decompress(&cinfo);
         fclose(fp);
         return NULL;
@@ -316,7 +336,7 @@ struct image_data *image_load_jpeg(const char *path) {
     }
 
     /* Allocate image data */
-    struct image_data *img = calloc(1, sizeof(struct image_data));
+    img = calloc(1, sizeof(struct image_data));
     if (!img) {
         log_error("Failed to allocate image data: %s", strerror(errno));
         jpeg_destroy_decompress(&cinfo);
@@ -348,7 +368,7 @@ struct image_data *image_load_jpeg(const char *path) {
     }
 
     size_t row_stride = (size_t)width * 3;
-    unsigned char *row_buffer = malloc(row_stride);
+    row_buffer = malloc(row_stride);
     if (!row_buffer) {
         log_error("Failed to allocate row buffer: %s", strerror(errno));
         free(img->pixels);
@@ -378,9 +398,11 @@ struct image_data *image_load_jpeg(const char *path) {
         row++;
     }
 
-    /* Clean up */
-    free(row_buffer);
+    /* Finish while the error handler still owns row_buffer and img: this can
+     * longjmp too (trailing garbage after the last scanline). */
     jpeg_finish_decompress(&cinfo);
+    free(row_buffer);
+    row_buffer = NULL;
     jpeg_destroy_decompress(&cinfo);
     fclose(fp);
 
