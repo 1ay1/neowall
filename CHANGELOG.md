@@ -21,6 +21,8 @@ All notable changes to neowall. Dates are release dates.
 - X11: the outputs were never freed on shutdown.
 - `neowall watch` / `preview` printed their banner without flushing, so in
   a log file it showed up late or not at all.
+- A corrupt or truncated PNG/JPEG leaked its decode buffers every time it
+  came round in a slideshow (found by fuzzing).
 
 ### Removed
 - The unregistered generic Wayland fallback backend (dead code).
@@ -38,8 +40,8 @@ All notable changes to neowall. Dates are release dates.
 - `NEOWALL_GL_DEBUG=1` logs OpenGL driver messages.
 - The systemd unit is `Type=notify`, with readiness, reload and stop reported.
 - Man pages `neowall(1)` and `neowall.vibe(5)`, AppStream metainfo.
-- Fuzzers for the terminal and EXIF parsers; all fuzzers run in `meson test`
-  and in CI.
+- Fuzzers for the terminal, EXIF, image decoding and shader-source
+  transforms; all fuzzers run in `meson test` and in CI.
 - The shader engine and the output/render path are tested end to end with no
   display: a surfaceless Mesa GL context renders real shaders and images and
   the pixels are checked. CI fails if these tests skip.
