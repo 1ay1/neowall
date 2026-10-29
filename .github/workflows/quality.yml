@@ -38,6 +38,12 @@ jobs:
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
             egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon clang \
             sway xorg-server-xvfb python
+          # sway ships with file capabilities (cap_sys_nice, for realtime
+          # priority); a container without them can't exec it (EPERM). A test
+          # compositor doesn't need realtime, so drop them.
+          getcap /usr/bin/sway || true
+          setcap -r /usr/bin/sway 2>/dev/null || true
+          sway --version
 
       - uses: actions/checkout@v4
       - name: Configure (ASan + UBSan)
@@ -84,6 +90,8 @@ jobs:
           pacman -S --noconfirm base-devel git meson ninja wayland wayland-protocols \
             egl-wayland mesa libpng libjpeg-turbo libx11 libxrandr libxkbcommon sway \
             xorg-server-xvfb
+          # see the ASan job: sway's file capabilities can't be used in a container
+          setcap -r /usr/bin/sway 2>/dev/null || true
 
       - uses: actions/checkout@v4
 
