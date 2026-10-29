@@ -676,7 +676,9 @@ static int load_state_entries(const char *path, output_state_entry_t *states, in
             memcpy(entry.output_name, line + 5, n);
             entry.output_name[n] = '\0';
         } else if (reading && strncmp(line, "wallpaper=", 10) == 0) {
-            size_t n = strnlen(line + 10, sizeof(entry.wallpaper_path) - 1);
+            /* the line buffer is the bound: it ends 10 bytes after line+10 */
+            size_t n = strnlen(line + 10, sizeof(line) - 10);
+            if (n > sizeof(entry.wallpaper_path) - 1) n = sizeof(entry.wallpaper_path) - 1;
             memcpy(entry.wallpaper_path, line + 10, n);
             entry.wallpaper_path[n] = '\0';
         } else if (reading && strncmp(line, "mode=", 5) == 0) {
