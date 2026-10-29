@@ -18,11 +18,17 @@
 
 static char g_png[64], g_jpg[64];
 
+static void remove_scratch(void) {
+    unlink(g_png);
+    unlink(g_jpg);
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (size < 8) return 0;
     if (!g_png[0]) {
         snprintf(g_png, sizeof(g_png), "/tmp/nw-fuzz-image-%d.png", (int)getpid());
         snprintf(g_jpg, sizeof(g_jpg), "/tmp/nw-fuzz-image-%d.jpg", (int)getpid());
+        atexit(remove_scratch);
     }
     /* the format is picked by extension, so name the file by its magic bytes:
      * that way inputs that look like JPEG reach libjpeg and the rest libpng.
@@ -38,6 +44,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     fclose(f);
 
     struct image_data *img = image_load(path, w, h, mode);
+    unlink(path);
     if (img) {
         /* a decoded image must be self-consistent */
         if (img->width == 0 || img->height == 0 || !img->pixels) __builtin_trap();
