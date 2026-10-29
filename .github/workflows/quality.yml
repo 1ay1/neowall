@@ -91,7 +91,9 @@ jobs:
       - name: Run every test under TSan, including the whole daemon
         env:
           TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
-        run: meson test -C build-tsan --print-errorlogs
+        # the fuzz suite is single-threaded and covered by asan; tsan can't
+        # follow libpng's own longjmp ("can't find longjmp buf")
+        run: meson test -C build-tsan --no-suite fuzz --print-errorlogs
 
   coverage:
     name: Test coverage
