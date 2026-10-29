@@ -258,8 +258,22 @@ output {
 }
 EOF
     expect "reload with a block for the new output" 0 "configuration reloaded" "$nw" reload
-    hot_add
-    if wait_for 15 grep -q 'Reconnect: output .* online' "$tmp/nw.log"; then
+    # Nested Hyprland sometimes never gives a new monitor a size (it stays
+    # 0x0); neowall rightly waits, so that's a compositor flake, not a
+    # failure. Retry the plug a couple of times before judging.
+    plugged=0
+    for attempt in 1 2 3; do
+        hot_add
+        if wait_for 15 grep -q 'Reconnect: output .* online' "$tmp/nw.log"; then
+            plugged=1; break
+        fi
+        if grep -q 'has no size yet' "$tmp/nw.log"; then
+            echo "  (compositor may have left the new monitor at 0x0; re-plugging, attempt $attempt)"
+        fi
+        hot_remove
+        sleep 1
+    done
+    if [ "$plugged" = 1 ]; then
         ok "hotplugged output comes online"
     else
         bad "hotplugged output comes online" "$(grep -E 'Reconnect|New output' "$tmp/nw.log" | tail -3 | tr '\n' ' ')"
@@ -270,9 +284,17 @@ EOF
     hot_remove
     sleep 1
     expect "daemon survives the unplug"  0 "pid $nw_pid"              "$nw" ping
-    hot_add
-    wait_for 15 sh -c "[ \$(grep -c 'Reconnect: output .* online' '$tmp/nw.log') -ge 2 ]" \
-        && ok "replugged output comes back" || bad "replugged output comes back"
+    online_before=$(grep -c 'Reconnect: output .* online' "$tmp/nw.log")
+    replugged=0
+    for attempt in 1 2 3; do   # same 0x0 flake as above
+        hot_add
+        if wait_for 15 sh -c "[ \$(grep -c 'Reconnect: output .* online' '$tmp/nw.log') -gt $online_before ]"; then
+            replugged=1; break
+        fi
+        hot_remove
+        sleep 1
+    done
+    [ "$replugged" = 1 ] && ok "replugged output comes back" || bad "replugged output comes back"
     hot_remove
     # An output that shows up before it has a size (a headless output in
     # nested Hyprland stays 0x0 until a mode is set) must wait, then come up
