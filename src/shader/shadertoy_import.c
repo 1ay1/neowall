@@ -414,8 +414,10 @@ nw_result nw_shadertoy_import(const char *json, size_t len, nw_import *out, char
             for (size_t k = 0; inputs && inputs->t == J_ARR && k < inputs->len; k++) {
                 const jval *in = &inputs->items[k];
                 const jval *chv = jget(in, "channel");
-                int ch = chv && chv->t == J_NUM ? (int)chv->n : (int)k;
-                if (ch < 0 || ch > 3) continue;
+                /* range-check the double first: casting a huge one is undefined */
+                double chd = chv && chv->t == J_NUM ? chv->n : (double)k;
+                if (!(chd >= 0 && chd <= 3)) continue;
+                int ch = (int)chd;
                 const char *srcn = input_source(in, pname, ch, &notes);
                 if (!srcn) continue;
                 /* a buffer reading itself is `self` */

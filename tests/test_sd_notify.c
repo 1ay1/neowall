@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include "neowall/sd_notify.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

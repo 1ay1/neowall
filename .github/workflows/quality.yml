@@ -63,6 +63,9 @@ jobs:
               t = json.loads(line)
               if t["name"] in must_run:
                   seen[t["name"]] = t["result"]
+                  if t["result"] != "OK":
+                      # the test says why ("skip: compositor didn't start" + its log)
+                      print(f"--- {t['name']} {t['result']}:\n{t.get('stdout', '')[-3000:]}")
           print(seen)
           sys.exit(0 if set(seen) == must_run and all(r == "OK" for r in seen.values()) else 1)
           EOF
@@ -112,6 +115,7 @@ jobs:
       - run: meson test -C build-cov --print-errorlogs
       - name: Report
         run: |
+          mkdir -p coverage
           gcovr -r . build-cov --filter src/ --exclude 'src/terminal/vendor/' \
             --txt-summary --txt coverage.txt --html-details coverage/index.html
           tail -n 30 coverage.txt >> "$GITHUB_STEP_SUMMARY"
