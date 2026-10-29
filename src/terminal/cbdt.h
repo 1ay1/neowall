@@ -10,8 +10,8 @@
  * into straight RGBA8 pixels — giving us real color emoji with zero external
  * dependencies, exactly like the rest of the terminal renderer.
  *
- * Trusted-input only, same contract as stb_truetype: we point this at bundled
- * or user-configured font files, never at network/attacker data.
+ * Font files can be anything a user downloads, so every offset is bounds-
+ * checked and the embedded PNGs are size-capped. Fuzzed by tests/fuzz_cbdt.c.
  */
 #ifndef NEOWALL_TERMINAL_CBDT_H
 #define NEOWALL_TERMINAL_CBDT_H
@@ -33,7 +33,7 @@ bool cbdt_has(const cbdt_font *f, uint32_t cp);
 
 /* Decode the color glyph for `cp` into a freshly-malloc'd straight-alpha RGBA8
  * buffer (row-major, w*h*4 bytes). Caller frees with free(). Returns NULL if the
- * codepoint is absent or the strike can't be decoded. *out_w/*out_h receive the
+ * codepoint is absent or the strike can't be decoded. out_w/out_h receive the
  * native PNG pixel size (the strike ppem — e.g. 128x128 for NotoColorEmoji). */
 uint8_t *cbdt_render(const cbdt_font *f, uint32_t cp, int *out_w, int *out_h);
 

@@ -1085,6 +1085,7 @@ if has_terminal
   fuzz_harnesses += {
     'terminal': [files('tests/fuzz_terminal.c', 'src/terminal/screen.c',
                        'src/terminal/vtparse.c'), '', []],
+    'cbdt':     [files('tests/fuzz_cbdt.c'), 'tests/fixtures/fonts', [m_dep]],
   }
 endif
 
@@ -1093,10 +1094,13 @@ if get_option('fuzz') and cc.get_id() != 'clang'
 endif
 
 foreach name, h : fuzz_harnesses
+  # cbdt.c bundles stb_image, so it comes prebuilt with stb's relaxed flags
+  fuzz_link = name == 'cbdt' ? [terminal_glyph_lib] : []
   drv = executable('fuzz_' + name + '_driver',
     h[0] + files('tests/fuzz_driver.c'),
     include_directories: [inc_dirs, inc_dirs_build, include_directories('src/terminal')],
     dependencies: [thread_dep] + h[2],
+    link_with: fuzz_link,
     build_by_default: false,
   )
   seed_args = ['20000']
@@ -1110,6 +1114,7 @@ foreach name, h : fuzz_harnesses
       h[0],
       include_directories: [inc_dirs, inc_dirs_build, include_directories('src/terminal')],
       dependencies: [thread_dep] + h[2],
+      link_with: fuzz_link,
       c_args: ['-fsanitize=fuzzer'],
       link_args: ['-fsanitize=fuzzer'],
     )

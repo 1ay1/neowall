@@ -1680,7 +1680,7 @@ static int stbi__getn(stbi__context *s, stbi_uc *buffer, int n)
    }
 
    if (s->img_buffer+n <= s->img_buffer_end) {
-      memcpy(buffer, s->img_buffer, n);
+      if (n) memcpy(buffer, s->img_buffer, n);   /* neowall: n==0 with buffer==NULL is UB */
       s->img_buffer += n;
       return 1;
    } else

@@ -22,6 +22,8 @@
 #define STBI_NO_PNM
 #define STBI_NO_TGA
 #define STBI_NO_JPEG
+/* Emoji strikes are ~128-512 px; refuse anything absurd before allocating. */
+#define STBI_MAX_DIMENSIONS 2048
 #include "vendor/stb_image.h"
 
 /* ---- big-endian readers over a bounds-checked window ---- */
@@ -93,7 +95,7 @@ static bool load_cmap(cbdt_font *f) {
         uint16_t pid = rd16(cmap + rec);
         uint16_t eid = rd16(cmap + rec + 2);
         uint32_t off = rd32(cmap + rec + 4);
-        if (off + 2 > clen) continue;
+        if (off > clen || clen - off < 2) continue;   /* no uint32 wrap on a huge off */
         uint16_t fmt = rd16(cmap + off);
         int score = -1;
         /* Prefer Unicode full (pid3/eid10 or pid0/eid4+), format 12. */
@@ -112,49 +114,61 @@ static bool load_cmap(cbdt_font *f) {
     return true;
 }
 
+/* Bounds-checked big-endian reads within the cmap subtable: an out-of-range
+ * read yields 0 and sets *bad, so a malformed font fails the lookup instead of
+ * reading past the subtable. */
+static uint16_t sub16(const cmap_t *c, size_t off, bool *bad) {
+    if (off > c->sublen || c->sublen - off < 2) { *bad = true; return 0; }
+    return rd16(c->sub + off);
+}
+static uint32_t sub32(const cmap_t *c, size_t off, bool *bad) {
+    if (off > c->sublen || c->sublen - off < 4) { *bad = true; return 0; }
+    return rd32(c->sub + off);
+}
+
 static uint32_t cmap_lookup(const cmap_t *c, uint32_t cp) {
-    const uint8_t *s = c->sub;
+    bool bad = false;
     if (c->format == 12) {
-        uint32_t ngroups = rd32(s + 12);
+        uint32_t ngroups = sub32(c, 12, &bad);
         /* groups: startChar, endChar, startGlyph (12 bytes each), sorted */
+        if (bad || ngroups > (c->sublen - 16) / 12) return 0;
         uint32_t lo = 0, hi = ngroups;
         while (lo < hi) {
             uint32_t mid = lo + ((hi - lo) >> 1);
-            const uint8_t *g = s + 16 + (size_t)mid * 12;
-            uint32_t sc = rd32(g), ec = rd32(g + 4);
+            size_t g = 16 + (size_t)mid * 12;
+            uint32_t sc = sub32(c, g, &bad), ec = sub32(c, g + 4, &bad);
+            if (bad) return 0;
             if (cp < sc) hi = mid;
             else if (cp > ec) lo = mid + 1;
-            else return rd32(g + 8) + (cp - sc);
+            else return sub32(c, g + 8, &bad) + (cp - sc);
         }
         return 0;
     } else if (c->format == 4) {
         if (cp > 0xFFFF) return 0;
-        uint16_t segX2 = rd16(s + 6);
-        uint16_t segcount = segX2 / 2;
-        const uint8_t *endc = s + 14;
-        const uint8_t *startc = endc + segX2 + 2;
-        const uint8_t *iddelta = startc + segX2;
-        const uint8_t *idrange = iddelta + segX2;
-        for (uint16_t i = 0; i < segcount; i++) {
-            uint16_t end = rd16(endc + i * 2);
-            if (cp <= end) {
-                uint16_t start = rd16(startc + i * 2);
-                if (cp < start) return 0;
-                int16_t delta = (int16_t)rd16(iddelta + i * 2);
-                uint16_t ro = rd16(idrange + i * 2);
-                if (ro == 0) return (uint16_t)(cp + delta);
-                const uint8_t *gp = idrange + i * 2 + ro + (cp - start) * 2;
-                uint16_t g = rd16(gp);
-                if (g == 0) return 0;
-                return (uint16_t)(g + delta);
-            }
+        size_t segX2 = sub16(c, 6, &bad);
+        size_t endc = 14, startc = endc + segX2 + 2;
+        size_t iddelta = startc + segX2, idrange = iddelta + segX2;
+        if (bad) return 0;
+        for (size_t i = 0; i < segX2 / 2; i++) {
+            uint16_t end = sub16(c, endc + i * 2, &bad);
+            if (bad) return 0;
+            if (cp > end) continue;
+            uint16_t start = sub16(c, startc + i * 2, &bad);
+            int16_t delta = (int16_t)sub16(c, iddelta + i * 2, &bad);
+            uint16_t ro = sub16(c, idrange + i * 2, &bad);
+            if (bad || cp < start) return 0;
+            if (ro == 0) return (uint16_t)(cp + delta);
+            uint16_t g = sub16(c, idrange + i * 2 + ro + (size_t)(cp - start) * 2, &bad);
+            if (bad || g == 0) return 0;
+            return (uint16_t)(g + delta);
         }
         return 0;
     } else if (c->format == 6) {
-        uint16_t first = rd16(s + 6);
-        uint16_t count = rd16(s + 8);
-        if (cp < first || cp >= (uint32_t)first + count) return 0;
-        return rd16(s + 10 + (cp - first) * 2);
+        uint16_t first = sub16(c, 6, &bad);
+        uint16_t count = sub16(c, 8, &bad);
+        if (bad || cp < first || cp >= (uint32_t)first + count) return 0;
+        uint16_t g = sub16(c, 10 + (size_t)(cp - first) * 2, &bad);
+        return bad ? 0 : g;
     }
     return 0;
 }
@@ -198,12 +212,16 @@ static bool cblc_locate(const cbdt_font *f, uint32_t gid,
                 uint32_t o0 = rd32(t + oo);
                 uint32_t o1 = rd32(t + oo + 4);
                 if (o1 <= o0) return false;
+                if ((uint64_t)imageDataOff + o0 > UINT32_MAX) return false;
                 *img_off = imageDataOff + o0;
                 *img_len = o1 - o0;
             } else if (idxFormat == 2) {
                 /* constant-size images: imageSize(u32), bigMetrics(8) */
+                if (ist + 12 > tlen) return false;
                 uint32_t imageSize = rd32(t + ist + 8);
-                *img_off = imageDataOff + gi * imageSize;
+                uint64_t off = (uint64_t)imageDataOff + (uint64_t)gi * imageSize;
+                if (off > UINT32_MAX) return false;
+                *img_off = (uint32_t)off;
                 *img_len = imageSize;
             } else if (idxFormat == 3) {
                 /* uint16 offsets[last-first+2] */
@@ -219,6 +237,7 @@ static bool cblc_locate(const cbdt_font *f, uint32_t gid,
                  * imageDataOffset(4) numGlyphs(4)} then {glyphID(u16),
                  * offset(u16)} pairs (numGlyphs+1 of them, last is a sentinel).
                  * Rare for emoji (Noto uses format 1); guarded conservatively. */
+                if (ist + 12 > tlen) return false;
                 uint32_t ndat = rd32(t + ist + 8);
                 for (uint32_t g = 0; g < ndat; g++) {
                     size_t pr = ist + 12 + (size_t)g * 4;
@@ -251,7 +270,7 @@ static bool cblc_locate(const cbdt_font *f, uint32_t gid,
  * uint32 dataLen + a PNG. Return the PNG window. */
 static bool cbdt_png_window(const cbdt_font *f, uint32_t img_off, uint32_t img_len,
                             uint16_t img_fmt, const uint8_t **png, uint32_t *png_len) {
-    if ((size_t)img_off + img_len > f->cbdt_len) return false;
+    if ((uint64_t)img_off + img_len > f->cbdt_len) return false;
     const uint8_t *d = f->cbdt + img_off;
     size_t hdr;
     if (img_fmt == 17) hdr = 5;        /* smallGlyphMetrics(5) */
@@ -260,7 +279,7 @@ static bool cbdt_png_window(const cbdt_font *f, uint32_t img_off, uint32_t img_l
     else return false;
     if (hdr + 4 > img_len) return false;
     uint32_t dlen = rd32(d + hdr);
-    if (hdr + 4 + dlen > img_len) return false;
+    if ((uint64_t)hdr + 4 + dlen > img_len) return false;
     *png = d + hdr + 4;
     *png_len = dlen;
     return true;
@@ -279,7 +298,7 @@ static bool sbix_png_window(const cbdt_font *f, uint32_t gid,
         size_t so = 8 + (size_t)i * 4;
         if (so + 4 > tlen) break;
         uint32_t strikeOff = rd32(t + so);
-        if (strikeOff + 4 > tlen) continue;
+        if ((size_t)strikeOff + 4 > tlen) continue;
         uint16_t ppem = rd16(t + strikeOff);
         if (ppem >= bestPpem) { bestPpem = ppem; bestOff = strikeOff; }
     }
@@ -289,10 +308,10 @@ static bool sbix_png_window(const cbdt_font *f, uint32_t gid,
     size_t oo = base + (size_t)gid * 4;
     if (oo + 8 > tlen) return false;
     uint32_t o0 = rd32(t + oo), o1 = rd32(t + oo + 4);
-    if (o1 <= o0) return false;
-    size_t rec = bestOff + o0;
+    if (o1 <= o0 || o1 - o0 < 8) return false;   /* record header is 8 bytes */
+    size_t rec = bestOff + (size_t)o0;
     /* glyph record: originOffsetX(2) originOffsetY(2) graphicType(4) then data */
-    if (rec + 8 > tlen) return false;
+    if (rec + 8 > tlen || (o1 - o0) > tlen - rec) return false;
     *png = t + rec + 8;
     *png_len = (o1 - o0) - 8;
     return true;
