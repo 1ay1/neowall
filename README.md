@@ -124,6 +124,7 @@ neowall new aurora          # scaffold a working shader and tell you how to run 
 neowall new hud --template=reactive   # or: scene (default), flat, reactive
 neowall watch aurora        # live-reload as you edit; errors as file:line + "did you mean"
 neowall preview aurora      # run it once, without touching your wallpaper
+neowall import export.json  # bring in a Shadertoy shader (all passes, cube maps, bindings)
 neowall docs fbm            # look up a built-in helper or uniform
 ```
 

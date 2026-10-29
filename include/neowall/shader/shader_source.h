@@ -27,11 +27,14 @@ typedef enum {
     NW_IN_KEYBOARD, /* 256x3 key state (Shadertoy layout) */
     NW_IN_IMAGE,    /* a texture file */
     NW_IN_BLUE_NOISE,
+    NW_IN_CUBE,     /* a cube pass's output (Shadertoy "Cubemap A"): a samplerCube */
+    NW_IN_SKY,      /* a built-in sky cube, for shaders that sample one of
+                     * Shadertoy's cube maps (Uffizi, Forest, ...) we can't ship */
 } nw_input_kind;
 
 typedef struct {
     nw_input_kind kind;
-    int pass;            /* NW_IN_PASS: index into passes */
+    int pass;            /* NW_IN_PASS, NW_IN_CUBE: index into passes */
     const char *path;    /* NW_IN_IMAGE: resolved path */
     bool filter_nearest; /* sampler hints (Shadertoy "filter"/"wrap") */
     bool wrap_repeat;
@@ -49,6 +52,7 @@ typedef struct {
     int first_line;          /* body line 1 = this line in `file` */
     const char *file;
     bool is_image;           /* the pass that reaches the screen */
+    bool is_cube;            /* mainCubemap: renders the six faces of a cube */
     nw_input ch[NW_CHANNELS];
     nw_format format;
     double scale;            /* of the output size; ignored when fixed */

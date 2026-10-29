@@ -247,14 +247,80 @@ int main(void) {
         glDeleteTextures(1, &tex);
     }
 
-    /* 10. Every shipped shader compiles and draws a frame on llvmpipe. */
+    /* 10. A Cube A pass: it writes its ray direction as a colour, the image
+     *     pass samples six directions back. Wrong face orientation would
+     *     swap or mirror them. */
+    s = run("// Cube A\n"
+            "void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) {\n"
+            "    c = vec4(rd * 0.5 + 0.5, 1.0);\n"
+            "}\n"
+            "// Image\n"
+            "void mainImage(out vec4 c, in vec2 f) {\n"
+            "    int k = int(f.x) / 8;\n"
+            "    vec3 d = k == 0 ? vec3(1,0,0) : k == 1 ? vec3(-1,0,0) : k == 2 ? vec3(0,1,0)\n"
+            "           : k == 3 ? vec3(0,-1,0) : k == 4 ? vec3(0,0,1) : k == 5 ? vec3(0,0,-1)\n"
+            "           : normalize(vec3(1, 1, 0));\n"
+            "    c = texture(iChannel0, d);\n"
+            "}\n", 1, 0);
+    CHECK(s != NULL, "cube pass compiles");
+    if (s) {
+        CHECK(wallshader_pass_count(s) == 2, "two passes (%d)", wallshader_pass_count(s));
+        static const int want[7][3] = {{255, 128, 128}, {0, 128, 128}, {128, 255, 128}, {128, 0, 128},
+                                       {128, 128, 255}, {128, 128, 0}, {218, 218, 128}};
+        static const char *const dir[7] = {"+x", "-x", "+y", "-y", "+z", "-z", "+x+y"};
+        for (int k = 0; k < 7; k++) {
+            pixel(k * 8 + 4, 4, p);
+            bool ok = abs(p[0] - want[k][0]) <= 3 && abs(p[1] - want[k][1]) <= 3 && abs(p[2] - want[k][2]) <= 3;
+            CHECK(ok, "cube %s reads back %d %d %d, want %d %d %d", dir[k], p[0], p[1], p[2], want[k][0], want[k][1],
+                  want[k][2]);
+        }
+        wallshader_free(s);
+    }
+
+    /* 11. A cube that animates is redrawn every frame (red tracks iTime);
+     *     a static one (test 10) stays right after many frames. */
+    s = run("void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(fract(iTime), 0, 0, 1); }\n"
+            "void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, vec3(0, 0, 1)); }\n", 1, 0.25);
+    CHECK(s != NULL, "animated cube compiles");
+    if (s) {
+        pixel(4, 4, p);
+        CHECK(near(p[0], 64), "cube at t=0.25: %d", p[0]);
+        draw(s, 1, 0.75, NULL);
+        pixel(4, 4, p);
+        CHECK(near(p[0], 191), "cube follows time to 0.75: %d", p[0]);
+        wallshader_free(s);
+    }
+    s = run("void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(rd * 0.5 + 0.5, 1); }\n"
+            "void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, vec3(0, 0, -1)); }\n", 12, 0);
+    if (s) {
+        pixel(4, 4, p);
+        CHECK(near(p[0], 128) && near(p[1], 128) && near(p[2], 0), "static cube after 12 frames: %d %d %d", p[0], p[1], p[2]);
+        wallshader_free(s);
+    }
+
+    /* 12. A shader that samples one of Shadertoy's photo cube maps gets the
+     *     built-in sky: brighter above the horizon than below. */
+    s = run("void mainImage(out vec4 c, in vec2 f) {\n"
+            "    vec3 d = f.y < 16.0 ? vec3(0.3, -1.0, 0.2) : vec3(0.3, 1.0, 0.2);\n"
+            "    c = texture(iChannel0, normalize(d));\n"
+            "}\n", 1, 0);
+    CHECK(s != NULL, "sky cube compiles");
+    if (s) {
+        unsigned char up[4], down[4];
+        pixel(10, 24, up);
+        pixel(10, 4, down);
+        CHECK(up[2] > 150 && down[2] < 100, "sky above (%d), ground below (%d)", up[2], down[2]);
+        wallshader_free(s);
+    }
+
+    /* 13. Every shipped shader compiles and draws a frame on llvmpipe. */
     const char *sdir = getenv("NW_SHADER_DIR");
     if (sdir) {
         static const char *names[] = {
             "audio_bars", "audio_pulse", "circadian_sky", "fireflies", "garden",
             "living_aurora", "moon_ocean", "mouse_ripples", "neon_city", "plasma_touch",
             "rain_window", "scene_demo", "starfield_warp", "star_next", "system_deck",
-            "system_monitor", "time", "window_forge", "window_light",
+            "system_monitor", "time", "window_forge", "window_light", "glass_orb",
         };
         for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
             char path[512];

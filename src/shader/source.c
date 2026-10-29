@@ -134,7 +134,8 @@ static nw_result expand(expander *e, const char *text, const char *file, int dep
 
 /* ── scanning, comment-aware ─────────────────────────────────────────── */
 
-/* Next "void mainImage" outside comments, from `p`. */
+/* Next "void mainImage" or "void mainCubemap" (a Shadertoy Cube A pass)
+ * outside comments, from `p`. */
 static const char *find_main(const char *p) {
     while (*p) {
         if (p[0] == '/' && p[1] == '/') {
@@ -151,6 +152,8 @@ static const char *find_main(const char *p) {
             const char *q = p + 4;
             while (*q == ' ' || *q == '\t' || *q == '\n') q++;
             if (!strncmp(q, "mainImage", 9) && !isalnum((unsigned char)q[9]) && q[9] != '_') return p;
+            if (!strncmp(q, "mainCubemap", 11) && !isalnum((unsigned char)q[11]) && q[11] != '_')
+                return p;
         }
         p++;
     }
@@ -289,6 +292,12 @@ static bool parse_param(nw_arena *a, const char *ann, const char *decl, nw_param
 int nw_shader_source_find_pass(const nw_shader_source *src, const char *name) {
     for (size_t i = 0; i < src->passes.len; i++)
         if (!strcasecmp(src->passes.data[i].name, name)) return (int)i;
+    /* cube, cubeA, cubemap, "Cubemap A" (Shadertoy's own input name) */
+    if (!strncasecmp(name, "cube", 4)) {
+        for (size_t i = 0; i < src->passes.len; i++)
+            if (src->passes.data[i].is_cube) return (int)i;
+        return -1;
+    }
     /* manifest shorthands: a, bufferA, buffer_a */
     if (strlen(name) == 1 || !strncasecmp(name, "buffer", 6)) {
         char letter = (char)toupper((unsigned char)name[strlen(name) - 1]);
@@ -381,6 +390,57 @@ static bool uses_channel(const char *body, int c) {
     return false;
 }
 
+/* Sampled with a direction rather than a uv: `texture(iChannelN, rd)` where
+ * the coordinate is a vec3 the pass built. Text-level, so it looks for a
+ * vec3-ish argument: a `vec3(` constructor, or a name declared vec3 in the
+ * body. */
+static bool cube_like(const char *body, int c) {
+    char name[16];
+    snprintf(name, sizeof(name), "iChannel%d", c);
+    for (const char *p = strstr(body, name); p; p = strstr(p + 1, name)) {
+        const char *q = p + strlen(name);
+        while (*q == ' ') q++;
+        if (*q != ',') continue;
+        q++;
+        while (*q == ' ') q++;
+        if (!strncmp(q, "vec3(", 5)) return true;
+        /* calls that give back a direction */
+        static const char *const dir_fns[] = {"reflect(", "refract(", "normalize(", "cross("};
+        bool fn = false;
+        for (size_t k = 0; k < NW_COUNTOF(dir_fns); k++)
+            if (!strncmp(q, dir_fns[k], strlen(dir_fns[k]))) fn = true;
+        if (fn) {
+            /* normalize(uv) on a vec2 is a 2D lookup: only count it when the
+             * argument is itself a vec3 (or another call we can't see into) */
+            const char *a = strchr(q, '(') + 1;
+            while (*a == ' ') a++;
+            char arg[64];
+            size_t m = 0;
+            while ((isalnum((unsigned char)a[m]) || a[m] == '_') && m < sizeof(arg) - 1) arg[m] = a[m], m++;
+            arg[m] = '\0';
+            if (strncmp(q, "normalize(", 10) || !m || a[m] != ')') return true;
+            char d2[80];
+            snprintf(d2, sizeof(d2), "vec3 %s", arg);
+            if (strstr(body, d2)) return true;
+            continue;
+        }
+        /* a plain identifier: is it declared vec3 somewhere in the pass? */
+        char id[64];
+        size_t n = 0;
+        while ((isalnum((unsigned char)q[n]) || q[n] == '_') && n < sizeof(id) - 1) id[n] = q[n], n++;
+        id[n] = '\0';
+        if (!n || (q[n] != ')' && q[n] != ' ' && q[n] != ',')) continue;
+        char decl[80];
+        snprintf(decl, sizeof(decl), "vec3 %s", id);
+        for (const char *d = strstr(body, decl); d; d = strstr(d + 1, decl))
+            if (!isalnum((unsigned char)d[strlen(decl)]) && d[strlen(decl)] != '_') return true;
+        /* `in vec3 rd` in a parameter list */
+        snprintf(decl, sizeof(decl), "vec3  %s", id);
+        if (strstr(body, decl)) return true;
+    }
+    return false;
+}
+
 static bool noise_like(const char *body, int c) {
     char name[16];
     snprintf(name, sizeof(name), "iChannel%d", c);
@@ -419,8 +479,10 @@ static bool self_like(const char *body, int c) {
 static void default_bindings(nw_shader_source *src) {
     int nbuf = 0;
     int bufs[16];
+    int cube = -1;
     for (size_t i = 0; i < src->passes.len && nbuf < 16; i++)
-        if (!src->passes.data[i].is_image) bufs[nbuf++] = (int)i;
+        if (src->passes.data[i].is_cube) cube = (int)i;
+        else if (!src->passes.data[i].is_image) bufs[nbuf++] = (int)i;
 
     for (size_t i = 0; i < src->passes.len; i++) {
         nw_pass_src *p = &src->passes.data[i];
@@ -431,7 +493,11 @@ static void default_bindings(nw_shader_source *src) {
                 *in = (nw_input){.kind = NW_IN_NONE};
                 continue;
             }
-            if (noise_like(p->body, c)) {
+            if ((int)i != cube && cube_like(p->body, c)) {
+                /* sampled with a direction: the Cube A pass, or a built-in
+                 * sky standing in for one of Shadertoy's cube maps */
+                *in = cube >= 0 ? (nw_input){.kind = NW_IN_CUBE, .pass = cube} : (nw_input){.kind = NW_IN_SKY};
+            } else if (noise_like(p->body, c)) {
                 *in = (nw_input){.kind = NW_IN_NOISE, .wrap_repeat = true};
             } else if (!p->is_image && c == 0 && nbuf > 0 && bufs[0] == (int)i && self_like(p->body, c)) {
                 /* the first buffer reading its own coords: feedback. Later
@@ -465,7 +531,7 @@ static bool parse_input(nw_shader_source *src, const char *dir, const char *v, n
     static const struct { const char *name; nw_input_kind kind; } fixed[] = {
         {"noise", NW_IN_NOISE}, {"audio", NW_IN_AUDIO}, {"font", NW_IN_FONT},
         {"keyboard", NW_IN_KEYBOARD}, {"blue_noise", NW_IN_BLUE_NOISE}, {"bluenoise", NW_IN_BLUE_NOISE},
-        {"none", NW_IN_NONE},
+        {"none", NW_IN_NONE}, {"sky", NW_IN_SKY},
     };
     *out = (nw_input){0};
     /* an image, tagged (texture:art.png) or by extension. Before the
@@ -490,7 +556,7 @@ static bool parse_input(nw_shader_source *src, const char *dir, const char *v, n
     }
     int p = nw_shader_source_find_pass(src, v);
     if (p >= 0) {
-        *out = (nw_input){.kind = NW_IN_PASS, .pass = p};
+        *out = (nw_input){.kind = src->passes.data[p].is_cube ? NW_IN_CUBE : NW_IN_PASS, .pass = p};
         return true;
     }
     /* the terminal's grid is read through iTermCells, not a channel */
@@ -498,7 +564,7 @@ static bool parse_input(nw_shader_source *src, const char *dir, const char *v, n
         out->kind = NW_IN_NONE;
         return true;
     }
-    log_error("%s: unknown channel source '%s' (a pass name, self, noise, blue_noise, audio, font, "
+    log_error("%s: unknown channel source '%s' (a pass name, cube, self, noise, blue_noise, audio, font, sky, "
              "keyboard, none, or an image file)", where, v);
     return false;
 }
@@ -663,8 +729,8 @@ static nw_result order_passes(nw_shader_source *src) {
             bool ready = true;
             for (int c = 0; c < NW_CHANNELS && ready; c++) {
                 const nw_input *in = &src->passes.data[i].ch[c];
-                if (in->kind == NW_IN_PASS && in->pass != (int)i && in->pass != src->image_pass &&
-                    !done[in->pass])
+                if ((in->kind == NW_IN_PASS || in->kind == NW_IN_CUBE) && in->pass != (int)i &&
+                    in->pass != src->image_pass && !done[in->pass])
                     ready = false;
             }
             if (ready) {
@@ -697,7 +763,7 @@ static nw_result order_passes(nw_shader_source *src) {
     for (size_t i = 0; i < n; i++) {
         nw_pass_src p = src->passes.data[order[i]];
         for (int c = 0; c < NW_CHANNELS; c++)
-            if (p.ch[c].kind == NW_IN_PASS) p.ch[c].pass = pos[p.ch[c].pass];
+            if (p.ch[c].kind == NW_IN_PASS || p.ch[c].kind == NW_IN_CUBE) p.ch[c].pass = pos[p.ch[c].pass];
         sorted.data[sorted.len++] = p;
     }
     src->image_pass = pos[src->image_pass];
@@ -827,6 +893,18 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
     }
 
     /* passes */
+    /* A Shadertoy sound pass (mainSound) makes audio, which a wallpaper
+     * doesn't play: leave its function out so it can't break the picture. */
+    for (const char *sp = strstr(all, "mainSound"); sp; sp = strstr(sp + 1, "mainSound")) {
+        const char *fn = sp;
+        while (fn > all && fn[-1] != '\n') fn--;
+        const char *t = fn;
+        while (*t == ' ' || *t == '\t') t++;
+        if (strncmp(t, "vec2", 4) || (isalnum((unsigned char)sp[9]) || sp[9] == '_')) continue;
+        int from = line_index(all, fn), to = line_index(all, func_end(sp));
+        for (int k = from; k <= to && k < nlines; k++) skip[k] = true;
+        log_info("%s: skipping the sound pass (mainSound): wallpapers don't play audio", file);
+    }
     NW_LIST(const char *) mains = {0};
     for (const char *m = find_main(all); m; m = find_main(func_end(m))) (void)nw_list_push(&mains, m);
     if (mains.len == 0) {
@@ -872,6 +950,10 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
     for (size_t pi = 0; pi < mains.len; pi++) {
         int fn_line = line_index(all, mains.data[pi]);
         int end_line = line_index(all, func_end(mains.data[pi])) + 1;
+        /* the function, not the comment, says it's a cube pass */
+        const char *fn = mains.data[pi] + 4;
+        while (*fn == ' ' || *fn == '\t' || *fn == '\n') fn++;
+        bool cube = !strncmp(fn, "mainCubemap", 11);
         /* marker: up to 5 comment lines above the function */
         const char *pname = NULL;
         for (int k = fn_line - 1; k >= 0 && k >= fn_line - 5 && !pname; k--) {
@@ -879,7 +961,9 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
             size_t len = (size_t)(line_ptr[k + 1] - line_ptr[k]);
             pname = marker_name(a, line_ptr[k], len - (len && line_ptr[k][len - 1] == '\n'));
         }
-        if (!pname) {
+        if (cube) {
+            pname = "Cube A"; /* Shadertoy has exactly one */
+        } else if (!pname || !strcmp(pname, "Cube A")) {
             static const char *const letters[] = {"Buffer A", "Buffer B", "Buffer C", "Buffer D"};
             pname = pi == mains.len - 1 ? "Image"
                     : pi < 4           ? letters[pi]
@@ -887,7 +971,8 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
         }
         nw_pass_src p = {
             .name = pname,
-            .is_image = !strcmp(pname, "Image"),
+            .is_image = !cube && !strcmp(pname, "Image"),
+            .is_cube = cube,
             .format = NW_FMT_RGBA16F,
             .scale = 1.0,
         };
@@ -917,7 +1002,14 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
         src->image_pass = (int)i;
     }
     if (src->image_pass < 0) {
-        src->image_pass = (int)src->passes.len - 1;
+        /* the last pass that isn't the cube */
+        for (size_t i = src->passes.len; i-- > 0 && src->image_pass < 0;)
+            if (!src->passes.data[i].is_cube) src->image_pass = (int)i;
+        if (src->image_pass < 0) {
+            log_error("%s: a cube pass needs a 'void mainImage' to show it", file);
+            r = nw_err(NW_ERR_PARSE, "no mainImage");
+            goto fail;
+        }
         src->passes.data[src->image_pass].is_image = true;
         src->passes.data[src->image_pass].name = "Image";
     }

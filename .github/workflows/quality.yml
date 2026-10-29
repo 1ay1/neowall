@@ -138,14 +138,14 @@ jobs:
         run: CC=clang meson setup build-fuzz -Dfuzz=true -Db_sanitize=address,undefined -Db_lundef=false
 
       - name: Build
-        run: ninja -C build-fuzz fuzz_vibe fuzz_shader fuzz_exif fuzz_terminal fuzz_image fuzz_glsl fuzz_cbdt
+        run: ninja -C build-fuzz fuzz_vibe fuzz_shader fuzz_import fuzz_exif fuzz_terminal fuzz_image fuzz_glsl fuzz_cbdt
 
       - name: Fuzz each parser for 60s
         env:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: |
           mkdir -p crashes
-          for f in vibe shader exif terminal image glsl cbdt; do
+          for f in vibe shader import exif terminal image glsl cbdt; do
             mkdir -p corpus/$f
             # start from the checked-in seeds where there are some
             case $f in
@@ -154,6 +154,7 @@ jobs:
               glsl) cp examples/shaders/*.glsl corpus/$f/ ;;
               # a shader, a NUL, then its manifest
               shader) cp examples/shaders/*.glsl tests/fixtures/fuzz-shader/* corpus/$f/ ;;
+              import) cp tests/fixtures/fuzz-import/* corpus/$f/ ;;
             esac
             echo "== $f"
             ./build-fuzz/fuzz_$f -max_total_time=60 -artifact_prefix=crashes/$f- corpus/$f

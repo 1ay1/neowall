@@ -224,6 +224,7 @@ shader_sources = files(
   'src/shader/term_gpu.c',
   'src/shader/shader_hint.c',
   'src/shader/program_cache.c',
+  'src/shader/shadertoy_import.c',
   'src/shader/shader_core.c',
   'src/shader/shader_state.c',
   'src/shader/shader_docs.c',
@@ -683,6 +684,14 @@ test_gfx_exe = executable('test_gfx',
 test('gfx', test_gfx_exe)
 
 # Shadertoy -> desktop GLSL source fixes. GL-free.
+test('shadertoy_import', executable('test_shadertoy_import',
+  files('tests/test_shadertoy_import.c', 'src/base.c', 'src/shader/shadertoy_import.c',
+        'src/shader/source.c', 'src/config/vibe_impl.c', 'src/utils.c'),
+  include_directories: [inc_dirs, inc_dirs_build],
+  build_by_default: false,
+))
+
+# Shadertoy -> desktop GLSL source fixes. GL-free.
 test('shader_compat', executable('test_shader_compat',
   files('tests/test_shader_compat.c', 'src/base.c', 'src/shader/compat.c'),
   include_directories: [inc_dirs, inc_dirs_build, include_directories('src/shader')],
@@ -1050,6 +1059,9 @@ fuzz_harnesses = {
                       'src/shader/assemble.c', 'src/shader/compat.c',
                       'src/shader/glsl_shadow.c',
                       'src/config/vibe_impl.c', 'src/utils.c'), 'examples/shaders', []],
+  'import':    [files('tests/fuzz_import.c', 'src/base.c', 'src/shader/shadertoy_import.c',
+                      'src/shader/source.c', 'src/config/vibe_impl.c', 'src/utils.c'),
+                'tests/fixtures/fuzz-import', []],
   'exif':      [files('tests/fuzz_exif.c', 'src/image/exif.c'), '', []],
   'image':     [files('tests/fuzz_image.c', 'src/image/image.c', 'src/image/exif.c',
                       'src/utils.c'), 'tests/fixtures/images',

@@ -185,8 +185,160 @@ static char *shadertoy_fix(const char *source) {
     return result;
 }
 
+/* Words that are free identifiers in GLSL ES (and so in Shadertoy code) but
+ * reserved in desktop GLSL 330. `float packed` or `noise1(x)` is then a
+ * syntax error; such a word gets a trailing underscore everywhere. */
+static const char *const desktop_reserved[] = {
+    "packed", "precise", "noise1", "noise2", "noise3", "noise4", "double", "dvec2", "dvec3", "dvec4",
+    "dmat2", "dmat3", "dmat4", "input", "output", "filter", "common", "partition", "active",
+    "superp", "sizeof", "cast", "namespace", "using", "hvec2", "hvec3", "hvec4", "fvec2", "fvec3",
+    "fvec4", "sampler3DRect", "half", "fixed", "unsigned", "goto", "inline", "noinline", "public",
+    "static", "extern", "external", "interface", "long", "short", "template", "this", "typedef",
+    "union", "volatile", "class", "asm", "enum",
+};
+
+static bool is_reserved(const char *s, size_t n) {
+    for (size_t k = 0; k < NW_COUNTOF(desktop_reserved); k++)
+        if (strlen(desktop_reserved[k]) == n && !strncmp(desktop_reserved[k], s, n)) return true;
+    return false;
+}
+
+/* `float x;` / `vec3 a, b;` inside a function: WebGL zero-fills a local
+ * declared without a value, desktop drivers leave garbage (Mesa: 0, NVIDIA:
+ * whatever was there). Real shaders count on the zero (`vec3 acc; acc +=`),
+ * so such a declaration gets an explicit `= T(0)`. */
+static const char *const value_types[] = {
+    "float", "int", "uint", "vec2", "vec3", "vec4", "ivec2", "ivec3", "ivec4",
+    "uvec2", "uvec3", "uvec4", "mat2", "mat3", "mat4", "bool", "bvec2", "bvec3", "bvec4",
+};
+
+static const char *value_type(const char *s, size_t n) {
+    for (size_t k = 0; k < NW_COUNTOF(value_types); k++)
+        if (strlen(value_types[k]) == n && !strncmp(value_types[k], s, n)) return value_types[k];
+    return NULL;
+}
+
+static const char *zero_of(const char *type) {
+    if (!strcmp(type, "bool")) return "false";
+    if (type[0] == 'b') return NULL; /* bvecN(false) is fine too, but rare: leave it */
+    return "0";
+}
+
+/* Token-level ES -> desktop fixes, comments and strings copied verbatim:
+ * reserved words renamed, uninitialised locals zeroed. */
+static char *es_fix(const char *src) {
+    nw_str out = {0};
+    int depth = 0, paren = 0;
+    int struct_depth = -1;  /* depth of a struct body we're in, else -1 */
+    bool after_struct = false;
+    bool stmt_start = true; /* the next token starts a statement */
+    const char *p = src;
+    while (*p) {
+        if (p[0] == '/' && p[1] == '/') {
+            const char *e = strchr(p, '\n');
+            size_t n = e ? (size_t)(e - p) : strlen(p);
+            nw_str_append_n(&out, p, n);
+            p += n;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            const char *e = strstr(p + 2, "*/");
+            size_t n = e ? (size_t)(e + 2 - p) : strlen(p);
+            nw_str_append_n(&out, p, n);
+            p += n;
+            continue;
+        }
+        if (*p == '#') {
+            /* a preprocessor line: copy (with continuations) as is */
+            const char *e = p;
+            while (*e && !(*e == '\n' && e[-1] != '\\')) e++;
+            nw_str_append_n(&out, p, (size_t)(e - p));
+            p = e;
+            stmt_start = true;
+            continue;
+        }
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            const char *s = p;
+            while (is_ident(*p)) p++;
+            size_t n = (size_t)(p - s);
+            if (is_reserved(s, n)) {
+                nw_str_append_n(&out, s, n);
+                nw_str_append(&out, "_");
+                stmt_start = false;
+                continue;
+            }
+            const char *type = depth > 0 && paren == 0 && stmt_start && struct_depth < 0 ? value_type(s, n) : NULL;
+            if (n == 6 && !strncmp(s, "struct", 6)) after_struct = true;
+            nw_str_append_n(&out, s, n);
+            stmt_start = false;
+            if (!type || !zero_of(type)) continue;
+            /* `T name[, name]* ;` with no '=', '[' or '(' : zero each name */
+            const char *q = p;
+            bool simple = true;
+            int names = 0;
+            for (;;) {
+                while (*q == ' ' || *q == '\t') q++;
+                if (!isalpha((unsigned char)*q) && *q != '_') { simple = false; break; }
+                while (is_ident(*q)) q++;
+                names++;
+                while (*q == ' ' || *q == '\t') q++;
+                if (*q == ',') { q++; continue; }
+                if (*q != ';') simple = false;
+                break;
+            }
+            if (!simple || !names) continue;
+            /* rewrite the declarators, adding = T(0) */
+            while (p < q) {
+                while (*p == ' ' || *p == '\t') nw_str_append_n(&out, p++, 1);
+                const char *ns = p;
+                while (is_ident(*p)) p++;
+                const char *nm = ns;
+                size_t nn = (size_t)(p - ns);
+                bool reserved = is_reserved(nm, nn);
+                nw_str_append_n(&out, nm, nn);
+                if (reserved) nw_str_append(&out, "_");
+                if (!strcmp(type, "bool")) nw_str_append(&out, " = false");
+                else nw_str_printf(&out, " = %s(0)", type);
+                while (*p == ' ' || *p == '\t') nw_str_append_n(&out, p++, 1);
+                if (*p == ',') nw_str_append_n(&out, p++, 1);
+            }
+            continue;
+        }
+        if (isdigit((unsigned char)*p)) {
+            /* numbers (1e5, 0x1F, 2.0f) can contain letters: skip whole */
+            const char *s = p;
+            while (is_ident(*p) || *p == '.') p++;
+            nw_str_append_n(&out, s, (size_t)(p - s));
+            stmt_start = false;
+            continue;
+        }
+        if (*p == '{') {
+            depth++, stmt_start = true;
+            if (after_struct && struct_depth < 0) struct_depth = depth;
+            after_struct = false;
+        } else if (*p == '}') {
+            if (depth == struct_depth) struct_depth = -1;
+            depth = depth > 0 ? depth - 1 : 0, stmt_start = true;
+        } else if (*p == ';') stmt_start = paren == 0, after_struct = false;
+        else if (*p == '(') paren++, stmt_start = false;
+        else if (*p == ')') paren = paren > 0 ? paren - 1 : 0, stmt_start = false;
+        else if (!isspace((unsigned char)*p)) stmt_start = false;
+        nw_str_append_n(&out, p, 1);
+        p++;
+    }
+    if (out.oom) {
+        nw_str_free(&out);
+        return NULL;
+    }
+    if (!out.data) nw_str_append(&out, "");
+    return nw_str_take(&out);
+}
+
 char *nw_compat_fix(const char *src) {
-    char *base = shadertoy_fix(src);
+    char *fixed = shadertoy_fix(src);
+    if (!fixed) return NULL;
+    char *base = es_fix(fixed);
+    free(fixed);
     if (!base) return NULL;
     nw_str out = {0};
     name_list demoted = {0};

@@ -268,6 +268,37 @@ int main(void) {
     CHECK(rejects("#pragma neowall requires 99.0\n" "void mainImage(out vec4 c, in vec2 f) { c = vec4(1); }\n", NULL),
           "a shader for a newer neowall is refused");
 
+    /* a Cube A pass: named by its function, read as a cube by the image */
+    s = load("// Cube A\nvoid mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(rd, 1); }\n"
+             "// Image\nvoid mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, vec3(f, 1)); }\n",
+             NULL);
+    CHECK(s->passes.len == 2 && pass(s, "Cube A") >= 0, "cube pass found");
+    CHECK(s->passes.data[pass(s, "Cube A")].is_cube && !s->passes.data[pass(s, "Cube A")].is_image, "flagged cube");
+    CHECK(s->passes.data[s->image_pass].ch[0].kind == NW_IN_CUBE, "image reads it as a cube");
+    CHECK(pass(s, "Cube A") < s->image_pass, "cube runs before the image");
+    nw_shader_source_free(s);
+    /* the manifest can bind it by Shadertoy's name */
+    s = load("void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(rd, 1); }\n"
+             "void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel2, vec3(1)); }\n",
+             "image { ch2 cubemap }\n");
+    CHECK(s->passes.data[s->image_pass].ch[2].kind == NW_IN_CUBE, "manifest 'cubemap' binds the cube");
+    nw_shader_source_free(s);
+    /* a direction lookup with no cube pass gets the built-in sky */
+    s = load("void mainImage(out vec4 c, in vec2 f) { vec3 rd = vec3(f, 1); c = texture(iChannel0, rd); }\n", NULL);
+    CHECK(s->passes.data[0].ch[0].kind == NW_IN_SKY, "vec3 lookup without a cube pass: sky");
+    nw_shader_source_free(s);
+    s = load("void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, normalize(f)); }\n", NULL);
+    CHECK(s->passes.data[0].ch[0].kind != NW_IN_SKY, "normalize of a vec2 is still 2D");
+    nw_shader_source_free(s);
+    /* a sound pass is left out, even when it doesn't compile */
+    s = load("vec2 mainSound(int samp, float t) { return vec2(nope); }\n"
+             "void mainImage(out vec4 c, in vec2 f) { c = vec4(1); }\n", NULL);
+    CHECK(s->passes.len == 1 && !strstr(s->passes.data[0].body, "nope") && (!s->common || !strstr(s->common, "nope")),
+          "sound pass skipped");
+    nw_shader_source_free(s);
+    CHECK(rejects("void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(1); }\n", NULL),
+          "a cube pass alone has nothing to show");
+
     /* rejections */
     CHECK(shader_hint_suggest("nwSdSpere") && !strcmp(shader_hint_suggest("nwSdSpere"), "nwSdSphere"),
           "typo -> nwSdSphere");

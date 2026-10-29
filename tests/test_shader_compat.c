@@ -71,6 +71,28 @@ int main(void) {
     /* plain code is untouched */
     SAME("void mainImage(out vec4 c, in vec2 p){ c = vec4(1.0); }");
 
+    /* words reserved on desktop but free in GLSL ES get an underscore */
+    HAS("float packed = 1.0; float noise1(float x){ return x; }\n", "float packed_ = 1.0");
+    HAS("float noise1(float x){ return x; } void f(){ float a = noise1(2.); }\n", "noise1_(2.)");
+    HAS("float x; // packed in a comment\n", "// packed in a comment");
+    LACKS("float unpacked = 1.0;\n", "unpacked_");
+
+    /* a local declared with no value is zeroed (WebGL does, desktop doesn't) */
+    HAS("void f(){ vec3 acc; acc += 1.0; }", "vec3 acc = vec3(0);");
+    HAS("void f(){ float a, b; }", "float a = float(0), b = float(0);");
+    HAS("void f(){ bool hit; }", "bool hit = false;");
+    HAS("void f(){ float a = 2.0; }", "float a = 2.0;");
+    LACKS("void f(){ float a[4]; }", "= float(0)");          /* arrays: left alone */
+    LACKS("float g; void f(){}", "= float(0)");               /* globals are zero already */
+    LACKS("void f(in vec3 p, out float d){ d = 1.; }", "= ""vec3(0)"); /* parameters */
+    LACKS("void f(){ for (int i; i < 3; i++) {} }", "int i = int(0)"); /* inside parens */
+    /* struct members can't have initialisers: never touched */
+    LACKS("struct Ray { vec3 o; vec3 d; };\n", "vec3 o = vec3(0)");
+    LACKS("void f(){ struct S { float x; }; S s; }", "float x = ");
+
+    /* a #define body isn't parsed as code */
+    HAS("#define DECL float q;\nvoid f(){}", "#define DECL float q;");
+
     if (failures == 0) {
         printf("ok - %d checks passed\n", checks);
         return 0;

@@ -108,6 +108,15 @@ picks a starting point;
 .B \-\-list
 shows them.
 .TP
+.BI import " export.json" " \fR[\fPname\fR]\fP"
+Turn a Shadertoy JSON export into a shader in
+.IR ~/.config/neowall/shaders ,
+with every pass and its channel bindings.
+What can't come over (Shadertoy's own textures and cube maps, music, the
+sound pass) is listed and replaced with a built-in.
+.B \-\-force
+overwrites.
+.TP
 .BI preview " shader"
 Run one shader in the foreground next to the daemon, without touching
 your config.

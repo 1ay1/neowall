@@ -109,6 +109,12 @@ typedef struct {
 typedef struct {
     GLuint prog;
     nw_target *target; /* buffer passes; NULL for the image pass */
+    /* cube passes: two cube maps (this frame, last frame) and an FBO */
+    GLuint cube_tex[2], cube_fbo;
+    int cube_read;     /* which of cube_tex holds last frame */
+    bool cube_static;  /* reads no time, input or channel: drawn once */
+    bool cube_drawn;
+    GLint u_face;      /* nwCubeFace */
     int w, h;
     GLint u_time, u_res, u_mouse, u_frame, u_dt, u_fps, u_date, u_rate, u_span;
     GLint u_ch[NW_CHANNELS], u_chres, u_chtime;
@@ -523,6 +529,10 @@ void nw_engine_free(nw_engine *e) {
         pass_gl *g = &e->passes.data[i];
         glDeleteProgram(g->prog);
         nw_target_free(g->target);
+        if (g->cube_fbo) {
+            glDeleteFramebuffers(1, &g->cube_fbo);
+            glDeleteTextures(2, g->cube_tex);
+        }
         for (int c = 0; c < NW_CHANNELS; c++)
             if (g->image_ch[c].tex) glDeleteTextures(1, &g->image_ch[c].tex);
         nw_list_free(&g->extra);
@@ -566,11 +576,17 @@ static void pass_size(const nw_pass_src *p, int w, int h, int *ow, int *oh) {
 
 /* Every buffer pass gets a target of its size. A resize keeps nothing:
  * feedback contents at the old size are meaningless. */
+static void make_cube(pass_gl *g, const nw_pass_src *ps);
+
 static void ensure_targets(nw_engine *e, int w, int h) {
     for (size_t i = 0; i < e->passes.len; i++) {
         const nw_pass_src *ps = &e->src->passes.data[i];
         pass_gl *g = &e->passes.data[i];
         if ((int)i == e->src->image_pass) continue;
+        if (ps->is_cube) {
+            if (!g->cube_fbo) make_cube(g, ps);
+            continue;
+        }
         int tw, th;
         pass_size(ps, w, h, &tw, &th);
         if (g->target && g->w == tw && g->h == th) continue;
@@ -592,6 +608,57 @@ static GLuint builtin(int which) {
     static GLuint tex[3];
     if (!tex[which]) tex[which] = which == 0 ? texture_create_rgba_noise(256, 256) : which == 1 ? texture_create_blue_noise(256, 256) : texture_create_font_atlas(0, 0);
     return tex[which];
+}
+
+/* A stand-in for Shadertoy's photo cube maps (Uffizi, Forest, ...), which we
+ * can't ship: a daylight sky over a dim ground with a soft sun, so
+ * reflections and skyboxes look like something. Made once, shared. */
+#define SKY_SIZE 256
+
+static GLuint sky_cube(void) {
+    static GLuint tex;
+    if (tex) return tex;
+    static unsigned char px[SKY_SIZE * SKY_SIZE * 4];
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, tex);
+    for (int f = 0; f < 6; f++) {
+        for (int y = 0; y < SKY_SIZE; y++) {
+            for (int x = 0; x < SKY_SIZE; x++) {
+                /* the direction through this texel, in GL's cube map layout */
+                float u = (x + 0.5f) / SKY_SIZE * 2 - 1, v = (y + 0.5f) / SKY_SIZE * 2 - 1;
+                float d[6][3] = {{1, -v, -u}, {-1, -v, u}, {u, 1, v}, {u, -1, -v}, {u, -v, 1}, {-u, -v, -1}};
+                float dx = d[f][0], dy = d[f][1], dz = d[f][2];
+                float len = sqrtf(dx * dx + dy * dy + dz * dz);
+                dx /= len, dy /= len, dz /= len;
+                float r, g, b;
+                if (dy >= 0) {
+                    float t = powf(dy, 0.5f); /* horizon pale, zenith deep */
+                    r = 0.75f + (0.25f - 0.75f) * t, g = 0.85f + (0.45f - 0.85f) * t, b = 0.95f + (0.85f - 0.95f) * t;
+                } else {
+                    float t = fminf(-dy * 4, 1);
+                    r = 0.45f + (0.18f - 0.45f) * t, g = 0.42f + (0.16f - 0.42f) * t, b = 0.38f + (0.14f - 0.38f) * t;
+                }
+                /* sun toward +x +y +z */
+                float s = (dx * 0.5f + dy * 0.6f + dz * 0.62f) / 0.99f;
+                float sun = s > 0 ? powf(s, 256) * 3 + powf(s, 8) * 0.25f : 0;
+                r += sun, g += sun * 0.9f, b += sun * 0.7f;
+                unsigned char *o = &px[(y * SKY_SIZE + x) * 4];
+                o[0] = (unsigned char)(fminf(r, 1) * 255), o[1] = (unsigned char)(fminf(g, 1) * 255);
+                o[2] = (unsigned char)(fminf(b, 1) * 255), o[3] = 255;
+            }
+        }
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + (GLenum)f, 0, GL_RGBA8, SKY_SIZE, SKY_SIZE, 0, GL_RGBA,
+                     GL_UNSIGNED_BYTE, px);
+    }
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    return tex;
 }
 
 static GLuint resolve(nw_engine *e, int pass, int c, float *res) {
@@ -618,6 +685,13 @@ static GLuint resolve(nw_engine *e, int pass, int c, float *res) {
         return t->tex;
     }
     case NW_IN_NONE: return 0;
+    case NW_IN_CUBE: {
+        pass_gl *g = &e->passes.data[in->pass];
+        res[0] = res[1] = (float)g->w;
+        /* earlier in the frame: this frame's faces; itself or later: last frame's */
+        return in->pass < pass ? g->cube_tex[!g->cube_read] : g->cube_tex[g->cube_read];
+    }
+    case NW_IN_SKY: res[0] = res[1] = SKY_SIZE; return sky_cube();
     }
     return 0;
 }
@@ -659,7 +733,15 @@ static void set_uniforms(nw_engine *e, size_t i, pass_gl *g, const nw_frame_in *
             chres[c * 3 + 1] = in->channel_override_size[c][1];
         }
         glActiveTexture(GL_TEXTURE0 + (GLenum)c);
-        glBindTexture(GL_TEXTURE_2D, t);
+        nw_input_kind k = e->src->passes.data[i].ch[c].kind;
+        if (k == NW_IN_CUBE || k == NW_IN_SKY) {
+            /* a unit can hold a 2D and a cube texture at once; clear the 2D */
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, t);
+        } else {
+            glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+            glBindTexture(GL_TEXTURE_2D, t);
+        }
         if (g->u_ch[c] >= 0) glUniform1i(g->u_ch[c], c);
         chtime[c] = (float)in->time;
     }
@@ -714,6 +796,60 @@ static void set_uniforms(nw_engine *e, size_t i, pass_gl *g, const nw_frame_in *
     }
 }
 
+/* Shadertoy's Cube A is 1024 per face. */
+#define CUBE_SIZE 1024
+
+static void make_cube(pass_gl *g, const nw_pass_src *ps) {
+    GLenum ifmt = ps->format == NW_FMT_RGBA8 ? GL_RGBA8 : ps->format == NW_FMT_RGBA32F ? GL_RGBA32F : GL_RGBA16F;
+    glGenTextures(2, g->cube_tex);
+    for (int k = 0; k < 2; k++) {
+        glBindTexture(GL_TEXTURE_CUBE_MAP, g->cube_tex[k]);
+        for (int f = 0; f < 6; f++)
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + (GLenum)f, 0, (GLint)ifmt, CUBE_SIZE, CUBE_SIZE, 0, GL_RGBA,
+                         GL_FLOAT, NULL);
+        GLint filt = ps->filter == NW_FILTER_NEAREST ? GL_NEAREST : GL_LINEAR;
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, filt);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, filt);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    }
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    /* no seams where faces meet */
+    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+    glGenFramebuffers(1, &g->cube_fbo);
+    g->w = g->h = CUBE_SIZE;
+    g->cube_read = 0;
+    g->u_face = glGetUniformLocation(g->prog, "nwCubeFace");
+    /* the compiler keeps only uniforms the pass uses: no time, frame, mouse,
+     * date, channel or extra uniform means the cube can't change */
+    static const char *const live[] = {"iTime", "iFrame", "iTimeDelta", "iFrameRate", "iMouse", "iDate",
+                                       "iChannel0", "iChannel1", "iChannel2", "iChannel3"};
+    bool any = false;
+    for (size_t k = 0; k < NW_COUNTOF(live) && !any; k++) any = glGetUniformLocation(g->prog, live[k]) >= 0;
+    GLint n = 0;
+    glGetProgramiv(g->prog, GL_ACTIVE_UNIFORMS, &n);
+    /* anything beyond the face index (reactive, params, manifest) is live too */
+    g->cube_static = !any && n <= (g->u_face >= 0 ? 1 : 0) + (glGetUniformLocation(g->prog, "iResolution") >= 0);
+}
+
+static void set_uniforms(nw_engine *e, size_t i, pass_gl *g, const nw_frame_in *in, int w, int h);
+
+/* All six faces of a cube pass into this frame's cube map. */
+static void draw_cube(nw_engine *e, size_t i, pass_gl *g, const nw_frame_in *in) {
+    GLuint dst = g->cube_tex[!g->cube_read];
+    glBindFramebuffer(GL_FRAMEBUFFER, g->cube_fbo);
+    glViewport(0, 0, CUBE_SIZE, CUBE_SIZE);
+    glUseProgram(g->prog);
+    set_uniforms(e, i, g, in, CUBE_SIZE, CUBE_SIZE);
+    for (int f = 0; f < 6; f++) {
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + (GLenum)f,
+                               dst, 0);
+        if (g->u_face >= 0) glUniform1i(g->u_face, f);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+}
+
 void nw_engine_frame(nw_engine *e, const nw_frame_in *in) {
     GLint screen = 0;
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &screen);
@@ -741,6 +877,19 @@ void nw_engine_frame(nw_engine *e, const nw_frame_in *in) {
         pass_gl *g = &e->passes.data[i];
         bool is_image = (int)i == e->src->image_pass;
         int w = in->width, h = in->height;
+        if (e->src->passes.data[i].is_cube) {
+            /* six full faces is costly; a cube that can't change is drawn once */
+            if (g->cube_fbo && !(g->cube_static && g->cube_drawn)) {
+                draw_cube(e, i, g, in);
+                /* a static cube fills both halves, so any reader sees it */
+                if (g->cube_static) {
+                    g->cube_read ^= 1;
+                    draw_cube(e, i, g, in);
+                }
+                g->cube_drawn = true;
+            }
+            continue;
+        }
         if (is_image) {
             glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)screen);
         } else {
@@ -760,6 +909,8 @@ void nw_engine_frame(nw_engine *e, const nw_frame_in *in) {
     }
     for (size_t i = 0; i < e->passes.len; i++)
         if (e->passes.data[i].target) nw_gfx_target_swap(&e->passes.data[i].target->t);
+    for (size_t i = 0; i < e->passes.len; i++)
+        if (e->passes.data[i].cube_fbo && !e->passes.data[i].cube_static) e->passes.data[i].cube_read ^= 1;
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)screen);
     glBindVertexArray(0);

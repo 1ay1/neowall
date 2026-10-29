@@ -479,6 +479,25 @@ neowall new hello --template=scene     # scene | flat | reactive
 neowall new --list
 ```
 
+### Bringing in a Shadertoy shader
+
+Export it on shadertoy.com (or fetch `/api/v1/shaders/<id>` with your API
+key) and import the JSON:
+
+```bash
+neowall import export.json             # -> ~/.config/neowall/shaders/<title>.glsl (+ .neowall)
+neowall import export.json mysky       # pick the name
+```
+
+Every pass comes over (Common, Buffer A–D, Cube A, Image) with its channel
+bindings. What can't come over is listed and replaced: Shadertoy's photo
+textures become `noise` (bind your own image with `ch0 photo.png`), its cube
+maps become the built-in `sky`, music and microphone become the live `audio`
+spectrum, and the Sound pass is left out (a wallpaper doesn't play audio).
+Pasting a shader by hand works too: the passes are found by their `// Buffer
+A` style comments, a `mainCubemap` makes the Cube A pass, and a `mainSound`
+is skipped.
+
 ### Time travel (day-scale shaders)
 
 A shader driven by `iDate`/`iTimeOfDay`/`iSun` can evolve over days, which makes
@@ -623,17 +642,26 @@ A wallpaper runs forever, so its cost is paid continuously. Budget accordingly.
 
 ### Multipass pipeline
 
-NeoWall supports ping-pong buffers `bufferA` through `bufferD` plus the final
-`image` pass, wired through the manifest. Each buffer is a full-resolution render
-target that the next pass can sample.
+A shader can have any number of buffer passes (Shadertoy's `bufferA` to
+`bufferD`, or your own: a `// Pass: Blur` comment above a `mainImage`
+names it, and `pass { "Blur" { ... } }` in the manifest configures it),
+one Cube A pass, and the final `image`. Each buffer is a render target the
+other passes sample.
 
 - A buffer that reads its own previous frame (`bufferA { ch0 self }`) is the
   foundation for feedback effects: trails, blur accumulation, reaction-diffusion.
-- Order matters. Buffers render in `A, B, C, D` order, then `image`. A later buffer
-  may sample an earlier one from the *current* frame; sampling a later buffer reads
-  its *previous* frame.
-- The audio texture lives on channel unit 4 and is bound automatically whenever a
-  channel source is `audio` — you do not allocate it.
+- Passes run in the order their reads need: a pass that samples another runs
+  after it and sees this frame; one that samples itself, or a pass that has
+  to come later, sees the previous frame. The image runs last.
+- **Cube A.** `void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd)`
+  renders the six 1024² faces of a cube map from the ray direction `rd`.
+  A pass that samples a channel with a direction (`texture(iChannel0, rd)`)
+  gets it as a `samplerCube`; bind it explicitly with `ch0 cube`. A cube that
+  reads no time, input or channel is drawn once and never again, so a
+  pre-rendered sky costs nothing per frame.
+- **Built-in sky.** A direction lookup with no Cube A pass gets `sky`, a
+  daylight sky cube, standing in for Shadertoy's photo cube maps.
+- `audio`, `keyboard`, `noise` and `font` are built in; bind them by name.
 
 ### Practical limits
 

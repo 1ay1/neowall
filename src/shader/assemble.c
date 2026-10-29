@@ -33,10 +33,6 @@ static const char prefix[] =
     "uniform float iFrameRate;\n"
     "uniform vec4  iDate;\n"
     "uniform float iSampleRate;\n"
-    "uniform sampler2D iChannel0;\n"
-    "uniform sampler2D iChannel1;\n"
-    "uniform sampler2D iChannel2;\n"
-    "uniform sampler2D iChannel3;\n"
     "uniform vec3  iChannelResolution[4];\n"
     "uniform float iChannelTime[4];\n"
     "// Live terminal (terminal wallpapers): integer cell grid + glyph atlas.\n"
@@ -64,6 +60,24 @@ static const char prefix[] =
 static const char suffix[] =
     "void main() {\n"
     "    mainImage(fragColor, gl_FragCoord.xy + iSpanOffset);\n"
+    "}\n";
+
+/* A Cube A pass is drawn once per face. nwCubeFace picks the face (GL
+ * order: +X -X +Y -Y +Z -Z) and the ray is the direction through this texel,
+ * oriented the way GL samples a cube map, so texture(cube, rd) reads back
+ * what mainCubemap wrote for rd. */
+static const char cube_suffix[] =
+    "uniform int nwCubeFace;\n"
+    "void main() {\n"
+    "    vec2 uv = gl_FragCoord.xy / iResolution.xy * 2.0 - 1.0;\n"
+    "    vec3 rd;\n"
+    "    if (nwCubeFace == 0) rd = vec3( 1.0, -uv.y, -uv.x);\n"
+    "    else if (nwCubeFace == 1) rd = vec3(-1.0, -uv.y,  uv.x);\n"
+    "    else if (nwCubeFace == 2) rd = vec3( uv.x,  1.0,  uv.y);\n"
+    "    else if (nwCubeFace == 3) rd = vec3( uv.x, -1.0, -uv.y);\n"
+    "    else if (nwCubeFace == 4) rd = vec3( uv.x, -uv.y,  1.0);\n"
+    "    else rd = vec3(-uv.x, -uv.y, -1.0);\n"
+    "    mainCubemap(fragColor, gl_FragCoord.xy, vec3(0.0), normalize(rd));\n"
     "}\n";
 
 typedef struct {
@@ -117,8 +131,15 @@ static bool decl_param(builder *b, const nw_param *p) {
 }
 
 size_t nw_shader_preamble_chunks(const char **out, size_t max) {
+    /* what `neowall docs` lists for the channels; the real declarations are
+     * per pass (sampler2D, or samplerCube for a cube input) */
+    static const char channels[] =
+        "uniform sampler2D iChannel0; // or samplerCube when bound to Cube A\n"
+        "uniform sampler2D iChannel1;\n"
+        "uniform sampler2D iChannel2;\n"
+        "uniform sampler2D iChannel3;\n";
     const char *all[] = {
-        prefix, neowall_reactive_uniforms,
+        prefix, channels, neowall_reactive_uniforms,
         neowall_glsl_stdlib, neowall_glsl_stdlib2, neowall_glsl_stdlib3,
         neowall_glsl_stdlib4, neowall_glsl_stdlib5, neowall_glsl_stdlib6,
         neowall_glsl_stdlib7, neowall_glsl_stdlib8, neowall_glsl_stdlib8a2,
@@ -149,6 +170,13 @@ nw_result nw_shader_assemble(const nw_shader_source *src, int pass, char **text,
 
     builder b = {0};
     bool ok = put_injected(&b, prefix) && put_injected(&b, neowall_reactive_uniforms);
+    /* a channel reading a cube pass is a samplerCube; every other a sampler2D */
+    for (int c = 0; ok && c < NW_CHANNELS; c++) {
+        char line[64];
+        snprintf(line, sizeof(line), "uniform %s iChannel%d;\n",
+                 p->ch[c].kind == NW_IN_CUBE || p->ch[c].kind == NW_IN_SKY ? "samplerCube" : "sampler2D", c);
+        ok = put_injected(&b, line);
+    }
     const char *const lib[] = {neowall_glsl_stdlib,  neowall_glsl_stdlib2, neowall_glsl_stdlib3,
                                neowall_glsl_stdlib4, neowall_glsl_stdlib5, neowall_glsl_stdlib6,
                                neowall_glsl_stdlib7};
@@ -182,7 +210,7 @@ nw_result nw_shader_assemble(const nw_shader_source *src, int pass, char **text,
     if (ok) ok = put_tagged(&b, src, body);
     /* main() is injected; give it its own source number so its errors
      * never land on an author's line */
-    if (ok) ok = put_injected(&b, "#line 1 9999\n") && put_injected(&b, suffix);
+    if (ok) ok = put_injected(&b, "#line 1 9999\n") && put_injected(&b, p->is_cube ? cube_suffix : suffix);
     free(body);
     free(common);
 
