@@ -284,9 +284,12 @@ elif [ -n "${hypr_sig:-}" ]; then
     hot_remove() { HYPRLAND_INSTANCE_SIGNATURE=$hypr_sig hyprctl output remove NW-HOT >/dev/null; }
     hot_cmd=hyprctl
 elif command -v swaymsg >/dev/null; then
-    hot_add()    { swaymsg create_output >/dev/null; }
-    hot_remove() { swaymsg output HEADLESS-2 unplug >/dev/null; }
+    # the test's own sway, never the user's (SWAYSOCK is unset for the daemon)
+    sway_sock=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock 2>/dev/null | head -1)
+    hot_add()    { SWAYSOCK=$sway_sock swaymsg create_output >/dev/null; }
+    hot_remove() { SWAYSOCK=$sway_sock swaymsg output HEADLESS-2 unplug >/dev/null; }
     hot_cmd=swaymsg
+    [ -n "$sway_sock" ] || hot_cmd=""
 fi
 if [ -n "$hot_cmd" ]; then
     cat > "$cfg" <<EOF
