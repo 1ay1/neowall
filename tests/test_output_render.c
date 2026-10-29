@@ -276,6 +276,37 @@ int main(void) {
           read_rgb(W / 2, H / 2));
     CHECK(o->clock_fade_tex == 0, "fade texture released");
 
+    /* 4d. A background swap: the current shader keeps drawing while the next
+     *     compiles, then it lands on a later frame. A broken one never lands
+     *     and the current shader stays. */
+    ts = fopen(shader, "w");
+    fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(0.0, 1.0, 0.0, 1.0); }\n", ts);
+    fclose(ts);
+    CHECK(nw_is_ok(output_set_shader_async(o, shader)), "async swap starts");
+    CHECK(o->pending_shader != NULL, "a build is pending");
+    CHECK(close_rgb(read_rgb(W / 2, H / 2), 0x0000ff), "blue stays on screen while it builds");
+    for (int i = 0; i < 200 && o->pending_shader; i++) {
+        output_poll_shader_build(o);
+        if (o->pending_shader) usleep(5000);
+    }
+    CHECK(o->pending_shader == NULL, "the build finished");
+    CHECK(draw(o), "first frame after the swap (starts the fade)");
+    o->clock_fade_start = 1;
+    CHECK(draw(o), "draw after the swap");
+    CHECK(close_rgb(read_rgb(W / 2, H / 2), 0x00ff00), "green landed: %06x", read_rgb(W / 2, H / 2));
+
+    ts = fopen(shader, "w");
+    fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(nope); }\n", ts);
+    fclose(ts);
+    nw_result ar = output_set_shader_async(o, shader);
+    for (int i = 0; i < 200 && o->pending_shader; i++) {
+        output_poll_shader_build(o);
+        if (o->pending_shader) usleep(5000);
+    }
+    CHECK(nw_is_ok(ar) && o->pending_shader == NULL, "a broken build ends");
+    CHECK(draw(o), "draw after the broken build");
+    CHECK(close_rgb(read_rgb(W / 2, H / 2), 0x00ff00), "green stays: %06x", read_rgb(W / 2, H / 2));
+
     /* 5. Back to images, from a directory cycle. */
     struct wallpaper_config d;
     memset(&d, 0, sizeof(d));

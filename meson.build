@@ -992,7 +992,7 @@ test('shader_gl', executable('test_shader_gl',
    timeout: 300)
 
 # Build time per shader, cold and from the program cache. Run by hand.
-foreach tool : ['bench_shader_build', 'probe_shaders']
+foreach tool : ['bench_shader_build', 'bench_async_build', 'probe_shaders']
 executable(tool,
   files('tests' / tool + '.c', 'tests/gl_headless.c', 'src/utils.c',
         'src/clock.c', 'src/config/vibe_impl.c') +

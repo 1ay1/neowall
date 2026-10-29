@@ -519,6 +519,7 @@ static void app_subscribe(void *self, rt_subs *subs) {
     struct app *a = self;
     struct neowall_state *state = a->state;
     bool transition = false;
+    bool building = false;
 
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o; o = o->next) {
@@ -535,6 +536,8 @@ static void app_subscribe(void *self, rt_subs *subs) {
 
         if (o->transition_start_time > 0 && o->config->transition != TRANSITION_NONE)
             transition = true;
+        /* a background shader build lands on the next step that looks */
+        if (o->pending_shader) building = true;
 
         /* vsync-off animated output: the phase-locked pacer's next deadline.
          * output_pace_advance() moves it after each present. */
@@ -548,7 +551,7 @@ static void app_subscribe(void *self, rt_subs *subs) {
     }
     pthread_rwlock_unlock(&state->output_list_lock);
 
-    if (transition) rt_sub_every(subs, NW_MSG_TRANSITION, 0, 16666667);
+    if (transition || building) rt_sub_every(subs, NW_MSG_TRANSITION, 0, 16666667);
 }
 
 /* ── present ──────────────────────────────────────────────────────────── */

@@ -26,6 +26,19 @@ nw_result wallshader_load(const char *path, wallshader **out);
 nw_result wallshader_load_text(const char *text, const char *name, wallshader **out);
 void wallshader_free(wallshader *s);
 
+/* The same without blocking the loop: the driver compiles on its own threads
+ * (KHR_parallel_shader_compile) while the caller keeps drawing the old
+ * shader. Errors in the files show up right away; compile errors on the
+ * poll that returns FAILED. A program-cache hit is DONE on the first poll.
+ *
+ *   wallshader_load_start(path, &p)   parse, issue the compiles
+ *   wallshader_load_poll(p, &s)       PENDING / DONE (s is yours) / FAILED
+ *   wallshader_load_cancel(p)         always, once; safe after DONE/FAILED */
+typedef struct wallshader_pending wallshader_pending;
+nw_result wallshader_load_start(const char *path, wallshader_pending **out);
+nw_build_state wallshader_load_poll(wallshader_pending *p, wallshader **out);
+void wallshader_load_cancel(wallshader_pending *p);
+
 /* "file:line: message" with the source line and a caret, from the last
  * failed load. Valid until the next load. */
 const char *wallshader_last_errors(void);

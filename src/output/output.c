@@ -946,6 +946,8 @@ void output_set_wallpaper(struct output_state *output, const char *path) {
 }
 
 /* Set live shader wallpaper */
+static void output_install_shader(struct output_state *output, wallshader *fresh, const char *shader_path);
+
 nw_result output_set_shader(struct output_state *output, const char *shader_path) {
     if (!output || !shader_path) {
         log_error("Invalid parameters for output_set_shader");
@@ -1034,6 +1036,17 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
         log_error("Failed to load shader: %s", shader_path);
         return lr;
     }
+    output_install_shader(output, fresh, shader_path);
+    return nw_ok();
+}
+
+/* Put a loaded shader on screen in place of whatever was there. The output's
+ * context must be current. */
+static void output_install_shader(struct output_state *output, wallshader *fresh, const char *shader_path) {
+    /* a build that was still going belongs to the shader we're replacing */
+    wallshader_load_cancel(output->pending_shader);
+    output->pending_shader = NULL;
+
     /* the old one's last frame fades out over the new one, no pop */
     if (output->config->type == WALLPAPER_SHADER) render_snapshot_for_swap(output);
     wallshader_free(output->shader);
@@ -1108,8 +1121,62 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
         output->next_texture = 0;
     }
 
-    log_debug("Multipass shader wallpaper loaded successfully");
+    log_debug("Shader wallpaper loaded");
+}
+
+/* Load a shader without stalling the loop: compiles run on the driver's
+ * threads and output_poll_shader_build swaps it in when done, the current
+ * shader drawing meanwhile. A file error fails right here; a compile error
+ * when the build finishes. A second request replaces the first. */
+nw_result output_set_shader_async(struct output_state *output, const char *shader_path) {
+    if (!output || !shader_path) return nw_err(NW_ERR_INVALID_ARG, "NULL output or shader path");
+    /* nothing on screen yet, or no surface: nothing to keep drawing */
+    if (!output->shader || !output->compositor_surface ||
+        output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
+        return output_set_shader(output, shader_path);
+    }
+    if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface,
+                                  output->state->egl_context)) {
+        return nw_err(NW_ERR_GL, "eglMakeCurrent failed");
+    }
+    wallshader_load_cancel(output->pending_shader);
+    output->pending_shader = NULL;
+    log_info("Setting shader for output %s: %s (building in the background)",
+             output->model[0] ? output->model : "unknown", shader_path);
+    nw_result r = wallshader_load_start(shader_path, &output->pending_shader);
+    if (nw_is_err(r)) {
+        log_error("Failed to load shader: %s", shader_path);
+        return r;
+    }
+    snprintf(output->pending_shader_path, sizeof(output->pending_shader_path), "%s", shader_path);
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
     return nw_ok();
+}
+
+bool output_poll_shader_build(struct output_state *output) {
+    if (!output || !output->pending_shader) return false;
+    wallshader *fresh = NULL;
+    nw_build_state st = wallshader_load_poll(output->pending_shader, &fresh);
+    if (st == NW_BUILD_PENDING) return true;
+    wallshader_load_cancel(output->pending_shader);
+    output->pending_shader = NULL;
+    if (st == NW_BUILD_DONE) {
+        char path[OUTPUT_MAX_PATH_LENGTH];
+        snprintf(path, sizeof(path), "%s", output->pending_shader_path);
+        output_install_shader(output, fresh, path);
+        output->pending_failures = 0;
+    } else {
+        log_error("Failed to load shader: %s (keeping the current one)", output->pending_shader_path);
+        /* a broken entry in a cycle: try the next, but give up after a
+         * whole lap so an all-broken list stops */
+        if (output->config->cycle && output->config->cycle_count > 1 &&
+            ++output->pending_failures < output->config->cycle_count) {
+            output_cycle_wallpaper(output);
+            return output->pending_shader != NULL;
+        }
+        output->pending_failures = 0;
+    }
+    return false;
 }
 
 /* Built-in enhanced terminal pass-through: sample the whole grid across the
@@ -1737,7 +1804,10 @@ void output_cycle_wallpaper(struct output_state *output) {
              * a GL/state error means this output cannot load any shader right
              * now, and every remaining candidate would fail the same way.
              * Bounded by cycle_count so an all-broken list terminates. */
-            nw_result r = output_set_shader(output, next_path);
+            /* In the background: the current shader keeps drawing while the
+             * next compiles. File errors come back here; a compile error
+             * comes back to output_poll_shader_build, which moves on. */
+            nw_result r = output_set_shader_async(output, next_path);
 
             for (size_t tried = 1;
                  tried < output->config->cycle_count &&
@@ -1763,7 +1833,7 @@ void output_cycle_wallpaper(struct output_state *output) {
                          output->config->cycle_count,
                          next_path);
 
-                r = output_set_shader(output, next_path);
+                r = output_set_shader_async(output, next_path);
             }
 
             if (nw_is_err(r)) {
@@ -1877,6 +1947,10 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
     }
 
     if (output->config->type == WALLPAPER_SHADER && output->shader == NULL) {
+        return false;
+    }
+    /* the next one is still compiling; its landing restarts the clock */
+    if (output->pending_shader) {
         return false;
     }
 

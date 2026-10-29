@@ -33,9 +33,14 @@ static void output_step_transition(struct output_state *output, uint64_t now) {
     output->transition_progress = progress >= 1.0f ? 1.0f : ease_in_out_cubic(progress);
 }
 
-/* Count a shader frame and log the measured FPS every two seconds. */
+/* Count a shader frame and log the measured FPS every two seconds, with the
+ * longest gap between frames: a stall shows there even when the average
+ * still says 60. */
 static void output_meter_fps(struct output_state *output, uint64_t frame_start, uint64_t frame_end) {
     output->fps_frame_count++;
+    if (output->fps_last_frame && frame_end - output->fps_last_frame > output->fps_worst_gap)
+        output->fps_worst_gap = frame_end - output->fps_last_frame;
+    output->fps_last_frame = frame_end;
     if (output->fps_last_log_time == 0) output->fps_last_log_time = frame_end;
     uint64_t elapsed = frame_end - output->fps_last_log_time;
     if (elapsed < 2000) return;
@@ -43,13 +48,14 @@ static void output_meter_fps(struct output_state *output, uint64_t frame_start, 
     output->fps_current = fps;
     uint64_t frame_time = frame_end - frame_start;
     if (output->config->vsync) {
-        log_info("FPS [%s]: %.1f FPS (vsync: monitor sync, frame_time: %lums)",
-                 output->model, fps, frame_time);
+        log_info("FPS [%s]: %.1f FPS (vsync: monitor sync, frame_time: %lums, worst gap: %lums)",
+                 output->model, fps, frame_time, output->fps_worst_gap);
     } else {
-        log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums)", output->model, fps,
-                 shader_fps_resolve(output->config->shader_fps), frame_time);
+        log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums, worst gap: %lums)", output->model, fps,
+                 shader_fps_resolve(output->config->shader_fps), frame_time, output->fps_worst_gap);
     }
     output->fps_frame_count = 0;
+    output->fps_worst_gap = 0;
     output->fps_last_log_time = frame_end;
 }
 
@@ -347,7 +353,15 @@ static void render_outputs(struct app *a) {
         wallshader_set_visible(output->shader,
                                !atomic_load_explicit(&output->occluded, memory_order_acquire));
 
-        if (!output_wants_frame(a, output)) continue;
+        if (!output_wants_frame(a, output)) {
+            /* not drawing, but a background shader build still has to land */
+            if (output->pending_shader &&
+                egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface,
+                                         state->egl_context)) {
+                output_poll_shader_build(output);
+            }
+            continue;
+        }
 
         /* Make EGL context current for this output. Note: eglMakeCurrent can
          * synchronize with the GPU — we are NOT holding output_list_lock here. */
@@ -356,6 +370,8 @@ static void render_outputs(struct app *a) {
                      output->model, eglGetError());
             continue;
         }
+        /* a finished background build swaps in before this frame */
+        output_poll_shader_build(output);
 
         /* Geometry callbacks only publish atomics. Once this output's EGL
          * context is current, reconcile all geometry-dependent CPU/GL state

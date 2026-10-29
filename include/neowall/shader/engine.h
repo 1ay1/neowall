@@ -69,6 +69,30 @@ typedef struct nw_uniform_value {
 NW_MUST_USE nw_result nw_engine_new(const nw_shader_source *src, nw_engine **out);
 void nw_engine_free(nw_engine *e);
 
+/* The same without blocking. With KHR_parallel_shader_compile the driver
+ * compiles on its own threads and poll just asks whether it's done, so the
+ * loop keeps drawing the old shader meanwhile. `src` must outlive both.
+ *
+ * One cost can't be moved: on NVIDIA the first draw with a new program
+ * (even one loaded from a binary) runs the final optimizer on the drawing
+ * thread, 300+ ms for a big raymarcher. Measured: a worker thread with a
+ * shared context and a helper process both just move the stall to the first
+ * real frame. Only the program cache, or the driver's own disk cache, hides
+ * it, so a shader is slow to show once and instant after that.
+ *
+ *   nw_engine_build_start(src, &b)   issue every compile, return now
+ *   nw_engine_build_poll(b)          PENDING / DONE / FAILED; cheap
+ *   nw_engine_build_take(b)          after DONE: the engine is yours
+ *   nw_engine_build_free(b)          always; frees an untaken engine
+ * Errors after FAILED are in nw_engine_build_errors(b). */
+typedef struct nw_engine_build nw_engine_build;
+typedef enum { NW_BUILD_PENDING, NW_BUILD_DONE, NW_BUILD_FAILED } nw_build_state;
+NW_MUST_USE nw_result nw_engine_build_start(const nw_shader_source *src, nw_engine_build **out);
+nw_build_state nw_engine_build_poll(nw_engine_build *b);
+nw_engine *nw_engine_build_take(nw_engine_build *b);
+const char *nw_engine_build_errors(const nw_engine_build *b);
+void nw_engine_build_free(nw_engine_build *b);
+
 /* Draw. The image pass goes to the framebuffer bound when this is called. */
 void nw_engine_frame(nw_engine *e, const nw_frame_in *in);
 

@@ -234,6 +234,10 @@ struct output_state {
     GLuint glitch_program;              /* Shader program for glitch transition */
     GLuint pixelate_program;            /* Shader program for pixelate transition */
     wallshader *shader;                 /* the running shader (shader and terminal wallpapers) */
+    /* a shader compiling in the background to replace it (cycling, reload) */
+    struct wallshader_pending *pending_shader;
+    char pending_shader_path[OUTPUT_MAX_PATH_LENGTH];
+    size_t pending_failures;            /* broken cycle entries skipped in a row */
     GLuint vao;                         /* Vertex array object (required for OpenGL 3.3 Core) */
     GLuint vbo;
 
@@ -298,6 +302,8 @@ struct output_state {
     
     /* FPS measurement */
     uint64_t fps_last_log_time;         /* Last time we logged FPS */
+    uint64_t fps_last_frame;            /* ms, the previous frame (for the worst gap) */
+    uint64_t fps_worst_gap;             /* longest ms between frames this window */
     uint64_t fps_frame_count;           /* Frames rendered since last FPS log */
     float fps_current;                  /* Current measured FPS */
     
@@ -371,10 +377,15 @@ void output_process_geometry_change(struct output_state *output);
  *
  * Returns NW_OK once the shader is running, or when the load was deferred
  * because the EGL surface is not up yet (the path is stored on the config and
- * applied when the surface arrives). Any error status means no shader is bound
- * on this output: the previous program has already been torn down and
- * config->shader_path still names it. */
+ * applied when the surface arrives). On any error the previous shader is
+ * still on screen and config->shader_path still names it. */
 nw_result output_set_shader(struct output_state *output, const char *shader_path);
+/* The same without stalling: the current shader keeps drawing while the
+ * new one compiles; output_poll_shader_build swaps it in. */
+nw_result output_set_shader_async(struct output_state *output, const char *shader_path);
+/* Finish a background shader build if it's done. true while one is going.
+ * The output's context must be current. */
+bool output_poll_shader_build(struct output_state *output);
 
 /* Spawn `cmd` under a PTY and make the live terminal this output's wallpaper.
  * `shader_path` (may be NULL/"") is an optional GLSL file that samples the

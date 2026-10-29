@@ -227,9 +227,10 @@ fi
 expect "status shows the output"        0 "Output:"                 "$nw" current
 
 # ---- cycling ----------------------------------------------------------------
-first=$(grep -o 'Setting shader for output [^:]*: .*' "$tmp/nw.log" | tail -1)
+first=$(grep -o 'Loaded shader with [0-9]* pass(es): .*' "$tmp/nw.log" | tail -1)
 expect "next skips"                     0 "skipping to next"        "$nw" next
-wait_for 5 sh -c "grep -o 'Setting shader for output [^:]*: .*' '$tmp/nw.log' | tail -1 | grep -v -F -x \"\$1\"" _ "$first" \
+# the next shader builds in the background; wait until it's on screen
+wait_for 10 sh -c "grep -o 'Loaded shader with [0-9]* pass(es): .*' '$tmp/nw.log' | tail -1 | grep -v -F -x \"\$1\"" _ "$first" \
     && ok "next loads a different shader" || bad "next loads a different shader"
 expect "list shows the cycle"           0 "garden"                  "$nw" list
 expect "set 2 is accepted"              0 "setting wallpaper 2"     "$nw" set 2

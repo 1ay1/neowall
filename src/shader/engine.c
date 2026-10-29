@@ -285,8 +285,6 @@ static int g_parallel = -1;   /* KHR_parallel_shader_compile: -1 unknown */
 /* Every pass's compile is issued before any is checked, so with
  * KHR_parallel_shader_compile the driver spreads them over its threads.
  * nw_engine_new then waits for all of them. */
-typedef enum { NW_BUILD_PENDING, NW_BUILD_DONE, NW_BUILD_FAILED } nw_build_state;
-
 typedef struct {
     GLuint fs, prog;
     bool linked;   /* glLinkProgram issued (or loaded from the cache) */
@@ -294,13 +292,13 @@ typedef struct {
     bool cached;   /* came from the cache: nothing to store */
 } pending_pass;
 
-typedef struct {
+struct nw_engine_build {
     const nw_shader_source *src;
     NW_LIST(pending_pass) p;
     nw_engine *done;
     nw_build_state state;
     nw_str errors;
-} nw_engine_build;
+};
 
 static bool parallel_compile(void) {
     if (g_parallel < 0) {
@@ -326,9 +324,8 @@ static bool done_compiling(GLuint obj, bool is_prog) {
     return v != 0;
 }
 
-static void build_free(nw_engine_build *b);
 
-static nw_result build_start(const nw_shader_source *src, nw_engine_build **out) {
+nw_result nw_engine_build_start(const nw_shader_source *src, nw_engine_build **out) {
     nw_engine_build *b = calloc(1, sizeof(*b));
     if (!b) return nw_err(NW_ERR_OOM, "engine");
     b->src = src;
@@ -347,7 +344,7 @@ static nw_result build_start(const nw_shader_source *src, nw_engine_build **out)
         nw_src_loc *map;
         size_t n;
         if (nw_is_err(nw_shader_assemble(src, (int)i, &text, &map, &n))) {
-            build_free(b);
+            nw_engine_build_free(b);
             return nw_err(NW_ERR_OOM, "assemble");
         }
         pending_pass pp = {.key = program_cache_key(vertex_src, text)};
@@ -365,7 +362,7 @@ static nw_result build_start(const nw_shader_source *src, nw_engine_build **out)
         if (!nw_list_push(&b->p, pp)) {
             if (pp.fs) glDeleteShader(pp.fs);
             if (pp.prog) glDeleteProgram(pp.prog);
-            build_free(b);
+            nw_engine_build_free(b);
             return nw_err(NW_ERR_OOM, "engine");
         }
     }
@@ -428,7 +425,7 @@ static nw_engine *finish(nw_engine_build *b) {
     return e;
 }
 
-static nw_build_state build_poll(nw_engine_build *b) {
+nw_build_state nw_engine_build_poll(nw_engine_build *b) {
     if (b->state != NW_BUILD_PENDING) return b->state;
     bool all = true, failed = false;
     for (size_t i = 0; i < b->p.len; i++) {
@@ -481,7 +478,15 @@ static nw_build_state build_poll(nw_engine_build *b) {
     return b->state;
 }
 
-static void build_free(nw_engine_build *b) {
+nw_engine *nw_engine_build_take(nw_engine_build *b) {
+    nw_engine *e = b->done;
+    b->done = NULL;
+    return e;
+}
+
+const char *nw_engine_build_errors(const nw_engine_build *b) { return nw_str_cstr(&b->errors); }
+
+void nw_engine_build_free(nw_engine_build *b) {
     if (!b) return;
     for (size_t i = 0; i < b->p.len; i++) {
         if (b->p.data[i].fs) glDeleteShader(b->p.data[i].fs);
@@ -495,22 +500,18 @@ static void build_free(nw_engine_build *b) {
 
 nw_result nw_engine_new(const nw_shader_source *src, nw_engine **out) {
     nw_engine_build *b;
-    NW_TRY(build_start(src, &b));
+    NW_TRY(nw_engine_build_start(src, &b));
     nw_build_state s;
     /* we wait anyway, so skip the completion queries: the status calls
      * block until each step is done */
     int saved = g_parallel;
     g_parallel = 0;
-    while ((s = build_poll(b)) == NW_BUILD_PENDING) {}
+    while ((s = nw_engine_build_poll(b)) == NW_BUILD_PENDING) {}
     g_parallel = saved;
     nw_str_clear(&g_errors);
-    nw_str_append(&g_errors, nw_str_cstr(&b->errors));
-    nw_engine *e = NULL;
-    if (s == NW_BUILD_DONE) {
-        e = b->done;
-        b->done = NULL;
-    }
-    build_free(b);
+    nw_str_append(&g_errors, nw_engine_build_errors(b));
+    nw_engine *e = s == NW_BUILD_DONE ? nw_engine_build_take(b) : NULL;
+    nw_engine_build_free(b);
     if (!e) return nw_err(NW_ERR_GL, "shader compile");
     *out = e;
     return nw_ok();

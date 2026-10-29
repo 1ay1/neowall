@@ -49,7 +49,14 @@ int main(int argc, char **argv) {
             glBindFramebuffer(GL_FRAMEBUFFER, fbo);
             glViewport(0, 0, W, H);
             wallshader_frame fr = {.width = W, .height = H, .time = 3.0 + f / 60.0, .mouse = {W / 2.0f, H / 2.0f}};
+            struct timespec t0, t1;
+            clock_gettime(CLOCK_MONOTONIC, &t0);
             wallshader_draw(s, &fr);
+            if (getenv("PROBE_FRAMES") && f < 6) {
+                glFinish();
+                clock_gettime(CLOCK_MONOTONIC, &t1);
+                printf("  frame %d: %.1f ms\n", f, (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6);
+            }
         }
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px);

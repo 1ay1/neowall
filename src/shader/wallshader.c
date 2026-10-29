@@ -76,17 +76,18 @@ static void open_bindings(wallshader *s) {
     }
 }
 
-static nw_result finish_load(nw_shader_source *src, wallshader **out) {
-    nw_engine *eng = NULL;
-    nw_result r = nw_engine_new(src, &eng);
-    if (nw_is_err(r)) {
-        nw_str_clear(&g_errors);
-        nw_str_append(&g_errors, nw_engine_last_errors());
-        log_error("%s failed to compile:\n%s", src->path ? src->path : "shader", nw_str_cstr(&g_errors));
-        nw_shader_source_free(src);
-        /* bad GLSL is the shader's fault: callers skip to the next one */
-        return r.status == NW_ERR_GL ? nw_err(NW_ERR_PARSE, "shader failed to compile") : r;
-    }
+/* A compile that failed: keep the errors, and report it as the shader's
+ * fault so a cycle skips to the next one. Frees src. */
+static nw_result compile_failed(nw_shader_source *src, const char *errors) {
+    nw_str_clear(&g_errors);
+    nw_str_append(&g_errors, errors);
+    log_error("%s failed to compile:\n%s", src->path ? src->path : "shader", nw_str_cstr(&g_errors));
+    nw_shader_source_free(src);
+    return nw_err(NW_ERR_PARSE, "shader failed to compile");
+}
+
+/* A wallshader around a compiled engine. Takes both. */
+static nw_result wrap(nw_shader_source *src, nw_engine *eng, wallshader **out) {
     wallshader *s = calloc(1, sizeof(*s));
     if (!s) {
         nw_engine_free(eng);
@@ -102,7 +103,21 @@ static nw_result finish_load(nw_shader_source *src, wallshader **out) {
     return nw_ok();
 }
 
-nw_result wallshader_load(const char *path, wallshader **out) {
+static nw_result finish_load(nw_shader_source *src, wallshader **out) {
+    nw_engine *eng = NULL;
+    nw_result r = nw_engine_new(src, &eng);
+    if (nw_is_err(r)) {
+        if (r.status != NW_ERR_GL) {
+            nw_shader_source_free(src);
+            return r;
+        }
+        return compile_failed(src, nw_engine_last_errors());
+    }
+    return wrap(src, eng, out);
+}
+
+/* Find and parse a shader by path or bare name. */
+static nw_result parse_path(const char *path, nw_shader_source **out) {
     nw_str_clear(&g_errors);
     /* a bare name is found in the shader dirs; ~ is the home dir */
     char found[4096], full[4096];
@@ -121,7 +136,55 @@ nw_result wallshader_load(const char *path, wallshader **out) {
         if (r.status == NW_ERR_UNSUPPORTED) return nw_err(NW_ERR_PARSE, r.context);
         return r;
     }
+    *out = src;
+    return nw_ok();
+}
+
+nw_result wallshader_load(const char *path, wallshader **out) {
+    nw_shader_source *src = NULL;
+    NW_TRY(parse_path(path, &src));
     return finish_load(src, out);
+}
+
+struct wallshader_pending {
+    nw_shader_source *src; /* the build borrows it; ours until wrap() */
+    nw_engine_build *b;
+};
+
+nw_result wallshader_load_start(const char *path, wallshader_pending **out) {
+    wallshader_pending *p = calloc(1, sizeof(*p));
+    if (!p) return nw_err(NW_ERR_OOM, "wallshader");
+    nw_result r = parse_path(path, &p->src);
+    if (nw_is_ok(r)) r = nw_engine_build_start(p->src, &p->b);
+    if (nw_is_err(r)) {
+        wallshader_load_cancel(p);
+        return r;
+    }
+    *out = p;
+    return nw_ok();
+}
+
+nw_build_state wallshader_load_poll(wallshader_pending *p, wallshader **out) {
+    if (!p->b) return NW_BUILD_FAILED; /* already reported */
+    nw_build_state st = nw_engine_build_poll(p->b);
+    if (st == NW_BUILD_PENDING) return st;
+    nw_shader_source *src = p->src;
+    p->src = NULL;
+    if (st == NW_BUILD_FAILED) {
+        (void)compile_failed(src, nw_engine_build_errors(p->b));
+    } else if (nw_is_err(wrap(src, nw_engine_build_take(p->b), out))) {
+        st = NW_BUILD_FAILED;
+    }
+    nw_engine_build_free(p->b);
+    p->b = NULL;
+    return st;
+}
+
+void wallshader_load_cancel(wallshader_pending *p) {
+    if (!p) return;
+    nw_engine_build_free(p->b);
+    nw_shader_source_free(p->src);
+    free(p);
 }
 
 nw_result wallshader_load_text(const char *text, const char *name, wallshader **out) {

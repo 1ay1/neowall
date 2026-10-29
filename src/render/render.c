@@ -466,6 +466,8 @@ void render_cleanup_output(struct output_state *output) {
         output->pixelate_program = 0;
     }
 
+    wallshader_load_cancel(output->pending_shader);
+    output->pending_shader = NULL;
     wallshader_free(output->shader);
     output->shader = NULL;
 }
