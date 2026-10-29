@@ -37,7 +37,9 @@
 #include <stddef.h>
 
 #include "neowall/result.h"
-#include "neowall/shader/platform_compat.h"
+#include <GL/gl.h>
+#include <GL/glext.h>
+#include "neowall/log.h"
 
 /* ==========================================================================
  * Programs
@@ -120,8 +122,6 @@ void nw_gfx_texture_gen_mipmaps(nw_gfx_texture *tex);
 /* Delete and zero. Safe on a zeroed texture. */
 void nw_gfx_texture_destroy(nw_gfx_texture *tex);
 
-/* Bind to a sampler unit. Binding id 0 is valid and unbinds. */
-void nw_gfx_texture_bind(const nw_gfx_texture *tex, int unit);
 
 /* ==========================================================================
  * Render targets
@@ -149,9 +149,6 @@ nw_result nw_gfx_target_create(nw_gfx_target *out, int width, int height,
                                nw_gfx_format format, nw_gfx_filter filter,
                                bool feedback);
 
-/* Resize every attachment. No-op when the size already matches. Contents are
- * not preserved, so the target is marked for clearing. */
-nw_result nw_gfx_target_resize(nw_gfx_target *target, int width, int height);
 
 /* Delete and zero. Safe on a zeroed target. */
 void nw_gfx_target_destroy(nw_gfx_target *target);
@@ -160,8 +157,6 @@ void nw_gfx_target_destroy(nw_gfx_target *target);
  * the target was just created or resized. */
 void nw_gfx_target_bind(nw_gfx_target *target);
 
-/* Bind the default framebuffer (the screen). */
-void nw_gfx_target_unbind(void);
 
 /* Flip the buffers. Call once after drawing a feedback pass; a no-op on a
  * single-buffered target, so the caller need not special-case it. */

@@ -8,9 +8,7 @@ set -eu
 cd "${1:-$(dirname "$0")/..}"
 
 found=0
-# gfx/ and graph/ are shader-engine v2 layers whose API exists ahead of its
-# callers (docs/architecture/SHADER_ENGINE_V2.md); they're tested directly.
-for f in $(git ls-files 'src/*.c' | grep -v -E '/vendor/|^src/(gfx|graph)/'); do
+for f in $(git ls-files 'src/*.c' | grep -v -E '/vendor/'); do
     # function definitions at column 0 that aren't static
     grep -o -E '^[a-z][a-zA-Z_0-9 *]*\b[a-z_][a-z_0-9]*\(' "$f" \
         | grep -v -E '^(static |return|if|for|while|switch|else)' \

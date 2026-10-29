@@ -21,7 +21,7 @@ The foundations are good, better than most C codebases this size:
   `vec.h`, `defer.h`).
 - CI runs ASan+UBSan, TSan, clang-tidy, `gcc -fanalyzer`, clang-format.
 - Narrow seams exist where they were built recently: the compositor vtable,
-  `gfx/`, `graph/`, `source/`, `frame_clock`, `shader_clock` (pure logic,
+  `gfx/`, `source/`, `shader/` (source model, engine), `frame_clock`, `shader_clock` (pure logic,
   unit tested).
 
 ## What's holding it back

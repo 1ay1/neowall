@@ -1,7 +1,9 @@
 #ifndef SHADER_H
 #define SHADER_H
 
-#include "neowall/shader/platform_compat.h"
+#include <GL/gl.h>
+#include <GL/glext.h>
+#include "neowall/log.h"
 #include <stdbool.h>
 
 /**

@@ -5,8 +5,9 @@ system (`source.c`, `assemble.c`, `engine.c`, `wallshader.c`, `term_gpu.c`;
 see docs/ARCHITECTURE.md §8). It already has what §1 asked for: any number of
 passes in dependency order, passes named rather than enumerated, manifest
 uniforms bound through `nw_source` providers, and a GL-free source model
-tested without a display. What's left from this plan is moving the engine
-onto `graph/` and the frontend vtable (§7).
+tested without a display. The engine orders passes itself, so the separate
+`graph/` layer this plan built was deleted unused. What's left is a
+frontend vtable (§4) and layers (slice 7).
 
 The sections below are the original design, kept for the reasoning.
 
@@ -274,9 +275,9 @@ Slices, each one shippable and green on its own. No big-bang branch.
 | 1 | `source/` — open data plane, registry, exec + file providers | **landed** |
 | 2 | port `reactive.c`'s 24 binds to builtin providers, delete `uniform_bind_t` | **landed** |
 | 3 | `gfx/` — GL objects out of the old engine | **landed** |
-| 4 | `graph/` — N passes, M bindings, topo order | **landed** (not yet used by the engine) |
-| 5 | replace the old engine | **landed**: the rewrite's source model + engine. `shader_multipass.c`, `multipass_parse.c`, `manifest.c`, `adaptive_scale.c`, `multipass_optimizer.c`, `program_cache.c` and `shader_diag.c` are deleted; `uniform_bind_t` and `channel_source_t` died with them |
-| 6 | run the engine on `graph/` and a frontend vtable | next |
+| 4 | `graph/` — N passes, M bindings, topo order | dropped: the engine's source model does this, `graph/` was deleted |
+| 5 | replace the old engine | **landed**: the rewrite's source model + engine. `shader_multipass.c`, `multipass_parse.c`, `manifest.c`, `adaptive_scale.c`, `multipass_optimizer.c`, `shadertoy_compat.c` and `shader_diag.c` are deleted (the cache and the hints were rewritten); `uniform_bind_t` and `channel_source_t` died with them |
+| 6 | a frontend vtable (Shadertoy as one frontend of several) | next |
 | 7 | layers: viewport + blend per pass, the actual "canvas" | |
 
 Compatibility: existing `.glsl` and `.neowall` files keep working, including

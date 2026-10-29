@@ -52,7 +52,7 @@ include/neowall/          PUBLIC headers (the project's API surface)
   occlusion/                 "pause when covered" dispatcher
   source/                    open data plane: live scalar/texture providers
                              (see architecture/SHADER_ENGINE_V2.md)
-  gfx/  graph/               GL object layer, render graph (engine v2 slices)
+  gfx/                       GL object layer: programs, textures, targets
   shader/                    shader system: source model, engine, per-output
                              wallshader, terminal textures, clock, docs
   terminal/                  in-tree VT/xterm emulator (terminal-as-wallpaper)
@@ -280,7 +280,8 @@ ones that matter most when changing the runtime:
 | `output_refcount` | refcount protocol under concurrency (8 threads × 20 000 iterations) |
 | `shader_source` | passes, includes, params, manifests, default bindings, pass order, line maps |
 | `shader_gl` | the engine on llvmpipe: pixels, feedback, spanning, errors as file:line, every shipped shader |
-| `foundation`, `vibe`, `utils`, `shadertoy_compat`, ... | pure units |
+| `shader_compat` | Shadertoy GLSL ES -> desktop GLSL rewrites |
+| `foundation`, `vibe`, `utils`, ... | pure units |
 
 CI (`.github/workflows/`):
 

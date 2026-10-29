@@ -213,12 +213,6 @@ gfx_sources = files(
   'src/gfx/gfx.c',
 )
 
-# Render graph: N passes, M bindings, topological order. Replaces the fixed
-# 5-pass / 4-channel arrays of the old multipass_shader_t.
-graph_sources = files(
-  'src/graph/graph.c',
-)
-
 # Shader engine sources
 shader_sources = files(
   'src/base.c',
@@ -233,7 +227,6 @@ shader_sources = files(
   'src/shader/shader_core.c',
   'src/shader/shader_state.c',
   'src/shader/shader_docs.c',
-  'src/shader/shadertoy_compat.c',
   'src/shader/glsl_shadow.c',
   'src/shader/shader_scaffold.c',
   'src/shader/shader_clock.c',
@@ -434,7 +427,6 @@ all_sources = (
   core_sources +
   egl_sources +
   gfx_sources +
-  graph_sources +
   source_sources +
   source_reactive_sources +
   shader_sources +
@@ -690,33 +682,18 @@ test_gfx_exe = executable('test_gfx',
 
 test('gfx', test_gfx_exe)
 
-# Render graph: feedback-vs-cycle (a self-edge is legal, A<->B is not) and the
-# ordering contract every downstream layer assumes. Also pins that N passes and
-# M bindings work past the old 5-pass / 4-channel ceilings.
-test_graph_exe = executable('test_graph',
-  files('tests/test_graph.c', 'tests/gl_stub.c', 'src/utils.c')
-    + gfx_sources + graph_sources + source_sources,
-  include_directories: [inc_dirs, inc_dirs_build],
-  dependencies: [m_dep, thread_dep],
+# Shadertoy -> desktop GLSL source fixes. GL-free.
+test('shader_compat', executable('test_shader_compat',
+  files('tests/test_shader_compat.c', 'src/base.c', 'src/shader/compat.c'),
+  include_directories: [inc_dirs, inc_dirs_build, include_directories('src/shader')],
   build_by_default: false,
-)
-
-test('graph', test_graph_exe)
-
-# Shadertoy source-compat transforms are GL-free and unit-tested directly.
-test_compat_exe = executable('test_shadertoy_compat',
-  files('tests/test_shadertoy_compat.c', 'src/shader/shadertoy_compat.c'),
-  include_directories: [inc_dirs, inc_dirs_build],
-  build_by_default: false,
-)
-
-test('shadertoy_compat', test_compat_exe)
+))
 
 # The shader source model: passes, common, includes, params, manifests,
 # default bindings, pass order, line maps. GL-free.
 test('shader_source', executable('test_shader_source',
   files('tests/test_shader_source.c', 'src/base.c', 'src/shader/source.c',
-        'src/shader/assemble.c', 'src/shader/compat.c', 'src/shader/shadertoy_compat.c',
+        'src/shader/assemble.c', 'src/shader/compat.c',
         'src/shader/shader_hint.c',
         'src/shader/glsl_shadow.c', 'src/config/vibe_impl.c', 'src/utils.c'),
   include_directories: [inc_dirs, inc_dirs_build],
@@ -981,7 +958,7 @@ test('shader_gl', executable('test_shader_gl',
   files('tests/test_shader_gl.c', 'tests/gl_headless.c', 'src/utils.c',
         'src/clock.c', 'src/config/vibe_impl.c') +
     shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
-    gfx_sources + graph_sources + terminal_sources,
+    gfx_sources + terminal_sources,
   include_directories: has_terminal
     ? [inc_dirs, inc_dirs_build, include_directories('src/terminal', 'tests')]
     : [inc_dirs, inc_dirs_build, include_directories('tests')],
@@ -997,7 +974,7 @@ executable(tool,
   files('tests' / tool + '.c', 'tests/gl_headless.c', 'src/utils.c',
         'src/clock.c', 'src/config/vibe_impl.c') +
     shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
-    gfx_sources + graph_sources + terminal_sources,
+    gfx_sources + terminal_sources,
   include_directories: has_terminal
     ? [inc_dirs, inc_dirs_build, include_directories('src/terminal', 'tests')]
     : [inc_dirs, inc_dirs_build, include_directories('tests')],
@@ -1017,7 +994,7 @@ if has_wayland
           'src/output/output.c', 'src/output/frame_clock.c', 'src/output/span.c',
           'src/render/render.c', 'src/compositor/compositor_surface.c', 'src/egl/egl_bind.c') +
       shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
-      gfx_sources + graph_sources + terminal_sources + transition_sources,
+      gfx_sources + terminal_sources + transition_sources,
     include_directories: [inc_dirs, inc_dirs_build,
                           include_directories('src/terminal', 'src/compositor/backends/wayland')],
     dependencies: deps,
@@ -1071,13 +1048,13 @@ fuzz_harnesses = {
   'vibe':      [files('tests/fuzz_vibe.c', 'src/config/vibe_impl.c'), 'config', []],
   'shader':    [files('tests/fuzz_shader.c', 'src/base.c', 'src/shader/source.c',
                       'src/shader/assemble.c', 'src/shader/compat.c',
-                      'src/shader/shadertoy_compat.c', 'src/shader/glsl_shadow.c',
+                      'src/shader/glsl_shadow.c',
                       'src/config/vibe_impl.c', 'src/utils.c'), 'examples/shaders', []],
   'exif':      [files('tests/fuzz_exif.c', 'src/image/exif.c'), '', []],
   'image':     [files('tests/fuzz_image.c', 'src/image/image.c', 'src/image/exif.c',
                       'src/utils.c'), 'tests/fixtures/images',
                 [libpng_dep, libjpeg_dep, m_dep]],
-  'glsl':      [files('tests/fuzz_glsl.c', 'src/shader/shadertoy_compat.c',
+  'glsl':      [files('tests/fuzz_glsl.c', 'src/base.c', 'src/shader/compat.c',
                       'src/shader/glsl_shadow.c', 'src/utils.c'), 'examples/shaders', []],
 }
 if has_terminal
@@ -1097,7 +1074,7 @@ foreach name, h : fuzz_harnesses
   fuzz_link = name == 'cbdt' ? [terminal_glyph_lib] : []
   drv = executable('fuzz_' + name + '_driver',
     h[0] + files('tests/fuzz_driver.c'),
-    include_directories: [inc_dirs, inc_dirs_build, include_directories('src/terminal')],
+    include_directories: [inc_dirs, inc_dirs_build, include_directories('src/terminal', 'src/shader')],
     dependencies: [thread_dep] + h[2],
     link_with: fuzz_link,
     build_by_default: false,
@@ -1111,7 +1088,7 @@ foreach name, h : fuzz_harnesses
   if get_option('fuzz')
     executable('fuzz_' + name,
       h[0],
-      include_directories: [inc_dirs, inc_dirs_build, include_directories('src/terminal')],
+      include_directories: [inc_dirs, inc_dirs_build, include_directories('src/terminal', 'src/shader')],
       dependencies: [thread_dep] + h[2],
       link_with: fuzz_link,
       c_args: ['-fsanitize=fuzzer'],

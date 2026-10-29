@@ -10,7 +10,9 @@
 #include "neowall/base.h"
 #include "neowall/clock.h"
 #include "neowall/log.h"
-#include "neowall/shader/platform_compat.h"
+#include <GL/gl.h>
+#include <GL/glext.h>
+#include "neowall/log.h"
 #include "neowall/shader/reactive.h"
 #include "neowall/shader/shader_source.h"
 #include "neowall/shader/shader_state.h"

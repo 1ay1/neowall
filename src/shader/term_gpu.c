@@ -4,7 +4,9 @@
 #include <stdlib.h>
 
 #include "neowall/log.h"
-#include "neowall/shader/platform_compat.h"
+#include <GL/gl.h>
+#include <GL/glext.h>
+#include "neowall/log.h"
 
 #ifdef NEOWALL_HAVE_TERMINAL
 #include "term_render.h"

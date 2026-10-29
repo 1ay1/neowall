@@ -12,7 +12,9 @@
  * no display server.
  */
 
-#include "neowall/shader/platform_compat.h"
+#include <GL/gl.h>
+#include <GL/glext.h>
+#include "neowall/log.h"
 
 static GLuint g_next_id = 1;
 

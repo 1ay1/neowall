@@ -592,8 +592,8 @@ A clean run prints `Successfully compiled pass Image`.
 
 - Build: `ninja -C build` (incremental against the existing build dir).
 - Tests: `meson test -C build` runs the whole headless suite (no display or
-  GPU needed). `meson test -C build shader_diag shadertoy_compat` runs just
-  the shader-facing ones.
+  GPU needed). `meson test -C build shader_source shader_compat shader_gl` runs
+  just the shader-facing ones.
 - Reconfigure: `meson setup build --reconfigure`.
 - The GLSL std-lib string exceeds the C99 4095-char literal limit, so it is split
   into two adjacent `static const char *` chunks and concatenated at wrap time.

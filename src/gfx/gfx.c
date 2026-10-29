@@ -10,7 +10,7 @@
  */
 
 #include "neowall/gfx/gfx.h"
-#include "neowall/shader/shader_log.h"
+#include "neowall/log.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -287,10 +287,6 @@ void nw_gfx_texture_destroy(nw_gfx_texture *tex) {
     memset(tex, 0, sizeof(*tex));
 }
 
-void nw_gfx_texture_bind(const nw_gfx_texture *tex, int unit) {
-    glActiveTexture((GLenum)(GL_TEXTURE0 + unit));
-    glBindTexture(GL_TEXTURE_2D, tex ? tex->id : 0);
-}
 
 /* ==========================================================================
  * Render targets
@@ -339,28 +335,6 @@ nw_result nw_gfx_target_create(nw_gfx_target *out, int width, int height,
     return nw_ok();
 }
 
-nw_result nw_gfx_target_resize(nw_gfx_target *target, int width, int height) {
-    if (!target || !target->fbo) {
-        return nw_err(NW_ERR_INVALID_ARG, "gfx: resize of uncreated target");
-    }
-    if (target->textures[0].width == width && target->textures[0].height == height) {
-        return nw_ok();
-    }
-
-    int count = target->feedback ? 2 : 1;
-    for (int i = 0; i < count; i++) {
-        nw_result r = nw_gfx_texture_resize(&target->textures[i], width, height);
-        if (nw_is_err(r)) {
-            return r;
-        }
-    }
-
-    /* Contents are undefined after reallocation. For a feedback target that
-     * means the history is garbage, which shows up as a flash of noise unless
-     * it is cleared before the next read. */
-    target->needs_clear = true;
-    return nw_ok();
-}
 
 void nw_gfx_target_destroy(nw_gfx_target *target) {
     if (!target) {
@@ -403,7 +377,6 @@ void nw_gfx_target_bind(nw_gfx_target *target) {
     }
 }
 
-void nw_gfx_target_unbind(void) { glBindFramebuffer(GL_FRAMEBUFFER, 0); }
 
 void nw_gfx_target_swap(nw_gfx_target *target) {
     if (!target || !target->feedback) {
