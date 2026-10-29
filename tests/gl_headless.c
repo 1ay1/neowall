@@ -24,6 +24,10 @@ const char *gl_headless_init(void) {
     setenv("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/share/glvnd/egl_vendor.d/50_mesa.json", 0);
     setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
     setenv("LP_NUM_THREADS", "0", 0);
+    /* Mesa's shader disk cache works on its own threads too (disk$0, ...),
+     * uninstrumented, so TSan reports their barrier as a race. A test
+     * compiles each shader once anyway. */
+    setenv("MESA_SHADER_CACHE_DISABLE", "true", 0);
     setenv("EGL_PLATFORM", "surfaceless", 0);
 
     PFNEGLGETPLATFORMDISPLAYEXTPROC get_dpy =
