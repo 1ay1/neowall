@@ -1,4 +1,4 @@
-/* Shader hot-reload watcher. See include/neowall/watch.h. */
+/* Shader hot-reload watcher. See include/neowall/app/watch.h. */
 
 /* realpath() needs the XSI/BSD declaration in stdlib.h, which _DEFAULT_SOURCE
  * exposes on glibc alongside the build's _POSIX_C_SOURCE. */
@@ -6,8 +6,8 @@
 #define _DEFAULT_SOURCE
 #endif
 
-#include "neowall/watch.h"
-#include "neowall/app.h"
+#include "neowall/app/watch.h"
+#include "neowall/app/app.h"
 #include "neowall/neowall.h"
 #include "neowall/output/output.h"
 #include "neowall/shader/wallshader.h"

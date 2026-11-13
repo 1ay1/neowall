@@ -7,7 +7,7 @@ drew, all in one function, with each new feature adding another atomic flag
 polled somewhere far away.
 
 ```
-  OS: fds, timers, signals            program (src/app.c)
+  OS: fds, timers, signals            program (src/app/)
   ────────────────────────            ───────────────────
   rt wait ── signal / fd / post ──▶   update(model, msg)      the only place
                                          │                    state changes
@@ -44,7 +44,7 @@ Rules it enforces:
   armed while a frame callback is pending, since that wakes us anyway). A
   child printing flat out costs one wake per frame, not one per read.
 - **Children start clean.** Every spawned child resets the blocked signals
-  and SIGPIPE (`include/neowall/child_signals.h`), or it can't be stopped.
+  and SIGPIPE (`include/neowall/core/child_signals.h`), or it can't be stopped.
 - **No work in signal handlers.** The command signals are blocked in every
   thread at startup (`main.c`, before any thread exists) and read from a
   signalfd. Crash signals (SEGV, BUS, ILL, FPE, ABRT) keep a plain
@@ -59,9 +59,9 @@ Rules it enforces:
 period isn't padded to 17, every posted message arrives, signals become
 messages, an idle loop sleeps.
 
-## The program (`src/app.c`)
+## The program (`src/app/`)
 
-**Messages** (`include/neowall/app.h`):
+**Messages** (`include/neowall/app/app.h`):
 
 | message | from |
 |---|---|
@@ -87,7 +87,7 @@ writes them.
 is up; one `FRAME_DUE` per vsync-off animated output at the pacer's next
 deadline; a 60 Hz `TRANSITION` tick while any transition runs.
 
-**present** is `render_outputs()` (`src/app_render.inc`), unchanged from the
+**present** is `render_outputs()` (`src/app/present.c`), unchanged from the
 old loop. It runs in three phases, which is what makes it safe against
 hotplug:
 
@@ -164,7 +164,7 @@ for that output, so new output still shows within a frame.
 ## The control socket
 
 The CLI drives a running daemon over `$XDG_RUNTIME_DIR/neowall.sock`
-(`src/ipc.c`). One request line, one reply line:
+(`src/runtime/ipc.c`). One request line, one reply line:
 
 ```
 $ printf 'next\n' | socat - UNIX:$XDG_RUNTIME_DIR/neowall.sock

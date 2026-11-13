@@ -13,7 +13,7 @@
 #define _DEFAULT_SOURCE   /* forkpty (<pty.h>) */
 
 #include "neowall/terminal/terminal.h"
-#include "neowall/child_signals.h"
+#include "neowall/core/child_signals.h"
 #include "vtparse.h"
 
 #include <errno.h>

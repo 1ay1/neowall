@@ -3,7 +3,7 @@
 #define _DEFAULT_SOURCE
 #include "neowall/shader/shader_source.h"
 #include "neowall/shader/shader_hint.h"
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 
 #include <stdio.h>
 #include <stdlib.h>

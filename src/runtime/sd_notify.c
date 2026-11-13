@@ -1,5 +1,5 @@
 #define _GNU_SOURCE
-#include "neowall/sd_notify.h"
+#include "neowall/runtime/sd_notify.h"
 
 #include <stddef.h>
 #include <stdlib.h>

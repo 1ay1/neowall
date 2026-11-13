@@ -3,7 +3,7 @@
 
 #include <GL/gl.h>
 #include <GL/glext.h>
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 #include <stdbool.h>
 
 /**

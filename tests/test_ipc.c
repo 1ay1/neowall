@@ -10,7 +10,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 
-#include "neowall/ipc.h"
+#include "neowall/runtime/ipc.h"
 #include "neowall/runtime/rt.h"
 
 static int failures = 0, checks = 0;

@@ -1,5 +1,5 @@
 /*
- * neowall/vec.h — type-safe growable arrays for C
+ * neowall/core/vec.h — type-safe growable arrays for C
  * ============================================================================
  *
  * A single, header-only, type-generic dynamic array. Replaces the fixed-size

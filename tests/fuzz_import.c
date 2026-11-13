@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 #include "neowall/shader/shader_source.h"
 #include "neowall/shader/shadertoy_import.h"
 

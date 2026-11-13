@@ -21,7 +21,7 @@
  */
 
 #include "neowall/source/source.h"
-#include "neowall/child_signals.h"
+#include "neowall/core/child_signals.h"
 
 #include <errno.h>
 #include <fcntl.h>

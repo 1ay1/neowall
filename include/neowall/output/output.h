@@ -6,7 +6,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <GL/gl.h>
-#include "neowall/result.h"        /* For nw_result */
+#include "neowall/core/result.h"        /* For nw_result */
 #include "neowall/image/image.h"   /* For struct image_data and enum image_format */
 #include "neowall/shader/wallshader.h"
 #include "neowall/shader/shader_clock.h"      /* For shader_clock_tracker */

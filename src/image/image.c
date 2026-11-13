@@ -9,7 +9,7 @@
 #include "neowall/image/image.h"
 #include "neowall/image/exif.h"
 #include "neowall/neowall.h"
-#include "neowall/constants.h"
+#include "neowall/core/constants.h"
 
 /* Reject decompression bombs and dimensions that are unreasonable for a
  * wallpaper. 100M RGBA pixels is already ~400 MiB before codec scratch data. */

@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include "neowall/neowall.h"
-#include "neowall/constants.h"
+#include "neowall/core/constants.h"
 
 /* Current log level */
 static int log_level = LOG_LEVEL_INFO;

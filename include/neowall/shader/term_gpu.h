@@ -11,7 +11,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "neowall/result.h"
+#include "neowall/core/result.h"
 #include "neowall/shader/engine.h"
 
 typedef struct term_gpu term_gpu;

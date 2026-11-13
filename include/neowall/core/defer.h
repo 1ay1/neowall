@@ -1,5 +1,5 @@
 /*
- * neowall/defer.h — scope-bound cleanup for leak-free early returns
+ * neowall/core/defer.h — scope-bound cleanup for leak-free early returns
  * ============================================================================
  *
  * Wraps GCC/Clang's `__attribute__((cleanup))` into readable macros. A variable

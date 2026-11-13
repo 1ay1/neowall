@@ -3,10 +3,10 @@
 
 #include <stdlib.h>
 
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 #include <GL/gl.h>
 #include <GL/glext.h>
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 
 #ifdef NEOWALL_HAVE_TERMINAL
 #include "term_render.h"

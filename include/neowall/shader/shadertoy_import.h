@@ -14,7 +14,7 @@
 
 #include <stddef.h>
 
-#include "neowall/result.h"
+#include "neowall/core/result.h"
 
 typedef struct {
     char *glsl;     /* the shader text */

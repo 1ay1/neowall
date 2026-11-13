@@ -9,8 +9,8 @@
 
 #include <GL/gl.h>
 #include "neowall/neowall.h"
-#include "neowall/constants.h"
-#include "neowall/transitions.h"
+#include "neowall/core/constants.h"
+#include "neowall/transitions/transitions.h"
 #include "neowall/shader/shader.h"
 
 /* Vertex shader for pixelate transition */

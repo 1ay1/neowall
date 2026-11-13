@@ -1,5 +1,32 @@
-/* Rendering and output bring-up. Included by app.c only: these need its
- * struct app and helpers. */
+/* present: draw every output that needs it, and bring outputs up after a
+ * reconnect or hotplug. */
+
+#include <stdio.h>
+
+#include "app_internal.h"
+#include "neowall/compositor/compositor.h"
+#include "neowall/core/constants.h"
+#include "neowall/core/vec.h"
+#include "neowall/egl/egl_core.h"
+#include "neowall/egl/gpu_health.h"
+#include "neowall/output/output.h"
+#include "neowall/runtime/sd_notify.h"
+#include "neowall/shader/term_gpu.h"
+#include "neowall/shader/wallshader.h"
+
+#ifdef HAVE_WAYLAND_BACKEND
+bool output_configure_compositor_surface(struct output_state *output);
+void wayland_request_present_feedback(struct output_state *output);
+#endif
+
+struct swap_info {
+    struct output_state *output;
+    bool render_success;
+};
+
+NW_VEC_DEFINE_STATIC(output_ptr_vec, struct output_state *)
+NW_VEC_DEFINE_STATIC(swap_vec, struct swap_info)
+
 
 /* Whether this output draws this step. Pure gating: no GL, no side effects. */
 static bool output_wants_frame(const struct app *a, struct output_state *output) {
@@ -196,7 +223,7 @@ static void output_present(struct app *a, struct output_state *output, uint64_t 
      * frame, except a settled terminal, which sleeps until its child writes. */
     bool term_settled = output->config->type == WALLPAPER_TERMINAL &&
                         output->shader && output->frames_rendered > 0 &&
-                        !term_gpu_animating(wallshader_terminal(output->shader), kTermFxSettleMs);
+                        !term_gpu_animating(wallshader_terminal(output->shader), APP_TERM_FX_SETTLE_MS);
     if ((output->transition_start_time == 0 || output->config->transition == TRANSITION_NONE) &&
         (!wallpaper_is_animated(output->config->type) || term_settled)) {
         atomic_store_explicit(&output->needs_redraw, false, memory_order_release);
@@ -532,3 +559,125 @@ static void reinit_reconnected_outputs(struct neowall_state *state) {
     }
 }
 #endif /* HAVE_WAYLAND_BACKEND */
+
+/* The redraw rules for an output that isn't frame-timed. A vsync output is
+ * paced by its own frame callback (the swap doesn't block), so "redraw it
+ * every step" is what drives it. */
+static void mark_animated(struct app *a) {
+    struct neowall_state *state = a->state;
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (o->config->pause_on_fullscreen &&
+            atomic_load_explicit(&o->occluded, memory_order_acquire)) {
+            continue;
+        }
+        if (o->transition_start_time > 0 && o->config->transition != TRANSITION_NONE) {
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+        }
+        if (!wallpaper_is_animated(o->config->type)) continue;
+        if (o->shader_load_failed) continue;
+        if (o->shader == NULL) continue;
+        if (o->config->type == WALLPAPER_SHADER && a->shader_paused) continue;
+
+        /* A static shader painted its one frame. */
+        bool is_static = o->config->type == WALLPAPER_SHADER &&
+                         !wallshader_animated(o->shader) && o->frames_rendered > 0;
+        /* A settled terminal only redraws when its child writes. */
+        bool term_idle = o->config->type == WALLPAPER_TERMINAL &&
+                         o->frames_rendered > 0 &&
+                         !term_gpu_animating(wallshader_terminal(o->shader), APP_TERM_FX_SETTLE_MS);
+        /* An output with a frame timer (vsync off, or vsync without frame
+         * callbacks) is driven by FRAME_DUE. Anything else is paced by its
+         * frame callback, so mark it every step. */
+        if (!is_static && !term_idle && output_get_frame_timer_fd(o) < 0) {
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+}
+
+/* ── present ──────────────────────────────────────────────────────────── */
+
+void app_present(void *self, rt_loop *loop) {
+    struct app *a = self;
+    struct neowall_state *state = a->state;
+
+#ifdef HAVE_WAYLAND_BACKEND
+    if (a->outputs_need_init) {
+        a->outputs_need_init = false;
+        reinit_reconnected_outputs(state);
+    }
+#endif
+
+    mark_animated(a);
+
+    bool any = a->next_pending > 0 || a->set_index >= 0 || a->terminal_pending;
+    if (!any) {
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        for (struct output_state *o = state->outputs; o; o = o->next) {
+            if (atomic_load_explicit(&o->needs_redraw, memory_order_acquire)) {
+                any = true;
+                break;
+            }
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
+    }
+    if (any) render_outputs(a);
+    if (a->gpu_lost) {
+        log_error("Graphics can't recover in this process; exiting to restart cleanly");
+        nw_sd_notify("STOPPING=1");
+        rt_quit(loop, NW_EXIT_GPU_LOST);
+        return;
+    }
+
+    a->stats_frames++;
+    uint64_t now = get_time_ms();
+    if (now - a->stats_since_ms >= STATS_INTERVAL_MS) {
+        double secs = (double)(now - a->stats_since_ms) / (double)MS_PER_SECOND;
+        log_debug("Stats: %.1f steps/s, %lu frames rendered, %lu errors",
+                  (double)a->stats_frames / secs, state->frames_rendered, state->errors_count);
+        a->stats_since_ms = now;
+        a->stats_frames = 0;
+    }
+}
+
+/* A vsync output waits for its frame callback, which arrives on the
+ * compositor fd. If the compositor never sends it (hidden surface), the
+ * frame-ready timeout must still fire, so don't sleep past it. */
+int64_t app_wait_hint(void *self) {
+    struct app *a = self;
+    struct neowall_state *state = a->state;
+    int64_t hint = -1;
+    /* Arm the output wake only if some output has no frame callback in
+     * flight; otherwise the callback wakes us and sees needs_redraw. */
+    bool want_wake = false;
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (!o->compositor_surface || !o->compositor_surface->frame_cb) {
+            want_wake = true;
+            break;
+        }
+    }
+    app_arm_output_wake(want_wake);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (!o->config->vsync || output_get_frame_timer_fd(o) >= 0) continue;
+        if (o->compositor_surface && o->compositor_surface->frame_cb) {
+            hint = 50 * 1000000LL;
+            break;
+        }
+        /* An animated vsync output with no callback pending wants the next
+         * step at once: present() will draw it and request one. Not if it
+         * can't draw (paused shader, hidden output): needs_redraw stays set
+         * for those, and treating it as owed work would spin the loop. */
+        if (!wallpaper_is_animated(o->config->type)) continue;
+        if (o->config->type == WALLPAPER_SHADER && a->shader_paused) continue;
+        if (o->config->pause_on_fullscreen &&
+            atomic_load_explicit(&o->occluded, memory_order_acquire)) continue;
+        if (atomic_load(&o->needs_redraw)) {
+            hint = 0;
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+    return hint;
+}

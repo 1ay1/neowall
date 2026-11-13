@@ -1,6 +1,6 @@
 /* nw_sd_notify talks the systemd notify protocol without libsystemd. */
 #define _GNU_SOURCE
-#include "neowall/sd_notify.h"
+#include "neowall/runtime/sd_notify.h"
 
 #include <stddef.h>
 #include <stdio.h>

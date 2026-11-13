@@ -1,5 +1,5 @@
-#ifndef TEXTURES_H
-#define TEXTURES_H
+#ifndef NEOWALL_TEXTURES_H
+#define NEOWALL_TEXTURES_H
 
 #include <GL/gl.h>
 
@@ -59,4 +59,4 @@ GLuint texture_create_font_atlas(int width, int height);
 /* Default texture sizes */
 #define DEFAULT_TEXTURE_SIZE 256
 
-#endif /* TEXTURES_H */
+#endif /* NEOWALL_TEXTURES_H */

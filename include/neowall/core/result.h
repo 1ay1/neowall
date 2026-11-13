@@ -1,5 +1,5 @@
 /*
- * neowall/result.h — composable error handling for C
+ * neowall/core/result.h — composable error handling for C
  * ============================================================================
  *
  * Replaces the `return false; // and log the reason somewhere` idiom with a

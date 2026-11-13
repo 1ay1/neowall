@@ -5,10 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 #include <GL/gl.h>
 #include <GL/glext.h>
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 #include "neowall/shader/shader.h"
 
 /* utils.c; declared here so this file doesn't pull in all of neowall.h. */

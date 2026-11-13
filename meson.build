@@ -175,16 +175,28 @@ inc_dirs_build = include_directories('.')
 # Source Files
 # =============================================================================
 
-# Core sources (always compiled)
+# core: logging, paths, small containers. Depends on nothing else here.
 core_sources = files(
-  'src/main.c',
-  'src/app.c',
-  'src/ipc.c',
-  'src/sd_notify.c',
+  'src/core/utils.c',
+  'src/core/base.c',
+)
+
+# runtime: the Elm-style loop, the control socket, systemd notify.
+# Knows nothing about wallpapers.
+runtime_sources = files(
   'src/runtime/rt.c',
-  'src/utils.c',
-  'src/clock.c',
-  'src/watch.c',
+  'src/runtime/ipc.c',
+  'src/runtime/sd_notify.c',
+)
+
+# app: the neowall program on the runtime (update / subscribe / present).
+app_sources = files(
+  'src/main.c',
+  'src/app/app.c',
+  'src/app/update.c',
+  'src/app/present.c',
+  'src/app/host.c',
+  'src/app/watch.c',
 )
 
 # EGL sources (desktop OpenGL 3.3)
@@ -215,7 +227,7 @@ gfx_sources = files(
 
 # Shader engine sources
 shader_sources = files(
-  'src/base.c',
+  'src/shader/wall_clock.c',
   'src/shader/source.c',
   'src/shader/assemble.c',
   'src/shader/compat.c',
@@ -426,6 +438,8 @@ endif
 
 all_sources = (
   core_sources +
+  runtime_sources +
+  app_sources +
   egl_sources +
   gfx_sources +
   source_sources +
@@ -580,7 +594,7 @@ endif
 # `meson test`. utils.c provides its own log_*() implementations, so no stubs
 # are required; version.h is the generated header.
 test_utils_exe = executable('test_utils',
-  files('tests/test_utils.c', 'src/utils.c'),
+  files('tests/test_utils.c', 'src/core/utils.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
   build_by_default: false,
@@ -591,7 +605,7 @@ test('utils', test_utils_exe)
 # The runtime loop on its own: timers keep phase and never fire early, posted
 # messages all arrive in order, signals become messages, an idle loop sleeps.
 test_runtime_exe = executable('test_runtime',
-  files('tests/test_runtime.c', 'src/runtime/rt.c', 'src/utils.c'),
+  files('tests/test_runtime.c', 'src/runtime/rt.c', 'src/core/utils.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
   build_by_default: false,
@@ -622,7 +636,7 @@ test('frame_clock', test_frame_clock_exe)
 # oversize and malformed lines are refused, a live socket isn't stolen and a
 # stale one is replaced.
 test_ipc_exe = executable('test_ipc',
-  files('tests/test_ipc.c', 'src/ipc.c', 'src/runtime/rt.c', 'src/utils.c'),
+  files('tests/test_ipc.c', 'src/runtime/ipc.c', 'src/runtime/rt.c', 'src/core/utils.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
   build_by_default: false,
@@ -632,7 +646,7 @@ test('ipc', test_ipc_exe)
 
 # The systemd notify protocol, path and abstract sockets, without libsystemd.
 test('sd_notify', executable('test_sd_notify',
-  files('tests/test_sd_notify.c', 'src/sd_notify.c'),
+  files('tests/test_sd_notify.c', 'src/runtime/sd_notify.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   build_by_default: false,
 ))
@@ -660,8 +674,8 @@ test('source', test_source_exe)
 # Pins that every legacy bind name still resolves (a dropped one reads 0
 # silently rather than crashing) and that the occlusion contract survived.
 test_source_reactive_exe = executable('test_source_reactive',
-  files('tests/test_source_reactive.c', 'src/shader/reactive.c', 'src/utils.c',
-        'src/clock.c')
+  files('tests/test_source_reactive.c', 'src/shader/reactive.c', 'src/core/utils.c',
+        'src/shader/wall_clock.c')
     + source_sources + source_reactive_sources,
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
@@ -675,7 +689,7 @@ test('source_reactive', test_source_reactive_exe)
 # an error, so it shows up as flicker, not a crash. Linked against a GL stub so
 # the invariant is checkable with no display server.
 test_gfx_exe = executable('test_gfx',
-  files('tests/test_gfx.c', 'tests/gl_stub.c', 'src/utils.c') + gfx_sources,
+  files('tests/test_gfx.c', 'tests/gl_stub.c', 'src/core/utils.c') + gfx_sources,
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
   build_by_default: false,
@@ -685,15 +699,15 @@ test('gfx', test_gfx_exe)
 
 # Shadertoy -> desktop GLSL source fixes. GL-free.
 test('shadertoy_import', executable('test_shadertoy_import',
-  files('tests/test_shadertoy_import.c', 'src/base.c', 'src/shader/shadertoy_import.c',
-        'src/shader/source.c', 'src/config/vibe_impl.c', 'src/utils.c'),
+  files('tests/test_shadertoy_import.c', 'src/core/base.c', 'src/shader/shadertoy_import.c',
+        'src/shader/source.c', 'src/config/vibe_impl.c', 'src/core/utils.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   build_by_default: false,
 ))
 
 # Shadertoy -> desktop GLSL source fixes. GL-free.
 test('shader_compat', executable('test_shader_compat',
-  files('tests/test_shader_compat.c', 'src/base.c', 'src/shader/compat.c'),
+  files('tests/test_shader_compat.c', 'src/core/base.c', 'src/shader/compat.c'),
   include_directories: [inc_dirs, inc_dirs_build, include_directories('src/shader')],
   build_by_default: false,
 ))
@@ -701,10 +715,10 @@ test('shader_compat', executable('test_shader_compat',
 # The shader source model: passes, common, includes, params, manifests,
 # default bindings, pass order, line maps. GL-free.
 test('shader_source', executable('test_shader_source',
-  files('tests/test_shader_source.c', 'src/base.c', 'src/shader/source.c',
+  files('tests/test_shader_source.c', 'src/core/base.c', 'src/shader/source.c',
         'src/shader/assemble.c', 'src/shader/compat.c',
         'src/shader/shader_hint.c',
-        'src/shader/glsl_shadow.c', 'src/config/vibe_impl.c', 'src/utils.c'),
+        'src/shader/glsl_shadow.c', 'src/config/vibe_impl.c', 'src/core/utils.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   build_by_default: false,
 ))
@@ -712,8 +726,8 @@ test('shader_source', executable('test_shader_source',
 # Shader-authoring plumbing: pass-marker detection, the virtual shader clock,
 # and the `#pragma neowall requires` floor. All GL-free, so they run in CI.
 test_authoring_exe = executable('test_shader_authoring',
-  files('tests/test_shader_authoring.c', 'src/base.c', 'src/shader/source.c',
-        'src/config/vibe_impl.c', 'src/utils.c', 'src/clock.c'),
+  files('tests/test_shader_authoring.c', 'src/core/base.c', 'src/shader/source.c',
+        'src/config/vibe_impl.c', 'src/core/utils.c', 'src/shader/wall_clock.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
   build_by_default: false,
@@ -738,7 +752,7 @@ test('glsl_shadow', test_glsl_shadow_exe)
 test_scaffold_exe = executable('test_shader_scaffold',
   files('tests/test_shader_scaffold.c',
         'src/shader/shader_scaffold.c',
-        'src/utils.c'),
+        'src/core/utils.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
   build_by_default: false,
@@ -795,7 +809,7 @@ test('output_refcount', test_refcount_exe)
 # Alias-safe config field setter — guards the self-assignment bug that blanked
 # term_cmd/shader_path/path on every deferred wallpaper re-apply.
 test_config_str_exe = executable('test_config_str_set',
-  files('tests/test_config_str_set.c', 'src/utils.c'),
+  files('tests/test_config_str_set.c', 'src/core/utils.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
   build_by_default: false,
@@ -807,7 +821,7 @@ test('config_str_set', test_config_str_exe)
 # and reload keeping the last good config. output_apply_config is stubbed.
 test('config', executable('test_config',
   files('tests/test_config.c', 'src/config/config.c', 'src/config/shuffle.c',
-        'src/config/vibe_impl.c', 'src/utils.c'),
+        'src/config/vibe_impl.c', 'src/core/utils.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep, egl_dep, gl_dep],
   build_by_default: false,
@@ -874,7 +888,7 @@ test('image_exif', test_exif_exe)
 # Includes src/image/image.c directly for its static helpers, so it needs the
 # codec deps and utils.c/exif.c for logging + EXIF symbols.
 test_image_scale_exe = executable('test_image_scale',
-  files('tests/test_image_scale.c', 'src/utils.c', 'src/image/exif.c'),
+  files('tests/test_image_scale.c', 'src/core/utils.c', 'src/image/exif.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [libpng_dep, libjpeg_dep, m_dep, thread_dep],
   build_by_default: false,
@@ -964,9 +978,9 @@ endif
 # (Mesa surfaceless + llvmpipe), pixels read back and checked, and every
 # shipped shader compiled and drawn. Skips (77) without software GL.
 test('shader_gl', executable('test_shader_gl',
-  files('tests/test_shader_gl.c', 'tests/gl_headless.c', 'src/utils.c',
-        'src/clock.c', 'src/config/vibe_impl.c') +
-    shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
+  files('tests/test_shader_gl.c', 'tests/gl_headless.c',
+        'src/config/vibe_impl.c') +
+    core_sources + shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
     gfx_sources + terminal_sources,
   include_directories: has_terminal
     ? [inc_dirs, inc_dirs_build, include_directories('src/terminal', 'tests')]
@@ -980,9 +994,9 @@ test('shader_gl', executable('test_shader_gl',
 # Build time per shader, cold and from the program cache. Run by hand.
 foreach tool : ['bench_shader_build', 'bench_async_build', 'probe_shaders']
 executable(tool,
-  files('tests' / tool + '.c', 'tests/gl_headless.c', 'src/utils.c',
-        'src/clock.c', 'src/config/vibe_impl.c') +
-    shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
+  files('tests' / tool + '.c', 'tests/gl_headless.c',
+        'src/config/vibe_impl.c') +
+    core_sources + shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
     gfx_sources + terminal_sources,
   include_directories: has_terminal
     ? [inc_dirs, inc_dirs_build, include_directories('src/terminal', 'tests')]
@@ -998,11 +1012,11 @@ endforeach
 # and a bad image are all applied and drawn for real. Skips (77) without GL.
 if has_wayland
   test('output_render', executable('test_output_render',
-    files('tests/test_output_render.c', 'src/utils.c', 'src/clock.c',
+    files('tests/test_output_render.c',
           'src/config/vibe_impl.c', 'src/config/config.c', 'src/config/shuffle.c',
           'src/output/output.c', 'src/output/frame_clock.c', 'src/output/span.c',
           'src/render/render.c', 'src/compositor/compositor_surface.c', 'src/egl/egl_bind.c') +
-      shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
+      core_sources + shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
       gfx_sources + terminal_sources + transition_sources,
     include_directories: [inc_dirs, inc_dirs_build,
                           include_directories('src/terminal', 'src/compositor/backends/wayland')],
@@ -1015,7 +1029,7 @@ if has_wayland
   # the real IPC, JSON scanner and coverage maths, no Hyprland needed.
   test('hyprland_coverage', executable('test_hyprland_coverage',
     files('tests/test_hyprland_coverage.c',
-          'src/compositor/backends/wayland/hyprland_coverage.c', 'src/utils.c'),
+          'src/compositor/backends/wayland/hyprland_coverage.c', 'src/core/utils.c'),
     include_directories: [inc_dirs, inc_dirs_build,
                           include_directories('src/compositor/backends/wayland')],
     c_args: ['-DHAVE_WAYLAND_BACKEND'],
@@ -1055,19 +1069,19 @@ endif
 #   ./build/fuzz_terminal -max_total_time=600 corpus/
 fuzz_harnesses = {
   'vibe':      [files('tests/fuzz_vibe.c', 'src/config/vibe_impl.c'), 'config', []],
-  'shader':    [files('tests/fuzz_shader.c', 'src/base.c', 'src/shader/source.c',
+  'shader':    [files('tests/fuzz_shader.c', 'src/core/base.c', 'src/shader/source.c',
                       'src/shader/assemble.c', 'src/shader/compat.c',
                       'src/shader/glsl_shadow.c',
-                      'src/config/vibe_impl.c', 'src/utils.c'), 'examples/shaders', []],
-  'import':    [files('tests/fuzz_import.c', 'src/base.c', 'src/shader/shadertoy_import.c',
-                      'src/shader/source.c', 'src/config/vibe_impl.c', 'src/utils.c'),
+                      'src/config/vibe_impl.c', 'src/core/utils.c'), 'examples/shaders', []],
+  'import':    [files('tests/fuzz_import.c', 'src/core/base.c', 'src/shader/shadertoy_import.c',
+                      'src/shader/source.c', 'src/config/vibe_impl.c', 'src/core/utils.c'),
                 'tests/fixtures/fuzz-import', []],
   'exif':      [files('tests/fuzz_exif.c', 'src/image/exif.c'), '', []],
   'image':     [files('tests/fuzz_image.c', 'src/image/image.c', 'src/image/exif.c',
-                      'src/utils.c'), 'tests/fixtures/images',
+                      'src/core/utils.c'), 'tests/fixtures/images',
                 [libpng_dep, libjpeg_dep, m_dep]],
-  'glsl':      [files('tests/fuzz_glsl.c', 'src/base.c', 'src/shader/compat.c',
-                      'src/shader/glsl_shadow.c', 'src/utils.c'), 'examples/shaders', []],
+  'glsl':      [files('tests/fuzz_glsl.c', 'src/core/base.c', 'src/shader/compat.c',
+                      'src/shader/glsl_shadow.c', 'src/core/utils.c'), 'examples/shaders', []],
 }
 if has_terminal
   fuzz_harnesses += {

@@ -1,5 +1,5 @@
-/* See neowall/base.h. */
-#include "neowall/base.h"
+/* See neowall/core/base.h. */
+#include "neowall/core/base.h"
 
 #include <stdio.h>
 

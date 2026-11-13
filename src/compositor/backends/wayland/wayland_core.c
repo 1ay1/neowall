@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <time.h>
 #include "neowall/neowall.h"
-#include "neowall/app.h"
+#include "neowall/app/app.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/compositor/backends/wayland.h"
 #include "frame_watchdog.h"

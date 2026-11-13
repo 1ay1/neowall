@@ -1,11 +1,11 @@
-/* neowall/base.h — small helpers the shader code builds on.
+/* neowall/core/base.h — small helpers the shader code builds on.
  *
  *   nw_str      a length-tracked, growable string. Never overflows.
  *   nw_arena    a bump allocator; everything in it is freed at once.
  *   NW_LIST(T)  a typed growable array (nw_list_push / nw_list_free).
  *
  * Ported from the rewrite's core; NW_LIST is what it calls NW_VEC, renamed
- * so it doesn't clash with neowall/vec.h. */
+ * so it doesn't clash with neowall/core/vec.h. */
 #ifndef NEOWALL_BASE_H
 #define NEOWALL_BASE_H
 
@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "neowall/result.h"
+#include "neowall/core/result.h"
 
 #define NW_MUST_USE __attribute__((warn_unused_result))
 

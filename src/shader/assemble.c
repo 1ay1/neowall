@@ -14,7 +14,7 @@
  * including inside #include'd files. */
 #include "compat.h"
 #include "neowall/shader/shader_source.h"
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 
 #include <stdio.h>
 #include <string.h>

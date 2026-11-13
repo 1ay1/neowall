@@ -26,7 +26,7 @@ The compositor-specific tier is what changes between e.g. wlroots, KDE Plasma,
 GNOME Shell — they all speak Wayland but expose different shell protocols.
 
 ```
-runtime loop (src/runtime/rt.c, src/app.c)
+runtime loop (src/runtime/rt.c, src/app/)
     │
     ▼
 compositor_backend  ◀── auto-detected from $XDG_SESSION_TYPE +

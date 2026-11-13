@@ -1,4 +1,4 @@
-/* neowall/log.h — leveled logging to stderr (src/utils.c). */
+/* neowall/core/log.h — leveled logging to stderr (src/core/utils.c). */
 #ifndef NEOWALL_LOG_H
 #define NEOWALL_LOG_H
 

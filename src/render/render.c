@@ -16,13 +16,13 @@
 #include "neowall/neowall.h"
 #include "neowall/image/image.h"    /* Only for legacy wrapper functions */
 #include "neowall/config/config_access.h"
-#include "neowall/constants.h"
+#include "neowall/core/constants.h"
 #include "neowall/egl/egl_core.h"
-#include "neowall/transitions.h"
+#include "neowall/transitions/transitions.h"
 #include "neowall/shader/shader.h"
 #include "neowall/shader/wallshader.h"
 #include "neowall/shader/shader_clock.h"
-#include "neowall/textures.h"
+#include "neowall/textures/textures.h"
 #include "neowall/compositor/compositor.h"
 #ifdef HAVE_WAYLAND_BACKEND
 /* For iWindows[]: window rects come from the Hyprland IPC snapshot that the

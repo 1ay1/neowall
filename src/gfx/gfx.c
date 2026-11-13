@@ -10,7 +10,7 @@
  */
 
 #include "neowall/gfx/gfx.h"
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 
 #include <stdio.h>
 #include <string.h>

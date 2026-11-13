@@ -10,7 +10,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "neowall/child_signals.h"
+#include "neowall/core/child_signals.h"
 
 extern char **environ;
 

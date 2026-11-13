@@ -11,7 +11,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "neowall/result.h"
+#include "neowall/core/result.h"
 #include "neowall/shader/engine.h"
 #include "neowall/shader/term_gpu.h"
 

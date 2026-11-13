@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "neowall/base.h"
+#include "neowall/core/base.h"
 
 /* ── JSON ─────────────────────────────────────────────────────────────── */
 

@@ -8,7 +8,7 @@
 #define _DEFAULT_SOURCE
 
 #include "neowall/shader/engine.h"
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -23,7 +23,7 @@
 #include "neowall/image/image.h"
 #include "neowall/shader/program_cache.h"
 #include "neowall/shader/shader_hint.h"
-#include "neowall/textures.h"
+#include "neowall/textures/textures.h"
 
 #define AUDIO_W 512
 

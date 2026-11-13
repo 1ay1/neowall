@@ -46,7 +46,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "neowall/result.h"
+#include "neowall/core/result.h"
 
 /* Provider name, e.g. "cpu", "exec", "term". */
 #define NW_SOURCE_NAME_MAX 32

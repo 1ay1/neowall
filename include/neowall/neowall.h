@@ -58,7 +58,7 @@ struct neowall_state {
                                       * threads that must stop with it */
     /* Cycling pause, shader pause, skip/set requests and output bring-up used
      * to be atomics here, polled by the loop. They are messages now, folded
-     * into the runtime's model (src/app.c), so nothing else can see them. */
+     * into the runtime's model (src/app/app.c), so nothing else can see them. */
     atomic_bool_t mouse_interaction;  /* Global: bind wl_pointer / poll X11 mouse / set cursor.
                                        * Default true. When false, the wallpaper surface receives
                                        * no pointer events and iMouse stays at center. Read by
@@ -120,7 +120,7 @@ bool egl_init(struct neowall_state *state);
 void egl_cleanup(struct neowall_state *state);
 void detect_gl_capabilities(struct neowall_state *state);
 
-/* The main loop is the runtime: see neowall/app.h (app_run, app_post). */
+/* The main loop is the runtime: see neowall/app/app.h (app_run, app_post). */
 
 /* Utility functions */
 uint64_t get_time_ms(void);
@@ -128,7 +128,7 @@ uint64_t get_time_us(void);
 const char *wallpaper_mode_to_string(enum wallpaper_mode mode);
 const char *transition_type_to_string(enum transition_type type);
 
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 float ease_in_out_cubic(float t);
 
 /* Parse a non-negative decimal index (wallpaper index, cycle_total, ...) from a

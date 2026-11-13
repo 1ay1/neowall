@@ -30,7 +30,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "neowall/result.h"
+#include "neowall/core/result.h"
 
 typedef struct term_render term_render;
 

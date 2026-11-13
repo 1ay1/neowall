@@ -41,29 +41,32 @@ surface; there are **zero relative-path includes** (`../`) anywhere in the tree.
 
 ```
 include/neowall/          PUBLIC headers (the project's API surface)
-  result.h  vec.h  defer.h   foundation primitives (header-only, dep-free)
   neowall.h                  app state + umbrella declarations
-  constants.h  child_signals.h  ipc.h  app.h
-  runtime/rt.h               the Elm-style loop's API
+  core/                      result.h vec.h defer.h base.h log.h constants.h
+                             child_signals.h: dep-free foundation
+  runtime/                   rt.h (the Elm-style loop), ipc.h, sd_notify.h
+  app/                       app.h (messages, app_run), watch.h
   compositor/                compositor abstraction + backend interfaces
   config/                    vibe parser + config model
   output/                    per-monitor state + lifecycle, frame_clock.h
   render/  image/  egl/       rendering, image decode, EGL context
+  textures/  transitions/    procedural textures, image transitions
   occlusion/                 "pause when covered" dispatcher
   source/                    open data plane: live scalar/texture providers
                              (see architecture/SHADER_ENGINE_V2.md)
   gfx/                       GL object layer: programs, textures, targets
   shader/                    shader system: source model, engine, per-output
-                             wallshader, terminal textures, clock, docs
+                             wallshader, terminal textures, wall_clock, docs
   terminal/                  in-tree VT/xterm emulator (terminal-as-wallpaper)
 src/                       IMPLEMENTATION (.c) + truly-private impl headers
   main.c                     CLI, daemonize, startup/shutdown
-  runtime/rt.c               the loop: wait, messages, timers, mailbox
-  app.c  app_render.inc      the program: update / subscribe / present
-  ipc.c                      control socket (CLI ↔ daemon)
-  watch.c                    `neowall watch` file watcher
-  clock.c                    virtual calendar clock (`--date`, `--timelapse`)
-  utils.c
+  core/                      utils.c (log, paths, state file), base.c (arena, str)
+  runtime/                   rt.c (wait, messages, timers, mailbox), ipc.c
+                             (control socket), sd_notify.c
+  app/                       the program on rt: app.c (model, run), update.c,
+                             present.c, host.c (compositor + watch fds),
+                             watch.c (`neowall watch`); app_internal.h
+  shader/wall_clock.c        virtual calendar clock (`--date`, `--timelapse`)
   compositor/backends/{wayland,x11}/   backend implementations; private headers
                                        (frame_watchdog.h, *_occlusion.h) live here
   terminal/                  utf8 · vtparse (ANSI/DEC state machine) · screen
@@ -122,7 +125,7 @@ No core changes required.
 
 ---
 
-## 5. The runtime (`src/runtime/`, `src/app.c`)
+## 5. The runtime (`src/runtime/`, `src/app/`)
 
 neowall runs on a small Elm-style loop in C. `rt` waits on fds, timers and
 signals and turns each into a message; `app_update` folds it into the model
@@ -136,7 +139,7 @@ interval 0, so one slow monitor can't stall the others. vsync-off outputs use a
 phase-locked pacer (`output_pace_advance`) whose next deadline is a timer
 subscription.
 
-The CLI talks to a running daemon over a unix socket (`src/ipc.c`,
+The CLI talks to a running daemon over a unix socket (`src/runtime/ipc.c`,
 `$XDG_RUNTIME_DIR/neowall.sock`); signals remain as a fallback when nothing
 answers on the socket.
 
@@ -163,7 +166,7 @@ loop, so a late post can't use a freed mailbox.
 
 Spawned children (terminal shell, `parec`, `nvidia-smi`, `exec()` sources)
 start with a clean signal mask and default SIGPIPE
-(`include/neowall/child_signals.h`). The daemon blocks its control signals for
+(`include/neowall/core/child_signals.h`). The daemon blocks its control signals for
 signalfd and ignores SIGPIPE; without the reset, children inherit both and
 can't be stopped.
 

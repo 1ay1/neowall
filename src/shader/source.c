@@ -15,7 +15,7 @@
 #define _DEFAULT_SOURCE
 
 #include "neowall/shader/shader_source.h"
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 
 #include <ctype.h>
 #include <errno.h>

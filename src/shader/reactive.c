@@ -18,8 +18,8 @@
 #endif
 
 #include "neowall/shader/reactive.h"
-#include "neowall/child_signals.h"
-#include "neowall/clock.h"
+#include "neowall/core/child_signals.h"
+#include "neowall/shader/wall_clock.h"
 #include "neowall/neowall.h"
 
 #include <stdio.h>

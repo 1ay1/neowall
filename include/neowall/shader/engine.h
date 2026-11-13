@@ -11,7 +11,7 @@
 #ifndef NEOWALL_SHADER_ENGINE_H
 #define NEOWALL_SHADER_ENGINE_H
 
-#include "neowall/base.h"
+#include "neowall/core/base.h"
 #include "neowall/shader/shader_source.h"
 
 typedef struct nw_engine nw_engine;

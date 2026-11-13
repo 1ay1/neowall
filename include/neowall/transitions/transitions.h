@@ -1,5 +1,5 @@
-#ifndef TRANSITIONS_H
-#define TRANSITIONS_H
+#ifndef NEOWALL_TRANSITIONS_H
+#define NEOWALL_TRANSITIONS_H
 
 #include "neowall/neowall.h"
 
@@ -44,4 +44,4 @@ bool transition_slide_right_render(struct output_state *output, float progress);
 bool transition_glitch_render(struct output_state *output, float progress);
 bool transition_pixelate_render(struct output_state *output, float progress);
 
-#endif /* TRANSITIONS_H */
+#endif /* NEOWALL_TRANSITIONS_H */

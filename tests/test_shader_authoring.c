@@ -10,8 +10,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "neowall/clock.h"
-#include "neowall/log.h"
+#include "neowall/shader/wall_clock.h"
+#include "neowall/core/log.h"
 #include "neowall/shader/shader_source.h"
 
 static int failures = 0;

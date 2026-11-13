@@ -14,7 +14,7 @@
 #ifndef NEOWALL_SHADER_SOURCE_H
 #define NEOWALL_SHADER_SOURCE_H
 
-#include "neowall/base.h"
+#include "neowall/core/base.h"
 
 /* ── what a pass reads ───────────────────────────────────────────────── */
 

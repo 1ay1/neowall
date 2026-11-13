@@ -5,7 +5,9 @@ vendored code) and a plan to move it to a modern C shape: C23, explicit
 ownership, single-owner state, narrow module boundaries, and errors that
 can't be dropped. Every number here was measured on the tree, not guessed.
 
-This is a plan, not a description. Nothing in it has landed yet.
+This is a plan, not a description. Landed so far: step 7 (the program
+lives in `src/app/`, split into update/present/host, no `.c`-in-`.c`) and
+the loose `src/*.c` files moved into `core/`, `runtime/` and `app/`.
 
 ## Where it already is
 
@@ -17,7 +19,7 @@ The foundations are good, better than most C codebases this size:
 - A single-threaded Elm-style runtime (`src/runtime/rt.c`): one thread owns
   state, workers only post messages. This is the modern answer to C
   concurrency and it's already in place.
-- `nw_result`, `nw_vec`, `NW_DEFER` exist (`include/neowall/result.h`,
+- `nw_result`, `nw_vec`, `NW_DEFER` exist (`include/neowall/core/result.h`,
   `vec.h`, `defer.h`).
 - CI runs ASan+UBSan, TSan, clang-tidy, `gcc -fanalyzer`, clang-format.
 - Narrow seams exist where they were built recently: the compositor vtable,
@@ -37,7 +39,7 @@ The foundations are good, better than most C codebases this size:
 | Fixed buffers | 19 `char[PATH]` fields in config/output structs; 30 `strcat` calls building shader source in `shader_multipass.c` |
 | Hidden globals | 74 mutable file-scope statics (20 in `reactive.c`, 8 in `x11_occlusion.c`, 7 in `hyprland_coverage.c`) |
 | Layering leaks | `render.c` includes the Hyprland backend header; `output.c` includes 12 module headers; `neowall.h` (included by 41 files) pulls in `output.h`, `config.h`, EGL and GL; include cycles compositor\<-\>output, compositor\<-\>config, compositor\<-\>egl, config\<-\>shader; 9 `extern` declarations inside `.c` files |
-| `.c` included into `.c` | `app_render.inc` is `#include`d into `app.c` |
+| `.c` included into `.c` | ~~`app_render.inc` is `#include`d into `app.c`~~ done |
 | One link unit | No per-module libraries, so nothing stops a module reaching into any other |
 
 Extra warnings, counted with the current code against a stricter set:
@@ -110,8 +112,9 @@ cheaper. Effort is rough: S = an afternoon, M = a few days, L = a week+.
    stops including `output.h`, `config.h`, EGL and GL. Modules that need
    output geometry include `output.h` themselves. Forward-declare structs
    in headers instead of including.
-7. **`app_render.inc` becomes `src/app/present.c`** with a small internal
-   header. The `.c`-in-`.c` was a migration shortcut.
+7. **Done.** `app_render.inc` is now `src/app/present.c`; `app.c` is split
+   into `app.c` (model, run), `update.c`, `present.c` and `host.c`, sharing
+   `src/app/app_internal.h`.
 8. **Window rects through `sources/`, not `render.c` → Hyprland.** The
    shader gets windows the same way it gets CPU load: from a provider.
 

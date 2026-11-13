@@ -7,9 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "neowall/result.h"
-#include "neowall/vec.h"
-#include "neowall/defer.h"
+#include "neowall/core/result.h"
+#include "neowall/core/vec.h"
+#include "neowall/core/defer.h"
 
 static int failures = 0;
 static int checks = 0;

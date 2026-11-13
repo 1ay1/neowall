@@ -36,10 +36,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "neowall/result.h"
+#include "neowall/core/result.h"
 #include <GL/gl.h>
 #include <GL/glext.h>
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 
 /* ==========================================================================
  * Programs

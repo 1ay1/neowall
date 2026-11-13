@@ -14,7 +14,7 @@
 
 #include <stdbool.h>
 
-#include "neowall/vec.h"
+#include "neowall/core/vec.h"
 
 NW_VEC_DEFINE_STATIC(output_set, void *)
 

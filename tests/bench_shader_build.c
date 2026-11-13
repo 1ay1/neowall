@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #include "gl_headless.h"
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 #include "neowall/shader/program_cache.h"
 #include "neowall/shader/wallshader.h"
 

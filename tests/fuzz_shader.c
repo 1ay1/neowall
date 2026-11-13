@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 #include "neowall/shader/shader_source.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {

@@ -15,7 +15,7 @@
 #ifndef NW_COMPAT_H
 #define NW_COMPAT_H
 
-#include "neowall/base.h"
+#include "neowall/core/base.h"
 
 /* Returns a new string (free it), or NULL on OOM. */
 char *nw_compat_fix(const char *src);

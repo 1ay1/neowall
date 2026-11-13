@@ -1,8 +1,8 @@
-/* The control socket. See include/neowall/ipc.h. */
+/* The control socket. See include/neowall/runtime/ipc.h. */
 
 #define _GNU_SOURCE   /* accept4, MSG_NOSIGNAL */
 
-#include "neowall/ipc.h"
+#include "neowall/runtime/ipc.h"
 
 #include <errno.h>
 #include <fcntl.h>

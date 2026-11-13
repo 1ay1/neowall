@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "gl_headless.h"
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 #include "neowall/shader/wallshader.h"
 #include "neowall/shader/reactive.h"
 #include <time.h>

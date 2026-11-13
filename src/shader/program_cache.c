@@ -18,10 +18,10 @@
 #include <unistd.h>
 #include <utime.h>
 
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 #include <GL/gl.h>
 #include <GL/glext.h>
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 
 #define MAGIC 0x4E575042u /* "NWPB" */
 #define VERSION 1u

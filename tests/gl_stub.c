@@ -14,7 +14,7 @@
 
 #include <GL/gl.h>
 #include <GL/glext.h>
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 
 static GLuint g_next_id = 1;
 

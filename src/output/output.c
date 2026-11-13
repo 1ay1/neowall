@@ -6,13 +6,13 @@
 #include <sys/timerfd.h>
 #include <unistd.h>
 #include "neowall/neowall.h"
-#include "neowall/app.h"
+#include "neowall/app/app.h"
 #include "neowall/output/output.h"
 #include "neowall/image/image.h"    /* For struct image_data definition */
 #include "neowall/compositor/compositor.h"
 #include "neowall/config/config_access.h"
 #include "neowall/config/config.h"  /* config_shuffle_cycle_paths() */
-#include "neowall/constants.h"
+#include "neowall/core/constants.h"
 #include "neowall/shader/shader.h"
 #include "neowall/shader/wallshader.h"
 #include "neowall/egl/egl_core.h"

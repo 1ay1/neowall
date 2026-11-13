@@ -7,7 +7,7 @@
 #include <time.h>
 
 #include "gl_headless.h"
-#include "neowall/log.h"
+#include "neowall/core/log.h"
 #include "neowall/shader/wallshader.h"
 
 static double now_ms(void) {

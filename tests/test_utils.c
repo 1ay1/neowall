@@ -1,4 +1,4 @@
-/* Unit tests for the pure helper functions in src/utils.c.
+/* Unit tests for the pure helper functions in src/core/utils.c.
  *
  * These cover the math/format/parse helpers that have no GL, Wayland, or
  * filesystem dependencies, so they can run headless in CI. The graphics and
@@ -22,7 +22,7 @@
 #include <limits.h>
 #include <time.h>
 
-/* Prototypes from src/utils.c (kept in sync with include/neowall.h). */
+/* Prototypes from src/core/utils.c (kept in sync with include/neowall/neowall.h). */
 float lerp(float a, float b, float t);
 float clamp(float value, float min, float max);
 float ease_in_out_cubic(float t);
