@@ -50,14 +50,18 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="@VERSION@" date="2026-10-28">
+    <release version="@VERSION@" date="2026-11-14">
       <description>
         <p>Packaging and robustness release.</p>
         <ul>
           <li>Recovers from GPU resets and lost surfaces by restarting cleanly</li>
           <li>Runs as a systemd notify service and reports readiness</li>
           <li>Ships only freely licensed shaders; the default is now garden</li>
-          <li>Fixes a heap overflow in the terminal wallpaper found by fuzzing</li>
+          <li>Reloads and shader changes never freeze the wallpaper while compiling</li>
+          <li>A static wallpaper uses no CPU when idle</li>
+          <li>Fixes black wallpapers on NVIDIA</li>
+          <li>X11 survives stray protocol errors instead of exiting</li>
+          <li>Fixes several memory bugs in the terminal, image and font readers found by fuzzing</li>
           <li>Refuses GNOME on Wayland clearly instead of showing nothing</li>
         </ul>
       </description>

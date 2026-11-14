@@ -2,7 +2,7 @@
 
 All notable changes to neowall. Dates are release dates.
 
-## Unreleased
+## 0.9.0 - 2026-11-14
 
 ### Fixed
 - A reload no longer stops the wallpaper while the new shader compiles: the
