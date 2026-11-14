@@ -437,6 +437,9 @@ x11_sources = []
 if has_x11
   x11_sources = files(
     'src/backends/x11/x11_core.c',
+    'src/backends/x11/x11_wm.c',
+    'src/backends/x11/x11_surface.c',
+    'src/backends/x11/x11_outputs.c',
     'src/backends/x11/x11_geometry.c',
     'src/backends/x11/x11_wm_detect.c',
   )
