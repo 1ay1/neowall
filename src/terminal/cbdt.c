@@ -24,7 +24,7 @@
 #define STBI_NO_JPEG
 /* Emoji strikes are ~128-512 px; refuse anything absurd before allocating. */
 #define STBI_MAX_DIMENSIONS 2048
-#include "vendor/stb_image.h"
+#include <stb_image.h>   /* src/terminal/vendor, or -Dsystem_stb */
 
 /* ---- big-endian readers over a bounds-checked window ---- */
 typedef struct { const uint8_t *p; size_t len; } buf;

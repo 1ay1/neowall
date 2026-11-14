@@ -7,6 +7,7 @@
  * stopped with kill, and outlives neowall writing into a dead pipe forever. */
 
 #include <signal.h>
+#include <stddef.h>
 #include <spawn.h>
 
 /* Call in a fork() child before exec. Only async-signal-safe calls. */

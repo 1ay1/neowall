@@ -116,9 +116,31 @@ meson test -C build            # headless; no display server, no $HOME needed
 DESTDIR="$pkgdir" meson install -C build
 ```
 
-- Warnings aren't errors unless you pass `-Dwerror=true` (CI does).
-- Builds are reproducible: no timestamps are embedded.
-- Nothing is downloaded at build time.
+- Warnings aren't errors unless you pass `-Dwerror=true` (CI does). Your
+  `CFLAGS`/`LDFLAGS` are used as given; meson adds no `-O`, `-march` or
+  `-s` of its own with `--buildtype=plain`.
+- It builds warning-free with Fedora's full hardening flags (`-O2 -flto=auto
+  -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection
+  -fcf-protection`, `-z now -z relro`) and `-Werror`, on gcc and clang.
+- Builds are reproducible: two builds from different directories, with
+  `-ffile-prefix-map`, give the same bytes. No timestamps are embedded.
+- Nothing is downloaded at build time. `meson dist` gives a tarball that
+  builds and passes `meson test` on its own.
+- `meson test` needs no display, no network and no writable `$HOME`
+  (`HOME=/nonexistent` works). Tests that need a compositor or libFuzzer
+  skip with 77. The `e2e` suite drives a real daemon under headless sway if
+  it's installed; exclude it with `--no-suite e2e` if your builders can't
+  run sway.
+- The sources also compile against musl.
+
+### Build options
+
+| Option | Default | |
+|--------|---------|---|
+| `wayland_backend`, `x11_backend` | auto | at least one is required |
+| `terminal` | enabled | the terminal wallpaper (PTY + VT parser) |
+| `system_stb` | `''` | directory with `stb_image.h`/`stb_truetype.h` to use instead of the bundled copy (Debian: `/usr/include/stb`) |
+| `bash_completions_dir`, `zsh_completions_dir`, `fish_completions_dir` | `''` | `''` asks the shell's pkg-config file; `no` skips |
 
 ### Build dependencies
 
@@ -142,8 +164,11 @@ is enough).
 | File | Upstream | License |
 |------|----------|---------|
 | `src/terminal/vendor/stb_truetype.h` | stb_truetype 1.26 | MIT or public domain |
-| `src/terminal/vendor/stb_image.h` | stb_image | MIT or public domain |
+| `src/terminal/vendor/stb_image.h` | stb_image 2.30 | MIT or public domain |
 | `include/neowall/config/vibe.h` | libvibe (same author) | MIT |
+
+Both stb headers can be swapped for the distro's with `-Dsystem_stb`. Each
+header carries its license text at the end.
 
 ### Runtime dependencies
 
@@ -187,11 +212,16 @@ clients. neowall exits with a clear message there. GNOME on X11 works.
 /usr/share/man/man1/neowall.1
 /usr/share/man/man5/neowall.vibe.5
 /usr/lib/systemd/user/neowall.service
+/usr/share/bash-completion/completions/neowall
+/usr/share/zsh/site-functions/_neowall
+/usr/share/fish/vendor_completions.d/neowall.fish
 /usr/share/doc/neowall/{README.md,LICENSE,CHANGELOG.md,CONFIG.md}
 ```
 
 `appstreamcli validate` and `desktop-file-validate` both pass on the
-installed files.
+installed files. The user unit is `Type=notify`; under systemd the log goes
+to the journal with real priorities (`journalctl --user -u neowall -p
+warning` shows warnings and errors only). `NO_COLOR` turns off colour.
 
 ### Arch
 

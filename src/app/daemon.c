@@ -107,12 +107,12 @@ void remove_pid_file(void) {
 /* Claim and exclusively lock the PID file. flock is attached to the open file
  * description and therefore survives the daemonization forks. A stale file is
  * harmless: only the held lock denotes a live daemon. */
-bool try_take_pid_file(pid_t *existing_pid_out) {
+pid_claim try_take_pid_file(pid_t *existing_pid_out) {
     const char *pid_path = get_pid_file_path();
     int fd = open(pid_path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
     if (fd < 0) {
         log_error("Failed to open PID file %s: %s", pid_path, strerror(errno));
-        return false;
+        return PID_CLAIM_FAILED;
     }
     if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
         FILE *fp = fdopen(dup(fd), "r");
@@ -125,14 +125,14 @@ bool try_take_pid_file(pid_t *existing_pid_out) {
         }
         if (fp) fclose(fp);
         close(fd);
-        return false;
+        return PID_CLAIM_HELD;
     }
     pid_lock_fd = fd;
     if (!update_pid_file()) {
         remove_pid_file();
-        return false;
+        return PID_CLAIM_FAILED;
     }
-    return true;
+    return PID_CLAIM_OK;
 }
 
 /* Handle crash signals - these still need traditional handlers.

@@ -15,6 +15,7 @@ project('neowall', 'c',
 # release shouldn't break a distro build.
 
 cc = meson.get_compiler('c')
+fs = import('fs')
 
 # =============================================================================
 # Required Dependencies
@@ -316,16 +317,26 @@ occlusion_sources = files(
 )
 
 # Terminal emulator wallpaper source (in-tree PTY + VT parser; no external dep,
-# uses glibc <pty.h>/forkpty). Gated behind -Dterminal.
+# uses <pty.h>/forkpty). Gated behind -Dterminal.
 terminal_option = get_option('terminal')
 terminal_sources = []
 has_terminal = false
 if not terminal_option.disabled()
   fontconfig_dep = dependency('fontconfig', required: false)
-  # forkpty lives in libutil on glibc; an explicitly enabled feature must fail
-  # configuration when it is unavailable.
-  util_dep = cc.find_library('util', required: terminal_option)
-  if util_dep.found()
+  # forkpty is in libc on musl and glibc >= 2.34, in libutil on older glibc.
+  # An explicitly enabled feature must fail configuration if it's nowhere.
+  util_dep = dependency('', required: false)
+  forkpty_args = ['-D_DEFAULT_SOURCE']
+  have_forkpty = cc.has_function('forkpty', prefix: '#include <pty.h>', args: forkpty_args)
+  if not have_forkpty
+    util_dep = cc.find_library('util', required: false)
+    have_forkpty = util_dep.found() and cc.has_function('forkpty',
+      prefix: '#include <pty.h>', args: forkpty_args, dependencies: util_dep)
+  endif
+  if terminal_option.enabled() and not have_forkpty
+    error('-Dterminal=enabled, but forkpty() was not found (libc or libutil)')
+  endif
+  if have_forkpty
     has_terminal = true
     add_project_arguments('-DNEOWALL_HAVE_TERMINAL=1', language: 'c')
     terminal_sources = files(
@@ -340,10 +351,22 @@ if not terminal_option.disabled()
     # neither is -Wpedantic/-Werror clean. Compile them in their own static
     # library with relaxed warnings so the strict project-wide gate
     # (warning_level=3, werror=true) still governs all our own code.
+    # stb: the bundled copy, or a distro's (-Dsystem_stb=/usr/include/stb).
+    stb_dir = get_option('system_stb')
+    if stb_dir == ''
+      stb_inc = include_directories('src/terminal/vendor')
+    else
+      foreach h : ['stb_image.h', 'stb_truetype.h']
+        if not fs.is_file(stb_dir / h)
+          error('-Dsystem_stb: no ' + h + ' in ' + stb_dir)
+        endif
+      endforeach
+      stb_inc = include_directories(stb_dir, is_system: true)
+    endif
     terminal_glyph_lib = static_library('terminal_glyph',
       files('src/terminal/glyph_atlas.c',
             'src/terminal/cbdt.c'),
-      include_directories: [inc_dirs, inc_dirs_build,
+      include_directories: [inc_dirs, inc_dirs_build, stb_inc,
                             include_directories('src/terminal')],
       dependencies: fontconfig_dep,
       c_args: cc.get_supported_arguments(
@@ -358,7 +381,7 @@ endif
 wayland_protocol_sources = []
 if has_wayland
   wl_protocol_dir = wayland_protocols_dep.get_variable('pkgdatadir')
-  fs = import('fs')
+  # fs is imported at the top
   wayland_scanner = find_program(
     wayland_scanner_dep.get_variable('wayland_scanner'), native: true)
   wl_protocols = {
@@ -556,6 +579,32 @@ user_unit_dir = systemd_dep.found() ? \
     pkgconfig_define: ['prefix', get_option('prefix')]) : \
   get_option('prefix') / 'lib' / 'systemd' / 'user'
 install_data(configured_service, install_dir: user_unit_dir)
+
+# Shell completions, at the paths each shell's package advertises (or the
+# usual ones under our prefix). Each dir can be overridden or set to 'no'.
+completion_dirs = {
+  'bash': ['bash-completion', 'completionsdir', 'bash-completion' / 'completions', 'neowall'],
+  'zsh': ['', '', 'zsh' / 'site-functions', '_neowall'],
+  'fish': ['fish', 'completionsdir', 'fish' / 'vendor_completions.d', 'neowall.fish'],
+}
+foreach shell, c : completion_dirs
+  dir = get_option(shell + '_completions_dir')
+  if dir == 'no'
+    continue
+  endif
+  if dir == ''
+    dir = get_option('datadir') / c[2]
+    if c[0] != ''
+      pc = dependency(c[0], required: false)
+      if pc.found()
+        dir = pc.get_variable(c[1], pkgconfig_define: ['datadir', get_option('prefix') / get_option('datadir')],
+                              default_value: dir)
+      endif
+    endif
+  endif
+  src = shell == 'zsh' ? '_neowall' : 'neowall.' + shell
+  install_data('packaging' / 'completions' / src, install_dir: dir, rename: c[3])
+endforeach
 
 # =============================================================================
 # Custom Targets (matching Makefile's development targets)
@@ -802,6 +851,11 @@ test('documented_shaders',
   find_program('tests/verify-documented-shaders.sh'),
   args: [meson.project_source_root()],
 )
+
+# Shell completions keep up with the binary's commands and templates.
+test('completions', find_program('tests/check-completions.sh'),
+  args: [neowall_exe.full_path(), meson.project_source_root()],
+  depends: neowall_exe)
 
 # VIBE config parser is filesystem/GL-free in its string-parse path.
 test_vibe_exe = executable('test_vibe',

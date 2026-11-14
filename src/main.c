@@ -193,14 +193,16 @@ int main(int argc, char *argv[]) {
         }
         snprintf(preview_resolved, sizeof(preview_resolved), "%s", resolved);
 
+        /* $XDG_RUNTIME_DIR, else the 0700 per-user dir; never a guessable
+         * name in shared /tmp. */
         const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-        if (runtime_dir) {
-            snprintf(preview_config, sizeof(preview_config),
-                     "%s/neowall-preview-%d.vibe", runtime_dir, (int)getpid());
-        } else {
-            snprintf(preview_config, sizeof(preview_config),
-                     "/tmp/neowall-preview-%d.vibe", (int)getpid());
+        if (!runtime_dir || !runtime_dir[0]) runtime_dir = neowall_secure_runtime_dir();
+        if (!runtime_dir) {
+            fprintf(stderr, "No private directory for the preview config\n");
+            return EXIT_FAILURE;
         }
+        snprintf(preview_config, sizeof(preview_config),
+                 "%s/neowall-preview-%d.vibe", runtime_dir, (int)getpid());
 
         FILE *pf = fopen(preview_config, "w");
         if (!pf) {
@@ -242,7 +244,13 @@ int main(int argc, char *argv[]) {
      * to start or, worse, delete the running daemon's file on exit and leave
      * `neowall reload/next/kill` unable to find it. */
     pid_t existing_pid = 0;
-    if (!preview_shader && !try_take_pid_file(&existing_pid)) {
+    pid_claim claim = preview_shader ? PID_CLAIM_OK : try_take_pid_file(&existing_pid);
+    if (claim == PID_CLAIM_FAILED) {
+        fprintf(stderr, "Error: can't create the PID file %s (see the log above)\n",
+                get_pid_file_path());
+        return EXIT_FAILURE;
+    }
+    if (claim == PID_CLAIM_HELD) {
         const char *pid_path = get_pid_file_path();
         log_error("NeoWall is already running (PID %d)", existing_pid);
         fprintf(stderr, "Error: NeoWall is already running (PID %d)\n", existing_pid);

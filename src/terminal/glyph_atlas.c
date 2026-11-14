@@ -24,7 +24,7 @@
  * user-configured path, never untrusted data). */
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
-#include "vendor/stb_truetype.h"
+#include <stb_truetype.h>   /* src/terminal/vendor, or -Dsystem_stb */
 
 /* Well-known monospace TrueType paths, tried in order when no font is given.
  * DejaVu Sans Mono is first because it has excellent box-drawing + block-

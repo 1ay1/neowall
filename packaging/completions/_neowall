@@ -1,0 +1,50 @@
+#compdef neowall
+
+local -a commands
+commands=(
+  'new:create a shader from a template'
+  'import:import a Shadertoy export'
+  'docs:list shader helpers and uniforms'
+  'preview:run one shader in the foreground'
+  'watch:preview a shader and reload it on save'
+  'kill:stop the running daemon'
+  'next:skip to the next wallpaper'
+  'pause:pause wallpaper cycling'
+  'resume:resume wallpaper cycling'
+  'reload:reload the configuration'
+  'set:set the wallpaper by index'
+  'list:list wallpapers with indices'
+  'current:show the current wallpaper'
+  'status:show the current wallpaper'
+  'ping:exit 0 if a daemon is answering'
+  'pause-shader:freeze the shader animation'
+  'resume-shader:resume the shader animation'
+  'set-terminal:swap the terminal wallpaper command'
+)
+
+_arguments -C \
+  '(-c --config)'{-c,--config}'[config file]:config:_files -g "*.vibe"' \
+  '(-f --foreground)'{-f,--foreground}'[stay in the foreground]' \
+  '(-v --verbose)'{-v,--verbose}'[verbose logging]' \
+  '(- *)'{-h,--help}'[show help]' \
+  '(- *)'{-V,--version}'[show version]' \
+  '--date=[shift the shader clock]:offset' \
+  '--timelapse=[speed up the shader clock]:span/duration' \
+  '1: :->cmd' \
+  '*:: :->args' && return
+
+case $state in
+  cmd) _describe 'command' commands ;;
+  args)
+    case $words[1] in
+      new) _arguments '--template=[template]:template:(scene flat reactive)' \
+                      '(-f --force)'{-f,--force}'[overwrite]' '--list[list templates]' '1:name' ;;
+      import) _arguments '(-f --force)'{-f,--force}'[overwrite]' \
+                         '1:export:_files -g "*.json"' '2:name' ;;
+      preview|watch) _arguments '--date=[shift the shader clock]:offset' \
+                                '--timelapse=[speed up the shader clock]:span/duration' \
+                                '1:shader:_files -g "*.(glsl|frag|neowall)"' ;;
+      set-terminal) _command_names ;;
+    esac
+    ;;
+esac

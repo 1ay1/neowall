@@ -11,6 +11,7 @@
 #include "app_internal.h"
 #include "neowall/app/app.h"
 #include "neowall/output/output.h"
+#include "version.h"
 
 const char *app_socket_path(void) {
     static char path[sizeof(((struct sockaddr_un *)0)->sun_path)];
@@ -98,7 +99,7 @@ void app_on_ipc_request(void *ctx, rt_loop *loop, const nw_ipc_request_t *r) {
     char text[NW_IPC_MAX_LINE];
 
     if (strcmp(r->verb, "ping") == 0) {
-        snprintf(text, sizeof(text), "neowall %s pid %d", NEOWALL_VERSION, (int)getpid());
+        snprintf(text, sizeof(text), "neowall %s pid %d", NEOWALL_VERSION_STRING, (int)getpid());
         ipc_server_reply(a->host.ipc, r->conn, true, text);
         return;
     }

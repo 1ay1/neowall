@@ -1,0 +1,94 @@
+# Build the way distro builders do, so a package never breaks on something
+# our own CI didn't try: strict distro CFLAGS, musl, the release tarball, no
+# HOME, reproducibility, and the system copy of bundled code.
+name: Distro builds
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  fedora:
+    name: Fedora (rpm hardening flags, LTO, -Werror)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf -y install gcc clang meson ninja-build pkgconf-pkg-config git redhat-rpm-config \
+            wayland-devel wayland-protocols-devel mesa-libEGL-devel mesa-libGL-devel \
+            libpng-devel libjpeg-turbo-devel libX11-devel libXrandr-devel libxkbcommon-devel \
+            desktop-file-utils appstream bash-completion-devel fish
+      - uses: actions/checkout@v4
+      - name: Build with %{optflags} and %{build_ldflags}
+        run: |
+          export CFLAGS="$(rpm --eval '%{optflags}')" LDFLAGS="$(rpm --eval '%{build_ldflags}')"
+          meson setup build --prefix=/usr --buildtype=plain -Db_lto=true -Dwerror=true
+          ninja -C build
+      - name: Test as a builder (no HOME, no display)
+        run: env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 meson test -C build --print-errorlogs
+      - name: Install and validate
+        run: |
+          DESTDIR=$PWD/root meson install -C build
+          desktop-file-validate root/usr/share/applications/*.desktop
+          appstreamcli validate --no-net root/usr/share/metainfo/*.xml
+          test -f root/usr/share/bash-completion/completions/neowall
+          test -f root/usr/share/fish/vendor_completions.d/neowall.fish
+          test -f root/usr/share/zsh/site-functions/_neowall
+
+  alpine:
+    name: Alpine (musl)
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          apk add build-base meson ninja pkgconf git linux-headers \
+            wayland-dev wayland-protocols mesa-dev libpng-dev libjpeg-turbo-dev \
+            libx11-dev libxrandr-dev libxkbcommon-dev
+      - uses: actions/checkout@v4
+      - run: meson setup build -Dwerror=true
+      - run: ninja -C build
+      - run: meson test -C build --no-suite e2e --print-errorlogs
+
+  tarball:
+    name: Release tarball, reproducible, unbundled stb
+    runs-on: ubuntu-latest
+    container:
+      image: debian:testing
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential git pkg-config meson ninja-build \
+            libwayland-dev libwayland-bin wayland-protocols libwayland-egl1-mesa \
+            libx11-dev libxrandr-dev libegl1-mesa-dev libgl1-mesa-dev libgl1-mesa-dri \
+            libpng-dev libjpeg-dev libxkbcommon-dev libstb-dev xz-utils
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: meson dist builds and tests on its own
+        run: |
+          git config --global --add safe.directory "$PWD"
+          meson setup dist-build
+          meson dist -C dist-build --formats xztar
+      - name: Two builds from two paths give the same bytes
+        run: |
+          tar xJf dist-build/meson-dist/*.tar.xz -C /tmp && mv /tmp/neowall-* /tmp/a
+          cp -a /tmp/a /tmp/b
+          for d in a b; do
+            (cd /tmp/$d && SOURCE_DATE_EPOCH=1700000000 \
+              CFLAGS="-O2 -g -ffile-prefix-map=/tmp/$d=." \
+              meson setup build --prefix=/usr --buildtype=plain && ninja -C build neowall)
+          done
+          cmp /tmp/a/build/neowall /tmp/b/build/neowall
+      - name: Build against the system stb (libstb-dev)
+        run: |
+          meson setup stb-build -Dsystem_stb=/usr/include/stb
+          ninja -C stb-build
+          ! grep -q terminal/vendor stb-build/compile_commands.json
+          meson test -C stb-build glyph_atlas --print-errorlogs

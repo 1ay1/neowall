@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <inttypes.h>  /* PRIu64 */
 #include <limits.h>
 #include <time.h>
@@ -23,9 +24,6 @@
 
 /* Current log level */
 static int log_level = LOG_LEVEL_INFO;
-
-/* Enable colors in terminal */
-static bool use_colors = true;
 
 /* ANSI color codes */
 #define COLOR_RESET   "\033[0m"
@@ -65,19 +63,52 @@ static void get_timestamp(char *buf, size_t size) {
     }
 }
 
-/* Generic logging function */
+/* How stderr looks, decided once: the journal, a colour terminal, or plain. */
+enum log_sink { SINK_UNKNOWN, SINK_JOURNAL, SINK_TTY, SINK_PLAIN };
+static _Atomic int g_sink = SINK_UNKNOWN;
+
+/* stderr is the journal when $JOURNAL_STREAM names its device and inode
+ * (systemd.exec(5)). Then the journal stamps the time and we send the level
+ * as a <N> prefix, so `journalctl -p warning` works. */
+static enum log_sink sink(void) {
+    int s = g_sink;
+    if (s != SINK_UNKNOWN) return (enum log_sink)s;
+    s = SINK_PLAIN;
+    const char *js = getenv("JOURNAL_STREAM");
+    struct stat st;
+    unsigned long long dev, ino;
+    if (js && sscanf(js, "%llu:%llu", &dev, &ino) == 2 && fstat(STDERR_FILENO, &st) == 0 &&
+        (unsigned long long)st.st_dev == dev && (unsigned long long)st.st_ino == ino) {
+        s = SINK_JOURNAL;
+    } else if (isatty(STDERR_FILENO) && !getenv("NO_COLOR")) {
+        s = SINK_TTY;
+    }
+    g_sink = s;
+    return (enum log_sink)s;
+}
+
+/* syslog priorities, for the journal prefix */
+static int priority(const char *level) {
+    switch (level[0]) {
+    case 'E': return 3;
+    case 'W': return 4;
+    case 'I': return 6;
+    default: return 7;
+    }
+}
+
 static void log_message(const char *level, const char *color,
                        const char *format, va_list args) {
-    char timestamp[32];
-    get_timestamp(timestamp, sizeof(timestamp));
-
-    /* Check if stderr (where we actually write) is a TTY for color support */
-    if (use_colors && isatty(STDERR_FILENO)) {
-        fprintf(stderr, "%s[%s]%s %s%s%s: ",
-                COLOR_GRAY, timestamp, COLOR_RESET,
-                color, level, COLOR_RESET);
+    enum log_sink s = sink();
+    if (s == SINK_JOURNAL) {
+        fprintf(stderr, "<%d>", priority(level));
     } else {
-        fprintf(stderr, "[%s] %s: ", timestamp, level);
+        char timestamp[32];
+        get_timestamp(timestamp, sizeof(timestamp));
+        if (s == SINK_TTY)
+            fprintf(stderr, "%s[%s]%s %s%s%s: ", COLOR_GRAY, timestamp, COLOR_RESET, color, level, COLOR_RESET);
+        else
+            fprintf(stderr, "[%s] %s: ", timestamp, level);
     }
 
     vfprintf(stderr, format, args);

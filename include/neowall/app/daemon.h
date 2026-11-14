@@ -10,8 +10,10 @@ struct neowall_state;
 /* The pid file, held with flock for the daemon's whole life, so "is one
  * running" doesn't depend on pid reuse. */
 const char *get_pid_file_path(void);
-/* Claim the pid file. False with *existing_pid set if a live daemon has it. */
-bool try_take_pid_file(pid_t *existing_pid);
+/* Claim the pid file. HELD (with *existing_pid) if a live daemon has it,
+ * FAILED if it can't be created (logged with the reason). */
+typedef enum { PID_CLAIM_OK, PID_CLAIM_HELD, PID_CLAIM_FAILED } pid_claim;
+pid_claim try_take_pid_file(pid_t *existing_pid);
 bool update_pid_file(void);
 bool remove_stale_pid_file(void);
 void remove_pid_file(void);

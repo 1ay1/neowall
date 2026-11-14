@@ -152,13 +152,33 @@ are searched too.
 .TP
 .I $XDG_RUNTIME_DIR/neowall.sock
 Control socket.
+.TP
+.I $XDG_STATE_HOME/neowall/
+What each output is showing and the cycle list, so a restart resumes where
+it was (falls back to
+.IR ~/.config/neowall/ ).
+.TP
+.I $XDG_CACHE_HOME/neowall/programs/
+Compiled shader programs, keyed by GPU driver, so a restart doesn't
+recompile.
+Safe to delete.
 .SH ENVIRONMENT
 .TP
 .B NEOWALL_GL_DEBUG=1
 Log OpenGL driver debug messages without full verbose logging.
 .TP
+.B NEOWALL_NO_PROGRAM_CACHE=1
+Don't load or save compiled shader programs.
+.TP
+.B NO_COLOR
+If set, log lines are not coloured.
+.TP
 .BR WAYLAND_DISPLAY ", " DISPLAY
 Pick the display server, as usual.
+.TP
+.BR XDG_CURRENT_DESKTOP ", " HYPRLAND_INSTANCE_SIGNATURE ", " SWAYSOCK
+Used to tell which compositor is running, to pick a backend and enable
+compositor\-specific features such as window rectangles on Hyprland.
 .SH EXIT STATUS
 .TP
 .B 0

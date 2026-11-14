@@ -24,3 +24,17 @@ option('terminal',
   value: 'enabled',
   description: 'Build the in-tree terminal emulator wallpaper source (PTY + VT parser; uses glibc <pty.h>, no external dependency)'
 )
+
+# Empty = ask the shell's pkg-config file, else the usual path under datadir.
+# 'no' = don't install.
+option('bash_completions_dir', type: 'string', value: '',
+  description: 'Where to install bash completions')
+option('zsh_completions_dir', type: 'string', value: '',
+  description: 'Where to install zsh completions')
+option('fish_completions_dir', type: 'string', value: '',
+  description: 'Where to install fish completions')
+
+# Build against the distro's stb instead of src/terminal/vendor (Debian:
+# /usr/include/stb, from libstb-dev). Empty = bundled.
+option('system_stb', type: 'string', value: '',
+  description: 'Directory with stb_image.h and stb_truetype.h (empty = bundled)')

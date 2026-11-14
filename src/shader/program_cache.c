@@ -10,6 +10,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,9 +19,9 @@
 #include <unistd.h>
 #include <utime.h>
 
-#include "neowall/core/log.h"
 #include <GL/gl.h>
 #include <GL/glext.h>
+#include "neowall/core/constants.h"
 #include "neowall/core/log.h"
 
 #define MAGIC 0x4E575042u /* "NWPB" */
@@ -29,7 +30,7 @@
 #define MAX_ENTRIES 256
 
 static int g_state = -1;   /* -1 unknown, 0 off, 1 on */
-static char g_dir[512];
+static char g_dir[NW_PATH_MAX];
 static uint64_t g_driver;
 static unsigned g_hits, g_misses;
 
@@ -130,17 +131,18 @@ static void prune(void) {
     DIR *d = opendir(g_dir);
     if (!d) return;
     struct ent {
-        char name[64];
+        char name[NAME_MAX + 1];
         time_t at;
     } *ents = NULL;
     size_t n = 0, cap = 0;
     struct dirent *de;
     while ((de = readdir(d))) {
         size_t len = strlen(de->d_name);
-        if (len < 5 || len >= 64 || strcmp(de->d_name + len - 4, ".bin")) continue;
-        char p[640];
+        if (len < 5 || len > NAME_MAX || strcmp(de->d_name + len - 4, ".bin")) continue;
+        char p[NW_PATH_MAX + NAME_MAX + 2];
         struct stat st;
-        snprintf(p, sizeof(p), "%s/%s", g_dir, de->d_name);
+        int w = snprintf(p, sizeof(p), "%s/%s", g_dir, de->d_name);
+        if (w < 0 || (size_t)w >= sizeof(p)) continue;
         if (stat(p, &st) != 0) continue;
         if (n == cap) {
             cap = cap ? cap * 2 : 64;
@@ -148,7 +150,7 @@ static void prune(void) {
             if (!ne) break;
             ents = ne;
         }
-        snprintf(ents[n].name, sizeof(ents[n].name), "%s", de->d_name);
+        memcpy(ents[n].name, de->d_name, len + 1);
         ents[n++].at = st.st_mtime;
     }
     closedir(d);
@@ -156,9 +158,9 @@ static void prune(void) {
         size_t old = 0;
         for (size_t i = 1; i < n; i++)
             if (ents[i].at < ents[old].at) old = i;
-        char p[640];
-        snprintf(p, sizeof(p), "%s/%s", g_dir, ents[old].name);
-        unlink(p);
+        char p[NW_PATH_MAX + NAME_MAX + 2];
+        int w = snprintf(p, sizeof(p), "%s/%s", g_dir, ents[old].name);
+        if (w > 0 && (size_t)w < sizeof(p)) unlink(p);
         ents[old] = ents[--n];
     }
     free(ents);
@@ -175,10 +177,10 @@ void program_cache_store(uint64_t key, unsigned prog) {
     GLenum fmt = 0;
     glGetProgramBinary(prog, len, &got, &fmt, blob);
     if (got > 0 && glGetError() == GL_NO_ERROR) {
-        char path[640], tmp[700];
+        char path[NW_PATH_MAX + 64], tmp[NW_PATH_MAX + 96];
         path_for(key, path, sizeof(path));
-        snprintf(tmp, sizeof(tmp), "%s.%d.tmp", path, (int)getpid());
-        FILE *f = fopen(tmp, "wb");
+        int w = snprintf(tmp, sizeof(tmp), "%s.%d.tmp", path, (int)getpid());
+        FILE *f = (w > 0 && (size_t)w < sizeof(tmp)) ? fopen(tmp, "wb") : NULL;
         if (f) {
             uint32_t h[4] = {MAGIC, VERSION, (uint32_t)fmt, (uint32_t)got};
             bool ok = fwrite(h, sizeof(h), 1, f) == 1 && fwrite(blob, (size_t)got, 1, f) == 1;
