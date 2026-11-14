@@ -23,6 +23,8 @@ GLuint render_create_texture(struct image_data *img);
 /* Rendering */
 bool render_init_output(struct output_state *output);
 void render_cleanup_output(struct output_state *output);
+/* The GL objects all outputs share; before the context is destroyed. */
+void render_release_shared(void);
 bool render_frame(struct output_state *output);
 bool render_frame_shader(struct output_state *output);
 bool render_frame_transition(struct output_state *output, float progress);

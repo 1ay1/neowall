@@ -15,7 +15,7 @@
 #endif
 
 #include "neowall/source/reactive.h"
-#include "neowall/core/child_signals.h"
+#include "capture.h"
 #include "neowall/core/wall_clock.h"
 
 #include <stdio.h>
@@ -34,7 +34,6 @@
 #include <spawn.h>
 #include <dirent.h>
 
-extern char **environ;
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -60,65 +59,34 @@ static pthread_mutex_t g_sample_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_sys_cond;           /* CLOCK_MONOTONIC, see init_conds */
 static reactive_snapshot_t g_sys;           /* protected by g_sample_lock */
 
-/* audio thread */
-static pthread_t g_audio_thread;
-static atomic_bool g_audio_run = false;
-static atomic_bool g_audio_live = false;
-/* Set when a shader asks for audio before reactive_init() has run. The shader
- * is loaded during output setup, which happens before the event loop calls
- * reactive_init(), so the request must be remembered and honoured at init. */
+/* Audio and NVIDIA data come from helper processes, each read on its own
+ * thread (capture.c). Both are opt-in: a request before init is remembered. */
+static capture g_audio, g_nv;
 static atomic_bool g_audio_wanted = false;
-static _Atomic pid_t g_parec_pid = -1;
-
-/* Self-pipe used to break the capture threads out of a blocking read().
- *
- * Both capture loops only test their run flag BETWEEN reads, so clearing the
- * flag cannot wake a thread already parked in read(). Shutdown did SIGKILL the
- * child, whose dying pipe delivers EOF -- but that only helps once the child
- * has actually died and been reaped, which loses the 200ms race often enough
- * that "capture thread did not stop in time; abandoning" printed on essentially
- * every exit. An abandoned thread is then still holding g_lock-adjacent state
- * while the process tears down around it.
- *
- * Writing one byte here makes the poll return at once, exactly as
- * src/terminal/pty.c does for its PTY reader. */
-static int g_wake_pipe[2] = {-1, -1};
-
-/* Wake any capture thread parked in read() or sleeping between reconnects. */
-static void reactive_wake_threads(void) {
-    if (g_wake_pipe[1] >= 0) {
-        const char b = 'x';
-        ssize_t n = write(g_wake_pipe[1], &b, 1);
-        (void)n; /* best effort: a full pipe already means "wake pending" */
-    }
-}
-
-/* nvidia-smi worker thread — polls NVIDIA proprietary GPU stats that sysfs
- * doesn't expose (utilisation, VRAM, temp, power). Published into g_snap under
- * g_lock. Absent driver / no nvidia-smi → g_nv_live stays false, fields zero. */
-static pthread_t g_nv_thread;
-static atomic_bool g_nv_run = false;
-static atomic_bool g_nv_live = false;
-static atomic_bool g_nv_wanted = false;   /* a shader reads iNv*; see reactive_nvidia_start */
-/* Written by the nvidia thread, read by reactive_shutdown to kill nvidia-smi. */
-static _Atomic pid_t g_nv_pid = -1;
-
-/* Capture threads say they've finished here, so shutdown can wait a bounded
- * time on the monotonic clock. */
-static pthread_mutex_t g_exit_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_exit_cond;          /* CLOCK_MONOTONIC */
-static bool g_audio_exited = true, g_nv_exited = true;   /* under g_exit_lock */
+static atomic_bool g_nv_wanted = false;
 
 /* Timed waits on the monotonic clock, so a wall-clock step (NTP, the user
- * setting the time) can't stall the sampler or shutdown. */
-static pthread_once_t g_conds_once = PTHREAD_ONCE_INIT;
-static void init_conds(void) {
+ * setting the time) can't stall the sampler. */
+static pthread_once_t g_once = PTHREAD_ONCE_INIT;
+static void audio_read(capture_run *c, int fd, void *ctx);
+static void nv_read(capture_run *c, int fd, void *ctx);
+static char *const kParecArgv[] = {
+    "parec", "-d", "@DEFAULT_MONITOR@", "--format=float32le", "--channels=1",
+    "--rate", "44100", "--latency-msec=30", NULL,
+};
+static char *const kNvArgv[] = {
+    "nvidia-smi",
+    "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit",
+    "--format=csv,noheader,nounits", "-lms", "500", NULL,
+};
+static void init_once(void) {
     pthread_condattr_t a;
     pthread_condattr_init(&a);
     pthread_condattr_setclock(&a, CLOCK_MONOTONIC);
     pthread_cond_init(&g_sys_cond, &a);
-    pthread_cond_init(&g_exit_cond, &a);
     pthread_condattr_destroy(&a);
+    g_audio = (capture){.name = "audio", .argv = kParecArgv, .read = audio_read};
+    g_nv = (capture){.name = "NVIDIA", .argv = kNvArgv, .read = nv_read};
 }
 
 static struct timespec mono_in(long ms) {
@@ -128,47 +96,6 @@ static struct timespec mono_in(long ms) {
     t.tv_nsec += (ms % 1000) * 1000000L;
     if (t.tv_nsec >= 1000000000L) { t.tv_sec++; t.tv_nsec -= 1000000000L; }
     return t;
-}
-
-static void set_exited(bool *flag, bool v) {
-    pthread_mutex_lock(&g_exit_lock);
-    *flag = v;
-    pthread_cond_broadcast(&g_exit_cond);
-    pthread_mutex_unlock(&g_exit_lock);
-}
-
-/* True if the thread finished within `ms`. */
-static bool wait_exited(const bool *flag, long ms) {
-    struct timespec until = mono_in(ms);
-    pthread_mutex_lock(&g_exit_lock);
-    while (!*flag && pthread_cond_timedwait(&g_exit_cond, &g_exit_lock, &until) != ETIMEDOUT) {}
-    bool done = *flag;
-    pthread_mutex_unlock(&g_exit_lock);
-    return done;
-}
-
-/* Capture children. A thread takes its pid out of the slot under this lock
- * before it reaps; shutdown kills under the same lock without taking it. So
- * shutdown only ever signals a pid that isn't reaped yet (a zombie at worst,
- * whose number can't be reused), and the thread still reaps its own child. */
-static pthread_mutex_t g_child_lock = PTHREAD_MUTEX_INITIALIZER;
-
-static void kill_child(_Atomic pid_t *slot) {
-    pthread_mutex_lock(&g_child_lock);
-    pid_t pid = atomic_load(slot);
-    if (pid > 0) kill(pid, SIGKILL);
-    pthread_mutex_unlock(&g_child_lock);
-}
-
-/* The thread's half: claim the pid, then it's ours to stop and reap. */
-static void reap_child(_Atomic pid_t *slot) {
-    pthread_mutex_lock(&g_child_lock);
-    pid_t pid = atomic_exchange(slot, -1);
-    pthread_mutex_unlock(&g_child_lock);
-    if (pid > 0) {
-        kill(pid, SIGTERM);
-        waitpid(pid, NULL, 0);
-    }
 }
 
 /* input energy accumulators (written from input handlers, decayed in sample) */
@@ -541,55 +468,10 @@ static void sample_time(reactive_snapshot_t *s) {
  * @DEFAULT_MONITOR@ is the loopback of the default sink, i.e. what the
  * speakers are playing, which is the only thing a music-reactive wallpaper
  * ever wanted. PulseAudio and PipeWire's pulse shim both resolve it. */
-static int spawn_parec(pid_t *out_pid) {
-    int pipefd[2];
-    if (nw_pipe_cloexec(pipefd) != 0) return -1;
-
-    char rate[16];
-    snprintf(rate, sizeof(rate), "%d", SAMPLE_RATE);
-    char *argv[] = {
-        "parec", "-d", "@DEFAULT_MONITOR@",
-        "--format=float32le", "--channels=1", "--rate", rate,
-        "--latency-msec=30", NULL
-    };
-
-    posix_spawn_file_actions_t fa;
-    posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_adddup2(&fa, pipefd[1], STDOUT_FILENO);
-    posix_spawn_file_actions_addclose(&fa, pipefd[0]);
-    posix_spawn_file_actions_addclose(&fa, pipefd[1]);
-    nw_spawn_close_fds(&fa, -1);
-
-    posix_spawnattr_t attr;
-    bool have_attr = nw_spawnattr_reset_signals(&attr) == 0;
-    pid_t pid;
-    int rc = posix_spawnp(&pid, "parec", &fa, have_attr ? &attr : NULL, argv, environ);
-    if (have_attr) posix_spawnattr_destroy(&attr);
-    posix_spawn_file_actions_destroy(&fa);
-    close(pipefd[1]);
-    if (rc != 0) {
-        close(pipefd[0]);
-        return -1;
-    }
-    *out_pid = pid;
-    return pipefd[0];
-}
-
-static void *audio_thread_body(void *arg) {
-    (void)arg;
-    /* Don't let SIGPIPE from a dying parec kill the process. */
-    signal(SIGPIPE, SIG_IGN);
-
-    pid_t pid = -1;
-    int fd = spawn_parec(&pid);
-    if (fd < 0) {
-        log_info("Reactive: audio capture unavailable (parec not found) — "
-                 "audio uniforms will read zero");
-        atomic_store(&g_audio_live, false);
-        return NULL;
-    }
-    atomic_store(&g_parec_pid, pid);
-    atomic_store(&g_audio_live, true);
+/* parec's stdout: float32 mono PCM. FFT it into the snapshot. */
+static void audio_read(capture_run *c, int fd, void *ctx) {
+    (void)ctx;
+    capture_set_live(c, true);
     log_info("Reactive: audio capture active (parec monitor, %d Hz)", SAMPLE_RATE);
 
     float window[FFT_SIZE];
@@ -601,23 +483,7 @@ static void *audio_thread_body(void *arg) {
     int filled = 0;
     float beat_avg = 0.0f;       /* running average bass energy for onset detect */
 
-    while (atomic_load(&g_audio_run)) {
-        /* Wait on the capture fd AND the wake pipe, so a stop request breaks the
-         * block immediately instead of leaving this thread parked until parec
-         * happens to produce another buffer. */
-        struct pollfd pfds[2] = {
-            {.fd = fd,             .events = POLLIN, .revents = 0},
-            {.fd = g_wake_pipe[0], .events = POLLIN, .revents = 0},
-        };
-        int pr = poll(pfds, 2, -1);
-        if (pr < 0) {
-            if (errno == EINTR) continue;
-            break;
-        }
-        if (pfds[1].revents) break;       /* stop requested */
-        if (!atomic_load(&g_audio_run)) break;
-        if (!(pfds[0].revents & (POLLIN | POLLHUP | POLLERR))) continue;
-
+    while (capture_poll(c, fd)) {
         float chunk[256];
         ssize_t got = read(fd, chunk, sizeof(chunk));
         if (got <= 0) {
@@ -674,17 +540,6 @@ static void *audio_thread_body(void *arg) {
         }
     }
 
-    close(fd);
-    /* Reap parec synchronously — we are the only spawner/owner of g_parec_pid,
-     * so we own the wait. No SIGCHLD handler is installed; we don't need one
-     * because every parec exit (graceful or crash) drops us into this block
-     * via the `break` above, where waitpid() collects the zombie. If parec
-     * already exited on its own, kill() returns ESRCH harmlessly and waitpid
-     * returns immediately. Claim the pid first so shutdown can't kill it
-     * after it's reaped and possibly reused. */
-    reap_child(&g_parec_pid);
-    atomic_store(&g_audio_live, false);
-    return NULL;
 }
 
 /* ============================================================================
@@ -697,91 +552,52 @@ static void *audio_thread_body(void *arg) {
  * and parse its CSV stream, mirroring the parec pattern (spawn once, read a
  * stream, reap on exit). If nvidia-smi is absent the thread exits immediately
  * and every nv_* field stays zero. */
-static int spawn_nvsmi(pid_t *out_pid) {
-    int pipefd[2];
-    if (nw_pipe_cloexec(pipefd) != 0) return -1;
+/* One CSV row: util, mem used, mem total, temp, power draw, power limit. */
+static void nv_row(capture_run *c, const char *line) {
+    float util = 0, mem_used = 0, mem_total = 0, temp = 0, pdraw = 0, plimit = 0;
+    int got = sscanf(line, "%f , %f , %f , %f , %f , %f",
+                     &util, &mem_used, &mem_total, &temp, &pdraw, &plimit);
+    if (got < 4) return;  /* malformed / [N/A] row */
 
-    /* query: util.gpu, mem.used, mem.total, temp, power.draw, power.limit
-     * -lms 500 = emit a fresh CSV row every 500 ms; nounits keeps it numeric. */
-    char *argv[] = {
-        "nvidia-smi",
-        "--query-gpu=utilization.gpu,memory.used,memory.total,"
-        "temperature.gpu,power.draw,power.limit",
-        "--format=csv,noheader,nounits",
-        "-lms", "500", NULL
-    };
+    float u   = clampf(util / 100.0f, 0.0f, 1.0f);
+    float vr  = mem_total > 0.0f ? clampf(mem_used / mem_total, 0.0f, 1.0f) : 0.0f;
+    float pw  = plimit > 0.0f ? clampf(pdraw / plimit, 0.0f, 1.0f) : 0.0f;
 
-    posix_spawn_file_actions_t fa;
-    posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_adddup2(&fa, pipefd[1], STDOUT_FILENO);
-    posix_spawn_file_actions_addclose(&fa, pipefd[0]);
-    posix_spawn_file_actions_addclose(&fa, pipefd[1]);
-    nw_spawn_close_fds(&fa, -1);
-
-    posix_spawnattr_t attr;
-    bool have_attr = nw_spawnattr_reset_signals(&attr) == 0;
-    pid_t pid;
-    int rc = posix_spawnp(&pid, "nvidia-smi", &fa, have_attr ? &attr : NULL, argv, environ);
-    if (have_attr) posix_spawnattr_destroy(&attr);
-    posix_spawn_file_actions_destroy(&fa);
-    close(pipefd[1]);
-    if (rc != 0) {
-        close(pipefd[0]);
-        return -1;
-    }
-    *out_pid = pid;
-    return pipefd[0];
+    pthread_mutex_lock(&g_lock);
+    capture_set_live(c, true);
+    /* light smoothing so beams don't jitter between polls */
+    float sm = 0.5f;
+    g_snap.nv_gpu    = g_snap.nv_gpu    * sm + u  * (1 - sm);
+    g_snap.nv_vram   = g_snap.nv_vram   * sm + vr * (1 - sm);
+    g_snap.nv_temp_c = temp;
+    g_snap.nv_power  = g_snap.nv_power  * sm + pw * (1 - sm);
+    g_snap.nv_active = true;
+    pthread_mutex_unlock(&g_lock);
 }
 
-static void *nv_thread_body(void *arg) {
-    (void)arg;
-    signal(SIGPIPE, SIG_IGN);
-
-    pid_t pid = -1;
-    int fd = spawn_nvsmi(&pid);
-    if (fd < 0) {
-        log_info("Reactive: NVIDIA capture unavailable (nvidia-smi not found) — "
-                 "nv_* uniforms will read zero");
-        atomic_store(&g_nv_live, false);
-        return NULL;
-    }
-    atomic_store(&g_nv_pid, pid);
+/* nvidia-smi's CSV, one row every 500 ms. */
+static void nv_read(capture_run *c, int fd, void *ctx) {
+    (void)ctx;
     log_info("Reactive: NVIDIA GPU capture active (nvidia-smi)");
-
-    FILE *fp = fdopen(fd, "r");
-    if (!fp) {
-        close(fd);
-        atomic_store(&g_nv_live, false);
-        return NULL;
+    char buf[512];
+    size_t have = 0;
+    while (capture_poll(c, fd)) {
+        ssize_t got = read(fd, buf + have, sizeof(buf) - 1 - have);
+        if (got <= 0) {
+            if (got < 0 && errno == EINTR) continue;
+            break;
+        }
+        have += (size_t)got;
+        buf[have] = '\0';
+        char *nl;
+        while ((nl = strchr(buf, '\n'))) {
+            *nl = '\0';
+            nv_row(c, buf);
+            have -= (size_t)(nl + 1 - buf);
+            memmove(buf, nl + 1, have + 1);
+        }
+        if (have >= sizeof(buf) - 1) have = 0;   /* an absurd line: drop it */
     }
-
-    char line[256];
-    while (atomic_load(&g_nv_run) && fgets(line, sizeof(line), fp)) {
-        float util = 0, mem_used = 0, mem_total = 0, temp = 0, pdraw = 0, plimit = 0;
-        int got = sscanf(line, "%f , %f , %f , %f , %f , %f",
-                         &util, &mem_used, &mem_total, &temp, &pdraw, &plimit);
-        if (got < 4) continue;  /* malformed / [N/A] row */
-
-        float u   = clampf(util / 100.0f, 0.0f, 1.0f);
-        float vr  = mem_total > 0.0f ? clampf(mem_used / mem_total, 0.0f, 1.0f) : 0.0f;
-        float pw  = plimit > 0.0f ? clampf(pdraw / plimit, 0.0f, 1.0f) : 0.0f;
-
-        pthread_mutex_lock(&g_lock);
-        atomic_store(&g_nv_live, true);
-        /* light smoothing so beams don't jitter between polls */
-        float sm = 0.5f;
-        g_snap.nv_gpu    = g_snap.nv_gpu    * sm + u  * (1 - sm);
-        g_snap.nv_vram   = g_snap.nv_vram   * sm + vr * (1 - sm);
-        g_snap.nv_temp_c = temp;
-        g_snap.nv_power  = g_snap.nv_power  * sm + pw * (1 - sm);
-        g_snap.nv_active = true;
-        pthread_mutex_unlock(&g_lock);
-    }
-
-    fclose(fp);  /* closes fd */
-    reap_child(&g_nv_pid);
-    atomic_store(&g_nv_live, false);
-    return NULL;
 }
 
 /* ============================================================================
@@ -790,37 +606,12 @@ static void *nv_thread_body(void *arg) {
 
 static void *sys_thread_fn(void *arg);
 
-/* Every way out of a capture thread, early returns included, ends here. */
-static void *audio_thread_fn(void *arg) {
-    audio_thread_body(arg);
-    set_exited(&g_audio_exited, true);
-    return NULL;
-}
-
-static void *nv_thread_fn(void *arg) {
-    nv_thread_body(arg);
-    set_exited(&g_nv_exited, true);
-    return NULL;
-}
-
 bool reactive_init(void) {
     if (atomic_load(&g_inited)) return true;
-    pthread_once(&g_conds_once, init_conds);
+    pthread_once(&g_once, init_once);
     memset(&g_snap, 0, sizeof(g_snap));
     g_snap.battery = 1.0f;
     g_snap.charging = true;
-
-    /* Create the wake pipe before any capture thread starts, so a stop request
-     * can always break a blocking read. Non-fatal if it fails: the threads fall
-     * back to the old (racy) behaviour rather than not running at all. */
-    if (nw_pipe_cloexec(g_wake_pipe) != 0) {
-        g_wake_pipe[0] = g_wake_pipe[1] = -1;
-        log_info("Reactive: wake pipe unavailable; capture threads may lag at exit");
-    } else {
-        /* Never let a wake write block the caller. */
-        fcntl(g_wake_pipe[1], F_SETFL, O_NONBLOCK);
-    }
-
     atomic_store(&g_inited, true);
 
     /* Prime the snapshot once, then hand sampling to its own thread. */
@@ -831,79 +622,32 @@ bool reactive_init(void) {
         log_info("Reactive: could not start sampler thread; system signals stay frozen");
         atomic_store(&g_sys_run, false);
     }
-
     log_info("Reactive subsystem initialised");
 
-    /* A shader loaded before this point may already have asked for audio.
-     * Now that the subsystem is up, honour that request. */
+    /* A shader loaded before this point may already have asked. */
     if (atomic_load(&g_audio_wanted)) reactive_audio_start();
     if (atomic_load(&g_nv_wanted)) reactive_nvidia_start();
-
     return true;
 }
 
-/* Start the nvidia-smi reader on demand: it polls the GPU twice a second,
- * which keeps an NVIDIA card out of its deepest idle state, so only a shader
- * that reads iNv* pays for it. Idempotent. */
+/* nvidia-smi polls the GPU twice a second, which keeps an NVIDIA card out of
+ * its deepest idle state, so only a shader that reads iNv* pays for it. */
 void reactive_nvidia_start(void) {
     atomic_store(&g_nv_wanted, true);
-    if (!atomic_load(&g_inited)) return;
-    bool expected = false;
-    if (!atomic_compare_exchange_strong(&g_nv_run, &expected, true)) return;
-    set_exited(&g_nv_exited, false);
-    if (pthread_create(&g_nv_thread, NULL, nv_thread_fn, NULL) != 0) {
-        log_info("Reactive: could not start NVIDIA thread");
-        atomic_store(&g_nv_run, false);
-        set_exited(&g_nv_exited, true);
-    }
+    if (atomic_load(&g_inited)) capture_start(&g_nv);
 }
 
-/* Start audio capture on demand.
- *
- * This is deliberately NOT called from reactive_init(). Capturing audio means
- * spawning parec, which registers a recording stream the desktop reports as
- * "an app is listening" — so neowall must only do it when a shader actually
- * reads an audio signal, not merely because the daemon is running (issue #84).
- * Idempotent and safe to call every time a shader loads; the second and later
- * calls are a single atomic load. */
+/* parec registers a recording stream the desktop shows as "an app is
+ * listening", so it starts only when a shader reads audio (issue #84). */
 void reactive_audio_start(void) {
-    /* Remember the request either way: if a shader asked before the subsystem
-     * came up, reactive_init() starts capture when it reaches the audio step. */
     atomic_store(&g_audio_wanted, true);
-    if (!atomic_load(&g_inited)) return;
-    /* Already running (or a start is in flight) — nothing to do. */
-    bool expected = false;
-    if (!atomic_compare_exchange_strong(&g_audio_run, &expected, true)) return;
-
-    set_exited(&g_audio_exited, false);
-    if (pthread_create(&g_audio_thread, NULL, audio_thread_fn, NULL) != 0) {
-        log_info("Reactive: could not start audio thread");
-        atomic_store(&g_audio_run, false);
-        set_exited(&g_audio_exited, true);
-        return;
+    if (atomic_load(&g_inited) && !capture_running(&g_audio)) {
+        if (capture_start(&g_audio)) log_info("Reactive: audio capture requested by shader");
     }
-    log_info("Reactive: audio capture requested by shader");
 }
 
 void reactive_shutdown(void) {
     if (!atomic_load(&g_inited)) return;
-    /* Both capture threads block waiting on a pipe fed by a child (parec /
-     * nvidia-smi). Clearing the run flag alone does NOT unblock them — the wait
-     * only re-checks the flag after it returns.
-     *
-     * Primary wake is the self-pipe: one byte makes the poll return at once,
-     * regardless of whether the child is alive, already reaped, or never
-     * started. Relying on the child's death for EOF (as this used to) loses the
-     * race often enough that "capture thread did not stop in time; abandoning"
-     * printed on essentially every exit.
-     *
-     * SIGKILL of the child stays as a backstop: it stops the child promptly and
-     * covers the case where the wake pipe could not be created. The bounded
-     * join stays too — a never-returning shutdown is far worse than a detached
-     * capture thread the kernel reaps on _exit. */
-    reactive_wake_threads();
-
-    /* Wake the sampler off its condvar and wait for it. */
     if (atomic_load(&g_sys_run)) {
         pthread_mutex_lock(&g_sample_lock);
         atomic_store(&g_sys_run, false);
@@ -911,44 +655,10 @@ void reactive_shutdown(void) {
         pthread_mutex_unlock(&g_sample_lock);
         pthread_join(g_sys_thread, NULL);
     }
-
-    /* Each capture thread: stop it, kill its child, wait up to 1 s on the
-     * monotonic clock. One that finished is joined; one that didn't is
-     * detached and abandoned (the kernel reaps it at exit). */
-    bool abandoned = false;
-    if (atomic_load(&g_audio_run)) {
-        atomic_store(&g_audio_run, false);
-        kill_child(&g_parec_pid);
-        if (wait_exited(&g_audio_exited, 1000)) {
-            pthread_join(g_audio_thread, NULL);
-        } else {
-            pthread_detach(g_audio_thread);
-            kill_child(&g_parec_pid);
-            abandoned = true;
-            log_warn("reactive: audio capture thread did not stop in time; abandoning");
-        }
-    }
-    if (atomic_load(&g_nv_run)) {
-        atomic_store(&g_nv_run, false);
-        kill_child(&g_nv_pid);
-        if (wait_exited(&g_nv_exited, 1000)) {
-            pthread_join(g_nv_thread, NULL);
-        } else {
-            pthread_detach(g_nv_thread);
-            kill_child(&g_nv_pid);
-            abandoned = true;
-            log_warn("reactive: NVIDIA capture thread did not stop in time; abandoning");
-        }
-    }
-
-    /* Close the wake pipe only when nothing can still be polling it: an
-     * abandoned thread could otherwise poll a recycled fd number. The pipe
-     * stays signalled, so an abandoned thread wakes as soon as it gets there. */
-    if (!abandoned) {
-        if (g_wake_pipe[1] >= 0) { close(g_wake_pipe[1]); g_wake_pipe[1] = -1; }
-        if (g_wake_pipe[0] >= 0) { close(g_wake_pipe[0]); g_wake_pipe[0] = -1; }
-    }
-
+    /* Each capture stops within 1 s; one that doesn't is abandoned with its
+     * wake pipe left open (capture.h). */
+    capture_stop(&g_audio, 1000);
+    capture_stop(&g_nv, 1000);
     atomic_store(&g_audio_wanted, false);
     atomic_store(&g_nv_wanted, false);
     atomic_store(&g_inited, false);
@@ -1019,10 +729,10 @@ static void sample_once_locked(void) {
     g_snap.key_energy   = clampf(g_snap.key_energy   * 0.80f + keys * 0.25f, 0.0f, 1.0f);
     g_snap.mouse_energy = clampf(g_snap.mouse_energy * 0.80f + mouse / 400.0f, 0.0f, 1.0f);
 
-    if (!atomic_load(&g_audio_live)) {
+    if (!capture_live(&g_audio)) {
         g_snap.audio_active = false;
     }
-    if (!atomic_load(&g_nv_live)) {
+    if (!capture_live(&g_nv)) {
         g_snap.nv_active = false;
     }
 

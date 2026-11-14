@@ -55,13 +55,18 @@ typedef struct {
     int fullscreen;
 } hypr_client_t;
 
-static pthread_mutex_t snap_lock = PTHREAD_MUTEX_INITIALIZER;
-static hypr_monitor_t snap_monitors[MAX_MONITORS];
-static int snap_n_monitors = 0;
-static hypr_client_t snap_clients[MAX_CLIENTS];
-static int snap_n_clients = 0;
-static uint64_t last_refresh_attempt_ms = 0; /* throttles retries */
-static uint64_t last_refresh_ok_ms = 0;      /* freshness of snapshot */
+/* The last answer from Hyprland's IPC: one per process (there's one
+ * Hyprland), refreshed at most every HYPR_REFRESH_MS. Everything below the
+ * lock is guarded by it. */
+static struct {
+    pthread_mutex_t lock;
+    hypr_monitor_t monitors[MAX_MONITORS];
+    int n_monitors;
+    hypr_client_t clients[MAX_CLIENTS];
+    int n_clients;
+    uint64_t attempt_ms;          /* throttles retries */
+    uint64_t ok_ms;               /* freshness of the snapshot */
+} g_hypr = {.lock = PTHREAD_MUTEX_INITIALIZER};
 
 /* ---------- IPC ---------- */
 
@@ -322,11 +327,11 @@ static const char *next_array_obj(const char **cursor) {
 /* ---------- refresh ---------- */
 
 static void parse_monitors(const char *json) {
-    snap_n_monitors = 0;
+    g_hypr.n_monitors = 0;
     const char *cursor = json;
     const char *obj;
-    while ((obj = next_array_obj(&cursor)) && snap_n_monitors < MAX_MONITORS) {
-        hypr_monitor_t *m = &snap_monitors[snap_n_monitors];
+    while ((obj = next_array_obj(&cursor)) && g_hypr.n_monitors < MAX_MONITORS) {
+        hypr_monitor_t *m = &g_hypr.monitors[g_hypr.n_monitors];
         m->id = parse_int_at(find_key(obj, "id"), -1);
         parse_string_at(find_key(obj, "name"), m->name, sizeof(m->name));
         m->x = parse_int_at(find_key(obj, "x"), 0);
@@ -346,17 +351,17 @@ static void parse_monitors(const char *json) {
         m->reserved_right  = rsv[2] > 0 ? rsv[2] : 0;
         m->reserved_bottom = rsv[3] > 0 ? rsv[3] : 0;
         if (m->w > 0 && m->h > 0) {
-            snap_n_monitors++;
+            g_hypr.n_monitors++;
         }
     }
 }
 
 static void parse_clients(const char *json) {
-    snap_n_clients = 0;
+    g_hypr.n_clients = 0;
     const char *cursor = json;
     const char *obj;
-    while ((obj = next_array_obj(&cursor)) && snap_n_clients < MAX_CLIENTS) {
-        hypr_client_t *c = &snap_clients[snap_n_clients];
+    while ((obj = next_array_obj(&cursor)) && g_hypr.n_clients < MAX_CLIENTS) {
+        hypr_client_t *c = &g_hypr.clients[g_hypr.n_clients];
         c->monitor = parse_int_at(find_key(obj, "monitor"), -1);
         const char *ws = find_key(obj, "workspace");
         c->ws = parse_int_at(find_key(ws, "id"), -1);
@@ -371,7 +376,7 @@ static void parse_clients(const char *json) {
         c->hidden = hidden && *hidden == 't';
         c->fullscreen = parse_int_at(find_key(obj, "fullscreen"), 0);
         if (c->w > 0 && c->h > 0 && c->mapped && !c->hidden) {
-            snap_n_clients++;
+            g_hypr.n_clients++;
         }
     }
 }
@@ -385,32 +390,32 @@ void hyprland_coverage_refresh(void) {
         return;
     }
     uint64_t now = get_time_ms();
-    pthread_mutex_lock(&snap_lock);
-    if (now - last_refresh_attempt_ms < HYPR_REFRESH_MS) {
-        pthread_mutex_unlock(&snap_lock);
+    pthread_mutex_lock(&g_hypr.lock);
+    if (now - g_hypr.attempt_ms < HYPR_REFRESH_MS) {
+        pthread_mutex_unlock(&g_hypr.lock);
         return;
     }
     /* Stamp the attempt timestamp so we throttle retries even on failure,
-     * but DO NOT touch last_refresh_ok_ms until both queries succeed. The
+     * but DO NOT touch g_hypr.ok_ms until both queries succeed. The
      * previous code bumped the throttle before the queries ran, which meant
      * a failed IPC left the old (possibly "covered") snapshot in place for
      * 500ms with no retry — and if failures kept happening, the wallpaper
      * stayed paused indefinitely even after the user closed every window. */
-    last_refresh_attempt_ms = now;
-    pthread_mutex_unlock(&snap_lock);
+    g_hypr.attempt_ms = now;
+    pthread_mutex_unlock(&g_hypr.lock);
 
     /* Do network I/O outside the lock. */
     size_t mlen = 0, clen = 0;
     char *mjson = hypr_query("j/monitors", &mlen);
     char *cjson = hypr_query("j/clients", &clen);
 
-    pthread_mutex_lock(&snap_lock);
+    pthread_mutex_lock(&g_hypr.lock);
     if (mjson && cjson) {
         parse_monitors(mjson);
         parse_clients(cjson);
-        last_refresh_ok_ms = now;
+        g_hypr.ok_ms = now;
     }
-    pthread_mutex_unlock(&snap_lock);
+    pthread_mutex_unlock(&g_hypr.lock);
 
     free(mjson);
     free(cjson);
@@ -420,9 +425,9 @@ void hyprland_coverage_refresh(void) {
 static const hypr_monitor_t *find_monitor_for(const struct output_state *o) {
     const char *want = o->connector_name[0] ? o->connector_name : NULL;
     if (!want) return NULL;
-    for (int i = 0; i < snap_n_monitors; i++) {
-        if (strcmp(snap_monitors[i].name, want) == 0) {
-            return &snap_monitors[i];
+    for (int i = 0; i < g_hypr.n_monitors; i++) {
+        if (strcmp(g_hypr.monitors[i].name, want) == 0) {
+            return &g_hypr.monitors[i];
         }
     }
     return NULL;
@@ -431,20 +436,20 @@ static const hypr_monitor_t *find_monitor_for(const struct output_state *o) {
 bool hyprland_output_covered(const struct output_state *o, float threshold) {
     if (!o || !hyprland_coverage_available()) return false;
 
-    pthread_mutex_lock(&snap_lock);
+    pthread_mutex_lock(&g_hypr.lock);
 
     /* If the snapshot is too old (IPC has been failing, Hyprland restarted,
      * socket got wedged, ...), don't trust it. Better to render an extra frame
      * than to leave the wallpaper frozen forever. */
-    if (last_refresh_ok_ms == 0 ||
-        get_time_ms() - last_refresh_ok_ms > HYPR_SNAPSHOT_TTL_MS) {
-        pthread_mutex_unlock(&snap_lock);
+    if (g_hypr.ok_ms == 0 ||
+        get_time_ms() - g_hypr.ok_ms > HYPR_SNAPSHOT_TTL_MS) {
+        pthread_mutex_unlock(&g_hypr.lock);
         return false;
     }
 
     const hypr_monitor_t *m = find_monitor_for(o);
     if (!m || m->w <= 0 || m->h <= 0) {
-        pthread_mutex_unlock(&snap_lock);
+        pthread_mutex_unlock(&g_hypr.lock);
         return false;
     }
 
@@ -458,7 +463,7 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
     int ww = wx1 - wx0;
     int wh = wy1 - wy0;
     if (ww <= 0 || wh <= 0) {
-        pthread_mutex_unlock(&snap_lock);
+        pthread_mutex_unlock(&g_hypr.lock);
         return false;
     }
 
@@ -470,8 +475,8 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
     static uint8_t grid[GRID_H][GRID_W];
     memset(grid, 0, sizeof(grid));
 
-    for (int i = 0; i < snap_n_clients; i++) {
-        const hypr_client_t *c = &snap_clients[i];
+    for (int i = 0; i < g_hypr.n_clients; i++) {
+        const hypr_client_t *c = &g_hypr.clients[i];
         if (c->monitor != m->id) continue;
         if (c->ws != m->active_ws) continue;
 
@@ -507,7 +512,7 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
             covered += grid[y][x];
         }
     }
-    pthread_mutex_unlock(&snap_lock);
+    pthread_mutex_unlock(&g_hypr.lock);
 
     float frac = (float)covered / (float)(GRID_W * GRID_H);
     return frac >= threshold;
@@ -525,21 +530,21 @@ int hyprland_output_windows(const struct output_state *o,
      * timestamp comparison and the two callers share one IPC round-trip. */
     hyprland_coverage_refresh();
 
-    pthread_mutex_lock(&snap_lock);
+    pthread_mutex_lock(&g_hypr.lock);
 
     /* Same staleness rule as the coverage path: a snapshot we no longer trust
      * must report nothing rather than pin windows to where they used to be.
      * A shader lighting up a stale rectangle is more obviously wrong than one
      * that simply sees an empty desktop. */
-    if (last_refresh_ok_ms == 0 ||
-        get_time_ms() - last_refresh_ok_ms > HYPR_SNAPSHOT_TTL_MS) {
-        pthread_mutex_unlock(&snap_lock);
+    if (g_hypr.ok_ms == 0 ||
+        get_time_ms() - g_hypr.ok_ms > HYPR_SNAPSHOT_TTL_MS) {
+        pthread_mutex_unlock(&g_hypr.lock);
         return 0;
     }
 
     const hypr_monitor_t *m = find_monitor_for(o);
     if (!m || m->w <= 0 || m->h <= 0) {
-        pthread_mutex_unlock(&snap_lock);
+        pthread_mutex_unlock(&g_hypr.lock);
         return 0;
     }
 
@@ -549,8 +554,8 @@ int hyprland_output_windows(const struct output_state *o,
      * does NOT subtract reserved zones: a bar overlapping the wallpaper is
      * still a real position a shader may want to react to. */
     int n = 0;
-    for (int i = 0; i < snap_n_clients && n < max; i++) {
-        const hypr_client_t *c = &snap_clients[i];
+    for (int i = 0; i < g_hypr.n_clients && n < max; i++) {
+        const hypr_client_t *c = &g_hypr.clients[i];
         if (c->monitor != m->id) continue;
         if (c->ws != m->active_ws) continue;
         if (c->w <= 0 || c->h <= 0) continue;
@@ -574,7 +579,7 @@ int hyprland_output_windows(const struct output_state *o,
         n++;
     }
 
-    pthread_mutex_unlock(&snap_lock);
+    pthread_mutex_unlock(&g_hypr.lock);
     return n;
 }
 

@@ -237,6 +237,7 @@ source_sources = files(
 # unlike the rest of the source layer which is dependency-free.
 source_reactive_sources = files(
   'src/source/reactive.c',
+  'src/source/capture.c',
   'src/source/builtin_reactive.c',
 )
 
@@ -750,7 +751,7 @@ test('source', test_source_exe)
 # Pins that every legacy bind name still resolves (a dropped one reads 0
 # silently rather than crashing) and that the occlusion contract survived.
 test_source_reactive_exe = executable('test_source_reactive',
-  files('tests/test_source_reactive.c', 'src/source/reactive.c', 'src/core/log.c', 'src/core/util.c',
+  files('tests/test_source_reactive.c', 'src/core/log.c', 'src/core/util.c',
         'src/core/wall_clock.c')
     + source_sources + source_reactive_sources,
   include_directories: [inc_dirs, inc_dirs_build],
@@ -759,6 +760,15 @@ test_source_reactive_exe = executable('test_source_reactive',
 )
 
 test('source_reactive', test_source_reactive_exe)
+
+# The helper-process reader: start, stop, restart, and abandoning a reader
+# that won't stop without breaking the next run.
+test('capture', executable('test_capture',
+  files('tests/test_capture.c', 'src/source/capture.c', 'src/core/log.c'),
+  include_directories: [inc_dirs, inc_dirs_build, include_directories('src/source')],
+  dependencies: [thread_dep],
+  build_by_default: false,
+))
 
 # gfx feedback/ping-pong logic: which half of the pair is readable this frame.
 # Reading the texture you are writing is undefined on most drivers rather than

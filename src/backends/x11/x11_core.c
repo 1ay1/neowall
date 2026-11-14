@@ -130,7 +130,7 @@ typedef struct {
      * root property, so waiting for a PropertyNotify would wait forever. */
     Window wm_check_window;
 
-    bool occlusion_active;
+    x11_occlusion occ;
 
     bool initialized;
 } x11_backend_data_t;
@@ -1400,23 +1400,18 @@ static bool x11_occ_init(void *backend_data, struct neowall_state *state) {
     if (!b || !b->x_display) {
         return false;
     }
-    b->occlusion_active = x11_occlusion_init(b->x_display, state);
-    return b->occlusion_active;
+    return x11_occlusion_init(&b->occ, b->x_display, state);
 }
 
 static void x11_occ_update(void *backend_data, struct neowall_state *state) {
     x11_backend_data_t *b = backend_data;
-    if (b && b->occlusion_active) {
-        x11_occlusion_update(state);
-    }
+    (void)state;
+    if (b) x11_occlusion_update(&b->occ);
 }
 
 static void x11_occ_cleanup(void *backend_data) {
     x11_backend_data_t *b = backend_data;
-    if (b && b->occlusion_active) {
-        x11_occlusion_cleanup();
-        b->occlusion_active = false;
-    }
+    if (b) x11_occlusion_cleanup(&b->occ);
 }
 
 /* ============================================================================

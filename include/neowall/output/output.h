@@ -290,6 +290,8 @@ bool output_configure_compositor_surface(struct output_state *output);
 bool output_create_egl_surface(struct output_state *output);
 /* Make the shared context current on this output's surface. */
 bool output_make_current(struct output_state *output);
+/* Release GL objects shared by all outputs. The context must be current. */
+void output_release_shared_gl(void);
 void output_set_wallpaper(struct output_state *output, const char *path);
 /* Notify the output core that its physical render dimensions changed. Safe in
  * compositor callbacks: only atomics are touched; image/GL replacement occurs

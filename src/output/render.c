@@ -77,7 +77,14 @@ static const char *color_fragment_shader =
     "    fragColor = color;\n"
     "}\n";
 
-static GLuint color_overlay_program = 0;
+/* GL objects every output shares (there's one context). Made on first use,
+ * released by render_release_shared() before the context goes. */
+static struct {
+    GLuint overlay_prog;          /* the FPS text */
+    GLint overlay_pos, overlay_color;
+    GLuint overlay_vao, overlay_vbo;
+    GLuint fade_prog, fade_vao;   /* the crossfade between two shaders */
+} g_gl = {.overlay_pos = -1, .overlay_color = -1};
 
 /* Simple 5x7 bitmap font for FPS display (digits 0-9, dot, space, and 'FPS') */
 static const uint8_t font_5x7[][7] = {
@@ -102,8 +109,6 @@ static const uint8_t font_5x7[][7] = {
  * in one buffer, drawn in a single call per colour. Locations, the VAO and
  * the VBO are made once, not per frame (it used to be ~250 glBufferData
  * calls and a fresh VBO every frame). */
-static GLint overlay_pos = -1, overlay_color = -1;
-static GLuint overlay_vao, overlay_vbo;
 
 static int glyph_index(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -138,18 +143,18 @@ static int glyph_quads(float *v, int idx, float x, float y, float cw, float ch, 
 
 static void render_fps_watermark(struct output_state *output) {
     if (!output || !output->config->show_fps) return;
-    if (output->fps_current <= 0.0f || !color_overlay_program) return;
+    if (output->fps_current <= 0.0f || !g_gl.overlay_prog) return;
 
-    if (!overlay_vao) {
-        overlay_pos = glGetAttribLocation(color_overlay_program, "position");
-        overlay_color = glGetUniformLocation(color_overlay_program, "color");
-        if (overlay_pos < 0 || overlay_color < 0) return;
-        glGenVertexArrays(1, &overlay_vao);
-        glGenBuffers(1, &overlay_vbo);
-        glBindVertexArray(overlay_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, overlay_vbo);
-        glVertexAttribPointer((GLuint)overlay_pos, 2, GL_FLOAT, GL_FALSE, 0, 0);
-        glEnableVertexAttribArray((GLuint)overlay_pos);
+    if (!g_gl.overlay_vao) {
+        g_gl.overlay_pos = glGetAttribLocation(g_gl.overlay_prog, "position");
+        g_gl.overlay_color = glGetUniformLocation(g_gl.overlay_prog, "color");
+        if (g_gl.overlay_pos < 0 || g_gl.overlay_color < 0) return;
+        glGenVertexArrays(1, &g_gl.overlay_vao);
+        glGenBuffers(1, &g_gl.overlay_vbo);
+        glBindVertexArray(g_gl.overlay_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, g_gl.overlay_vbo);
+        glVertexAttribPointer((GLuint)g_gl.overlay_pos, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray((GLuint)g_gl.overlay_pos);
     }
 
     char text[32];
@@ -181,14 +186,14 @@ static void render_fps_watermark(struct output_state *output) {
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glUseProgram(color_overlay_program);
-    glBindVertexArray(overlay_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, overlay_vbo);
+    glUseProgram(g_gl.overlay_prog);
+    glBindVertexArray(g_gl.overlay_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, g_gl.overlay_vbo);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size_t)n * 2 * sizeof(float)), verts, GL_STREAM_DRAW);
 
-    glUniform4f(overlay_color, 0.0f, 0.0f, 0.0f, 1.0f);
+    glUniform4f(g_gl.overlay_color, 0.0f, 0.0f, 0.0f, 1.0f);
     glDrawArrays(GL_TRIANGLES, 0, half);
-    glUniform4f(overlay_color, 0.0f, 1.0f, 0.0f, 1.0f);
+    glUniform4f(g_gl.overlay_color, 0.0f, 1.0f, 0.0f, 1.0f);
     glDrawArrays(GL_TRIANGLES, half, n - half);
 
     glBindVertexArray((GLuint)prev_vao);
@@ -205,16 +210,8 @@ static const float quad_vertices[] = {
      1.0f, -1.0f,    1.0f, 1.0f   /* bottom-right */
 };
 
-/* Simple fullscreen quad vertices (position only) for shader rendering - matches gleditor */
-static const float shader_quad_vertices[] = {
-    -1.0f, -1.0f,  /* Bottom-left */
-     1.0f, -1.0f,  /* Bottom-right */
-    -1.0f,  1.0f,  /* Top-left */
-     1.0f,  1.0f,  /* Top-right */
-};
 
 /* Shader-specific VBO (created once, shared across outputs) */
-static GLuint shader_vbo = 0;
 
 /* Helper: Cache uniform locations for a program */
 static inline void cache_program_uniforms(struct output_state *output) {
@@ -284,8 +281,8 @@ bool render_init_output(struct output_state *output) {
     output->shader_uniforms.u_speed = -2;
 
     /* Create simple color shader for overlays (once, shared across outputs) */
-    if (color_overlay_program == 0) {
-        if (!shader_create_program_from_sources(color_vertex_shader, color_fragment_shader, &color_overlay_program)) {
+    if (g_gl.overlay_prog == 0) {
+        if (!shader_create_program_from_sources(color_vertex_shader, color_fragment_shader, &g_gl.overlay_prog)) {
             log_error("Failed to create color overlay shader program");
             return false;
         }
@@ -329,15 +326,6 @@ bool render_init_output(struct output_state *output) {
     glBindBuffer(GL_ARRAY_BUFFER, output->vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), quad_vertices, GL_STATIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-    /* Create shared shader VBO (matching gleditor's format exactly) */
-    if (shader_vbo == 0) {
-        glGenBuffers(1, &shader_vbo);
-        glBindBuffer(GL_ARRAY_BUFFER, shader_vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(shader_quad_vertices), shader_quad_vertices, GL_STATIC_DRAW);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        log_debug("Created shader VBO with gleditor-compatible format");
-    }
 
     /* Check for errors */
     GLenum error = glGetError();
@@ -748,8 +736,6 @@ static const char *clock_fade_fs =
     "uniform sampler2D tex;\n"
     "uniform float alpha;\n"
     "void main() { fragColor = vec4(texture(tex, uv).rgb, alpha); }\n";
-static GLuint clock_fade_program = 0;
-static GLuint clock_fade_vao = 0;
 
 /* Copy what's in the back buffer now (the last frame on the old clock). */
 static bool clock_fade_capture(struct output_state *output, int w, int h) {
@@ -768,10 +754,10 @@ static bool clock_fade_capture(struct output_state *output, int w, int h) {
 
 /* Draw the captured frame over the new one, fading out. */
 static void clock_fade_draw(struct output_state *output, int w, int h, float alpha) {
-    if (!clock_fade_program) {
-        if (!shader_create_program_from_sources(clock_fade_vs, clock_fade_fs, &clock_fade_program))
+    if (!g_gl.fade_prog) {
+        if (!shader_create_program_from_sources(clock_fade_vs, clock_fade_fs, &g_gl.fade_prog))
             return;
-        glGenVertexArrays(1, &clock_fade_vao);
+        glGenVertexArrays(1, &g_gl.fade_vao);
     }
     GLint prev_prog = 0;
     glGetIntegerv(GL_CURRENT_PROGRAM, &prev_prog);
@@ -780,12 +766,12 @@ static void clock_fade_draw(struct output_state *output, int w, int h, float alp
     glViewport(0, 0, w, h);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glUseProgram(clock_fade_program);
+    glUseProgram(g_gl.fade_prog);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, output->clock_fade_tex);
-    glUniform1i(glGetUniformLocation(clock_fade_program, "tex"), 0);
-    glUniform1f(glGetUniformLocation(clock_fade_program, "alpha"), alpha);
-    glBindVertexArray(clock_fade_vao);
+    glUniform1i(glGetUniformLocation(g_gl.fade_prog, "tex"), 0);
+    glUniform1f(glGetUniformLocation(g_gl.fade_prog, "alpha"), alpha);
+    glBindVertexArray(g_gl.fade_vao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -1390,4 +1376,14 @@ bool render_frame_transition(struct output_state *output, float progress) {
     }
 
     return result;
+}
+
+void render_release_shared(void) {
+    if (g_gl.overlay_prog) glDeleteProgram(g_gl.overlay_prog);
+    if (g_gl.overlay_vbo) glDeleteBuffers(1, &g_gl.overlay_vbo);
+    if (g_gl.overlay_vao) glDeleteVertexArrays(1, &g_gl.overlay_vao);
+    if (g_gl.fade_prog) glDeleteProgram(g_gl.fade_prog);
+    if (g_gl.fade_vao) glDeleteVertexArrays(1, &g_gl.fade_vao);
+    memset(&g_gl, 0, sizeof(g_gl));
+    g_gl.overlay_pos = g_gl.overlay_color = -1;
 }

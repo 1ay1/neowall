@@ -558,3 +558,7 @@ bool output_make_current(struct output_state *output) {
                                     output->compositor_surface->egl_surface,
                                     output->state->egl_context);
 }
+
+void output_release_shared_gl(void) {
+    render_release_shared();
+}

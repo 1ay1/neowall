@@ -55,8 +55,14 @@ bool app_graphics_up(struct neowall_state *state) {
     return true;
 }
 
-/* Graphics down: surfaces before the context they belong to. */
+/* Graphics down: shared GL objects and surfaces before the context. */
 void app_graphics_down(struct neowall_state *state) {
+    if (state->egl_display != EGL_NO_DISPLAY && state->egl_context != EGL_NO_CONTEXT) {
+        bool current = false;
+        for (struct output_state *o = state->outputs; o && !current; o = o->next)
+            current = output_make_current(o);
+        if (current) output_release_shared_gl();
+    }
     for (struct output_state *o = state->outputs; o; o = o->next) {
         if (o->compositor_surface && o->compositor_surface->egl_surface != EGL_NO_SURFACE)
             compositor_surface_destroy_egl(o->compositor_surface, state->egl_display);

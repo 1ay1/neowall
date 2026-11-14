@@ -8,8 +8,10 @@ can't be dropped. Every number here was measured on the tree, not guessed.
 Status: steps 6 and 7 are done. `neowall.h` is gone; modules form a strict
 hierarchy with no include cycles, enforced in CI by `scripts/check-layers.sh`
 (see ARCHITECTURE.md §2). `output.c` is split by role. Update is pure and
-returns effects. Still open: module globals into owned structs (step 4) and
-the remaining fixed path buffers.
+returns effects. Module globals: reactive's audio and NVIDIA readers are
+`capture` values (refcounted runs, no shared state between a stuck reader
+and a restart); X11 occlusion lives on the backend; render's shared GL
+objects and the Hyprland cache each have one owner and a release path.
 
 ## Where it already is
 
