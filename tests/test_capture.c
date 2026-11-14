@@ -93,13 +93,17 @@ int main(void) {
         for (int w = 0; w < 200 && !capture_live(&c); w++)
             sleep_ms(2);
         CHECK(capture_live(&c), "live %d", i);
+        /* live means the reader started, not that `yes` has written yet */
+        long before = atomic_load(&g_bytes);
+        for (int w = 0; w < 1000 && atomic_load(&g_bytes) == before; w++)
+            sleep_ms(2);
+        CHECK(atomic_load(&g_bytes) > before, "data was read %d", i);
         struct timespec t0;
         clock_gettime(CLOCK_MONOTONIC, &t0);
         CHECK(capture_stop(&c, 1000), "stop %d", i);
         CHECK(ms_since(&t0) < 500, "stop %d took %.0f ms", i, ms_since(&t0));
         CHECK(!capture_live(&c) && !capture_running(&c), "stopped %d", i);
     }
-    CHECK(atomic_load(&g_bytes) > 0, "data was read");
     CHECK(capture_stop(&c, 10), "stop when stopped is fine");
     CHECK(count_children() == 0, "no children left");
     CHECK(count_fds() == fds, "no fds leaked (%d -> %d)", fds, count_fds());
