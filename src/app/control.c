@@ -48,40 +48,41 @@ static void set_index(struct app *a, rt_loop *loop, const nw_ipc_request_t *r) {
     char *end = NULL;
     long idx = strtol(r->arg, &end, 10);
     if (!r->arg[0] || *end || idx < 0 || idx > 100000) {
-        ipc_server_reply(a->ipc, r->conn, false, "usage: set <index>");
+        ipc_server_reply(a->host.ipc, r->conn, false, "usage: set <index>");
         return;
     }
     size_t most = summarize_outputs(a->state).longest_cycle;
     if (most <= 1) {
-        ipc_server_reply(a->ipc, r->conn, false,
+        ipc_server_reply(a->host.ipc, r->conn, false,
                          "nothing to set: only one wallpaper or shader is configured");
         return;
     }
     if ((size_t)idx >= most) {
         snprintf(text, sizeof(text), "index %ld is out of range (0-%zu)", idx, most - 1);
-        ipc_server_reply(a->ipc, r->conn, false, text);
+        ipc_server_reply(a->host.ipc, r->conn, false, text);
         return;
     }
     app_send(loop, NW_MSG_SET_INDEX, 0, idx);
     snprintf(text, sizeof(text), "setting wallpaper %ld", idx);
-    ipc_server_reply(a->ipc, r->conn, true, text);
+    ipc_server_reply(a->host.ipc, r->conn, true, text);
 }
 
-/* `set-terminal <command>`. The command is too long for a message, so it
- * waits in the model and the message says it's there. */
+/* `set-terminal <command>`. The message carries a copy of the command. */
 static void set_terminal(struct app *a, rt_loop *loop, const nw_ipc_request_t *r) {
-    if (!r->arg[0] || strlen(r->arg) >= sizeof(a->ipc_terminal_cmd)) {
-        ipc_server_reply(a->ipc, r->conn, false,
+    if (!r->arg[0] || strlen(r->arg) >= APP_TERMINAL_CMD_MAX) {
+        ipc_server_reply(a->host.ipc, r->conn, false,
                          r->arg[0] ? "command too long" : "usage: set-terminal <command>");
         return;
     }
     if (!summarize_outputs(a->state).has_terminal) {
-        ipc_server_reply(a->ipc, r->conn, false, "no output is running a terminal wallpaper");
+        ipc_server_reply(a->host.ipc, r->conn, false, "no output is running a terminal wallpaper");
         return;
     }
-    snprintf(a->ipc_terminal_cmd, sizeof(a->ipc_terminal_cmd), "%s", r->arg);
-    app_send(loop, NW_MSG_SET_TERMINAL, 0, 0);
-    ipc_server_reply(a->ipc, r->conn, true, "swapping terminal wallpaper");
+    if (!app_send_terminal(loop, r->arg)) {
+        ipc_server_reply(a->host.ipc, r->conn, false, "out of memory");
+        return;
+    }
+    ipc_server_reply(a->host.ipc, r->conn, true, "swapping terminal wallpaper");
 }
 
 void app_on_ipc_request(void *ctx, rt_loop *loop, const nw_ipc_request_t *r) {
@@ -98,12 +99,12 @@ void app_on_ipc_request(void *ctx, rt_loop *loop, const nw_ipc_request_t *r) {
 
     if (strcmp(r->verb, "ping") == 0) {
         snprintf(text, sizeof(text), "neowall %s pid %d", NEOWALL_VERSION, (int)getpid());
-        ipc_server_reply(a->ipc, r->conn, true, text);
+        ipc_server_reply(a->host.ipc, r->conn, true, text);
         return;
     }
 
     if (strcmp(r->verb, "next") == 0 && summarize_outputs(a->state).longest_cycle <= 1) {
-        ipc_server_reply(a->ipc, r->conn, false,
+        ipc_server_reply(a->host.ipc, r->conn, false,
                          "nothing to cycle: only one wallpaper or shader is configured");
         return;
     }
@@ -119,7 +120,7 @@ void app_on_ipc_request(void *ctx, rt_loop *loop, const nw_ipc_request_t *r) {
         if (strcmp(r->verb, simple[i].verb) != 0) continue;
         /* Reply now: "kill" stops the loop, and the client is owed an answer
          * before that. */
-        ipc_server_reply(a->ipc, r->conn, true, simple[i].done);
+        ipc_server_reply(a->host.ipc, r->conn, true, simple[i].done);
         app_send(loop, simple[i].kind, 0, 0);
         return;
     }
@@ -134,5 +135,5 @@ void app_on_ipc_request(void *ctx, rt_loop *loop, const nw_ipc_request_t *r) {
     }
 
     snprintf(text, sizeof(text), "unknown command '%s'", r->verb);
-    ipc_server_reply(a->ipc, r->conn, false, text);
+    ipc_server_reply(a->host.ipc, r->conn, false, text);
 }

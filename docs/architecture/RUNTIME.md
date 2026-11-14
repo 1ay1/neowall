@@ -85,6 +85,16 @@ under TSan.
 | `present.c` | draw every output that needs it, bring outputs up |
 | `host.c` | the compositor and watch fds → messages |
 | `control.c` | control-socket requests → messages |
+| `daemon.c` | pid file, daemonize, crash handlers, blocked signals |
+
+`struct app` splits by owner: `model` (only update writes it; present,
+subscribe and wait_hint get it `const`), `view` (present's stats) and `host`
+(fd bookkeeping). present acts on the requests in the model and reports
+what it used with `NW_MSG_APPLIED`; update clears them. Each report names
+the request (index, generation), so one that arrived mid-frame survives.
+
+The CLI side lives in `src/cli/` (usage, tools, talking to a daemon, the
+old command files), so `main.c` is just argument parsing and bring-up.
 
 **Messages** (`include/neowall/app/app.h`):
 
@@ -100,6 +110,7 @@ under TSan.
 | `WATCH` | `neowall watch`: the shader file changed |
 | `REDRAW` | any thread (`app_request_redraw`) |
 | `GPU_LOST` | present: the context or a surface can't recover |
+| `APPLIED` | present: which queued requests this frame used up |
 
 A message from a signal has `id = signo`; from the socket or `perform` it
 has `id 0` and carries its argument. So `SET_INDEX` from an old CLI's

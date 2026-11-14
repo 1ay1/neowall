@@ -346,6 +346,55 @@ static void test_stress(void) {
     rt_loop_free(l);
 }
 
+/* 11. present reports what it consumed with rt_send; update must see that
+ * before present runs again, or a request gets applied twice. */
+typedef struct {
+    int pending;      /* model: requests waiting */
+    int applied;      /* how many times present acted on one */
+    int presents;
+    bool ended;
+} consume_prog;
+
+enum { K_REQ = 100, K_DONE, K_END };
+
+static void consume_upd(void *self, const rt_msg *m, rt_cmds *cmds) {
+    consume_prog *p = self;
+    if (m->kind == K_REQ) p->pending++;
+    if (m->kind == K_DONE && p->pending > 0) p->pending--;
+    if (m->kind == K_END) rt_cmd_quit(cmds, 0);
+}
+
+static void consume_present(void *self, rt_loop *l) {
+    consume_prog *p = self;
+    p->presents++;
+    if (p->pending > 0) {
+        p->applied++;
+        rt_msg done = {.kind = K_DONE};
+        rt_send(l, &done);
+    }
+    /* idle again (nothing pending, ticks drained): stop */
+    if (p->pending == 0 && p->applied > 0 && !p->ended) {
+        p->ended = true;
+        rt_msg end = {.kind = K_END};
+        rt_send(l, &end);
+    }
+}
+
+static void test_present_report(void) {
+    rt_loop *l = rt_loop_new();
+    consume_prog p = {0};
+    rt_program pr = {.self = &p, .update = consume_upd, .present = consume_present};
+    rt_msg req = {.kind = K_REQ};
+    rt_send(l, &req);
+    /* keep the loop stepping so present runs several times */
+    rt_msg tick = {.kind = K_TICK};
+    for (int i = 0; i < 3; i++) rt_post(l, &tick);
+    rt_run(l, &pr);
+    CHECK(p.applied == 1, "request applied once, got %d", p.applied);
+    CHECK(p.pending == 0, "and cleared");
+    rt_loop_free(l);
+}
+
 /* 5b. Commands run right after the update that pushed them, in order, and a
  * message a command sends is folded before the step ends. */
 static void test_commands(void) {
@@ -378,6 +427,7 @@ int main(void) {
     test_fd();
     test_idle();
     test_stress();
+    test_present_report();
     printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;
 }

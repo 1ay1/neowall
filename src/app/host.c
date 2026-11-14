@@ -19,14 +19,14 @@ bool app_host_prepare(void *ctx, rt_loop *loop) {
     void *bd = state->compositor_backend ? state->compositor_backend->data : NULL;
     if (!ops) return false;
 
-    a->read_prepared = false;
+    a->host.read_prepared = false;
     if (ops->prepare_events) {
         if (!ops->prepare_events(bd)) {
             log_error("Failed to prepare compositor events");
             app_send(loop, NW_MSG_QUIT, 0, 0);
             return true;
         }
-        a->read_prepared = true;
+        a->host.read_prepared = true;
     }
     if (ops->flush) {
         compositor_flush_result_t fr = ops->flush(bd);
@@ -35,10 +35,10 @@ bool app_host_prepare(void *ctx, rt_loop *loop) {
             app_send(loop, NW_MSG_QUIT, 0, 0);
             return true;
         }
-        a->flush_blocked = fr == COMPOSITOR_FLUSH_BLOCKED;
-        if (a->compositor_watch)
-            rt_watch_modify(loop, a->compositor_watch,
-                            RT_READ | (a->flush_blocked ? RT_WRITE : 0));
+        a->host.flush_blocked = fr == COMPOSITOR_FLUSH_BLOCKED;
+        if (a->host.compositor_watch)
+            rt_watch_modify(loop, a->host.compositor_watch,
+                            RT_READ | (a->host.flush_blocked ? RT_WRITE : 0));
     }
     return ops->has_pending_events && ops->has_pending_events(bd);
 }
@@ -52,8 +52,8 @@ void app_on_compositor(void *ctx, rt_loop *loop, int fd, unsigned ev) {
 
     if (ev & RT_HANGUP) {
         log_error("Compositor disconnected, display server shut down");
-        if (a->read_prepared && ops->cancel_read) ops->cancel_read(bd);
-        a->read_prepared = false;
+        if (a->host.read_prepared && ops->cancel_read) ops->cancel_read(bd);
+        a->host.read_prepared = false;
         app_send(loop, NW_MSG_QUIT, 0, 0);
         return;
     }
@@ -63,16 +63,16 @@ void app_on_compositor(void *ctx, rt_loop *loop, int fd, unsigned ev) {
             app_send(loop, NW_MSG_QUIT, 0, 0);
             return;
         }
-        a->read_prepared = false;
+        a->host.read_prepared = false;
     }
-    if ((ev & RT_WRITE) && a->flush_blocked && ops->flush) {
+    if ((ev & RT_WRITE) && a->host.flush_blocked && ops->flush) {
         compositor_flush_result_t fr = ops->flush(bd);
         if (fr == COMPOSITOR_FLUSH_FATAL) {
             log_error("Failed to flush compositor requests after POLLOUT");
             app_send(loop, NW_MSG_QUIT, 0, 0);
             return;
         }
-        a->flush_blocked = fr == COMPOSITOR_FLUSH_BLOCKED;
+        a->host.flush_blocked = fr == COMPOSITOR_FLUSH_BLOCKED;
     }
 }
 
@@ -86,8 +86,8 @@ void app_host_after_wait(void *ctx, rt_loop *loop, bool fd_ready) {
     const compositor_backend_ops_t *ops = state->compositor_backend->ops;
     void *bd = state->compositor_backend->data;
 
-    if (a->read_prepared && ops->cancel_read) ops->cancel_read(bd);
-    a->read_prepared = false;
+    if (a->host.read_prepared && ops->cancel_read) ops->cancel_read(bd);
+    a->host.read_prepared = false;
 
     if (ops->dispatch_events && !ops->dispatch_events(bd)) {
         log_error("Failed to dispatch compositor events, display server may have disconnected");

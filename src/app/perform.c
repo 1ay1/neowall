@@ -6,6 +6,7 @@
 #include "app_internal.h"
 #include "neowall/app/app.h"
 #include "neowall/app/watch.h"
+#include "neowall/cli/cli.h"
 #include "neowall/config/config.h"
 #include "neowall/occlusion/occlusion.h"
 #include "neowall/output/output.h"
@@ -50,7 +51,7 @@ static void frame_due(struct app *a, uint32_t id) {
     struct neowall_state *state = a->state;
     pthread_rwlock_rdlock(&state->output_list_lock);
     struct output_state *o = output_by_id(state, id);
-    if (o && !(o->config->type == WALLPAPER_SHADER && a->shader_paused)) {
+    if (o && !(o->config->type == WALLPAPER_SHADER && a->model.shader_paused)) {
         bool idle = o->config->type == WALLPAPER_TERMINAL && o->shader &&
                     o->frames_rendered > 0 &&
                     !term_gpu_animating(wallshader_terminal(o->shader), APP_TERM_FX_SETTLE_MS);
@@ -80,7 +81,7 @@ static void reload(struct app *a, uint32_t conn) {
     }
     nw_sd_notify("READY=1");
     if (conn)
-        ipc_server_reply(a->ipc, conn, ok,
+        ipc_server_reply(a->host.ipc, conn, ok,
                          ok ? "configuration reloaded"
                             : "reload failed; the previous configuration is still in effect");
 }
@@ -112,13 +113,15 @@ void app_perform(void *self, rt_loop *loop, const rt_cmd *c) {
         break;
     }
 
-    case APP_CMD_READ_TERMINAL_FILE:
-        if (!read_set_terminal_file(a->ipc_terminal_cmd, sizeof(a->ipc_terminal_cmd))) {
+    case APP_CMD_READ_TERMINAL_FILE: {
+        char buf[APP_TERMINAL_CMD_MAX];
+        if (!read_set_terminal_file(buf, sizeof(buf))) {
             log_error("set-terminal requested but no valid command file found");
             break;
         }
-        app_send(loop, NW_MSG_SET_TERMINAL, 0, 0);
+        app_send_terminal(loop, buf);
         break;
+    }
 
     case APP_CMD_SHADER_PAUSE:
         shader_pause(state, c->v.i != 0);

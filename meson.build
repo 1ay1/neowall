@@ -190,9 +190,18 @@ runtime_sources = files(
   'src/runtime/sd_notify.c',
 )
 
+# cli: `neowall <verb>` other than running the daemon.
+cli_sources = files(
+  'src/cli/cmdfile.c',
+  'src/cli/control.c',
+  'src/cli/tools.c',
+  'src/cli/usage.c',
+)
+
 # app: the neowall program on the runtime (update / subscribe / present).
 app_sources = files(
   'src/main.c',
+  'src/app/daemon.c',
   'src/app/app.c',
   'src/app/update.c',
   'src/app/subscribe.c',
@@ -444,6 +453,7 @@ endif
 all_sources = (
   core_sources +
   runtime_sources +
+  cli_sources +
   app_sources +
   egl_sources +
   gfx_sources +

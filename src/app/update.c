@@ -7,6 +7,8 @@
  * without a display. */
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "app_internal.h"
 #include "neowall/app/app.h"
@@ -29,9 +31,21 @@ static void notify(rt_cmds *cmds, const char *line) {
  * id 0, with any argument already in hand. */
 static bool from_signal(const rt_msg *m) { return m->id != 0; }
 
-void app_update(void *self, const rt_msg *m, rt_cmds *cmds) {
-    struct app *a = self;
+void app_model_init(struct app_model *a) {
+    *a = (struct app_model){.set_index = -1};
+}
 
+/* present used these up; clear each only if it's still the same request. */
+static void applied(struct app_model *a, const struct app_applied *done) {
+    if ((done->flags & APP_APPLIED_NEXT) && a->next_pending > 0) a->next_pending--;
+    if ((done->flags & APP_APPLIED_INDEX) && a->set_index == done->index) a->set_index = -1;
+    if ((done->flags & APP_APPLIED_TERMINAL) && a->terminal_gen == done->terminal_gen)
+        a->terminal_pending = false;
+    if ((done->flags & APP_APPLIED_OUTPUTS) && a->outputs_gen == done->outputs_gen)
+        a->outputs_need_init = false;
+}
+
+void app_model_update(struct app_model *a, const rt_msg *m, rt_cmds *cmds) {
     switch (m->kind) {
     case NW_MSG_QUIT:
         log_info("Shutting down");
@@ -89,13 +103,16 @@ void app_update(void *self, const rt_msg *m, rt_cmds *cmds) {
 
     case NW_MSG_SET_TERMINAL:
         /* Same as SET_INDEX: a signal means the command is in a file. From
-         * the socket or perform it is already in ipc_terminal_cmd. */
+         * the socket or perform, v.p is a malloc'd copy and it's ours now. */
         if (from_signal(m)) {
             cmd(cmds, APP_CMD_READ_TERMINAL_FILE, 0, 0);
             return;
         }
-        snprintf(a->terminal_cmd, sizeof(a->terminal_cmd), "%s", a->ipc_terminal_cmd);
+        if (!m->v.p) return;
+        snprintf(a->terminal_cmd, sizeof(a->terminal_cmd), "%s", (const char *)m->v.p);
+        free(m->v.p);
         a->terminal_pending = true;
+        a->terminal_gen++;
         log_info("Swapping terminal wallpaper to: %s", a->terminal_cmd);
         return;
 
@@ -117,7 +134,15 @@ void app_update(void *self, const rt_msg *m, rt_cmds *cmds) {
         /* A new wl_output (hotplug, monitor back from DPMS). present brings
          * it up after this step's dispatch configured it. */
         a->outputs_need_init = true;
+        a->outputs_gen++;
         return;
+
+    case NW_MSG_APPLIED: {
+        struct app_applied done;
+        memcpy(&done, m->v.bytes, sizeof(done));
+        applied(a, &done);
+        return;
+    }
 
     case NW_MSG_TRANSITION:
     case NW_MSG_REDRAW:
@@ -140,4 +165,8 @@ void app_update(void *self, const rt_msg *m, rt_cmds *cmds) {
         cmd(cmds, APP_CMD_WATCH_RELOAD, 0, 0);
         return;
     }
+}
+
+void app_update(void *self, const rt_msg *m, rt_cmds *cmds) {
+    app_model_update(&((struct app *)self)->model, m, cmds);
 }

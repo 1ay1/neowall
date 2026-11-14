@@ -13,6 +13,8 @@
 
 #include <sched.h>
 #include <signal.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "app_internal.h"
 #include "neowall/app/app.h"
@@ -39,6 +41,15 @@ void app_send(rt_loop *l, uint32_t kind, uint32_t id, int64_t v) {
     rt_msg m = {.kind = kind, .id = id};
     m.v.i = v;
     rt_send(l, &m);
+}
+
+bool app_send_terminal(rt_loop *l, const char *cmd) {
+    char *copy = strdup(cmd);
+    if (!copy) return false;
+    rt_msg m = {.kind = NW_MSG_SET_TERMINAL};
+    m.v.p = copy;
+    rt_send(l, &m);
+    return true;
 }
 
 void app_arm_output_wake(bool armed) {
@@ -85,8 +96,9 @@ int app_run(struct neowall_state *state) {
         return EXIT_FAILURE;
     }
 
-    struct app a = {.state = state, .set_index = -1, .compositor_fd = -1};
-    a.stats_since_ms = get_time_ms();
+    struct app a = {.state = state, .host.compositor_fd = -1};
+    app_model_init(&a.model);
+    a.view.stats_since_ms = get_time_ms();
     a.loop = rt_loop_new();
     if (!a.loop) {
         log_error("Failed to create the runtime loop");
@@ -111,27 +123,27 @@ int app_run(struct neowall_state *state) {
         state->compositor_backend ? state->compositor_backend->ops : NULL;
     void *bd = state->compositor_backend ? state->compositor_backend->data : NULL;
     if (ops && ops->get_fd) {
-        a.compositor_fd = ops->get_fd(bd);
-        if (a.compositor_fd >= 0) {
-            a.compositor_watch = rt_watch(a.loop, a.compositor_fd, RT_READ, app_on_compositor, &a);
+        a.host.compositor_fd = ops->get_fd(bd);
+        if (a.host.compositor_fd >= 0) {
+            a.host.compositor_watch = rt_watch(a.loop, a.host.compositor_fd, RT_READ, app_on_compositor, &a);
             log_info("Using compositor backend '%s' with fd %d",
-                     state->compositor_backend->name, a.compositor_fd);
+                     state->compositor_backend->name, a.host.compositor_fd);
         }
     }
     rt_set_host_hooks(a.loop, app_host_prepare, app_host_after_wait, &a);
 
     if (state->watch_fd >= 0) {
-        a.watch_handle = rt_watch(a.loop, state->watch_fd, RT_READ, app_on_watch, &a);
+        a.host.watch_handle = rt_watch(a.loop, state->watch_fd, RT_READ, app_on_watch, &a);
     }
 
-    a.has_occlusion = occlusion_init(state);
+    a.model.has_occlusion = occlusion_init(state);
     reactive_init();
 
     /* The control socket. A preview runs beside the real daemon and must not
      * take it; neither does an instance that finds another one listening. */
     if (!state->is_preview) {
-        a.ipc = ipc_server_start(a.loop, app_socket_path(), app_on_ipc_request, &a);
-        if (!a.ipc) log_warn("Control socket unavailable; CLI commands fall back to signals");
+        a.host.ipc = ipc_server_start(a.loop, app_socket_path(), app_on_ipc_request, &a);
+        if (!a.host.ipc) log_warn("Control socket unavailable; CLI commands fall back to signals");
     }
 
     atomic_store_explicit(&g_loop, a.loop, memory_order_release);
@@ -154,9 +166,9 @@ int app_run(struct neowall_state *state) {
     while (atomic_load(&g_posters) > 0) sched_yield();
     atomic_store_explicit(&state->running, false, memory_order_release);
 
-    ipc_server_stop(a.ipc);
+    ipc_server_stop(a.host.ipc);
 
-    if (a.has_occlusion) occlusion_cleanup(state);
+    if (a.model.has_occlusion) occlusion_cleanup(state);
     reactive_shutdown();
     rt_loop_free(a.loop);
     return code;

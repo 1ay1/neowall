@@ -2,6 +2,7 @@
  * reconnect or hotplug. */
 
 #include <stdio.h>
+#include <string.h>
 
 #include "app_internal.h"
 #include "neowall/app/app.h"
@@ -27,16 +28,25 @@ struct swap_info {
 NW_VEC_DEFINE_STATIC(output_ptr_vec, struct output_state *)
 NW_VEC_DEFINE_STATIC(swap_vec, struct swap_info)
 
+/* One present call. The model is read-only here; what the frame used up and
+ * whether graphics died go back to update as messages. */
+struct frame {
+    struct neowall_state *state;
+    const struct app_model *m;
+    struct app_applied done;
+    bool gpu_lost;
+};
+
 
 /* Whether this output draws this step. Pure gating: no GL, no side effects. */
-static bool output_wants_frame(const struct app *a, struct output_state *output) {
+static bool output_wants_frame(const struct frame *f, struct output_state *output) {
     if (output->config->pause_on_fullscreen &&
         atomic_load_explicit(&output->occluded, memory_order_acquire)) {
         return false;   /* a fullscreen window covers it */
     }
     /* Shader pause keeps the last frame on screen with the GPU idle; the
      * clock is reconciled on resume (apply_shader_pause). */
-    if (output->config->type == WALLPAPER_SHADER && a->shader_paused) return false;
+    if (output->config->type == WALLPAPER_SHADER && f->m->shader_paused) return false;
     if (!atomic_load_explicit(&output->needs_redraw, memory_order_acquire) ||
         !output->compositor_surface ||
         output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
@@ -145,8 +155,8 @@ static bool output_damage_rect(const struct neowall_state *state, struct output_
 
 /* Present one rendered output: damage, present feedback, frame request,
  * swap, commit, pacing, and the post-frame bookkeeping. */
-static void output_present(struct app *a, struct output_state *output, uint64_t frame_time) {
-    struct neowall_state *state = a->state;
+static void output_present(struct frame *f, struct output_state *output, uint64_t frame_time) {
+    struct neowall_state *state = f->state;
     EGLSurface surf = output->compositor_surface->egl_surface;
 
     /* On the common single-output path the render phase left this current;
@@ -195,7 +205,7 @@ static void output_present(struct app *a, struct output_state *output, uint64_t 
         /* A lost context, or a surface that keeps failing, won't heal by
          * retrying every frame. Hand it to the restart path. */
         if (err == EGL_CONTEXT_LOST || gpu_health_swap_result(&output->swap_fail_streak, false)) {
-            a->gpu_lost = true;
+            f->gpu_lost = true;
         }
         return;
     }
@@ -243,21 +253,25 @@ static void explain_no_cycle(int total_outputs) {
     }
 }
 
-static void render_outputs(struct app *a) {
-    struct neowall_state *state = a->state;
+static void render_outputs(struct frame *f) {
+    struct neowall_state *state = f->state;
+    const struct app_model *m = f->m;
 
     uint64_t current_time = get_time_ms();
 
-    /* Take the commands update() queued since the last frame. They are model
-     * fields now, not atomics another thread can change mid-frame. */
-    int next_count = a->next_pending;
-    int set_index = a->set_index;
-    a->set_index = -1;
-    bool terminal_requested = a->terminal_pending;
-    char terminal_cmd[512] = {0};
+    /* The requests update queued. This frame acts on them and says so in
+     * f->done; update clears them when that message comes back. */
+    int next_count = m->next_pending;
+    int set_index = m->set_index;
+    bool terminal_requested = m->terminal_pending;
+    const char *terminal_cmd = m->terminal_cmd;
+    if (set_index >= 0) {
+        f->done.flags |= APP_APPLIED_INDEX;
+        f->done.index = set_index;
+    }
     if (terminal_requested) {
-        snprintf(terminal_cmd, sizeof(terminal_cmd), "%s", a->terminal_cmd);
-        a->terminal_pending = false;
+        f->done.flags |= APP_APPLIED_TERMINAL;
+        f->done.terminal_gen = m->terminal_gen;
     }
     bool processed_next = false;
     bool processed_set_index = false;
@@ -365,7 +379,7 @@ static void render_outputs(struct app *a) {
         }
 
         /* Check if we should cycle wallpaper (timer-driven) */
-        if (!a->cycle_paused &&
+        if (!m->cycle_paused &&
             output->config->cycle && output->config->duration > 0.0f) {
             if (output_should_cycle(output, current_time)) {
                 /* Take the whole span group across together: half a scene
@@ -380,7 +394,7 @@ static void render_outputs(struct app *a) {
         wallshader_set_visible(output->shader,
                                !atomic_load_explicit(&output->occluded, memory_order_acquire));
 
-        if (!output_wants_frame(a, output)) {
+        if (!output_wants_frame(f, output)) {
             /* not drawing, but a background shader build still has to land */
             if (output->pending_shader &&
                 egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface,
@@ -443,21 +457,19 @@ static void render_outputs(struct app *a) {
     }
 
     /* One queued `next` advances every distinct group exactly once. */
-    if (processed_next) {
-        a->next_pending--;
-    }
+    if (processed_next) f->done.flags |= APP_APPLIED_NEXT;
     if (set_index >= 0) {
         log_info("Set wallpaper index %d on all eligible outputs%s", set_index,
                  processed_set_index ? "" : " (none eligible)");
     }
     for (size_t i = 0; i < swaps.len; i++) {
-        if (swaps.data[i].render_success) output_present(a, swaps.data[i].output, current_time);
+        if (swaps.data[i].render_success) output_present(f, swaps.data[i].output, current_time);
     }
 
     /* If we had a next request but couldn't process it, inform the user */
     if (next_count > 0 && !processed_next) {
         if (!has_cycleable_output) explain_no_cycle(total_outputs);
-        a->next_pending--;
+        f->done.flags |= APP_APPLIED_NEXT;
     }
 
     /* Drop the references taken in PHASE 1. For any output that was removed
@@ -474,7 +486,7 @@ static void render_outputs(struct app *a) {
         gpu_health_init(state->gl_robust, log_get_level() >= LOG_LEVEL_DEBUG);
         state->gpu_health_pending = false;
     }
-    if (gpu_health_lost()) a->gpu_lost = true;
+    if (gpu_health_lost()) f->gpu_lost = true;
 }
 
 /* Bring freshly-appeared outputs (reconnected monitors / DPMS-on / hotplug)
@@ -563,8 +575,7 @@ static void reinit_reconnected_outputs(struct neowall_state *state) {
 /* The redraw rules for an output that isn't frame-timed. A vsync output is
  * paced by its own frame callback (the swap doesn't block), so "redraw it
  * every step" is what drives it. */
-static void mark_animated(struct app *a) {
-    struct neowall_state *state = a->state;
+static void mark_animated(struct neowall_state *state, const struct app_model *m) {
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o; o = o->next) {
         if (o->config->pause_on_fullscreen &&
@@ -577,7 +588,7 @@ static void mark_animated(struct app *a) {
         if (!wallpaper_is_animated(o->config->type)) continue;
         if (o->shader_load_failed) continue;
         if (o->shader == NULL) continue;
-        if (o->config->type == WALLPAPER_SHADER && a->shader_paused) continue;
+        if (o->config->type == WALLPAPER_SHADER && m->shader_paused) continue;
 
         /* A static shader painted its one frame. */
         bool is_static = o->config->type == WALLPAPER_SHADER &&
@@ -601,17 +612,20 @@ static void mark_animated(struct app *a) {
 void app_present(void *self, rt_loop *loop) {
     struct app *a = self;
     struct neowall_state *state = a->state;
+    const struct app_model *m = &a->model;
+    struct frame f = {.state = state, .m = m};
 
 #ifdef HAVE_WAYLAND_BACKEND
-    if (a->outputs_need_init) {
-        a->outputs_need_init = false;
+    if (m->outputs_need_init) {
         reinit_reconnected_outputs(state);
+        f.done.flags |= APP_APPLIED_OUTPUTS;
+        f.done.outputs_gen = m->outputs_gen;
     }
 #endif
 
-    mark_animated(a);
+    mark_animated(state, m);
 
-    bool any = a->next_pending > 0 || a->set_index >= 0 || a->terminal_pending;
+    bool any = m->next_pending > 0 || m->set_index >= 0 || m->terminal_pending;
     if (!any) {
         pthread_rwlock_rdlock(&state->output_list_lock);
         for (struct output_state *o = state->outputs; o; o = o->next) {
@@ -622,22 +636,29 @@ void app_present(void *self, rt_loop *loop) {
         }
         pthread_rwlock_unlock(&state->output_list_lock);
     }
-    if (any) render_outputs(a);
-    if (a->gpu_lost) {
-        /* update decides what that means (stop, exit code); present just reports. */
-        a->gpu_lost = false;
+    if (any) render_outputs(&f);
+
+    /* Report back. rt_send keeps the next wait from sleeping, so update sees
+     * this before another present can act on the same request. */
+    if (f.done.flags) {
+        rt_msg msg = {.kind = NW_MSG_APPLIED};
+        memcpy(msg.v.bytes, &f.done, sizeof(f.done));
+        rt_send(loop, &msg);
+    }
+    if (f.gpu_lost) {
         app_send(loop, NW_MSG_GPU_LOST, 0, 0);
         return;
     }
 
-    a->stats_frames++;
+    struct app_view *v = &a->view;
+    v->stats_frames++;
     uint64_t now = get_time_ms();
-    if (now - a->stats_since_ms >= STATS_INTERVAL_MS) {
-        double secs = (double)(now - a->stats_since_ms) / (double)MS_PER_SECOND;
+    if (now - v->stats_since_ms >= STATS_INTERVAL_MS) {
+        double secs = (double)(now - v->stats_since_ms) / (double)MS_PER_SECOND;
         log_debug("Stats: %.1f steps/s, %lu frames rendered, %lu errors",
-                  (double)a->stats_frames / secs, state->frames_rendered, state->errors_count);
-        a->stats_since_ms = now;
-        a->stats_frames = 0;
+                  (double)v->stats_frames / secs, state->frames_rendered, state->errors_count);
+        v->stats_since_ms = now;
+        v->stats_frames = 0;
     }
 }
 
@@ -645,8 +666,9 @@ void app_present(void *self, rt_loop *loop) {
  * compositor fd. If the compositor never sends it (hidden surface), the
  * frame-ready timeout must still fire, so don't sleep past it. */
 int64_t app_wait_hint(void *self) {
-    struct app *a = self;
+    const struct app *a = self;
     struct neowall_state *state = a->state;
+    const struct app_model *m = &a->model;
     int64_t hint = -1;
     /* Arm the output wake only if some output has no frame callback in
      * flight; otherwise the callback wakes us and sees needs_redraw. */
@@ -670,7 +692,7 @@ int64_t app_wait_hint(void *self) {
          * can't draw (paused shader, hidden output): needs_redraw stays set
          * for those, and treating it as owed work would spin the loop. */
         if (!wallpaper_is_animated(o->config->type)) continue;
-        if (o->config->type == WALLPAPER_SHADER && a->shader_paused) continue;
+        if (o->config->type == WALLPAPER_SHADER && m->shader_paused) continue;
         if (o->config->pause_on_fullscreen &&
             atomic_load_explicit(&o->occluded, memory_order_acquire)) continue;
         if (atomic_load(&o->needs_redraw)) {

@@ -20,41 +20,68 @@
  * decay, with a margin so the last animated frame is never clipped. */
 enum { APP_TERM_FX_SETTLE_MS = 700 };
 
-/* The model. Only the loop thread touches it. */
-struct app {
-    struct neowall_state *state;
-    rt_loop *loop;
+/* Longest set-terminal command. */
+enum { APP_TERMINAL_CMD_MAX = 512 };
 
-    /* The GL context or a surface is unrecoverable: stop and exit with
-     * NW_EXIT_GPU_LOST so we come back in a fresh process. */
-    bool gpu_lost;
-
-    /* Commands waiting for the next frame. */
+/* The model. Only update writes it; everything else gets it const. */
+struct app_model {
+    /* Requests waiting for present. present reports what it used with
+     * NW_MSG_APPLIED, and update clears them. */
     int next_pending;
     int set_index;                  /* -1 = none */
     bool terminal_pending;
-    char terminal_cmd[512];
+    uint32_t terminal_gen;          /* bumps per set-terminal */
+    char terminal_cmd[APP_TERMINAL_CMD_MAX];
+    bool outputs_need_init;         /* reconnect / hotplug: bring outputs up */
+    uint32_t outputs_gen;
 
     bool cycle_paused;              /* `neowall pause` */
     bool shader_paused;             /* `neowall pause-shader` */
-    bool shader_pause_applied;      /* what apply_shader_pause last did */
+    bool shader_pause_applied;      /* what the last SHADER_PAUSE command did */
 
-    /* The compositor told us outputs need bring-up (reconnect, hotplug). */
-    bool outputs_need_init;
+    bool has_occlusion;             /* fixed at start */
+};
 
-    /* Host bookkeeping. */
+/* What present used up this frame (NW_MSG_APPLIED's payload). The index and
+ * generations say which request it was, so a newer one isn't cleared. */
+enum {
+    APP_APPLIED_NEXT = 1u << 0,
+    APP_APPLIED_INDEX = 1u << 1,
+    APP_APPLIED_TERMINAL = 1u << 2,
+    APP_APPLIED_OUTPUTS = 1u << 3,
+};
+struct app_applied {
+    uint32_t flags;
+    int32_t index;
+    uint32_t terminal_gen;
+    uint32_t outputs_gen;
+};
+_Static_assert(sizeof(struct app_applied) <= RT_MSG_PAYLOAD, "app_applied fits a message");
+
+/* present's own bookkeeping. */
+struct app_view {
+    uint64_t stats_since_ms;
+    uint64_t stats_frames;
+};
+
+/* The host side's: the compositor fd, the watch fd, the socket. */
+struct app_host {
     int compositor_fd;
     uint32_t compositor_watch;
     bool flush_blocked;
     bool read_prepared;
     uint32_t watch_handle;
-    bool has_occlusion;
-
-    uint64_t stats_since_ms;
-    uint64_t stats_frames;
-
     nw_ipc_server *ipc;             /* NULL for a preview, or if binding failed */
-    char ipc_terminal_cmd[512];     /* set-terminal's command, for its message */
+};
+
+/* Everything the program holds. `state` is the world update doesn't own:
+ * outputs, GL, config. */
+struct app {
+    struct neowall_state *state;
+    rt_loop *loop;
+    struct app_model model;
+    struct app_view view;
+    struct app_host host;
 };
 
 /* Effects update asks for (rt_cmd.kind). perform.c runs them. */
@@ -75,8 +102,13 @@ enum {
 /* app.c */
 void app_send(rt_loop *loop, uint32_t kind, uint32_t id, int64_t v);
 void app_arm_output_wake(bool armed);
+/* Send SET_TERMINAL carrying a copy of `cmd` (update takes ownership). */
+bool app_send_terminal(rt_loop *loop, const char *cmd);
 
 /* update.c */
+void app_model_init(struct app_model *m);
+/* The pure part: fold `msg` into `m`, push effects into `cmds`. */
+void app_model_update(struct app_model *m, const rt_msg *msg, rt_cmds *cmds);
 void app_update(void *self, const rt_msg *m, rt_cmds *cmds);
 void app_subscribe(void *self, rt_subs *subs);
 
@@ -97,8 +129,5 @@ void app_host_after_wait(void *ctx, rt_loop *loop, bool fd_ready);
 void app_on_compositor(void *ctx, rt_loop *loop, int fd, unsigned ev);
 void app_on_watch(void *ctx, rt_loop *loop, int fd, unsigned ev);
 
-/* Readers for the command files the CLI writes before signalling (main.c). */
-int read_set_index_file(void);
-bool read_set_terminal_file(char *buf, size_t size);
 
 #endif /* NEOWALL_APP_INTERNAL_H */
