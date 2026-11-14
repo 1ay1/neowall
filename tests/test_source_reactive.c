@@ -12,8 +12,13 @@
  * Still headless: no GL, no display server.
  */
 
+#include <dirent.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 #include "neowall/shader/reactive.h"
 #include "neowall/source/source.h"
@@ -229,6 +234,90 @@ static void test_snapshot_is_shared_per_frame(void) {
     }
 }
 
+/* Shutdown with capture helpers still running, again and again: it must
+ * finish quickly, leave no children and leak no fds. The helpers are fakes
+ * on PATH: a parec that streams forever and an nvidia-smi that ignores
+ * SIGTERM, so only the SIGKILL path can stop it. */
+static int count_fds(void) {
+    int n = 0;
+    DIR *d = opendir("/proc/self/fd");
+    if (!d) return -1;
+    while (readdir(d)) n++;
+    closedir(d);
+    return n;
+}
+
+static int count_children(void) {
+    char path[64], buf[512];
+    snprintf(path, sizeof(path), "/proc/self/task/%d/children", (int)getpid());
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    int n = 0;
+    while (fscanf(f, "%511s", buf) == 1) n++;
+    fclose(f);
+    return n;
+}
+
+static void test_shutdown_cycles(void) {
+    char dir[] = "/tmp/nw-fake-XXXXXX";
+    if (!mkdtemp(dir)) return;
+    char p[256];
+    snprintf(p, sizeof(p), "%s/parec", dir);
+    FILE *f = fopen(p, "w");
+    fprintf(f, "#!/bin/sh\n: > %s/parec.ran\nexec cat /dev/zero\n", dir);
+    fclose(f);
+    chmod(p, 0755);
+    snprintf(p, sizeof(p), "%s/nvidia-smi", dir);
+    f = fopen(p, "w");
+    fprintf(f, "#!/bin/sh\n: > %s/nv.ran\ntrap '' TERM\nwhile :; do echo '1, 2, 3, 4, 5, 6'; sleep 0.1; done\n", dir);
+    fclose(f);
+    chmod(p, 0755);
+    const char *old = getenv("PATH");
+    char path[4096];
+    snprintf(path, sizeof(path), "%s:%s", dir, old ? old : "/usr/bin:/bin");
+    setenv("PATH", path, 1);
+
+    int fds = count_fds();
+    for (int i = 0; i < 5; i++) {
+        CHECK(reactive_init(), "init %d", i);
+        reactive_audio_start();
+        /* let both helpers get going, so shutdown has live children to stop */
+        for (int w = 0; w < 200; w++) {
+            char a[300], b[300];
+            snprintf(a, sizeof(a), "%s/parec.ran", dir);
+            snprintf(b, sizeof(b), "%s/nv.ran", dir);
+            if (access(a, F_OK) == 0 && access(b, F_OK) == 0) break;
+            struct timespec ts = {0, 5 * 1000000L};
+            nanosleep(&ts, NULL);
+        }
+        if (i == 0) {
+            char a[300], b[300];
+            snprintf(a, sizeof(a), "%s/parec.ran", dir);
+            snprintf(b, sizeof(b), "%s/nv.ran", dir);
+            CHECK(access(a, F_OK) == 0 && access(b, F_OK) == 0, "both fake helpers ran");
+        }
+        struct timespec t0, t1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        reactive_shutdown();
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        double ms = (double)(t1.tv_sec - t0.tv_sec) * 1e3 + (double)(t1.tv_nsec - t0.tv_nsec) / 1e6;
+        CHECK(ms < 1500, "shutdown %d took %.0f ms", i, ms);
+    }
+    CHECK(count_children() == 0, "no capture helper outlives shutdown (%d left)", count_children());
+    CHECK(count_fds() == fds, "no fds leaked (%d -> %d)", fds, count_fds());
+
+    setenv("PATH", old ? old : "/usr/bin:/bin", 1);
+    snprintf(p, sizeof(p), "%s/parec", dir);
+    unlink(p);
+    snprintf(p, sizeof(p), "%s/nvidia-smi", dir);
+    unlink(p);
+    snprintf(p, sizeof(p), "%s/parec.ran", dir);
+    unlink(p);
+    snprintf(p, sizeof(p), "%s/nv.ran", dir);
+    unlink(p);
+    rmdir(dir);
+}
+
 int main(void) {
     /* Best-effort: reactive_init spawns capture helpers and may legitimately
      * fail in CI with no audio. Signals then read 0, which is fine for these
@@ -244,6 +333,8 @@ int main(void) {
     test_snapshot_is_shared_per_frame();
 
     reactive_shutdown();
+
+    test_shutdown_cycles();
 
     printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;

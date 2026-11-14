@@ -17,9 +17,10 @@
  * directly. That separation is deliberate: time travel must never make the
  * daemon miss a cycle deadline or write a misleading log timestamp.
  *
- * Thread-safety: the offset/scale are atomics written on the main loop thread
- * and read by the render and reactive-sampling paths. Reads are relaxed; the
- * values change only on an explicit command, so a frame of skew is harmless. */
+ * Thread-safety: offset and scale are set at startup (--date, --timelapse)
+ * before any thread that reads them starts. Elapsed time is measured on the
+ * monotonic clock, so a timelapse is smooth and wall-clock steps don't jolt
+ * it; with no offset or scale the clock is exactly the system clock. */
 
 #ifndef NEOWALL_CLOCK_H
 #define NEOWALL_CLOCK_H
@@ -32,6 +33,9 @@
  *
  * With the default offset 0 / scale 1 this is exactly time(NULL). */
 time_t nw_clock_now(void);
+
+/* The same, with sub-second precision. */
+double nw_clock_now_f(void);
 
 /* Shift the shader clock by `seconds` relative to real time. Positive jumps
  * forward. Replaces any previous offset. */

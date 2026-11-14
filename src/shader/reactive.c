@@ -9,12 +9,9 @@
 #define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
-/* pthread_timedjoin_np (bounded thread join in reactive_shutdown) is a GNU
- * extension; the project builds with c_std=c11 + _POSIX_C_SOURCE only, so we
- * must opt into the GNU surface for this translation unit specifically. Must
- * precede every #include so the feature-test macro is seen first. */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
+/* pthread_condattr_setclock is POSIX; _DEFAULT_SOURCE for the rest. */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
 #endif
 
 #include "neowall/shader/reactive.h"
@@ -61,7 +58,7 @@ static atomic_bool g_inited = false;
 static pthread_t g_sys_thread;
 static atomic_bool g_sys_run = false;
 static pthread_mutex_t g_sample_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_sys_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_sys_cond;           /* CLOCK_MONOTONIC, see init_conds */
 static reactive_snapshot_t g_sys;           /* protected by g_sample_lock */
 
 /* audio thread */
@@ -105,6 +102,74 @@ static atomic_bool g_nv_run = false;
 static atomic_bool g_nv_live = false;
 /* Written by the nvidia thread, read by reactive_shutdown to kill nvidia-smi. */
 static _Atomic pid_t g_nv_pid = -1;
+
+/* Capture threads say they've finished here, so shutdown can wait a bounded
+ * time on the monotonic clock. */
+static pthread_mutex_t g_exit_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_exit_cond;          /* CLOCK_MONOTONIC */
+static bool g_audio_exited = true, g_nv_exited = true;   /* under g_exit_lock */
+
+/* Timed waits on the monotonic clock, so a wall-clock step (NTP, the user
+ * setting the time) can't stall the sampler or shutdown. */
+static pthread_once_t g_conds_once = PTHREAD_ONCE_INIT;
+static void init_conds(void) {
+    pthread_condattr_t a;
+    pthread_condattr_init(&a);
+    pthread_condattr_setclock(&a, CLOCK_MONOTONIC);
+    pthread_cond_init(&g_sys_cond, &a);
+    pthread_cond_init(&g_exit_cond, &a);
+    pthread_condattr_destroy(&a);
+}
+
+static struct timespec mono_in(long ms) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    t.tv_sec += ms / 1000;
+    t.tv_nsec += (ms % 1000) * 1000000L;
+    if (t.tv_nsec >= 1000000000L) { t.tv_sec++; t.tv_nsec -= 1000000000L; }
+    return t;
+}
+
+static void set_exited(bool *flag, bool v) {
+    pthread_mutex_lock(&g_exit_lock);
+    *flag = v;
+    pthread_cond_broadcast(&g_exit_cond);
+    pthread_mutex_unlock(&g_exit_lock);
+}
+
+/* True if the thread finished within `ms`. */
+static bool wait_exited(const bool *flag, long ms) {
+    struct timespec until = mono_in(ms);
+    pthread_mutex_lock(&g_exit_lock);
+    while (!*flag && pthread_cond_timedwait(&g_exit_cond, &g_exit_lock, &until) != ETIMEDOUT) {}
+    bool done = *flag;
+    pthread_mutex_unlock(&g_exit_lock);
+    return done;
+}
+
+/* Capture children. A thread takes its pid out of the slot under this lock
+ * before it reaps; shutdown kills under the same lock without taking it. So
+ * shutdown only ever signals a pid that isn't reaped yet (a zombie at worst,
+ * whose number can't be reused), and the thread still reaps its own child. */
+static pthread_mutex_t g_child_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void kill_child(_Atomic pid_t *slot) {
+    pthread_mutex_lock(&g_child_lock);
+    pid_t pid = atomic_load(slot);
+    if (pid > 0) kill(pid, SIGKILL);
+    pthread_mutex_unlock(&g_child_lock);
+}
+
+/* The thread's half: claim the pid, then it's ours to stop and reap. */
+static void reap_child(_Atomic pid_t *slot) {
+    pthread_mutex_lock(&g_child_lock);
+    pid_t pid = atomic_exchange(slot, -1);
+    pthread_mutex_unlock(&g_child_lock);
+    if (pid > 0) {
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
+    }
+}
 
 /* input energy accumulators (written from input handlers, decayed in sample) */
 static atomic_int g_key_hits = 0;
@@ -439,10 +504,11 @@ static void sample_time(reactive_snapshot_t *s) {
     /* Shader-visible clock, so `neowall preview --date/--timelapse` moves
      * iTimeOfDay/iSun/iDayFraction together with iDate. Identical to
      * time(NULL) unless a preview is active. */
-    time_t t = nw_clock_now();
+    double now = nw_clock_now_f();
+    time_t t = (time_t)floor(now);
     struct tm tmv;
     localtime_r(&t, &tmv);
-    float secs = tmv.tm_hour * 3600.0f + tmv.tm_min * 60.0f + tmv.tm_sec;
+    float secs = tmv.tm_hour * 3600.0f + tmv.tm_min * 60.0f + tmv.tm_sec + (float)(now - (double)t);
     s->time_of_day = secs / 86400.0f;
     /* sun elevation proxy: cosine peaking at solar noon (~13:00 local-ish) */
     float h = secs / 3600.0f;
@@ -507,7 +573,7 @@ static int spawn_parec(pid_t *out_pid) {
     return pipefd[0];
 }
 
-static void *audio_thread_fn(void *arg) {
+static void *audio_thread_body(void *arg) {
     (void)arg;
     /* Don't let SIGPIPE from a dying parec kill the process. */
     signal(SIGPIPE, SIG_IGN);
@@ -614,11 +680,7 @@ static void *audio_thread_fn(void *arg) {
      * already exited on its own, kill() returns ESRCH harmlessly and waitpid
      * returns immediately. Claim the pid first so shutdown can't kill it
      * after it's reaped and possibly reused. */
-    pid_t parec = atomic_exchange(&g_parec_pid, -1);
-    if (parec > 0) {
-        kill(parec, SIGTERM);
-        waitpid(parec, NULL, 0);
-    }
+    reap_child(&g_parec_pid);
     atomic_store(&g_audio_live, false);
     return NULL;
 }
@@ -668,7 +730,7 @@ static int spawn_nvsmi(pid_t *out_pid) {
     return pipefd[0];
 }
 
-static void *nv_thread_fn(void *arg) {
+static void *nv_thread_body(void *arg) {
     (void)arg;
     signal(SIGPIPE, SIG_IGN);
 
@@ -714,11 +776,7 @@ static void *nv_thread_fn(void *arg) {
     }
 
     fclose(fp);  /* closes fd */
-    pid_t nv = atomic_exchange(&g_nv_pid, -1);
-    if (nv > 0) {
-        kill(nv, SIGTERM);
-        waitpid(nv, NULL, 0);
-    }
+    reap_child(&g_nv_pid);
     atomic_store(&g_nv_live, false);
     return NULL;
 }
@@ -729,8 +787,22 @@ static void *nv_thread_fn(void *arg) {
 
 static void *sys_thread_fn(void *arg);
 
+/* Every way out of a capture thread, early returns included, ends here. */
+static void *audio_thread_fn(void *arg) {
+    audio_thread_body(arg);
+    set_exited(&g_audio_exited, true);
+    return NULL;
+}
+
+static void *nv_thread_fn(void *arg) {
+    nv_thread_body(arg);
+    set_exited(&g_nv_exited, true);
+    return NULL;
+}
+
 bool reactive_init(void) {
     if (atomic_load(&g_inited)) return true;
+    pthread_once(&g_conds_once, init_conds);
     memset(&g_snap, 0, sizeof(g_snap));
     g_snap.battery = 1.0f;
     g_snap.charging = true;
@@ -749,9 +821,11 @@ bool reactive_init(void) {
     }
 
     atomic_store(&g_nv_run, true);
+    set_exited(&g_nv_exited, false);
     if (pthread_create(&g_nv_thread, NULL, nv_thread_fn, NULL) != 0) {
         log_info("Reactive: could not start NVIDIA thread");
         atomic_store(&g_nv_run, false);
+        set_exited(&g_nv_exited, true);
     }
 
     atomic_store(&g_inited, true);
@@ -791,9 +865,11 @@ void reactive_audio_start(void) {
     bool expected = false;
     if (!atomic_compare_exchange_strong(&g_audio_run, &expected, true)) return;
 
+    set_exited(&g_audio_exited, false);
     if (pthread_create(&g_audio_thread, NULL, audio_thread_fn, NULL) != 0) {
         log_info("Reactive: could not start audio thread");
         atomic_store(&g_audio_run, false);
+        set_exited(&g_audio_exited, true);
         return;
     }
     log_info("Reactive: audio capture requested by shader");
@@ -815,8 +891,6 @@ void reactive_shutdown(void) {
      * covers the case where the wake pipe could not be created. The bounded
      * join stays too — a never-returning shutdown is far worse than a detached
      * capture thread the kernel reaps on _exit. */
-    struct timespec deadline;
-
     reactive_wake_threads();
 
     /* Wake the sampler off its condvar and wait for it. */
@@ -828,39 +902,42 @@ void reactive_shutdown(void) {
         pthread_join(g_sys_thread, NULL);
     }
 
+    /* Each capture thread: stop it, kill its child, wait up to 1 s on the
+     * monotonic clock. One that finished is joined; one that didn't is
+     * detached and abandoned (the kernel reaps it at exit). */
+    bool abandoned = false;
     if (atomic_load(&g_audio_run)) {
         atomic_store(&g_audio_run, false);
-        pid_t parec = atomic_load(&g_parec_pid);
-        if (parec > 0) kill(parec, SIGKILL);
-        clock_gettime(CLOCK_REALTIME, &deadline);
-        deadline.tv_sec += 1;   /* 1s grace */
-        if (pthread_timedjoin_np(g_audio_thread, NULL, &deadline) != 0) {
-            /* still stuck — detach so no resource leak, then abandon it */
+        kill_child(&g_parec_pid);
+        if (wait_exited(&g_audio_exited, 1000)) {
+            pthread_join(g_audio_thread, NULL);
+        } else {
             pthread_detach(g_audio_thread);
-            parec = atomic_load(&g_parec_pid);
-            if (parec > 0) kill(parec, SIGKILL);
+            kill_child(&g_parec_pid);
+            abandoned = true;
             log_warn("reactive: audio capture thread did not stop in time; abandoning");
         }
     }
     if (atomic_load(&g_nv_run)) {
         atomic_store(&g_nv_run, false);
-        pid_t nv = atomic_load(&g_nv_pid);
-        if (nv > 0) kill(nv, SIGKILL);
-        clock_gettime(CLOCK_REALTIME, &deadline);
-        deadline.tv_sec += 1;   /* 1s grace */
-        if (pthread_timedjoin_np(g_nv_thread, NULL, &deadline) != 0) {
+        kill_child(&g_nv_pid);
+        if (wait_exited(&g_nv_exited, 1000)) {
+            pthread_join(g_nv_thread, NULL);
+        } else {
             pthread_detach(g_nv_thread);
-            nv = atomic_load(&g_nv_pid);
-            if (nv > 0) kill(nv, SIGKILL);
+            kill_child(&g_nv_pid);
+            abandoned = true;
             log_warn("reactive: NVIDIA capture thread did not stop in time; abandoning");
         }
     }
 
-    /* Both threads are joined (or detached and abandoned). Closing the read end
-     * last means an abandoned thread still parked in poll() sees POLLHUP and
-     * unwinds rather than waiting on an fd nobody will ever write to. */
-    if (g_wake_pipe[1] >= 0) { close(g_wake_pipe[1]); g_wake_pipe[1] = -1; }
-    if (g_wake_pipe[0] >= 0) { close(g_wake_pipe[0]); g_wake_pipe[0] = -1; }
+    /* Close the wake pipe only when nothing can still be polling it: an
+     * abandoned thread could otherwise poll a recycled fd number. The pipe
+     * stays signalled, so an abandoned thread wakes as soon as it gets there. */
+    if (!abandoned) {
+        if (g_wake_pipe[1] >= 0) { close(g_wake_pipe[1]); g_wake_pipe[1] = -1; }
+        if (g_wake_pipe[0] >= 0) { close(g_wake_pipe[0]); g_wake_pipe[0] = -1; }
+    }
 
     atomic_store(&g_inited, false);
 }
@@ -980,15 +1057,17 @@ void reactive_sample(void) {
 
 static void *sys_thread_fn(void *arg) {
     (void)arg;
+    unsigned ticks = 0;
     while (atomic_load(&g_sys_run)) {
+        /* libc reads the timezone once; re-read it every minute so a zone
+         * change (travel, timedatectl) reaches iDate and the log without a
+         * restart. tzset is serialised with localtime_r inside libc. */
+        if (ticks++ % 240 == 0) tzset();
         pthread_mutex_lock(&g_sample_lock);
         sample_once_locked();
 
         /* 4 Hz, but wake at once on shutdown. */
-        struct timespec until;
-        clock_gettime(CLOCK_REALTIME, &until);
-        until.tv_nsec += 250 * 1000000L;
-        if (until.tv_nsec >= 1000000000L) { until.tv_sec++; until.tv_nsec -= 1000000000L; }
+        struct timespec until = mono_in(250);
         while (atomic_load(&g_sys_run) &&
                pthread_cond_timedwait(&g_sys_cond, &g_sample_lock, &until) == 0) { }
         pthread_mutex_unlock(&g_sample_lock);

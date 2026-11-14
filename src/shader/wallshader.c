@@ -362,13 +362,15 @@ void wallshader_draw(wallshader *s, const wallshader_frame *f) {
     if (s->term) term_gpu_frame(s->term, f->time, &tu, &ntu, &tt, &ntt);
 
     float date[4] = {0};
-    time_t t = nw_clock_now();
+    /* Fractional seconds, so a timelapse moves every frame, not once a second. */
+    double wall = nw_clock_now_f();
+    time_t t = (time_t)floor(wall);
     struct tm tm;
     if (localtime_r(&t, &tm)) {
         date[0] = (float)(tm.tm_year + 1900);
         date[1] = (float)(tm.tm_mon + 1);
         date[2] = (float)tm.tm_mday;
-        date[3] = (float)(tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec);
+        date[3] = (float)(tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec) + (float)(wall - (double)t);
     }
 
     nw_frame_in in = {

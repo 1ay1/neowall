@@ -6,73 +6,70 @@
 
 #include <ctype.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* Offset applied to real time, in seconds. */
 static atomic_long g_offset_sec = 0;
 
-/* Rate multiplier for shader time. Stored as the bit pattern of a double so it
- * can live in an atomic without a lock; only ever written whole. */
+/* Rate multiplier for shader time. */
 static _Atomic double g_scale = 1.0;
 
-/* Real time at which the current scale took effect, and the shader time that
- * corresponded to it. Rebasing on every scale change keeps the clock monotonic:
- * elapsed real time since the anchor is what gets multiplied, so switching from
- * 1x to 100x speeds up the future without rewriting the past. */
-static atomic_long g_anchor_real = 0;
-static atomic_long g_anchor_virtual = 0;
+/* When the current scale took effect: the monotonic time then, and the shader
+ * time it corresponded to. Elapsed time is measured on the monotonic clock,
+ * in nanoseconds, so a fast timelapse moves smoothly every frame instead of
+ * jumping once per second, and a wall-clock step (NTP) doesn't jolt it.
+ * Written only by nw_clock_set_*, at startup, before any reader thread. */
+static _Atomic int64_t g_anchor_mono_ns = 0;
+static _Atomic double g_anchor_virtual = 0.0;
 
-static time_t real_now(void) {
-    return time(NULL);
+static int64_t mono_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-/* Establish the anchor lazily on first use so a daemon that never time-travels
- * pays nothing and returns exactly time(NULL). */
-static void ensure_anchor(void) {
-    if (atomic_load_explicit(&g_anchor_real, memory_order_relaxed) == 0) {
-        time_t now = real_now();
-        atomic_store_explicit(&g_anchor_real, (long)now, memory_order_relaxed);
-        atomic_store_explicit(&g_anchor_virtual, (long)now, memory_order_relaxed);
-    }
+static double real_now_f(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+/* Shader time before the offset, in seconds. */
+static double virtual_base(void) {
+    double scale = atomic_load_explicit(&g_scale, memory_order_acquire);
+    if (scale == 1.0) return real_now_f();
+    int64_t since = mono_ns() - atomic_load_explicit(&g_anchor_mono_ns, memory_order_relaxed);
+    return atomic_load_explicit(&g_anchor_virtual, memory_order_relaxed) + (double)since / 1e9 * scale;
 }
 
 time_t nw_clock_now(void) {
-    double scale = atomic_load_explicit(&g_scale, memory_order_relaxed);
-    long offset  = atomic_load_explicit(&g_offset_sec, memory_order_relaxed);
-
     /* Fast path: an untouched clock is the system clock. */
-    if (scale == 1.0 && offset == 0) {
-        return real_now();
+    if (atomic_load_explicit(&g_scale, memory_order_relaxed) == 1.0 &&
+        atomic_load_explicit(&g_offset_sec, memory_order_relaxed) == 0) {
+        return time(NULL);
     }
+    return (time_t)(virtual_base() + (double)atomic_load_explicit(&g_offset_sec, memory_order_relaxed));
+}
 
-    ensure_anchor();
-    long anchor_real    = atomic_load_explicit(&g_anchor_real, memory_order_relaxed);
-    long anchor_virtual = atomic_load_explicit(&g_anchor_virtual, memory_order_relaxed);
-
-    long elapsed = (long)real_now() - anchor_real;
-    if (elapsed < 0) elapsed = 0;   /* system clock stepped backwards; hold */
-
-    double virtual_now = (double)anchor_virtual + (double)elapsed * scale;
-    return (time_t)(virtual_now + (double)offset);
+double nw_clock_now_f(void) {
+    return virtual_base() + (double)atomic_load_explicit(&g_offset_sec, memory_order_relaxed);
 }
 
 void nw_clock_set_offset(long seconds) {
     atomic_store_explicit(&g_offset_sec, seconds, memory_order_relaxed);
-    ensure_anchor();
 }
 
 void nw_clock_set_scale(double scale) {
     if (!(scale > 0.0)) return;
-
-    /* Rebase so the jump in rate does not move the current instant. */
-    ensure_anchor();
-    time_t vnow_before = nw_clock_now();
-    long   offset      = atomic_load_explicit(&g_offset_sec, memory_order_relaxed);
-
-    atomic_store_explicit(&g_anchor_real, (long)real_now(), memory_order_relaxed);
-    atomic_store_explicit(&g_anchor_virtual, (long)vnow_before - offset, memory_order_relaxed);
-    atomic_store_explicit(&g_scale, scale, memory_order_relaxed);
+    /* Rebase so the change in rate doesn't move the current instant: the
+     * future runs at the new speed, the past stays. The anchor is published
+     * before the scale (release), so a reader that sees the scale sees it. */
+    double base = virtual_base();
+    atomic_store_explicit(&g_anchor_mono_ns, mono_ns(), memory_order_relaxed);
+    atomic_store_explicit(&g_anchor_virtual, base, memory_order_relaxed);
+    atomic_store_explicit(&g_scale, scale, memory_order_release);
 }
 
 long nw_clock_offset(void) {

@@ -168,6 +168,20 @@ static void test_version_pragma(void) {
     CHECK(s == NULL);
 }
 
+/* A timelapse moves every frame (not once a second), and setting the rate
+ * doesn't move the current instant. Last test: it leaves the scale set. */
+static void test_timelapse_is_smooth(void) {
+    double before = nw_clock_now_f();
+    nw_clock_set_scale(3600.0);               /* 1 s real = 1 h shader */
+    double at = nw_clock_now_f();
+    CHECK(at - before > -0.5 && at - before < 0.5);
+    struct timespec ts = {0, 20 * 1000000L};  /* 20 ms real */
+    nanosleep(&ts, NULL);
+    double after = nw_clock_now_f();
+    /* ~72 s of shader time in 20 ms; the old 1 s resolution gave 0 here */
+    CHECK(after - at > 30.0 && after - at < 1000.0);
+}
+
 int main(void) {
     log_quiet_errors(true);
     test_marker_scan_is_line_bounded();
@@ -179,6 +193,7 @@ int main(void) {
     test_clock_offset_shifts_time();
 
     test_version_pragma();
+    test_timelapse_is_smooth();
 
     if (failures == 0) {
         printf("test_shader_authoring: all %d checks passed\n", checks);
