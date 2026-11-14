@@ -131,6 +131,7 @@ static void clear_wide_pair_at(term_screen *s, int x, int y) {
 }
 
 static void row_fill_blank(term_screen *s, int y, int x0, int x1) {
+    if (x1 < x0) return;   /* empty range: touch nothing, not even a wide pair */
     /* Erasing either half of a wide glyph must erase the pair. */
     if (x0 >= 0 && x0 < s->cols) clear_wide_pair_at(s, x0, y);
     if (x1 >= 0 && x1 < s->cols) clear_wide_pair_at(s, x1, y);
@@ -321,6 +322,12 @@ static int pget(const int *p, int n, int i, int def) {
     return (p[i] < 0) ? def : p[i];
 }
 
+/* A count parameter: like xterm, an explicit 0 means 1. */
+static int pcount(const int *p, int n, int i) {
+    int v = pget(p, n, i, 1);
+    return v < 1 ? 1 : v;
+}
+
 /* OSC handler: Operating System Commands, "<Ps>;<Pt>". We consume window title
  * (0/2) into s->title; palette / clipboard / hyperlink commands are parsed but
  * not acted on (a wallpaper has no window title bar or clipboard). */
@@ -466,21 +473,21 @@ static void cb_csi(void *u, uint8_t final, const int *p, int n,
         case 'L': scroll_down(s, s->cur.y, s->scroll_bottom, pget(p,n,0,1)); break;        /* IL */
         case 'M': scroll_up(s, s->cur.y, s->scroll_bottom, pget(p,n,0,1)); break;          /* DL */
         case 'P': { /* DCH: delete chars, shift left */
-            int cnt = pget(p,n,0,1), y = s->cur.y, x = s->cur.x;
+            int cnt = pcount(p,n,0), y = s->cur.y, x = s->cur.x;
             if (cnt > s->cols - x) cnt = s->cols - x;
             for (int i = x; i < s->cols - cnt; i++) *cell_at(s,i,y) = *cell_at(s,i+cnt,y);
             row_fill_blank(s, y, s->cols - cnt, s->cols - 1);
             break;
         }
         case '@': { /* ICH: insert blanks, shift right */
-            int cnt = pget(p,n,0,1), y = s->cur.y, x = s->cur.x;
+            int cnt = pcount(p,n,0), y = s->cur.y, x = s->cur.x;
             if (cnt > s->cols - x) cnt = s->cols - x;
             for (int i = s->cols - 1; i >= x + cnt; i--) *cell_at(s,i,y) = *cell_at(s,i-cnt,y);
             row_fill_blank(s, y, x, x + cnt - 1);
             break;
         }
         case 'X': { /* ECH: erase chars in place */
-            int cnt = pget(p,n,0,1), y = s->cur.y, x = s->cur.x;
+            int cnt = pcount(p,n,0), y = s->cur.y, x = s->cur.x;
             row_fill_blank(s, y, x, x + cnt - 1);
             break;
         }

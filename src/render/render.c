@@ -53,11 +53,7 @@ static bool ensure_egl_current(struct output_state *output) {
     EGLSurface surf = output->compositor_surface->egl_surface;
     EGLContext ctx = output->state->egl_context;
 
-    if (eglGetCurrentContext() == ctx &&
-        eglGetCurrentSurface(EGL_DRAW) == surf &&
-        eglGetCurrentDisplay() == dpy) {
-        return true;
-    }
+    if (egl_is_current(dpy, surf, ctx)) return true;
     return egl_make_surface_current(dpy, surf, ctx);
 }
 

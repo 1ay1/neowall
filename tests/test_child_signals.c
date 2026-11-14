@@ -105,6 +105,45 @@ int main(void) {
     pthread_sigmask(SIG_BLOCK, NULL, &now);
     CHECK(sigismember(&now, SIGTERM), "parent mask changed");
 
+    /* Fds: an fd the parent forgot to mark close-on-exec (like a pty master
+     * or another child's pipe) must not reach either kind of child. */
+    int stray = dup(STDERR_FILENO);          /* no FD_CLOEXEC */
+    char *lsfd[] = {"ls", "/proc/self/fd", NULL};
+
+    CHECK(nw_pipe_cloexec(p) == 0, "pipe");
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, p[1], STDOUT_FILENO);
+    nw_spawn_close_fds(&fa, -1);
+    rc = posix_spawnp(&pid, "ls", &fa, NULL, lsfd, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    close(p[1]);
+    CHECK(rc == 0, "posix_spawnp ls");
+    read_all(p[0], out, sizeof(out));
+    close(p[0]);
+    waitpid(pid, NULL, 0);
+    /* ls opens one fd for the directory itself; anything else leaked */
+    int n = 0;
+    for (char *t = strtok(out, "\n"); t; t = strtok(NULL, "\n")) n++;
+    CHECK(n <= 4, "posix_spawn child sees %d fds (0-2 + ls's own)", n);
+
+    CHECK(nw_pipe_cloexec(p) == 0, "pipe");
+    pid = fork();
+    if (pid == 0) {
+        nw_child_reset_signals();
+        dup2(p[1], STDOUT_FILENO);
+        nw_child_close_fds();
+        execvp("ls", lsfd);
+        _exit(127);
+    }
+    close(p[1]);
+    read_all(p[0], out, sizeof(out));
+    close(p[0]);
+    waitpid(pid, NULL, 0);
+    n = 0;
+    for (char *t = strtok(out, "\n"); t; t = strtok(NULL, "\n")) n++;
+    CHECK(n <= 4, "fork child sees %d fds (0-2 + ls's own)", n);
+    close(stray);
+
     printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;
 }

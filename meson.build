@@ -973,7 +973,8 @@ test_image_scale_exe = executable('test_image_scale',
   build_by_default: false,
 )
 
-test('image_scale', test_image_scale_exe)
+test('image_scale', test_image_scale_exe,
+  args: [meson.project_source_root() / 'tests' / 'fixtures' / 'images'])
 
 # Fisher-Yates shuffle for cycle paths (issue #47). Pure data; links
 # src/config/shuffle.c only.
@@ -1192,13 +1193,19 @@ foreach name, h : fuzz_harnesses
   test('fuzz_' + name, drv, args: seed_args, suite: 'fuzz', timeout: 120)
 
   if get_option('fuzz')
+    # The code under test needs the coverage instrumentation and ASan too,
+    # not just the harness, or libFuzzer is blind inside it. cbdt.c (with
+    # stb_image) is compiled here directly for that reason, with stb's
+    # relaxed warnings, instead of linking the prebuilt glyph library.
+    fz_flags = ['-fsanitize=fuzzer,address,undefined', '-fno-sanitize-recover=undefined']
+    fz_src = name == 'cbdt' ? h[0] + files('src/terminal/cbdt.c') : h[0]
     executable('fuzz_' + name,
-      h[0],
-      include_directories: [inc_dirs, inc_dirs_build, include_directories('src/terminal', 'src/shader')],
+      fz_src,
+      include_directories: [inc_dirs, inc_dirs_build, stb_inc,
+                            include_directories('src/terminal', 'src/shader')],
       dependencies: [thread_dep] + h[2],
-      link_with: fuzz_link,
-      c_args: ['-fsanitize=fuzzer'],
-      link_args: ['-fsanitize=fuzzer'],
+      c_args: fz_flags + (name == 'cbdt' ? ['-Wno-error', '-w'] : []),
+      link_args: fz_flags,
     )
   endif
 endforeach

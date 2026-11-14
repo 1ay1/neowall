@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "neowall/neowall.h"
+#include "neowall/egl/egl_core.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/output/output.h"
 #include "neowall/config/config.h"
@@ -89,7 +90,7 @@ static bool attach_pbuffer(struct output_state *o) {
     o->compositor_surface->egl_surface = s;
     o->compositor_surface->width = W;
     o->compositor_surface->height = H;
-    return eglMakeCurrent(g_dpy, s, s, o->state->egl_context);
+    return egl_make_surface_current(g_dpy, s, o->state->egl_context);
 }
 
 /* A w x h PNG with a left half of `l` and a right half of `r` (0xRRGGBB). */
@@ -371,7 +372,8 @@ int main(void) {
     }
 
     output_destroy(o);
-    eglMakeCurrent(g_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    egl_make_current_raw(g_dpy, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    egl_forget_current();
     eglDestroyContext(g_dpy, st.egl_context);
     eglTerminate(g_dpy);
     char cmd[700];

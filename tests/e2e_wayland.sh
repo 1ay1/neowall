@@ -34,6 +34,9 @@ export WLR_RENDERER=pixman WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1
 # llvmpipe's worker threads aren't TSan-instrumented; keep its rendering on
 # the calling thread so a sanitizer build reports only neowall's own races.
 export LP_NUM_THREADS=0
+# Same for Mesa's shader disk cache (disk$0, disk$1): its threads race on
+# their own barrier, which TSan reports with no neowall frame at all.
+export MESA_SHADER_CACHE_DISABLE=true
 ln -s "$src/examples/shaders" "$tmp/share/neowall/shaders"
 
 comp_pid=""

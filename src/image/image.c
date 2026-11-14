@@ -28,6 +28,25 @@ static bool image_buffer_size(uint32_t width, uint32_t height, size_t channels,
     return true;
 }
 
+/* A real image needs a few bytes per thousand pixels even when it compresses
+ * very well. A file far smaller than its claimed size is a decompression
+ * bomb: rejecting it here keeps a 140-byte file from making us allocate and
+ * decode 400 MB. Flat-colour PNGs compress about 1000:1, so 1 byte per 4096
+ * pixels leaves plenty of room. Small images are always allowed. */
+#define IMAGE_MIN_BYTES_PER_PIXEL_INV 4096
+#define IMAGE_BOMB_FLOOR_PIXELS ((size_t)(4096u * 4096u))
+
+static bool image_plausible(FILE *fp, uint32_t width, uint32_t height) {
+    size_t pixels = (size_t)width * (size_t)height;
+    if (pixels <= IMAGE_BOMB_FLOOR_PIXELS) return true;
+    long here = ftell(fp);
+    if (here < 0 || fseek(fp, 0, SEEK_END) != 0) return true;   /* a pipe: can't tell */
+    long size = ftell(fp);
+    if (fseek(fp, here, SEEK_SET) != 0) return false;
+    if (size < 0) return true;
+    return (size_t)size >= pixels / IMAGE_MIN_BYTES_PER_PIXEL_INV;
+}
+
 /* Forward declarations */
 static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 
                                                    int32_t display_height, int mode);
@@ -135,6 +154,11 @@ struct image_data *image_load_png(const char *path) {
 
     uint32_t width = png_get_image_width(png_ptr, info_ptr);
     uint32_t height = png_get_image_height(png_ptr, info_ptr);
+    if (!image_plausible(fp, width, height)) {
+        log_error("PNG %s claims %ux%u but is far too small for that; not decoding",
+                  expanded_path, width, height);
+        png_error(png_ptr, "implausible size");   /* longjmps to the cleanup above */
+    }
     png_byte color_type = png_get_color_type(png_ptr, info_ptr);
     png_byte bit_depth = png_get_bit_depth(png_ptr, info_ptr);
 
@@ -250,8 +274,12 @@ static void jpeg_error_exit(j_common_ptr cinfo) {
     longjmp(err->setjmp_buffer, 1);
 }
 
-/* Load JPEG image */
-struct image_data *image_load_jpeg(const char *path) {
+/* Load a JPEG, decoding straight at 1/2, 1/4 or 1/8 size when that still
+ * covers the display: libjpeg does it in the IDCT, so a 24 MP photo for a
+ * 1080p screen costs a fraction of the time and memory. Modes that show
+ * pixels 1:1 (center, tile) always get the full image. */
+struct image_data *image_load_jpeg_for(const char *path, int32_t display_w,
+                                       int32_t display_h, int mode) {
     if (!path) {
         log_error("Invalid path for JPEG loading");
         return NULL;
@@ -317,6 +345,28 @@ struct image_data *image_load_jpeg(const char *path) {
 
     /* Force RGB output */
     cinfo.out_color_space = JCS_RGB;
+
+    if (display_w > 0 && display_h > 0 && mode != MODE_CENTER && mode != MODE_TILE) {
+        /* EXIF rotation swaps the axes the screen will see. */
+        bool swap = exif_orientation >= 5;
+        uint32_t iw = swap ? cinfo.image_height : cinfo.image_width;
+        uint32_t ih = swap ? cinfo.image_width : cinfo.image_height;
+        unsigned denom = 1;
+        while (denom < 8 && iw / (denom * 2) >= (uint32_t)display_w &&
+               ih / (denom * 2) >= (uint32_t)display_h) {
+            denom *= 2;
+        }
+        cinfo.scale_num = 1;
+        cinfo.scale_denom = denom;
+    }
+
+    if (!image_plausible(fp, cinfo.image_width, cinfo.image_height)) {
+        log_error("JPEG %s claims %ux%u but is far too small for that; not decoding",
+                  expanded_path, cinfo.image_width, cinfo.image_height);
+        jpeg_destroy_decompress(&cinfo);
+        fclose(fp);
+        return NULL;
+    }
 
     /* Start decompression */
     jpeg_start_decompress(&cinfo);
@@ -435,7 +485,7 @@ struct image_data *image_load(const char *path, int32_t display_width,
             img = image_load_png(path);
             break;
         case FORMAT_JPEG:
-            img = image_load_jpeg(path);
+            img = image_load_jpeg_for(path, display_width, display_height, mode);
             break;
         default:
             log_error("Unsupported or unknown image format: %s", path);
@@ -554,6 +604,9 @@ static void calculate_optimal_dimensions(uint32_t img_width, uint32_t img_height
             *out_height = img_height;
             break;
     }
+    /* Keeping the aspect on a tiny display can truncate one side to 0. */
+    if (*out_width == 0) *out_width = 1;
+    if (*out_height == 0) *out_height = 1;
 }
 
 /* Pad image to exact dimensions with opaque black borders (center positioning).

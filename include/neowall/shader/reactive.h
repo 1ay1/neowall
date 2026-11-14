@@ -126,6 +126,9 @@ void reactive_get(reactive_snapshot_t *out);
  * starts capture until a loaded shader actually asks for it. Idempotent. */
 void reactive_audio_start(void);
 
+/* Begin reading nvidia-smi. Call when a shader reads an iNv* signal. */
+void reactive_nvidia_start(void);
+
 /* True if audio capture is live (a monitor source was opened). */
 
 #endif /* NEOWALL_REACTIVE_H */

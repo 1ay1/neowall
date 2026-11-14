@@ -5,6 +5,30 @@ All notable changes to neowall. Dates are release dates.
 ## Unreleased
 
 ### Fixed
+- An idle wallpaper wasn't idle: a frame-callback loop woke the daemon at
+  the display's refresh rate (125 wakeups/s for a static image), and the
+  system sampler read /proc and /sys four times a second with nothing
+  reading it. A static image now uses no CPU and has no wakeups.
+- Shaders that read audio stopped starting capture after the shader engine
+  rewrite, so audio wallpapers sat still. nvidia-smi now starts only for a
+  shader that reads `iNv*`, instead of always.
+- Child processes (terminal wallpapers, exec sources, parec, nvidia-smi)
+  inherited the daemon's fds, including other terminals' pty masters.
+  They now start with only stdin, stdout and stderr.
+- A tiny image file claiming a huge size (a 140-byte JPEG claiming
+  16391x4101, found by fuzzing) was decoded in full: ~400 MB and a second
+  per slideshow step. Such files are refused. Large JPEGs are decoded at
+  1/2 to 1/8 size when that still covers the screen (a 24 MP photo for
+  1080p: 99 MB down to 34 MB).
+- Terminal: `CSI 0 @`, `CSI 0 X` and `CSI 0 P` did nothing instead of acting
+  on one cell, and could erase a wide glyph next to the cursor.
+- Each frame asked EGL five times what was current; glvnd answers with a
+  syscall each. neowall now tracks it.
+- Shutdown and the 4 Hz system sampler waited on the wall clock, so a clock
+  change could stall them. Timelapse moved once a second and jolted on NTP
+  steps; the timezone was read once at startup.
+- The pid file error said "already running" when it just couldn't be
+  created.
 - On NVIDIA every wallpaper was black (at a steady 60 fps) since the GPU
   reset work: the GL context was first bound with no window, and the
   driver kept drawing to no buffer after a window was bound. The e2e test

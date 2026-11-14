@@ -278,9 +278,24 @@ static void test_shutdown_cycles(void) {
     setenv("PATH", path, 1);
 
     int fds = count_fds();
+
+    /* Nothing asked for audio or NVIDIA data: neither helper may start. */
+    CHECK(reactive_init(), "init without consumers");
+    {
+        struct timespec ts = {0, 300 * 1000000L};
+        nanosleep(&ts, NULL);
+        char a[300], b[300];
+        snprintf(a, sizeof(a), "%s/parec.ran", dir);
+        snprintf(b, sizeof(b), "%s/nv.ran", dir);
+        CHECK(access(a, F_OK) != 0 && access(b, F_OK) != 0, "no capture helper without a consumer");
+        CHECK(count_children() == 0, "no children without a consumer");
+    }
+    reactive_shutdown();
+
     for (int i = 0; i < 5; i++) {
         CHECK(reactive_init(), "init %d", i);
         reactive_audio_start();
+        reactive_nvidia_start();
         /* let both helpers get going, so shutdown has live children to stop */
         for (int w = 0; w < 200; w++) {
             char a[300], b[300];

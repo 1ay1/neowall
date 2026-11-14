@@ -3,10 +3,11 @@
 
 /* Generic per-output frame-callback watchdog for Wayland backends.
  *
- * Asks the compositor for a frame callback on each output's surface. If the
- * compositor stops sending them for OCCLUSION_TIMEOUT_MS, the surface is
- * presumed obscured (spec: compositors MAY throttle frame callbacks for
- * non-visible surfaces). Self-perpetuating: each done re-arms a new request.
+ * Asks the compositor for a frame callback on each animating output's
+ * surface, at most every 250 ms. One unanswered for OCCLUSION_TIMEOUT_MS
+ * means the surface is presumed obscured (spec: compositors MAY throttle
+ * frame callbacks for non-visible surfaces). Outputs with nothing to pause
+ * (a static image, a settled static shader) aren't watched at all.
  *
  * Used by the KDE and wlroots backends; wlroots ORs it with other signals. */
 
@@ -25,6 +26,9 @@ void frame_watchdog_update(struct neowall_state *state);
  * state. Used by occlusion.c (wlr) to OR with other signals without writing
  * to o->occluded twice. */
 bool frame_watchdog_output_occluded(struct output_state *o);
+
+/* Whether this output is worth watching: it opted in and it animates. */
+bool frame_watchdog_wanted(const struct output_state *o);
 
 /* Ensure the watchdog is armed for this output. Called from update; exposed
  * so the wlr occlusion path can prime per-output entries too. */

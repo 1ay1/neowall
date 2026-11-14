@@ -25,6 +25,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <assert.h>
+#include <time.h>
 
 #include "../src/image/image.c"
 
@@ -164,12 +165,57 @@ static void test_center_preserves_pixels(void) {
     img_free(img);
 }
 
-int main(void) {
+/* ---- 4. decompression bombs and scaled decode --------------------------- */
+
+/* A 140-byte JPEG (found by fuzzing) that claims 16391x4101: it used to be
+ * allocated and decoded in full, ~400 MB and over a second. */
+static void test_size_bomb_rejected(const char *fixtures) {
+    printf("test_size_bomb_rejected\n");
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/regress-jpeg-size-bomb.jpg", fixtures);
+    struct timespec a, b;
+    clock_gettime(CLOCK_MONOTONIC, &a);
+    struct image_data *img = image_load(path, 1920, 1080, MODE_FILL);
+    clock_gettime(CLOCK_MONOTONIC, &b);
+    double ms = (double)(b.tv_sec - a.tv_sec) * 1e3 + (double)(b.tv_nsec - a.tv_nsec) / 1e6;
+    check(img == NULL, "tiny file claiming a huge size is refused");
+    check(ms < 100.0, "and refused before decoding");
+    img_free(img);
+}
+
+/* Decoding a JPEG at 1/2..1/8 must still give exactly the display size, in
+ * every mode, including when EXIF rotates it. */
+static void test_scaled_jpeg_decode(const char *fixtures) {
+    printf("test_scaled_jpeg_decode\n");
+    static const char *files[] = {"baseline.jpg", "orient6.jpg", "orient3.jpg"};
+    static const int modes[] = {MODE_CENTER, MODE_STRETCH, MODE_FIT, MODE_FILL, MODE_TILE};
+    static const int32_t disp[][2] = {{16, 9}, {7, 13}, {1, 1}};
+    for (size_t f = 0; f < sizeof(files) / sizeof(files[0]); f++) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s", fixtures, files[f]);
+        for (size_t m = 0; m < sizeof(modes) / sizeof(modes[0]); m++) {
+            for (size_t d = 0; d < sizeof(disp) / sizeof(disp[0]); d++) {
+                struct image_data *img = image_load(path, disp[d][0], disp[d][1], modes[m]);
+                char msg[256];
+                snprintf(msg, sizeof(msg), "%s mode %d -> %dx%d", files[f], modes[m],
+                         disp[d][0], disp[d][1]);
+                check(img && (int32_t)img->width == disp[d][0] &&
+                      (int32_t)img->height == disp[d][1], msg);
+                img_free(img);
+            }
+        }
+    }
+}
+
+int main(int argc, char **argv) {
     log_set_level(0); /* silence expected error/debug chatter */
+    const char *fixtures = argc > 1 ? argv[1] : "tests/fixtures/images";
 
     test_center_pad_no_overflow();
     test_modes_reach_exact_size();
     test_center_preserves_pixels();
+    test_size_bomb_rejected(fixtures);
+    test_scaled_jpeg_decode(fixtures);
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

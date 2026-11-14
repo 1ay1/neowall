@@ -197,7 +197,7 @@ static void exec_close(void *self) {
 
 static void exec_spawn(exec_state *st, uint64_t now_ms) {
     int fds[2];
-    if (pipe(fds) != 0) {
+    if (nw_pipe_cloexec(fds) != 0) {   /* dup2 in the child clears it on stdout */
         return;
     }
 
@@ -224,6 +224,7 @@ static void exec_spawn(exec_state *st, uint64_t now_ms) {
                 close(devnull);
             }
         }
+        nw_child_close_fds();
         execl("/bin/sh", "sh", "-c", st->command, (char *)NULL);
         _exit(127);
     }

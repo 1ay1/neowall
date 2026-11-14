@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <EGL/egl.h>
 #include "neowall/compositor/compositor.h"
+#include "neowall/egl/egl_core.h"
 #include "neowall/neowall.h"
 
 /*
@@ -291,6 +292,7 @@ void compositor_surface_destroy_egl(struct compositor_surface *surface,
 
     /* Destroy EGL surface */
     if (surface->egl_surface != EGL_NO_SURFACE && egl_display != EGL_NO_DISPLAY) {
+        egl_forget_current();   /* a new surface may reuse this handle */
         eglDestroySurface(egl_display, surface->egl_surface);
         surface->egl_surface = EGL_NO_SURFACE;
     }

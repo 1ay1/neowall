@@ -28,6 +28,8 @@ enum image_format image_detect_format(const char *path);
 
 /* Image loaders for specific formats */
 struct image_data *image_load_png(const char *path);
-struct image_data *image_load_jpeg(const char *path);
+/* Decoded smaller when that still covers display_w x display_h (0 = full). */
+struct image_data *image_load_jpeg_for(const char *path, int32_t display_w, int32_t display_h,
+                                       int mode);
 
 #endif /* IMAGE_H */

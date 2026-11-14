@@ -45,8 +45,31 @@ static void expect(bool cond, const char *what) {
 }
 
 int main(void) {
+    /* --- a count of 0 means 1 (ICH/ECH/DCH), like xterm, and never eats a
+     *     neighbouring wide glyph --- */
+    term_screen *s = term_screen_create(10, 2);
+    feed(s, "ABCDE\x1b[1;3H\x1b[0@");       /* insert 1 blank at col 3 */
+    expect_line(s, 0, "AB CDE");
+    feed(s, "\x1b[1;1H\x1b[0X");            /* erase 1 char at col 1 */
+    expect_line(s, 0, " B CDE");
+    feed(s, "\x1b[1;1H\x1b[0P");            /* delete 1 char at col 1 */
+    expect_line(s, 0, "B CDE");
+    term_screen_destroy(s);
+
+    s = term_screen_create(10, 2);
+    feed(s, "\xe4\xb8\xad\xe6\x96\x87");      /* two wide glyphs, cols 1-4 */
+    feed(s, "\x1b[1;3H\x1b[0X");            /* erase 1 at the second's head */
+    {
+        const term_cell *r = term_screen_row(s, 0);
+        expect(r[0].cp == 0x4E2D && (r[1].attr & TERM_ATTR_WIDE_TAIL),
+               "the first wide glyph survives an erase next to it");
+        expect(r[2].cp == 0 && r[3].cp == 0 && !(r[3].attr & TERM_ATTR_WIDE_TAIL),
+               "the erased wide glyph goes as a pair");
+    }
+    term_screen_destroy(s);
+
     /* --- print + cursor positioning (CUP) --- */
-    term_screen *s = term_screen_create(20, 6);
+    s = term_screen_create(20, 6);
     feed(s, "Hello");
     expect_line(s, 0, "Hello");
     feed(s, "\x1b[2;3HXY");            /* row2 col3 */

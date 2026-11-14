@@ -228,10 +228,13 @@ void wayland_occlusion_update(struct neowall_state *state) {
             continue;
         }
 
-        /* Keep the shared watchdog armed for this output. */
-        frame_watchdog_arm(o);
-
-        bool cb_says_occluded = frame_watchdog_output_occluded(o);
+        /* Keep the shared watchdog armed for outputs that animate; for the
+         * rest the frame-callback signal is simply "visible". */
+        bool cb_says_occluded = false;
+        if (frame_watchdog_wanted(o)) {
+            frame_watchdog_arm(o);
+            cb_says_occluded = frame_watchdog_output_occluded(o);
+        }
         bool toplevel_says_occluded =
             any_covering_toplevel_on((struct wl_output *)o->native_output);
         float threshold = o->config->pause_coverage_threshold;

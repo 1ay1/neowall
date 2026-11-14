@@ -186,6 +186,10 @@ static void *reactive_open(const nw_source_spec *spec, char *err, size_t err_cap
         return NULL;
     }
     st->sig = found;
+    /* Audio and NVIDIA capture are opt-in: a manifest that binds one of
+     * their signals asks for it here, like a shader that reads the uniform. */
+    if (strncmp(found->name, "audio_", 6) == 0) reactive_audio_start();
+    if (strncmp(found->name, "nv_", 3) == 0) reactive_nvidia_start();
     return st;
 }
 

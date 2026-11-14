@@ -100,6 +100,7 @@ static void reactive_wake_threads(void) {
 static pthread_t g_nv_thread;
 static atomic_bool g_nv_run = false;
 static atomic_bool g_nv_live = false;
+static atomic_bool g_nv_wanted = false;   /* a shader reads iNv*; see reactive_nvidia_start */
 /* Written by the nvidia thread, read by reactive_shutdown to kill nvidia-smi. */
 static _Atomic pid_t g_nv_pid = -1;
 
@@ -542,7 +543,7 @@ static void sample_time(reactive_snapshot_t *s) {
  * ever wanted. PulseAudio and PipeWire's pulse shim both resolve it. */
 static int spawn_parec(pid_t *out_pid) {
     int pipefd[2];
-    if (pipe(pipefd) != 0) return -1;
+    if (nw_pipe_cloexec(pipefd) != 0) return -1;
 
     char rate[16];
     snprintf(rate, sizeof(rate), "%d", SAMPLE_RATE);
@@ -557,6 +558,7 @@ static int spawn_parec(pid_t *out_pid) {
     posix_spawn_file_actions_adddup2(&fa, pipefd[1], STDOUT_FILENO);
     posix_spawn_file_actions_addclose(&fa, pipefd[0]);
     posix_spawn_file_actions_addclose(&fa, pipefd[1]);
+    nw_spawn_close_fds(&fa, -1);
 
     posix_spawnattr_t attr;
     bool have_attr = nw_spawnattr_reset_signals(&attr) == 0;
@@ -697,7 +699,7 @@ static void *audio_thread_body(void *arg) {
  * and every nv_* field stays zero. */
 static int spawn_nvsmi(pid_t *out_pid) {
     int pipefd[2];
-    if (pipe(pipefd) != 0) return -1;
+    if (nw_pipe_cloexec(pipefd) != 0) return -1;
 
     /* query: util.gpu, mem.used, mem.total, temp, power.draw, power.limit
      * -lms 500 = emit a fresh CSV row every 500 ms; nounits keeps it numeric. */
@@ -714,6 +716,7 @@ static int spawn_nvsmi(pid_t *out_pid) {
     posix_spawn_file_actions_adddup2(&fa, pipefd[1], STDOUT_FILENO);
     posix_spawn_file_actions_addclose(&fa, pipefd[0]);
     posix_spawn_file_actions_addclose(&fa, pipefd[1]);
+    nw_spawn_close_fds(&fa, -1);
 
     posix_spawnattr_t attr;
     bool have_attr = nw_spawnattr_reset_signals(&attr) == 0;
@@ -810,22 +813,12 @@ bool reactive_init(void) {
     /* Create the wake pipe before any capture thread starts, so a stop request
      * can always break a blocking read. Non-fatal if it fails: the threads fall
      * back to the old (racy) behaviour rather than not running at all. */
-    if (pipe(g_wake_pipe) != 0) {
+    if (nw_pipe_cloexec(g_wake_pipe) != 0) {
         g_wake_pipe[0] = g_wake_pipe[1] = -1;
         log_info("Reactive: wake pipe unavailable; capture threads may lag at exit");
     } else {
-        fcntl(g_wake_pipe[0], F_SETFD, FD_CLOEXEC);
-        fcntl(g_wake_pipe[1], F_SETFD, FD_CLOEXEC);
         /* Never let a wake write block the caller. */
         fcntl(g_wake_pipe[1], F_SETFL, O_NONBLOCK);
-    }
-
-    atomic_store(&g_nv_run, true);
-    set_exited(&g_nv_exited, false);
-    if (pthread_create(&g_nv_thread, NULL, nv_thread_fn, NULL) != 0) {
-        log_info("Reactive: could not start NVIDIA thread");
-        atomic_store(&g_nv_run, false);
-        set_exited(&g_nv_exited, true);
     }
 
     atomic_store(&g_inited, true);
@@ -844,8 +837,25 @@ bool reactive_init(void) {
     /* A shader loaded before this point may already have asked for audio.
      * Now that the subsystem is up, honour that request. */
     if (atomic_load(&g_audio_wanted)) reactive_audio_start();
+    if (atomic_load(&g_nv_wanted)) reactive_nvidia_start();
 
     return true;
+}
+
+/* Start the nvidia-smi reader on demand: it polls the GPU twice a second,
+ * which keeps an NVIDIA card out of its deepest idle state, so only a shader
+ * that reads iNv* pays for it. Idempotent. */
+void reactive_nvidia_start(void) {
+    atomic_store(&g_nv_wanted, true);
+    if (!atomic_load(&g_inited)) return;
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&g_nv_run, &expected, true)) return;
+    set_exited(&g_nv_exited, false);
+    if (pthread_create(&g_nv_thread, NULL, nv_thread_fn, NULL) != 0) {
+        log_info("Reactive: could not start NVIDIA thread");
+        atomic_store(&g_nv_run, false);
+        set_exited(&g_nv_exited, true);
+    }
 }
 
 /* Start audio capture on demand.
@@ -939,6 +949,8 @@ void reactive_shutdown(void) {
         if (g_wake_pipe[0] >= 0) { close(g_wake_pipe[0]); g_wake_pipe[0] = -1; }
     }
 
+    atomic_store(&g_audio_wanted, false);
+    atomic_store(&g_nv_wanted, false);
     atomic_store(&g_inited, false);
 }
 
@@ -1055,21 +1067,40 @@ void reactive_sample(void) {
     pthread_mutex_unlock(&g_sample_lock);
 }
 
+/* Last time anyone read the snapshot (reactive_get), monotonic ms. The
+ * sampler sleeps once nobody has for a while, so a static image or a covered
+ * screen doesn't read /proc and /sys four times a second for no one. */
+static _Atomic uint64_t g_last_read_ms = 0;
+#define SAMPLER_IDLE_MS 2000
+
+static uint64_t mono_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
 static void *sys_thread_fn(void *arg) {
     (void)arg;
     unsigned ticks = 0;
     while (atomic_load(&g_sys_run)) {
-        /* libc reads the timezone once; re-read it every minute so a zone
-         * change (travel, timedatectl) reaches iDate and the log without a
-         * restart. tzset is serialised with localtime_r inside libc. */
-        if (ticks++ % 240 == 0) tzset();
         pthread_mutex_lock(&g_sample_lock);
-        sample_once_locked();
-
-        /* 4 Hz, but wake at once on shutdown. */
-        struct timespec until = mono_in(250);
-        while (atomic_load(&g_sys_run) &&
-               pthread_cond_timedwait(&g_sys_cond, &g_sample_lock, &until) == 0) { }
+        bool wanted = mono_ms() - atomic_load(&g_last_read_ms) < SAMPLER_IDLE_MS;
+        if (wanted) {
+            /* libc reads the timezone once; re-read it every minute so a
+             * zone change (travel, timedatectl) reaches iDate and the log
+             * without a restart. tzset is serialised with localtime_r. */
+            if (ticks++ % 240 == 0) tzset();
+            sample_once_locked();
+            /* 4 Hz, but wake at once on shutdown. */
+            struct timespec until = mono_in(250);
+            while (atomic_load(&g_sys_run) &&
+                   pthread_cond_timedwait(&g_sys_cond, &g_sample_lock, &until) == 0) { }
+        } else {
+            /* Nobody's reading: sleep until a reader or shutdown signals. */
+            while (atomic_load(&g_sys_run) &&
+                   mono_ms() - atomic_load(&g_last_read_ms) >= SAMPLER_IDLE_MS)
+                pthread_cond_wait(&g_sys_cond, &g_sample_lock);
+        }
         pthread_mutex_unlock(&g_sample_lock);
     }
     return NULL;
@@ -1085,6 +1116,16 @@ void reactive_note_mouse(float dx, float dy) {
 void reactive_get(reactive_snapshot_t *out) {
     if (!out) return;
     if (!atomic_load(&g_inited)) { memset(out, 0, sizeof(*out)); out->battery = 1.0f; return; }
+    uint64_t now = mono_ms();
+    uint64_t last = atomic_exchange(&g_last_read_ms, now);
+    if (now - last >= SAMPLER_IDLE_MS) {
+        /* The sampler went to sleep; wake it, and take a fresh sample now so
+         * this first frame doesn't show values from before the idle spell. */
+        pthread_mutex_lock(&g_sample_lock);
+        sample_once_locked();
+        pthread_cond_signal(&g_sys_cond);
+        pthread_mutex_unlock(&g_sample_lock);
+    }
     pthread_mutex_lock(&g_lock);
     *out = g_snap;
     pthread_mutex_unlock(&g_lock);

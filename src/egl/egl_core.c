@@ -173,7 +173,7 @@ bool egl_core_init(struct neowall_state *state) {
 
     /* Context-wide setup can't wait for an output surface: on Wayland outputs
      * usually have no size yet. Make the context current surfaceless for it. */
-    if (eglMakeCurrent(state->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, state->egl_context)) {
+    if (egl_make_current_raw(state->egl_display, EGL_NO_SURFACE, state->egl_context)) {
         const char *gl_version = (const char *)glGetString(GL_VERSION);
         const char *gl_renderer = (const char *)glGetString(GL_RENDERER);
         log_info("OpenGL: %s", gl_version ? gl_version : "unknown");
@@ -258,11 +258,11 @@ void egl_core_cleanup(struct neowall_state *state) {
     }
 
     if (state->egl_display != EGL_NO_DISPLAY) {
-        eglMakeCurrent(state->egl_display, EGL_NO_SURFACE,
-                      EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        egl_make_current_raw(state->egl_display, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     }
 
     if (state->egl_context != EGL_NO_CONTEXT) {
+        egl_forget_current();
         eglDestroyContext(state->egl_display, state->egl_context);
         state->egl_context = EGL_NO_CONTEXT;
     }
@@ -277,8 +277,7 @@ bool egl_core_make_current(struct neowall_state *state, struct output_state *out
     if (!state || state->egl_display == EGL_NO_DISPLAY) return false;
 
     if (!output) {
-        return eglMakeCurrent(state->egl_display, EGL_NO_SURFACE,
-                             EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        return egl_make_current_raw(state->egl_display, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     }
 
     if (!output->compositor_surface || 

@@ -174,7 +174,7 @@ nw_result term_spawn(const term_spawn_opts *opts, terminal **out) {
         free(t->snap_cells); term_screen_destroy(t->screen); free(t);
         return nw_err(NW_ERR_STATE, "mutex");
     }
-    if (pipe(t->selfpipe) != 0) {
+    if (nw_pipe_cloexec(t->selfpipe) != 0) {
         pthread_mutex_destroy(&t->lock);
         free(t->snap_cells); term_screen_destroy(t->screen); free(t);
         return nw_err(NW_ERR_IO, "selfpipe");
@@ -246,6 +246,7 @@ nw_result term_spawn(const term_spawn_opts *opts, terminal **out) {
                 /* nothing to do; stderr goes to the PTY, which no one reads */
             }
         }
+        nw_child_close_fds();   /* the pty is 0-2 already */
         char *const argv[] = {(char *)sh, (char *)"-c", (char *)opts->cmd, NULL};
         execve(sh, argv, child_env);
         _exit(127); /* exec failed */
@@ -254,6 +255,8 @@ nw_result term_spawn(const term_spawn_opts *opts, terminal **out) {
     /* parent */
     free(child_env); free(color_assignment); free(term_assignment);
     t->child = pid;
+    /* forkpty's master isn't close-on-exec; the next child must not get it */
+    fcntl(t->master_fd, F_SETFD, FD_CLOEXEC);
     set_nonblock(t->master_fd);
     atomic_store(&t->stop, false);
     atomic_store(&t->child_exited, false);

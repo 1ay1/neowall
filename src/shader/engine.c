@@ -8,6 +8,7 @@
 #define _DEFAULT_SOURCE
 
 #include "neowall/shader/engine.h"
+#include "neowall/shader/reactive.h"
 #include "neowall/core/log.h"
 
 #include <ctype.h>
@@ -391,12 +392,20 @@ static nw_engine *finish(nw_engine_build *b) {
     nw_engine *e = calloc(1, sizeof(*e));
     if (!e) return NULL;
     e->src = src;
+    bool uses_nv = false;
     for (size_t i = 0; i < b->p.len; i++) {
         pass_gl g = {.prog = b->p.data[i].prog};
         b->p.data[i].prog = 0; /* the engine owns it now */
         cache_locations(&g, src);
         /* the compiler drops unused uniforms, so this is exact */
-        if (glGetUniformLocation(g.prog, "iAudio") >= 0) e->uses_audio = true;
+        static const char *const audio_uniforms[] = {
+            "iAudio", "iAudioLevel", "iAudioBass", "iAudioMid", "iAudioTreble", "iAudioBeat",
+        };
+        for (size_t k = 0; k < NW_COUNTOF(audio_uniforms); k++)
+            if (glGetUniformLocation(g.prog, audio_uniforms[k]) >= 0) e->uses_audio = true;
+        static const char *const nv_uniforms[] = {"iNvGpu", "iNvVram", "iNvGpuTempC", "iNvPower"};
+        for (size_t k = 0; k < NW_COUNTOF(nv_uniforms); k++)
+            if (glGetUniformLocation(g.prog, nv_uniforms[k]) >= 0) uses_nv = true;
         for (int c = 0; c < NW_CHANNELS; c++) {
             if (src->passes.data[i].ch[c].kind == NW_IN_AUDIO) e->uses_audio = true;
             if (src->passes.data[i].ch[c].kind == NW_IN_KEYBOARD) e->uses_keyboard = true;
@@ -408,6 +417,13 @@ static nw_engine *finish(nw_engine_build *b) {
         }
     }
     glGenVertexArrays(1, &e->vao);
+    /* Capture is opt-in (it shows as "recording" on the desktop), so only a
+     * shader that really reads audio starts it. Idempotent. */
+    if (e->uses_audio) {
+        log_info("Shader reads audio - starting capture (desktop output monitor)");
+        reactive_audio_start();
+    }
+    if (uses_nv) reactive_nvidia_start();
     static const float zero[AUDIO_W * 2];
     e->tex_audio = make_tex(GL_R16F, AUDIO_W, 2, GL_RED, GL_FLOAT, zero, true);
     static const uint8_t keys[256 * 3];

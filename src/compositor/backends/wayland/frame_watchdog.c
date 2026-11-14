@@ -8,15 +8,21 @@
 #include <wayland-client.h>
 #include "neowall/neowall.h"
 #include "neowall/compositor/compositor.h"
+#include "neowall/shader/wallshader.h"
 #include "frame_watchdog.h"
 
+/* A callback unanswered this long means the compositor isn't drawing us. */
 #define OCCLUSION_TIMEOUT_MS 500
+/* How often to ask again once one was answered. Asking right away made a
+ * loop at the refresh rate: a commit and a wakeup every frame, even for a
+ * wallpaper that never changes. */
+#define REARM_MS 250
 
 typedef struct watched_output {
     struct output_state *output;
     struct wl_callback *callback;
-    uint64_t last_done_ms;
-    bool armed;
+    uint64_t armed_at_ms;       /* when `callback` was requested */
+    uint64_t last_done_ms;      /* when the last one came back; 0 = never */
     struct watched_output *next;
 } watched_output_t;
 
@@ -35,8 +41,6 @@ static void on_frame_done(void *data, struct wl_callback *cb, uint32_t time) {
     }
     w->callback = NULL;
     w->last_done_ms = get_time_ms();
-    w->armed = true;
-    arm_locked(w);
     pthread_mutex_unlock(&lock);
 }
 
@@ -56,6 +60,9 @@ static void arm_locked(watched_output_t *w) {
     w->callback = wl_surface_frame(surf);
     if (w->callback) {
         wl_callback_add_listener(w->callback, &frame_listener, w);
+        w->armed_at_ms = get_time_ms();
+        /* An explicit commit, so the request is attached even when nothing
+         * else would commit (a paused or settled output). */
         wl_surface_commit(surf);
     }
 }
@@ -71,7 +78,6 @@ static watched_output_t *add_locked(struct output_state *o) {
     watched_output_t *w = calloc(1, sizeof(*w));
     if (!w) return NULL;
     w->output = o;
-    w->last_done_ms = get_time_ms();
     w->next = watched;
     watched = w;
     return w;
@@ -82,6 +88,15 @@ bool frame_watchdog_init(struct neowall_state *state) {
     return true;
 }
 
+bool frame_watchdog_wanted(const struct output_state *o) {
+    if (!o || !o->config || !o->config->pause_on_fullscreen) return false;
+    if (!o->compositor_surface || !o->compositor_surface->native_surface) return false;
+    /* Only something that animates has anything to pause. A static image or
+     * a shader that painted its one frame costs nothing while covered. */
+    if (!wallpaper_is_animated(o->config->type) || !o->shader) return false;
+    return o->config->type == WALLPAPER_TERMINAL || wallshader_animated(o->shader);
+}
+
 void frame_watchdog_arm(struct output_state *o) {
     if (!o) return;
     pthread_mutex_lock(&lock);
@@ -89,7 +104,8 @@ void frame_watchdog_arm(struct output_state *o) {
     if (!w) {
         w = add_locked(o);
     }
-    if (w && !w->callback) {
+    if (w && !w->callback &&
+        (w->last_done_ms == 0 || get_time_ms() - w->last_done_ms >= REARM_MS)) {
         arm_locked(w);
     }
     pthread_mutex_unlock(&lock);
@@ -100,8 +116,8 @@ bool frame_watchdog_output_occluded(struct output_state *o) {
     pthread_mutex_lock(&lock);
     watched_output_t *w = find_locked(o);
     bool occ = false;
-    if (w && w->armed) {
-        occ = (get_time_ms() - w->last_done_ms) > OCCLUSION_TIMEOUT_MS;
+    if (w && w->callback) {
+        occ = (get_time_ms() - w->armed_at_ms) > OCCLUSION_TIMEOUT_MS;
     }
     pthread_mutex_unlock(&lock);
     return occ;
@@ -136,12 +152,13 @@ void frame_watchdog_update(struct neowall_state *state) {
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o; o = o->next) {
         if (!o->config->pause_on_fullscreen) continue;
-        if (!o->compositor_surface || !o->compositor_surface->native_surface) continue;
-
-        frame_watchdog_arm(o);
 
         bool was = atomic_load_explicit(&o->occluded, memory_order_acquire);
-        bool nowocc = frame_watchdog_output_occluded(o);
+        bool nowocc = false;
+        if (frame_watchdog_wanted(o)) {
+            frame_watchdog_arm(o);
+            nowocc = frame_watchdog_output_occluded(o);
+        }
 
         atomic_store_explicit(&o->occluded, nowocc, memory_order_release);
 
