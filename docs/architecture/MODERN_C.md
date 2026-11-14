@@ -7,11 +7,14 @@ can't be dropped. Every number here was measured on the tree, not guessed.
 
 Status: steps 6 and 7 are done. `neowall.h` is gone; modules form a strict
 hierarchy with no include cycles, enforced in CI by `scripts/check-layers.sh`
-(see ARCHITECTURE.md §2). `output.c` is split by role. Update is pure and
-returns effects. Module globals: reactive's audio and NVIDIA readers are
-`capture` values (refcounted runs, no shared state between a stuck reader
-and a restart); X11 occlusion lives on the backend; render's shared GL
-objects and the Hyprland cache each have one owner and a release path.
+(see ARCHITECTURE.md §2). `output.c`, `x11_core.c` and `wlr_layer_shell.c`
+are split by role. Update is pure and returns effects. Module globals:
+reactive's audio and NVIDIA readers are `capture` values (refcounted runs,
+no shared state between a stuck reader and a restart); X11 occlusion lives on
+the backend; render's shared GL objects and the Hyprland cache each have one
+owner and a release path; the backend list is a `const` table. The tree is
+clang-format clean, checked in CI. The table below is the audit as it was at
+0.8.0, kept for reference.
 
 ## Where it already is
 
@@ -112,10 +115,9 @@ cheaper. Effort is rough: S = an afternoon, M = a few days, L = a week+.
    dependencies; a module that reaches past them stops linking. Tests link
    only the library they test (today `test_terminal_wake` pulls in 4
    source files by hand).
-6. **Break the include cycles.** `neowall.h` shrinks to the app state and
-   stops including `output.h`, `config.h`, EGL and GL. Modules that need
-   output geometry include `output.h` themselves. Forward-declare structs
-   in headers instead of including.
+6. **Done.** `neowall.h` is gone; each file includes what it uses, and the
+   shared struct is `state/state.h` (libc and EGL types only). Lower layers
+   reach the app through hooks on that struct.
 7. **Done.** `app_render.inc` is now `src/app/present.c`; `app.c` is split
    into `app.c` (model, run), `update.c`, `present.c` and `host.c`, sharing
    `src/app/app_internal.h`.

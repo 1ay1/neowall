@@ -38,9 +38,11 @@ public headers live under `include/neowall/`, mirroring the `src/` module tree,
 and every cross-module include is fully qualified** (`#include
 "neowall/<module>/<file>.h"`). A single `-Iinclude` resolves the whole public
 surface; there are **zero relative-path includes** (`../`) anywhere in the tree.
+There's no umbrella header either: each file includes what it uses.
 
 Modules form a strict hierarchy with no cycles. Each may include only the
-ones below it, and `scripts/check-layers.sh` fails CI otherwise:
+ones below it, and `scripts/check-layers.sh` fails CI otherwise (the script
+has the exact allow-list per module):
 
 ```
 app  cli  main               the program: update/perform/present, the CLI
@@ -65,7 +67,7 @@ it, it is private → keep it next to that `.c`.
 
 ---
 
-## 3. Foundation primitives (`include/neowall/`)
+## 3. Foundation primitives (`include/neowall/core/`)
 
 These are small, header-only, dependency-free building blocks used throughout.
 They exist so the rest of the code can be written in a modern, composable style.
@@ -83,7 +85,7 @@ All three are exercised by `tests/test_foundation.c` under ASan/UBSan/LSan.
 ## 4. The compositor abstraction (`include/neowall/surface/surface.h`)
 
 This is the central architectural seam. A `compositor_backend_ops` struct is a
-vtable of function pointers; each backend implements it and registers itself.
+vtable of function pointers; each backend implements it.
 
 - **Opaque handles.** `struct compositor_surface` carries `void *native_surface`
   etc. — the core treats them as opaque. No `wl_*` / `X*` type appears in the
@@ -91,6 +93,9 @@ vtable of function pointers; each backend implements it and registers itself.
 - **Capability flags.** `compositor_capabilities_t` advertises what a backend
   supports (layer-shell, viewporter, occlusion, …) so the core can adapt instead
   of hard-coding per-compositor behaviour.
+- **Optional ops.** Frame pacing (`frame_request`/`frame_ready`) and present
+  feedback are ops a backend may leave NULL; the core calls them through
+  `compositor_surface_*` wrappers and never through a backend's own functions.
 - **Selection.** Each Wayland backend exports a `const compositor_backend_desc_t`
   listed in `backends/registry.c`, which detects the running compositor (env
   vars + protocol probe) and picks the backend that fits, or refuses with a
@@ -101,9 +106,41 @@ and `x11` (EWMH + root window).
 GNOME/Mutter on Wayland is refused with a clear error: it has no wallpaper
 surface role for clients.
 
+Where the code lives:
+
+- `backends/registry.c`: compositor detection and backend selection.
+- `backends/wayland/wayland_core.c`: the display connection, outputs, frame
+  callbacks and present feedback shared by both Wayland backends.
+- `backends/wayland/compositors/`: `wlr_layer_shell.c` (surfaces) and
+  `wlr_input.c` (pointer, keyboard, seat), sharing `wlr_internal.h`;
+  `kde_plasma.c`.
+- `backends/x11/`: `x11_core.c` (display, ops, events), `x11_wm.c` (WM
+  detection, window shape), `x11_surface.c` (windows, commit, root pixmap),
+  `x11_outputs.c` (RandR, hotplug), `x11_occlusion.c`, sharing
+  `x11_internal.h`.
+
+Backends add and remove monitors only through `output_list_add` /
+`output_list_take*` / `output_list_clear` (`output/output.h`), which own the
+locking.
+
 **Adding a backend:** implement `compositor_backend_ops`, export a descriptor,
 and add it to the `wayland_backends` table and the selection logic in
 `backends/registry.c`. No core changes required.
+
+### Talking upward: hooks
+
+Lower layers can't include `app/`, so they tell it things through three
+hooks on `struct neowall_state` (`state/state.h`): `on_output_dirty`,
+`on_outputs_changed` and `on_output_ready`. `app_run` installs them; any
+thread may fire them through `state_output_dirty()` and friends; unset
+(as in tests) they do nothing.
+
+### Module state
+
+State belongs to an object, not a file-level global: backend data, the
+output, the engine. The globals left are ones there is honestly one of per
+process (log level, wall clock, pid lock, the Wayland connection, GL-context
+caches) or `dlerror()`-style "last error" buffers used only on the GL thread.
 
 ---
 
@@ -137,7 +174,7 @@ present. Every other thread only produces input:
 | Thread | Does | Talks to the loop by |
 |--------|------|----------------------|
 | slideshow preload (per output) | decodes the next image | mutex-guarded handoff + atomic flag; cooperatively cancelled, always joined in `output_destroy` (libpng/libjpeg aren't cancel-safe) |
-| terminal reader (per terminal) | drains the PTY into the screen model | sets `needs_redraw`, posts a wake only if the loop armed one (`app_request_output_redraw`) |
+| terminal reader (per terminal) | drains the PTY into the screen model | fires the `on_output_dirty` hook, which posts a wake only if the loop armed one |
 | reactive sampler | reads /proc, /sys, hwmon at 4 Hz | publishes a snapshot under `g_lock` (`src/source/reactive.c`) |
 | audio capture | runs `parec` on `@DEFAULT_MONITOR@`, FFT | same snapshot; only started when a shader reads audio |
 | nvidia-smi reader | parses `nvidia-smi -lms 500` | same snapshot |
@@ -240,12 +277,14 @@ metadata.
 ## 9. Configuration (`src/config/`)
 
 `config.vibe` is parsed by the **VIBE** parser (vendored single-header libvibe
-from <https://github.com/1ay1/vibe>, compiled once via `vibe_impl.c`) into a
-value tree, then
-mapped into `wallpaper_config` by `config.c`. The parser is strict: malformed
-input (value on the wrong line, integer overflow, dangling key) is **rejected
-with a line/column error** rather than silently producing wrong config. Covered
-by `tests/test_vibe.c`.
+from <https://github.com/1ay1/vibe>, compiled once via `src/core/vibe.c`) into
+a value tree, then mapped into `wallpaper_config` by `config.c`. The parser is
+strict: malformed input (value on the wrong line, integer overflow, dangling
+key) is **rejected with a line/column error** rather than silently producing
+wrong config. Covered by `tests/test_vibe.c`.
+
+`config/` only reads and validates; it depends on `core` alone. Applying the
+result to live outputs is `app/configure.c`, and GL setup is `app/graphics.c`.
 
 ---
 
@@ -274,12 +313,15 @@ CI (`.github/workflows/`):
   X11-only, both) plus an Xvfb RandR smoke test.
 - `quality.yml` — the full suite under ASan+UBSan, the concurrency tests under
   **ThreadSanitizer**, clang static analyzer + `clang-tidy`, `gcc -fanalyzer`,
-  `clang-format`, and a check that every version string agrees.
+  `clang-format`, the layer check (`scripts/check-layers.sh`), an unused-code
+  check, and a check that every version string agrees.
 - `release.yml` — on a `v*` tag: Arch, Fedora, openSUSE, Debian, Ubuntu
   packages, an AppImage, the AUR push and the flake version bump.
 
 Style is pinned by `.clang-format`, `.clang-tidy`, and `.editorconfig`:
-4-space indent, K&R braces, 100-column soft limit, pointers bound to the type.
+4-space indent, attached braces, 100 columns, pointers bound to the name.
+Run `scripts/format.sh` (or `ninja -C build format`) before committing; CI runs
+`scripts/format.sh --check`. Vendored stb and `vibe.h` are left alone.
 
 ---
 

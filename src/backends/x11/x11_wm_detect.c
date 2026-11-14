@@ -1,7 +1,7 @@
 /* Pure decision logic for the X11 backend's window-manager probe.
  *
  * No Xlib, no X server, no globals — see x11_wm_detect.h for why this is split
- * out of x11_core.c. Unit-tested by tests/test_x11_wm_detect.c. */
+ * out of x11_wm.c. Unit-tested by tests/test_x11_wm_detect.c. */
 
 #include "x11_wm_detect.h"
 

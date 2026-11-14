@@ -15,30 +15,28 @@ section first.
 
 ## Layering
 
-neowall has two backend tiers:
-
-1. **Transport backend** — wires up the connection to the display server.
-   One per display protocol: `wayland`, `x11`.
-2. **Compositor-specific backend** — chooses a strategy for hosting a
-   wallpaper surface within that transport.
-
-The compositor-specific tier is what changes between e.g. wlroots, KDE Plasma,
-GNOME Shell — they all speak Wayland but expose different shell protocols.
+On Wayland there are two tiers: `backends/wayland/wayland_core.c` owns the
+connection, outputs, frame callbacks and present feedback, and a
+compositor-specific backend under `backends/wayland/compositors/` decides how
+to host the wallpaper surface. X11 is a single backend.
 
 ```
 runtime loop (src/runtime/rt.c, src/app/)
     │
     ▼
-compositor_backend  ◀── auto-detected from $XDG_SESSION_TYPE +
-    │                   protocol availability (compositor_registry.c)
+compositor_backend  ◀── picked from $WAYLAND_DISPLAY / $DISPLAY, the
+    │                   desktop env vars and protocol probe (registry.c)
     │
     ├─ wlr_layer_shell    (wlroots: Sway, Hyprland, river, …)
-    ├─ kde_plasma         (Plasma's org_kde_plasma_shell)
+    ├─ kde_plasma         (layer shell with click pass-through, for KWin)
     └─ x11                (EWMH root-window + per-output viewports)
 ```
 
-A backend is picked at startup by `compositor_backend_init()`. The highest-
-`priority` backend whose `init()` returns non-NULL wins.
+A backend is picked at startup by `compositor_backend_init()`. On Wayland it
+chooses one backend by compositor type and calls its `init()`; if that returns
+NULL, startup fails with an error rather than trying a surface the compositor
+can't map. If the Wayland connection itself fails and `$DISPLAY` is set, it
+falls back to X11.
 
 ---
 
@@ -50,8 +48,8 @@ function pointer either has a real implementation or is `NULL` (meaning
 
 ### Required ops
 
-These must not be NULL — `compositor_backend_init()` rejects the backend if
-they are.
+These must not be NULL. Nothing checks this at startup; the core just calls
+them.
 
 | Op | What it does |
 |---|---|
@@ -71,6 +69,7 @@ they are.
 | `prepare_events` / `read_events` / `cancel_read` | Wayland's `wl_display_prepare_read` dance. X11 leaves these NULL. |
 | `has_pending_events` | True when events are already queued where poll() can't see them (Xlib's queue), so the loop dispatches instead of sleeping. |
 | `frame_request` / `frame_ready` / `frame_cancel` | Per-surface frame pacing: ask for a frame callback on the next commit, report when it arrived (or a timeout passed). Lets each output pace itself instead of one slow monitor blocking the swap. |
+| `present_feedback` | Ask for the real flip timestamp of the next commit, which the frame pacer phase-locks to. NULL = the pacer anchors on swap time. |
 | `set_vsync` | Change the tearing/vsync hint on a live surface. |
 | `set_scale` | HiDPI buffer scale. NULL means scale 1 forever. |
 | `on_output_added` / `on_output_removed` | Hotplug. NULL = static output list. |
@@ -83,11 +82,11 @@ they are.
 ### Capability bits
 
 `compositor_capabilities_t` is the cheap, cap-bit version of the vtable.
-Currently includes `LAYER_SHELL`, `KDE_SHELL`, `XDG_SHELL`, `MULTI_OUTPUT`,
-`OCCLUSION`, `DAMAGE_TRACKING`, etc. — see compositor.h for the live list.
-The runtime checks bits before asking for behaviour that's behind an
-optional op, so you don't have to handle "asked for layer-shell on a
-backend that doesn't have it".
+Currently `LAYER_SHELL`, `SUBSURFACES`, `VIEWPORT`, `EXCLUSIVE_ZONE`,
+`KEYBOARD_INTERACTIVITY`, `ANCHOR`, `MULTI_OUTPUT` and `OCCLUSION` (each
+prefixed `COMPOSITOR_CAP_`); see `surface.h` for the live list.
+Today they're only logged at startup; the core decides what to call by
+whether an optional op is NULL, not by these bits.
 
 ---
 
@@ -95,9 +94,9 @@ backend that doesn't have it".
 
 ```
 compositor_backend_init(state)
-    └── tries each backend by priority order:
-            init() → if NULL, try next
-                   → if non-NULL, this is your backend
+    └── picks one backend for the detected compositor:
+            init() → if non-NULL, this is your backend
+                   → if NULL, startup fails
 
 every runtime step (see docs/architecture/RUNTIME.md):
     prepare:  prepare_events() ; flush() ; has_pending_events()
@@ -105,7 +104,7 @@ every runtime step (see docs/architecture/RUNTIME.md):
     fd ready: read_events()       (or cancel_read() if it wasn't)
     after:    dispatch_events() ; get_error()
     present:  occlusion_update()  ← if op present
-              frame_ready()?  render, frame_request(), swap, commit
+              frame_ready()?  render, present_feedback(), frame_request(), swap
 
 config_load() runs:
     apply_input_config()  ← if op present
@@ -115,8 +114,7 @@ shutdown:
 ```
 
 `backend_data` is yours to allocate however you want; the runtime treats it
-as opaque. Most backends use a `static` struct or a `malloc`'d one — both
-are fine.
+as opaque. Allocate it in `init()` and free it in `cleanup()`.
 
 ---
 
@@ -127,6 +125,10 @@ are fine.
 - Never call `wl_display_roundtrip` / `dispatch` or `XSync` while holding
   `output_list_lock`: a listener that runs during the dispatch may take it
   for writing (hotplug removal), and that deadlocks.
+- Add and remove monitors only with `output_list_add` / `output_list_take*` /
+  `output_list_clear` (`output/output.h`); they take the lock for you.
+- Tell the app about changes with `state_output_dirty()`,
+  `state_outputs_changed()` and `state_output_ready()` (`state/state.h`).
 - Worker threads (terminal PTY readers, the reactive sampler, audio, preload)
   never touch the backend; they post to the loop.
 
@@ -134,14 +136,15 @@ are fine.
 
 ## Adding a new backend: minimum viable patch
 
-1. Create `src/backends/<name>/<name>_core.{c,h}`.
-2. Implement `compositor_backend_<name>_init(struct neowall_state *state)`
-   returning a `compositor_backend*` whose `ops` points at your vtable.
-3. Add it to `src/backends/registry.c`'s priority table.
+1. For a Wayland compositor, add `src/backends/wayland/compositors/<name>.c`
+   implementing `compositor_backend_ops_t` (copy `kde_plasma.c`).
+2. Export a `const compositor_backend_desc_t <name>_backend` and declare it in
+   `surface.h`.
+3. Add it to the `wayland_backends` table in `src/backends/registry.c` and
+   teach `select_wayland_backend()` when to pick it.
 4. Add a `meson.build` entry (look at how the existing backends are
    conditionally compiled with `has_wayland` / `has_x11`).
-5. Update [`backends/README.md`](../../src/backends/README.md) with a
-   one-line description.
+5. Update [`backends/README.md`](../../src/backends/README.md).
 
 That's the whole contract. The "compositor-specific" parts you'll spend
 real time on are surface creation, layering / z-order, and occlusion
@@ -152,7 +155,7 @@ detection — those are the rabbit holes worth budgeting time for.
 ## Conventions
 
 - All ops document their preconditions in the header comment in
-  `compositor.h`. If you can't satisfy a precondition, leave the op NULL.
+  `surface.h`. If you can't satisfy a precondition, leave the op NULL.
 - Log via `log_info` / `log_error` from `neowall/core/log.h` — same prefix
   scheme as the rest of the daemon.
 - No `printf` or `fprintf` from a backend. The daemon may be detached from
@@ -162,7 +165,7 @@ detection — those are the rabbit holes worth budgeting time for.
 
 ## See also
 
-- [`src/backends/README.md`](../../src/backends/README.md) — high-level
-  overview of the layering, includes the per-compositor quirks.
+- [`src/backends/README.md`](../../src/backends/README.md) — file layout and
+  how a backend is selected.
 - [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) — where backends fit in the
   runtime and rendering pipeline.

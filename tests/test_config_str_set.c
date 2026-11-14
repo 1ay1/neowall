@@ -1,7 +1,7 @@
 /* Regression test for the alias-safe config field setter.
  *
  * BUG THIS GUARDS (found live, v0.5.4): the deferred re-apply paths in
- * src/output/output.c call the wallpaper setters with the config's OWN buffer
+ * src/output/wallpaper_*.c call the wallpaper setters with the config's OWN buffer
  * as the argument:
  *
  *     output_set_terminal(output, output->config->term_cmd, ...);

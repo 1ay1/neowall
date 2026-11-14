@@ -23,15 +23,13 @@
  *
  * SUPPORTED BACKENDS:
  * - wlroots-based (Hyprland, Sway, River, etc.) - via wlr-layer-shell
- * - KDE Plasma - via org_kde_plasma_shell
- * - GNOME Shell/Mutter - via fallback subsurface method
+ * - KDE Plasma - layer shell with click pass-through
  * - X11 - via Xlib with EWMH hints
- * - Generic fallback - works on any compositor (limited features)
+ * GNOME/Mutter on Wayland is refused: it has no wallpaper role for clients.
  *
  * ADDING NEW BACKENDS:
  * 1. Implement compositor_backend_ops in src/backends/
- * 2. Register backend in compositor_registry.c
- * 3. Backend is auto-detected and loaded at runtime
+ * 2. Export a compositor_backend_desc_t and list it in src/backends/registry.c
  */
 
 /* Forward declarations */

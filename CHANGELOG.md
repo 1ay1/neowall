@@ -121,6 +121,13 @@ All notable changes to neowall. Dates are release dates.
 - Builds are reproducible (no embedded timestamps).
 - The desktop file and icon are named `io.github._1ay1.neowall`.
 
+### Internal
+- The code is split into modules with a strict include hierarchy and no
+  cycles, checked in CI by `scripts/check-layers.sh`. `neowall.h` is gone.
+- `output.c` and the X11 and wlroots backends are split into smaller files
+  by role. Backends are a `const` table instead of registering at startup.
+- The tree is clang-format clean, checked in CI (`scripts/format.sh`).
+
 ## 0.8.0 - 2026-10-26
 
 - New event loop: a small Elm-style runtime replaces the old 1,400-line loop.

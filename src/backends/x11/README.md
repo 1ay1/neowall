@@ -135,27 +135,25 @@ bspc rule -a NeoWall state=floating layer=below
 ### Architecture
 
 ```
-X11 Backend
-├── Display Connection (Xlib)
-├── Window Management
-│   ├── XCreateWindow() (managed or override-redirect, per WM detection)
-│   ├── EWMH property setup
-│   └── XRandR multi-monitor
-├── EGL Integration
-│   ├── EGL_PLATFORM_X11_KHR
-│   ├── Native window handle
-│   └── GPU-accelerated rendering
-└── Event Handling
-    ├── ConfigureNotify (resize)
-    ├── Expose (redraw)
-    ├── PropertyNotify on root (_NET_SUPPORTING_WM_CHECK: a WM started/exited)
-    └── RRScreenChangeNotify (monitor changes)
+src/backends/x11/
+├── x11_core.c        display connection, atoms, the ops table, event loop hooks
+├── x11_wm.c          WM detection, EWMH properties, managed vs override-redirect
+├── x11_wm_detect.c   the pure override-redirect decision (unit tested)
+├── x11_surface.c     wallpaper windows, readback, commit, root pixmap
+├── x11_outputs.c     XRandR monitors and hotplug
+├── x11_geometry.c    monitor rect math (unit tested)
+├── x11_occlusion.c   fullscreen-window detection
+└── x11_internal.h    backend data and helpers shared by the files above
 ```
+
+Events handled: ConfigureNotify (resize), Expose (redraw), PropertyNotify on
+root (`_NET_SUPPORTING_WM_CHECK`: a WM started or exited), and
+RRScreenChangeNotify (monitor changes).
 
 ### Window Properties Set
 
 Every wallpaper window carries these properties, set before it is mapped
-(`x11_set_wallpaper_properties`, `x11_core.c`):
+(`x11_set_wallpaper_properties`, `x11_wm.c`):
 
 ```c
 _NET_WM_WINDOW_TYPE = _NET_WM_WINDOW_TYPE_DESKTOP
@@ -379,15 +377,12 @@ vsync false
 
 ---
 
-## 🔄 Backend Priority
+## 🔄 Backend Selection
 
-When both Wayland and X11 are available, backend selection order:
+If `WAYLAND_DISPLAY` is set, a Wayland backend is used; if connecting fails
+and `DISPLAY` is set, NeoWall falls back to this one. With only `DISPLAY` set,
+X11 is used directly. To force X11:
 
-1. **wlr-layer-shell** (priority: 100) - Wayland compositors
-2. **KDE Plasma Shell** (priority: 90) - KDE Wayland
-3. **X11 Tiling WM** (priority: 50) - **This backend**
-
-Force X11 backend:
 ```bash
 unset WAYLAND_DISPLAY
 neowall

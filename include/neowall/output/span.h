@@ -1,8 +1,8 @@
 /* Virtual-screen geometry for spanning one shader across several outputs.
  *
- * Split out of the render path (as src/output/cycle_select.c was split out of
- * output.c) so the bounding-box arithmetic and the Y-axis flip below can be
- * unit-tested without EGL, GL, or a compositor. Nothing here touches the GPU.
+ * Split out of the render path so the bounding-box arithmetic and the Y-axis
+ * flip below can be unit-tested without EGL, GL, or a compositor. Nothing here
+ * touches the GPU.
  */
 #ifndef NEOWALL_OUTPUT_SPAN_H
 #define NEOWALL_OUTPUT_SPAN_H
@@ -31,7 +31,7 @@
  * catch that — the resulting rects are a shape a real layout can also have (a
  * cloned pair of unequal size nests exactly the same way), so the names and the
  * caller's derivation are the only guard there is. The caller is the seam: see
- * outputs_update_spans() in src/output/output.c, which divides the physical
+ * outputs_update_spans() in src/output/span_group.c, which divides the physical
  * output size by the same scale it passes here.
  */
 struct span_rect {

@@ -290,15 +290,19 @@ ninja -C build
 ./build/neowall -f -v
 ```
 
-Run the test suite (headless, no display server needed) with
-`meson test -C build`. For the memory-safety and concurrency gates use a
-sanitized build, the same as CI:
+Run the test suite with `meson test -C build`. The unit tests are headless;
+the `e2e` suite runs the real daemon under a headless sway (and Xvfb or
+Xwayland for X11) and skips if those aren't installed. For the memory-safety
+and concurrency gates use a sanitized build, the same as CI:
 
 ```bash
 meson setup build-asan -Db_sanitize=address,undefined && meson test -C build-asan
 meson setup build-tsan -Db_sanitize=thread -Db_lundef=false && \
   meson test -C build-tsan output_refcount foundation runtime terminal_wake ipc child_signals
 ```
+
+Before sending a patch, run `scripts/format.sh` and `scripts/check-layers.sh`;
+CI fails on either.
 
 Docs:
 
@@ -311,6 +315,7 @@ Docs:
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | layout, threading, locks, conventions |
 | [`docs/architecture/RUNTIME.md`](docs/architecture/RUNTIME.md) | the event loop and its rules |
 | [`docs/architecture/MODERN_C.md`](docs/architecture/MODERN_C.md) | where the C architecture is headed, and why |
+| [`docs/architecture/BACKEND_ABI.md`](docs/architecture/BACKEND_ABI.md) | the backend interface, and adding a backend |
 | [`docs/MULTI_MONITOR_SYNC.md`](docs/MULTI_MONITOR_SYNC.md) | spanning one scene across monitors |
 | [`docs/PACKAGING.md`](docs/PACKAGING.md) | distro packaging and releases |
 

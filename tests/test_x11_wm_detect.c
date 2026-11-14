@@ -57,7 +57,7 @@ static void test_wm_check_decide(void) {
 
     /* STALE: a WM exited without cleaning up. The root still names a window, but
      * that window is gone, so reading its property raised BadWindow. This is the
-     * case the temporary error handler in x11_core.c exists for; the answer must
+     * case the temporary error handler in x11_wm.c exists for; the answer must
      * be "no live WM", not a crash and not a false positive. */
     x11_wm_check_obs_t stale = {
         .root_prop_valid  = true,
