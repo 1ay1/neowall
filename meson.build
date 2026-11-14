@@ -165,8 +165,8 @@ inc_dirs = include_directories(
   'protocols',       # vendored protocol XML; generated headers land in the build dir
   # Module-private headers (fan-in 1) stay next to their .c and are reached
   # via these dirs. They are intentionally NOT part of the public include tree.
-  'src/compositor/backends/wayland',
-  'src/compositor/backends/x11',
+  'src/backends/wayland',
+  'src/backends/x11',
 )
 
 # Also include the build directory for generated version.h
@@ -195,7 +195,9 @@ runtime_sources = files(
 
 # cli: `neowall <verb>` other than running the daemon.
 cli_sources = files(
-  'src/cli/cmdfile.c',
+  'src/proto/cmdfile.c',
+  'src/proto/pidfile.c',
+  'src/proto/socket.c',
   'src/cli/control.c',
   'src/cli/tools.c',
   'src/cli/usage.c',
@@ -263,15 +265,6 @@ shader_sources = files(
   'src/shader/shader_clock.c',
 )
 
-# Transition sources
-transition_sources = files(
-  'src/transitions/fade.c',
-  'src/transitions/glitch.c',
-  'src/transitions/pixelate.c',
-  'src/transitions/slide.c',
-  'src/transitions/transitions.c',
-)
-
 # Texture sources
 texture_sources = files(
   'src/textures/abstract.c',
@@ -296,17 +289,18 @@ output_sources = files(
   'src/output/state_file.c',
   'src/output/frame_clock.c',
   'src/output/span.c',
+  'src/output/render.c',
+  'src/output/transitions/transitions.c',
+  'src/output/transitions/fade.c',
+  'src/output/transitions/glitch.c',
+  'src/output/transitions/pixelate.c',
+  'src/output/transitions/slide.c',
 )
 
 # Config sources
 config_sources = files(
   'src/config/config.c',
   'src/config/shuffle.c',
-)
-
-# Render sources
-render_sources = files(
-  'src/render/render.c',
 )
 
 # Image sources
@@ -317,8 +311,8 @@ image_sources = files(
 
 # Compositor abstraction layer sources
 compositor_sources = files(
-  'src/compositor/compositor_registry.c',
-  'src/compositor/compositor_surface.c',
+  'src/backends/registry.c',
+  'src/surface/surface.c',
 )
 
 # Occlusion detection sources (always include dispatcher)
@@ -420,10 +414,10 @@ if has_wayland
       command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
   endforeach
   occlusion_sources += files(
-    'src/compositor/backends/wayland/occlusion.c',
-    'src/compositor/backends/wayland/occlusion_set.c',
-    'src/compositor/backends/wayland/frame_watchdog.c',
-    'src/compositor/backends/wayland/hyprland_coverage.c',
+    'src/backends/wayland/occlusion.c',
+    'src/backends/wayland/occlusion_set.c',
+    'src/backends/wayland/frame_watchdog.c',
+    'src/backends/wayland/hyprland_coverage.c',
   )
 endif
 
@@ -431,9 +425,9 @@ endif
 wayland_sources = []
 if has_wayland
   wayland_sources = files(
-    'src/compositor/backends/wayland/wayland_core.c',
-    'src/compositor/backends/wayland/compositors/wlr_layer_shell.c',
-    'src/compositor/backends/wayland/compositors/kde_plasma.c',
+    'src/backends/wayland/wayland_core.c',
+    'src/backends/wayland/compositors/wlr_layer_shell.c',
+    'src/backends/wayland/compositors/kde_plasma.c',
   )
 endif
 
@@ -441,11 +435,11 @@ endif
 x11_sources = []
 if has_x11
   x11_sources = files(
-    'src/compositor/backends/x11/x11_core.c',
-    'src/compositor/backends/x11/x11_geometry.c',
-    'src/compositor/backends/x11/x11_wm_detect.c',
+    'src/backends/x11/x11_core.c',
+    'src/backends/x11/x11_geometry.c',
+    'src/backends/x11/x11_wm_detect.c',
   )
-  occlusion_sources += files('src/compositor/backends/x11/x11_occlusion.c')
+  occlusion_sources += files('src/backends/x11/x11_occlusion.c')
 endif
 
 # =============================================================================
@@ -493,11 +487,9 @@ all_sources = (
   source_sources +
   source_reactive_sources +
   shader_sources +
-  transition_sources +
   texture_sources +
   output_sources +
   config_sources +
-  render_sources +
   image_sources +
   compositor_sources +
   occlusion_sources +
@@ -920,7 +912,7 @@ test('config', executable('test_config',
 # Pure integer math, no Xlib/display needed (see x11_geometry.c).
 test_x11_geometry_exe = executable('test_x11_geometry',
   files('tests/test_x11_geometry.c',
-        'src/compositor/backends/x11/x11_geometry.c'),
+        'src/backends/x11/x11_geometry.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   build_by_default: false,
 )
@@ -932,7 +924,7 @@ test('x11_geometry', test_x11_geometry_exe)
 # Pure decision logic, no Xlib/display needed (see x11_wm_detect.c).
 test_x11_wm_detect_exe = executable('test_x11_wm_detect',
   files('tests/test_x11_wm_detect.c',
-        'src/compositor/backends/x11/x11_wm_detect.c'),
+        'src/backends/x11/x11_wm_detect.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   build_by_default: false,
 )
@@ -943,9 +935,9 @@ test('x11_wm_detect', test_x11_wm_detect_exe)
 # Pure pointer-set logic, no Wayland headers or display needed.
 test_occlusion_set_exe = executable('test_occlusion_set',
   files('tests/test_occlusion_set.c',
-        'src/compositor/backends/wayland/occlusion_set.c'),
+        'src/backends/wayland/occlusion_set.c'),
   include_directories: [inc_dirs, inc_dirs_build,
-                        include_directories('src/compositor/backends/wayland')],
+                        include_directories('src/backends/wayland')],
   build_by_default: false,
 )
 
@@ -1102,18 +1094,11 @@ endforeach
 # and a bad image are all applied and drawn for real. Skips (77) without GL.
 if has_wayland
   test('output_render', executable('test_output_render',
-    files('tests/test_output_render.c',
-          'src/core/vibe.c', 'src/config/config.c', 'src/config/shuffle.c',
-          'src/output/output.c', 'src/output/apply.c', 'src/output/cycle.c',
-          'src/output/span_group.c', 'src/output/preload.c', 'src/output/pace.c',
-          'src/output/wallpaper_image.c', 'src/output/wallpaper_shader.c',
-          'src/output/wallpaper_terminal.c', 'src/output/state_file.c',
-          'src/output/frame_clock.c', 'src/output/span.c',
-          'src/render/render.c', 'src/compositor/compositor_surface.c', 'src/egl/egl_bind.c') +
-      core_sources + shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
-      gfx_sources + terminal_sources + transition_sources,
+    files('tests/test_output_render.c', 'src/surface/surface.c', 'src/egl/egl_bind.c') +
+      core_sources + config_sources + output_sources + shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
+      gfx_sources + terminal_sources,
     include_directories: [inc_dirs, inc_dirs_build,
-                          include_directories('src/terminal', 'src/compositor/backends/wayland')],
+                          include_directories('src/terminal', 'src/backends/wayland')],
     dependencies: deps,
     link_with: has_terminal ? [terminal_glyph_lib] : [],
     build_by_default: false,
@@ -1123,9 +1108,9 @@ if has_wayland
   # the real IPC, JSON scanner and coverage maths, no Hyprland needed.
   test('hyprland_coverage', executable('test_hyprland_coverage',
     files('tests/test_hyprland_coverage.c',
-          'src/compositor/backends/wayland/hyprland_coverage.c', 'src/core/log.c', 'src/core/util.c'),
+          'src/backends/wayland/hyprland_coverage.c', 'src/core/log.c', 'src/core/util.c'),
     include_directories: [inc_dirs, inc_dirs_build,
-                          include_directories('src/compositor/backends/wayland')],
+                          include_directories('src/backends/wayland')],
     c_args: ['-DHAVE_WAYLAND_BACKEND'],
     dependencies: [m_dep, thread_dep],
     build_by_default: false,

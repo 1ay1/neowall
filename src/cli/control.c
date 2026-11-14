@@ -19,15 +19,13 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 
-#include "neowall/app/app.h"
-#include "neowall/app/daemon.h"
-#include "neowall/cli/cli.h"
 #include "neowall/state/state.h"
 #include "neowall/runtime/ipc.h"
 #include "neowall/core/log.h"
 #include "neowall/core/util.h"
 #include "neowall/output/state_file.h"
 #include "version.h"
+#include "neowall/proto/proto.h"
 
 /* Command descriptor structure */
 typedef struct {
@@ -191,7 +189,7 @@ static bool ipc_command(const char *verb, const char *arg, int *rc) {
     /* reload answers after the new config is applied, which can mean a
      * shader compile: a second or more on software GL or a loaded machine */
     int timeout_ms = strcmp(verb, "reload") == 0 ? 15000 : 3000;
-    nw_ipc_status st = nw_ipc_request(app_socket_path(), verb, arg, reply, sizeof(reply), timeout_ms);
+    nw_ipc_status st = nw_ipc_request(proto_socket_path(), verb, arg, reply, sizeof(reply), timeout_ms);
     switch (st) {
     case NW_IPC_OK:
         if (reply[0]) printf("%s\n", reply);
@@ -202,7 +200,7 @@ static bool ipc_command(const char *verb, const char *arg, int *rc) {
         *rc = EXIT_FAILURE;
         return true;
     case NW_IPC_FAILED:
-        fprintf(stderr, "The daemon didn't answer on %s\n", app_socket_path());
+        fprintf(stderr, "The daemon didn't answer on %s\n", proto_socket_path());
         *rc = EXIT_FAILURE;
         return true;
     case NW_IPC_NO_DAEMON:

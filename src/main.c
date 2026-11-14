@@ -24,7 +24,7 @@
 #include "neowall/core/wall_clock.h"
 #include "neowall/app/watch.h"
 #include "neowall/shader/shader.h"
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/egl/gpu_health.h"
 
@@ -36,6 +36,7 @@
 #include "neowall/shader/term_gpu.h"
 #include "neowall/shader/wallshader.h"
 #include "version.h"
+#include "neowall/proto/proto.h"
 
 /* The throwaway config (and placeholder) a preview/watch writes. Removed on
  * every exit, not just the clean one. */

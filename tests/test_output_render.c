@@ -19,7 +19,7 @@
 
 #include "neowall/state/state.h"
 #include "neowall/egl/egl_core.h"
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/output/output.h"
 #include "neowall/config/config.h"
 #include "hyprland_coverage.h"

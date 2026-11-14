@@ -5,8 +5,8 @@
 #include <unistd.h>
 #include <time.h>
 #include "neowall/state/state.h"
-#include "neowall/compositor/compositor.h"
-#include "neowall/compositor/backends/wayland.h"
+#include "neowall/surface/surface.h"
+#include "neowall/backends/wayland.h"
 #include "frame_watchdog.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"

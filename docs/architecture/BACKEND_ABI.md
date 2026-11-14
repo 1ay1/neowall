@@ -2,9 +2,9 @@
 
 This page is the contract you implement when porting neowall to a new
 compositor or display system. The structs and headers live in
-[`include/neowall/compositor/compositor.h`](../../include/neowall/compositor/compositor.h);
+[`include/neowall/surface/surface.h`](../../include/neowall/surface/surface.h);
 existing backends are under
-[`src/compositor/backends/`](../../src/compositor/backends/).
+[`src/backends/`](../../src/backends/).
 
 If you just want to add support for a wlroots-based compositor that ships
 `wlr-layer-shell-v1`, you almost certainly don't need a new backend — the
@@ -134,13 +134,13 @@ are fine.
 
 ## Adding a new backend: minimum viable patch
 
-1. Create `src/compositor/backends/<name>/<name>_core.{c,h}`.
+1. Create `src/backends/<name>/<name>_core.{c,h}`.
 2. Implement `compositor_backend_<name>_init(struct neowall_state *state)`
    returning a `compositor_backend*` whose `ops` points at your vtable.
-3. Add it to `src/compositor/compositor_registry.c`'s priority table.
+3. Add it to `src/backends/registry.c`'s priority table.
 4. Add a `meson.build` entry (look at how the existing backends are
    conditionally compiled with `has_wayland` / `has_x11`).
-5. Update [`compositor/README.md`](../../src/compositor/README.md) with a
+5. Update [`backends/README.md`](../../src/backends/README.md) with a
    one-line description.
 
 That's the whole contract. The "compositor-specific" parts you'll spend
@@ -153,7 +153,7 @@ detection — those are the rabbit holes worth budgeting time for.
 
 - All ops document their preconditions in the header comment in
   `compositor.h`. If you can't satisfy a precondition, leave the op NULL.
-- Log via `log_info` / `log_error` from `neowall/neowall.h` — same prefix
+- Log via `log_info` / `log_error` from `neowall/core/log.h` — same prefix
   scheme as the rest of the daemon.
 - No `printf` or `fprintf` from a backend. The daemon may be detached from
   stdio; the log system routes correctly.
@@ -162,7 +162,7 @@ detection — those are the rabbit holes worth budgeting time for.
 
 ## See also
 
-- [`src/compositor/README.md`](../../src/compositor/README.md) — high-level
+- [`src/backends/README.md`](../../src/backends/README.md) — high-level
   overview of the layering, includes the per-compositor quirks.
 - [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) — where backends fit in the
   runtime and rendering pipeline.

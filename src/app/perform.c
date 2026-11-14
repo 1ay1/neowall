@@ -6,7 +6,7 @@
 #include "app_internal.h"
 #include "neowall/app/app.h"
 #include "neowall/app/watch.h"
-#include "neowall/cli/cli.h"
+#include "neowall/proto/proto.h"
 #include "neowall/config/config.h"
 #include "neowall/occlusion/occlusion.h"
 #include "neowall/output/output.h"

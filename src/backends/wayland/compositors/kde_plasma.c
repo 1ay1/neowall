@@ -6,8 +6,8 @@
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include <EGL/egl.h>
-#include "neowall/compositor/compositor.h"
-#include "neowall/compositor/backends/wayland.h"
+#include "neowall/surface/surface.h"
+#include "neowall/backends/wayland.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
 #include "frame_watchdog.h"

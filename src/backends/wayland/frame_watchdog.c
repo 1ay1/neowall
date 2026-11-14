@@ -7,7 +7,7 @@
 #include <pthread.h>
 #include <wayland-client.h>
 #include "neowall/state/state.h"
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/shader/wallshader.h"
 #include "frame_watchdog.h"
 #include "neowall/core/log.h"

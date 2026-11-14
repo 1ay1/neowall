@@ -1,7 +1,7 @@
 /* Cycling: on a timer, on `next`, and to an index for `set`. */
 
 #include <stdio.h>
-#include "neowall/render/render.h"  /* Only output.c includes render.h */
+#include "render.h"
 #include "output_internal.h"
 #include "neowall/config/config.h"
 #include "neowall/core/log.h"

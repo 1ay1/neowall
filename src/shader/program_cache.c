@@ -92,7 +92,7 @@ static void path_for(uint64_t key, char *out, size_t cap) {
 
 unsigned program_cache_load(uint64_t key) {
     if (!ready()) return 0;
-    char path[640];
+    char path[NW_PATH_MAX + 64];
     path_for(key, path, sizeof(path));
     FILE *f = fopen(path, "rb");
     if (!f) {

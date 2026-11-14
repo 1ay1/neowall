@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <EGL/egl.h>
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/core/log.h"
 

@@ -2,7 +2,7 @@
  * builds in the background and its config goes live with it. */
 
 #include <stdio.h>
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "output_internal.h"
 #include "neowall/config/config.h"
 #include "neowall/core/log.h"

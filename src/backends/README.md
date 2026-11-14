@@ -193,7 +193,7 @@ the X11 backend. There's no generic fallback for the same reason: a bare
 #### 1. Create Backend File
 
 ```bash
-touch src/compositor/backends/my_compositor.c
+touch src/backends/my_compositor.c
 ```
 
 #### 2. Implement Backend Operations
@@ -297,10 +297,10 @@ Add to `meson.build` in the wayland sources section:
 
 ```meson
 wayland_sources = files(
-  'src/compositor/backends/wayland/wayland_core.c',
-  'src/compositor/backends/wayland/compositors/wlr_layer_shell.c',
-  'src/compositor/backends/wayland/compositors/kde_plasma.c',
-  'src/compositor/backends/wayland/compositors/my_compositor.c',
+  'src/backends/wayland/wayland_core.c',
+  'src/backends/wayland/compositors/wlr_layer_shell.c',
+  'src/backends/wayland/compositors/kde_plasma.c',
+  'src/backends/wayland/compositors/my_compositor.c',
 )
 ```
 

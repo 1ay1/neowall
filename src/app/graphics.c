@@ -2,7 +2,7 @@
  * backend and torn down before it. */
 
 #include "neowall/app/app.h"
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/core/log.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/egl/gpu_health.h"

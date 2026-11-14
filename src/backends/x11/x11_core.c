@@ -16,7 +16,7 @@
 #ifndef GL_BGRA
 #define GL_BGRA 0x80E1
 #endif
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/state/state.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/config/config.h"

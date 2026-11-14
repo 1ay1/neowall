@@ -74,8 +74,5 @@ bool app_post(uint32_t kind, uint32_t id, int64_t value);
 void app_request_redraw(struct neowall_state *state);
 void app_request_output_redraw(struct output_state *output);
 
-/* The control socket: $XDG_RUNTIME_DIR/neowall.sock, or the private
- * fallback dir. Static buffer; empty when no private dir is available. */
-const char *app_socket_path(void);
 
 #endif /* NEOWALL_APP_H */

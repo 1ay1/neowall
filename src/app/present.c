@@ -6,7 +6,7 @@
 
 #include "app_internal.h"
 #include "neowall/app/app.h"
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/core/constants.h"
 #include "neowall/core/vec.h"
 #include "neowall/egl/egl_core.h"

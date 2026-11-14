@@ -19,7 +19,6 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 
-#include "neowall/cli/cli.h"
 #include "neowall/state/state.h"
 #include "neowall/core/util.h"
 

@@ -2,16 +2,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/state/state.h"
 
 #ifdef HAVE_WAYLAND_BACKEND
 #include <wayland-client.h>
-#include "neowall/compositor/backends/wayland.h"
+#include "neowall/backends/wayland.h"
 #endif
 
 #ifdef HAVE_X11_BACKEND
-#include "neowall/compositor/backends/x11.h"
+#include "neowall/backends/x11.h"
 #include "neowall/core/log.h"
 #include "neowall/output/output.h"
 #endif
@@ -437,8 +437,6 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
     if (display_server == DISPLAY_SERVER_WAYLAND) {
         log_info("Detected Wayland display server");
         
-        /* Forward declaration */
-        extern bool wayland_init_registry(struct neowall_state *state);
 
         if (wayland_init_registry(state)) {
             /* Wayland initialized successfully, detect compositor */
@@ -548,7 +546,6 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         state->compositor_backend = backend;
 
         /* Configure compositor surfaces for all configured outputs */
-        extern bool output_configure_compositor_surface(struct output_state *output);
         pthread_rwlock_rdlock(&state->output_list_lock);
         struct output_state *output = state->outputs;
         while (output) {

@@ -21,13 +21,5 @@ int cmd_new(int argc, char *argv[]);
 int cmd_import(int argc, char *argv[]);
 int cmd_docs(int argc, char *argv[]);
 
-/* cmdfile.c: an older daemon reads `set` / `set-terminal` arguments from a
- * file after a signal. The CLI writes them; the daemon (perform.c) reads. */
-const char *get_set_index_file_path(void);
-const char *get_set_terminal_file_path(void);
-bool write_set_index_file(int index);
-bool write_set_terminal_file(const char *cmd);
-int read_set_index_file(void);
-bool read_set_terminal_file(char *out, size_t out_len);
 
 #endif /* NEOWALL_CLI_H */

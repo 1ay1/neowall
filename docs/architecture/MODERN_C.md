@@ -5,10 +5,11 @@ vendored code) and a plan to move it to a modern C shape: C23, explicit
 ownership, single-owner state, narrow module boundaries, and errors that
 can't be dropped. Every number here was measured on the tree, not guessed.
 
-This is a plan, not a description. Landed so far: step 7 (the program
-lives in `src/app/`, no `.c`-in-`.c`); the loose `src/*.c` files moved
-into `core/`, `runtime/` and `app/` with a CI layer check; update is pure
-and returns effects that `perform` runs (docs/architecture/RUNTIME.md).
+Status: steps 6 and 7 are done. `neowall.h` is gone; modules form a strict
+hierarchy with no include cycles, enforced in CI by `scripts/check-layers.sh`
+(see ARCHITECTURE.md §2). `output.c` is split by role. Update is pure and
+returns effects. Still open: module globals into owned structs (step 4) and
+the remaining fixed path buffers.
 
 ## Where it already is
 
@@ -39,7 +40,7 @@ The foundations are good, better than most C codebases this size:
 | Ownership by convention | 123 raw `malloc/calloc/realloc`, `NW_DEFER` used **0** times, 2 `goto cleanup` |
 | Fixed buffers | 19 `char[PATH]` fields in config/output structs; 30 `strcat` calls building shader source in `shader_multipass.c` |
 | Hidden globals | 74 mutable file-scope statics (20 in `reactive.c`, 8 in `x11_occlusion.c`, 7 in `hyprland_coverage.c`) |
-| Layering leaks | `render.c` includes the Hyprland backend header; `output.c` includes 12 module headers; `neowall.h` (included by 41 files) pulls in `output.h`, `config.h`, EGL and GL; include cycles compositor\<-\>output, compositor\<-\>config, compositor\<-\>egl, config\<-\>shader; 9 `extern` declarations inside `.c` files |
+| Layering leaks (fixed) | `render.c` includes the Hyprland backend header; `output.c` includes 12 module headers; `neowall.h` (included by 41 files) pulls in `output.h`, `config.h`, EGL and GL; include cycles compositor\<-\>output, compositor\<-\>config, compositor\<-\>egl, config\<-\>shader; 9 `extern` declarations inside `.c` files |
 | `.c` included into `.c` | ~~`app_render.inc` is `#include`d into `app.c`~~ done |
 | One link unit | No per-module libraries, so nothing stops a module reaching into any other |
 

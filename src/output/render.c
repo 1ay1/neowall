@@ -16,12 +16,12 @@
 #include "neowall/image/image.h"    /* Only for legacy wrapper functions */
 #include "neowall/core/constants.h"
 #include "neowall/egl/egl_core.h"
-#include "neowall/transitions/transitions.h"
+#include "transitions/transitions.h"
 #include "neowall/shader/shader.h"
 #include "neowall/shader/wallshader.h"
 #include "neowall/shader/shader_clock.h"
 #include "neowall/textures/textures.h"
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #ifdef HAVE_WAYLAND_BACKEND
 /* For iWindows[]: window rects come from the Hyprland IPC snapshot that the
  * occlusion path already maintains. */
@@ -59,7 +59,7 @@ static bool ensure_egl_current(struct output_state *output) {
     return egl_make_surface_current(dpy, surf, ctx);
 }
 
-/* Note: Each transition manages its own shader sources in src/transitions/ */
+/* Note: Each transition manages its own shader sources in src/output/transitions/ */
 
 /* Simple color shader for overlay effects */
 static const char *color_vertex_shader =

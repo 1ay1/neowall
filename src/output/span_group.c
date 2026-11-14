@@ -2,7 +2,7 @@
  * together and share a virtual canvas. */
 
 #include <stdio.h>
-#include "neowall/render/render.h"  /* Only output.c includes render.h */
+#include "render.h"
 #include "output_internal.h"
 #include "neowall/core/log.h"
 #include "neowall/state/state.h"

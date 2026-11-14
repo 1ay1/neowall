@@ -39,48 +39,25 @@ and every cross-module include is fully qualified** (`#include
 "neowall/<module>/<file>.h"`). A single `-Iinclude` resolves the whole public
 surface; there are **zero relative-path includes** (`../`) anywhere in the tree.
 
+Modules form a strict hierarchy with no cycles. Each may include only the
+ones below it, and `scripts/check-layers.sh` fails CI otherwise:
+
 ```
-include/neowall/          PUBLIC headers (the project's API surface)
-  state/state.h              shared daemon state (outputs, GL, backend)
-  core/                      result.h vec.h defer.h base.h log.h constants.h
-                             child_signals.h: dep-free foundation
-  runtime/                   rt.h (the Elm-style loop), ipc.h, sd_notify.h
-  app/                       app.h (messages, app_run), watch.h
-  compositor/                compositor abstraction + backend interfaces
-  config/                    vibe parser + config model
-  output/                    per-monitor state + lifecycle, frame_clock.h
-  render/  image/  egl/       rendering, image decode, EGL context
-  textures/  transitions/    procedural textures, image transitions
-  occlusion/                 "pause when covered" dispatcher
-  source/                    open data plane: live scalar/texture providers
-                             (see architecture/SHADER_ENGINE_V2.md)
-  gfx/                       GL object layer: programs, textures, targets
-  shader/                    shader system: source model, engine, per-output
-                             wallshader, terminal textures, wall_clock, docs
-  terminal/                  in-tree VT/xterm emulator (terminal-as-wallpaper)
-src/                       IMPLEMENTATION (.c) + truly-private impl headers
-  main.c                     argument parsing and daemon bring-up
-  cli/                       usage, tools (new/import/docs), control.c (talk to
-                             a running daemon), cmdfile.c (old set/set-terminal)
-  core/                      log.c (log, time), util.c (paths, data dirs),
-                             base.c (arena, str)
-  runtime/                   rt.c (wait, messages, timers, mailbox), ipc.c
-                             (control socket), sd_notify.c
-  app/                       the program on rt: app.c (run), update.c (pure),
-                             perform.c (effects), subscribe.c, present.c,
-                             host.c + control.c (fds/socket -> msgs), watch.c,
-                             daemon.c (pid file, daemonize, crash handlers)
-  output/state_file.c        what each output shows, on disk
-  shader/wall_clock.c        virtual calendar clock (`--date`, `--timelapse`)
-  compositor/backends/{wayland,x11}/   backend implementations; private headers
-                                       (frame_watchdog.h, *_occlusion.h) live here
-  terminal/                  utf8 · vtparse (ANSI/DEC state machine) · screen
-                             (cell grid + control functions) · pty (forkpty +
-                             reader thread) · glyph_atlas · cbdt (colour emoji)
-                             · term_render (grid → GPU cell texture)
-protocols/                 generated Wayland *-client-protocol.{c,h}
-tests/                     headless unit/concurrency tests (run under sanitizers)
+app  cli  main               the program: update/perform/present, the CLI
+backends  occlusion          Wayland (wlr, KDE) and X11 implementations
+output                       a monitor and what it shows: apply, cycle, span,
+                             preload, pacing, render, transitions
+proto  terminal              CLI<->daemon agreement; VT emulator
+egl  surface  state          GL context; one window surface; shared state
+shader  source               shader model and engine; live values
+config  image                parse and validate the file; decode images
+gfx  textures  runtime       GL objects; generated textures; the event loop
+core                         libc only: log, time, paths, containers, vibe
 ```
+
+Public headers mirror it under `include/neowall/<module>/`; a header used by
+one module stays next to its `.c` (`output_internal.h`, `render.h`,
+`app_internal.h`, the backends' private headers).
 
 **Rule of thumb for a new header:** if more than one module includes it, it is
 public → `include/neowall/<module>/`. If exactly one `.c` (or one backend) uses
@@ -103,7 +80,7 @@ All three are exercised by `tests/test_foundation.c` under ASan/UBSan/LSan.
 
 ---
 
-## 4. The compositor abstraction (`include/neowall/compositor/compositor.h`)
+## 4. The compositor abstraction (`include/neowall/surface/surface.h`)
 
 This is the central architectural seam. A `compositor_backend_ops` struct is a
 vtable of function pointers; each backend implements it and registers itself.
@@ -175,7 +152,7 @@ start with a clean signal mask and default SIGPIPE
 signalfd and ignores SIGPIPE; without the reset, children inherit both and
 can't be stopped.
 
-**Locks (acquire in this order — documented in `neowall.h`):**
+**Locks (acquire in this order — documented in `neowall/state/state.h`):**
 
 1. `output_list_lock` (rwlock) — guards the output linked list structure.
 2. `state_mutex` — guards individual fields.

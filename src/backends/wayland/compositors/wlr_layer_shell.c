@@ -11,8 +11,8 @@
 #include <unistd.h>
 #include <xkbcommon/xkbcommon.h>
 #endif
-#include "neowall/compositor/compositor.h"
-#include "neowall/compositor/backends/wayland.h"
+#include "neowall/surface/surface.h"
+#include "neowall/backends/wayland.h"
 #include "neowall/state/state.h"
 #include "neowall/source/reactive.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"

@@ -13,7 +13,7 @@
 #include <string.h>
 #include <GL/gl.h>
 #include "neowall/core/constants.h"
-#include "neowall/transitions/transitions.h"
+#include "transitions.h"
 #include "neowall/core/log.h"
 #include "neowall/output/output.h"
 

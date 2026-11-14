@@ -18,13 +18,14 @@
 
 #include "app_internal.h"
 #include "neowall/app/app.h"
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/occlusion/occlusion.h"
 #include "neowall/runtime/sd_notify.h"
 #include "neowall/source/reactive.h"
 #include "neowall/core/log.h"
 #include "neowall/core/time.h"
 #include "neowall/output/output.h"
+#include "neowall/proto/proto.h"
 
 /* The loop for app_post / app_request_* from other threads. Set for the
  * lifetime of app_run; NULL otherwise, so a post before or after is a no-op.
@@ -156,7 +157,7 @@ int app_run(struct neowall_state *state) {
     /* The control socket. A preview runs beside the real daemon and must not
      * take it; neither does an instance that finds another one listening. */
     if (!state->is_preview) {
-        a.host.ipc = ipc_server_start(a.loop, app_socket_path(), app_on_ipc_request, &a);
+        a.host.ipc = ipc_server_start(a.loop, proto_socket_path(), app_on_ipc_request, &a);
         if (!a.host.ipc) log_warn("Control socket unavailable; CLI commands fall back to signals");
     }
 

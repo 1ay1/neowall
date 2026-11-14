@@ -3,8 +3,8 @@
 
 #include <errno.h>
 #include <unistd.h>
-#include "neowall/compositor/compositor.h"
-#include "neowall/render/render.h"  /* Only output.c includes render.h */
+#include "neowall/surface/surface.h"
+#include "render.h"
 #include "output_internal.h"
 #include "neowall/config/config.h"
 #include "neowall/core/log.h"

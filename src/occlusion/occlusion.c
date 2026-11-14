@@ -1,13 +1,13 @@
 /* Occlusion detection — thin wrapper over the compositor abstraction.
  *
  * The actual implementation lives next to each backend
- * (src/compositor/backends/wayland/occlusion.c, .../x11/x11_occlusion.c).
+ * (src/backends/wayland/occlusion.c, .../x11/x11_occlusion.c).
  * This file just dispatches via the backend ops table, so core code never
  * needs to know which display server is in use. */
 
 #include "neowall/occlusion/occlusion.h"
 #include "neowall/state/state.h"
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/core/log.h"
 
 bool occlusion_init(struct neowall_state *state) {

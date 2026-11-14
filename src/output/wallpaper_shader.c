@@ -2,9 +2,9 @@
  * current one keeps drawing. */
 
 #include <stdio.h>
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/egl/egl_core.h"
-#include "neowall/render/render.h"  /* Only output.c includes render.h */
+#include "render.h"
 #include "output_internal.h"
 #include "neowall/core/log.h"
 #include "neowall/core/time.h"

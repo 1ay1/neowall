@@ -11,7 +11,7 @@
  * which can be stale.
  *
  * Now there is one unix socket (the program picks the path; neowall uses
- * app_socket_path()). A client connects, writes one request line, reads one
+ * proto_socket_path()). A client connects, writes one request line, reads one
  * reply line, and closes:
  *
  *   request:  <verb>[ <arg>]\n         e.g. "next\n", "set 3\n", "set-terminal htop\n"

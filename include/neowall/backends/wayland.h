@@ -109,6 +109,9 @@ wayland_t *wayland_get(void);
  */
 bool wayland_init(struct neowall_state *state);
 
+/* Connect and bind the globals (outputs arrive as they're announced). */
+bool wayland_init_registry(struct neowall_state *state);
+
 /**
  * Cleanup Wayland
  *

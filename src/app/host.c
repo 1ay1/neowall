@@ -5,7 +5,7 @@
 #include "app_internal.h"
 #include "neowall/app/app.h"
 #include "neowall/app/watch.h"
-#include "neowall/compositor/compositor.h"
+#include "neowall/surface/surface.h"
 #include "neowall/core/log.h"
 
 /* ── host: the compositor fd ──────────────────────────────────────────── */

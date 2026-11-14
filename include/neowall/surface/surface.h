@@ -29,7 +29,7 @@
  * - Generic fallback - works on any compositor (limited features)
  *
  * ADDING NEW BACKENDS:
- * 1. Implement compositor_backend_ops in src/compositor/backends/
+ * 1. Implement compositor_backend_ops in src/backends/
  * 2. Register backend in compositor_registry.c
  * 3. Backend is auto-detected and loaded at runtime
  */

@@ -9,7 +9,7 @@
 
 #include <GL/gl.h>
 #include "neowall/core/constants.h"
-#include "neowall/transitions/transitions.h"
+#include "transitions.h"
 #include "neowall/shader/shader.h"
 #include "neowall/output/output.h"
 
