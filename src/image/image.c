@@ -8,8 +8,10 @@
 #include <jpeglib.h>
 #include "neowall/image/image.h"
 #include "neowall/image/exif.h"
-#include "neowall/neowall.h"
 #include "neowall/core/constants.h"
+#include "neowall/core/log.h"
+#include "neowall/core/util.h"
+#include "neowall/output/output.h"
 
 /* Reject decompression bombs and dimensions that are unreasonable for a
  * wallpaper. 100M RGBA pixels is already ~400 MiB before codec scratch data. */
@@ -86,7 +88,7 @@ struct image_data *image_load_png(const char *path) {
     }
 
     /* Expand path if needed */
-    char expanded_path[MAX_PATH_LENGTH];
+    char expanded_path[NW_PATH_MAX];
     if (!expand_path(path, expanded_path, sizeof(expanded_path))) {
         return NULL;
     }
@@ -286,7 +288,7 @@ struct image_data *image_load_jpeg_for(const char *path, int32_t display_w,
     }
 
     /* Expand path if needed */
-    char expanded_path[MAX_PATH_LENGTH];
+    char expanded_path[NW_PATH_MAX];
     if (!expand_path(path, expanded_path, sizeof(expanded_path))) {
         return NULL;
     }

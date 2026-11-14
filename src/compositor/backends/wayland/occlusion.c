@@ -18,13 +18,16 @@
 #include <string.h>
 #include <stdatomic.h>
 #include <wayland-client.h>
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "neowall/compositor/compositor.h"
 #include "wlr-foreign-toplevel-management-unstable-v1-client-protocol.h"
 #include "wayland_occlusion.h"
 #include "frame_watchdog.h"
 #include "hyprland_coverage.h"
 #include "occlusion_set.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/output/output.h"
 
 /* ---------- per-toplevel state tracking ---------- */
 

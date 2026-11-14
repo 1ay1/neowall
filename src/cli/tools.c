@@ -20,10 +20,13 @@
 #include <sys/stat.h>
 
 #include "neowall/cli/cli.h"
-#include "neowall/neowall.h"
 #include "neowall/shader/shader_docs.h"
 #include "neowall/shader/shader_scaffold.h"
 #include "neowall/shader/shadertoy_import.h"
+#include "neowall/core/base.h"
+#include "neowall/core/log.h"
+#include "neowall/core/util.h"
+#include "neowall/shader/shader_source.h"
 
 
 /* `neowall new <name> [--template=scene|flat|reactive] [--force] [--list]` */

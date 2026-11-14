@@ -8,10 +8,10 @@
 #include <EGL/egl.h>
 #include "neowall/compositor/compositor.h"
 #include "neowall/compositor/backends/wayland.h"
-#include "neowall/neowall.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
 #include "frame_watchdog.h"
+#include "neowall/core/log.h"
 
 /*
  * ============================================================================

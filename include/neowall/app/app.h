@@ -49,6 +49,10 @@ enum {
  * EXIT_SUCCESS, or NW_EXIT_GPU_LOST when graphics died. */
 int app_run(struct neowall_state *state);
 
+/* Install the hooks lower layers report through. Call once, right after the
+ * state is made and before any thread starts. */
+void app_attach(struct neowall_state *state);
+
 /* Wake the loop from another thread with a message. False if it isn't
  * running. Safe to call before app_run (the message is dropped). */
 bool app_post(uint32_t kind, uint32_t id, int64_t value);

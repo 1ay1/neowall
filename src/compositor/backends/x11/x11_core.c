@@ -17,13 +17,16 @@
 #define GL_BGRA 0x80E1
 #endif
 #include "neowall/compositor/compositor.h"
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/config/config.h"
 #include "x11_occlusion.h"
 #include "x11_geometry.h"
 #include "x11_wm_detect.h"
 #include "neowall/output/output.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/output/state_file.h"
 
 /*
  * ============================================================================
@@ -1667,8 +1670,8 @@ static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
         return false;
     }
 
-    x11_monitor_t mons[MAX_OUTPUTS];
-    int n = x11_enumerate_monitors(backend, mons, MAX_OUTPUTS);
+    x11_monitor_t mons[NW_MAX_OUTPUTS];
+    int n = x11_enumerate_monitors(backend, mons, NW_MAX_OUTPUTS);
     log_info("X11: detected %d monitor(s)", n);
 
     int created = 0;
@@ -1768,15 +1771,15 @@ static void x11_reconcile_outputs(x11_backend_data_t *backend) {
     struct neowall_state *state = backend->state;
     if (!state) return;
 
-    x11_monitor_t mons[MAX_OUTPUTS];
-    int n = x11_enumerate_monitors(backend, mons, MAX_OUTPUTS);
+    x11_monitor_t mons[NW_MAX_OUTPUTS];
+    int n = x11_enumerate_monitors(backend, mons, NW_MAX_OUTPUTS);
 
     /* Pass 1: collect outputs whose physical connector vanished. Geometry
      * changes are reconciled in place below so live GL/render state survives. */
-    struct output_state *stale[MAX_OUTPUTS];
+    struct output_state *stale[NW_MAX_OUTPUTS];
     int n_stale = 0;
     pthread_rwlock_rdlock(&state->output_list_lock);
-    for (struct output_state *o = state->outputs; o && n_stale < MAX_OUTPUTS; o = o->next) {
+    for (struct output_state *o = state->outputs; o && n_stale < NW_MAX_OUTPUTS; o = o->next) {
         bool found = false;
         for (int i = 0; i < n; i++) {
             if (x11_mon_same_name(o, &mons[i])) { found = true; break; }
@@ -1916,10 +1919,10 @@ static void x11_recreate_surfaces(x11_backend_data_t *backend) {
 
     /* Snapshot the list under the read lock, with a ref on each output; the
      * rebuild below runs without the lock. */
-    struct output_state *outs[MAX_OUTPUTS];
+    struct output_state *outs[NW_MAX_OUTPUTS];
     int n = 0;
     pthread_rwlock_rdlock(&state->output_list_lock);
-    for (struct output_state *o = state->outputs; o && n < MAX_OUTPUTS; o = o->next) {
+    for (struct output_state *o = state->outputs; o && n < NW_MAX_OUTPUTS; o = o->next) {
         output_ref(o);
         outs[n++] = o;
     }

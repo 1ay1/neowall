@@ -12,6 +12,7 @@
 #include "neowall/app/app.h"
 #include "neowall/output/output.h"
 #include "version.h"
+#include "neowall/core/util.h"
 
 const char *app_socket_path(void) {
     static char path[sizeof(((struct sockaddr_un *)0)->sun_path)];

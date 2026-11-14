@@ -10,7 +10,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "neowall/neowall.h"
+#include "neowall/core/constants.h"
+#include "neowall/core/log.h"
+#include "neowall/core/util.h"
 
 typedef struct {
     const char *name;
@@ -202,14 +204,14 @@ bool neowall_scaffold_create(const char *name, const char *template_name, bool f
         return false;
     }
 
-    char dir[MAX_PATH_LENGTH];
+    char dir[NW_PATH_MAX];
     if (!expand_path("~/.config/neowall/shaders", dir, sizeof(dir))) {
         log_error("Could not resolve ~/.config/neowall/shaders");
         return false;
     }
 
     /* mkdir -p, one level at a time. EEXIST is success. */
-    char partial[MAX_PATH_LENGTH];
+    char partial[NW_PATH_MAX];
     snprintf(partial, sizeof(partial), "%s", dir);
     for (char *s = partial + 1; *s; s++) {
         if (*s != '/') continue;
@@ -225,7 +227,7 @@ bool neowall_scaffold_create(const char *name, const char *template_name, bool f
         return false;
     }
 
-    char path[MAX_PATH_LENGTH];
+    char path[NW_PATH_MAX];
     int n = snprintf(path, sizeof(path), "%s/%s.glsl", dir, stem);
     if (n < 0 || (size_t)n >= sizeof(path)) {
         log_error("Shader path too long");

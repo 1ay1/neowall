@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "neowall/config/config.h"
 #include "neowall/output/output.h"
 #include <stdatomic.h>

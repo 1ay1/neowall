@@ -41,7 +41,7 @@ surface; there are **zero relative-path includes** (`../`) anywhere in the tree.
 
 ```
 include/neowall/          PUBLIC headers (the project's API surface)
-  neowall.h                  app state + umbrella declarations
+  state/state.h              shared daemon state (outputs, GL, backend)
   core/                      result.h vec.h defer.h base.h log.h constants.h
                              child_signals.h: dep-free foundation
   runtime/                   rt.h (the Elm-style loop), ipc.h, sd_notify.h

@@ -14,6 +14,10 @@
 #include "neowall/output/output.h"
 #include "neowall/shader/term_gpu.h"
 #include "neowall/shader/wallshader.h"
+#include "neowall/config/config.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/core/util.h"
 
 #ifdef HAVE_WAYLAND_BACKEND
 bool output_configure_compositor_surface(struct output_state *output);
@@ -543,10 +547,10 @@ static void reinit_reconnected_outputs(struct neowall_state *state) {
 
     /* A ref on each, so a removal can't free it while the lock is dropped
      * for the slow surface/GL work. */
-    struct output_state *pending[MAX_OUTPUTS];
+    struct output_state *pending[NW_MAX_OUTPUTS];
     int n = 0;
     pthread_rwlock_rdlock(&state->output_list_lock);
-    for (struct output_state *o = state->outputs; o && n < MAX_OUTPUTS; o = o->next) {
+    for (struct output_state *o = state->outputs; o && n < NW_MAX_OUTPUTS; o = o->next) {
         if (!o->compositor_surface || o->compositor_surface->egl_surface == EGL_NO_SURFACE) {
             output_ref(o);
             pending[n++] = o;

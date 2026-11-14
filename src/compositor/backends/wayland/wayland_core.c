@@ -4,8 +4,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <time.h>
-#include "neowall/neowall.h"
-#include "neowall/app/app.h"
+#include "neowall/state/state.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/compositor/backends/wayland.h"
 #include "frame_watchdog.h"
@@ -13,6 +12,11 @@
 #include "tearing-control-v1-client-protocol.h"
 #include "presentation-time-client-protocol.h"
 #include "cursor-shape-v1-client-protocol.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/output/frame_clock.h"
+#include "neowall/output/output.h"
+#include "neowall/output/state_file.h"
 
 /* Maximum retries and delay when waiting for compositor to be ready */
 #define COMPOSITOR_READY_MAX_RETRIES 5
@@ -421,7 +425,7 @@ static void output_on_configure_callback(struct compositor_surface *surface,
      * size is still waiting; now that it has one, retry. */
     if (output->width > 0 && output->height > 0 && output->compositor_surface &&
         output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
-        app_post(NW_MSG_OUTPUTS_NEW, 0, 0);
+        state_outputs_changed(output->state, 0);
     }
 }
 
@@ -562,7 +566,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
             log_info("New output detected (name=%u, model=%s) - will initialize on configuration",
                      name, output->model[0] ? output->model : "pending");
             /* Bring it up after this dispatch has delivered its configure. */
-            app_post(NW_MSG_OUTPUTS_NEW, name, 0);
+            state_outputs_changed(state, name);
         } else {
             log_error("Failed to create output state");
             wl_output_destroy(output_obj);

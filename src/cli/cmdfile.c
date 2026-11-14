@@ -20,11 +20,12 @@
 #include <sys/stat.h>
 
 #include "neowall/cli/cli.h"
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
+#include "neowall/core/util.h"
 
 /* Get path to the set-index command file */
 const char *get_set_index_file_path(void) {
-    static char path[MAX_PATH_LENGTH];
+    static char path[NW_PATH_MAX];
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
 
     if (runtime_dir) {
@@ -53,7 +54,7 @@ const char *get_set_index_file_path(void) {
  * an earlier write (audit fix #21). */
 bool write_set_index_file(int index) {
     const char *path = get_set_index_file_path();
-    char tmp[MAX_PATH_LENGTH];
+    char tmp[NW_PATH_MAX];
     int n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", path);
     if (n < 0 || (size_t)n >= sizeof(tmp)) {
         fprintf(stderr, "set-index path too long\n");
@@ -87,7 +88,7 @@ bool write_set_index_file(int index) {
  * coalesce to the last payload that was published before a signal is handled. */
 int read_set_index_file(void) {
     const char *path = get_set_index_file_path();
-    char claimed[MAX_PATH_LENGTH];
+    char claimed[NW_PATH_MAX];
     int n = snprintf(claimed, sizeof(claimed), "%s.take-%d", path, (int)getpid());
     if (n < 0 || (size_t)n >= sizeof(claimed) || rename(path, claimed) != 0) {
         return -1;
@@ -110,7 +111,7 @@ int read_set_index_file(void) {
 
 /* Get path to the set-terminal command file. Mirrors get_set_index_file_path. */
 const char *get_set_terminal_file_path(void) {
-    static char path[MAX_PATH_LENGTH];
+    static char path[NW_PATH_MAX];
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
 
     if (runtime_dir) {
@@ -142,7 +143,7 @@ bool write_set_terminal_file(const char *cmd) {
         fprintf(stderr, "Cannot determine set-terminal file path\n");
         return false;
     }
-    char tmp[MAX_PATH_LENGTH];
+    char tmp[NW_PATH_MAX];
     int n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", path);
     if (n < 0 || (size_t)n >= sizeof(tmp)) {
         fprintf(stderr, "set-terminal path too long\n");
@@ -179,7 +180,7 @@ bool read_set_terminal_file(char *out, size_t out_len) {
     if (!out || out_len == 0) return false;
     out[0] = '\0';
     const char *path = get_set_terminal_file_path();
-    char claimed[MAX_PATH_LENGTH];
+    char claimed[NW_PATH_MAX];
     int n = snprintf(claimed, sizeof(claimed), "%s.take-%d", path, (int)getpid());
     if (n < 0 || (size_t)n >= sizeof(claimed) || rename(path, claimed) != 0) {
         return false;

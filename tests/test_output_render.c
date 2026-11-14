@@ -17,7 +17,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/output/output.h"

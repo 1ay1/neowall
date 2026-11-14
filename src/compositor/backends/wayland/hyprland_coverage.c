@@ -18,8 +18,9 @@
 #include <sys/time.h>
 #include <errno.h>
 #include <pthread.h>
-#include "neowall/neowall.h"
+#include "neowall/output/output.h"
 #include "hyprland_coverage.h"
+#include "neowall/core/time.h"
 
 #define HYPR_REFRESH_MS    500
 #define HYPR_RECV_TIMEOUT_MS 200   /* cap blocking time per IPC call */

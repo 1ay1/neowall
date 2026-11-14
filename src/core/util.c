@@ -24,7 +24,6 @@
 #include "neowall/core/log.h"
 #include "version.h"   /* NEOWALL_DATADIR */
 
-#define MAX_PATH_LENGTH NW_PATH_MAX
 
 /* Parse a non-negative decimal index out of `s`.
  *
@@ -203,7 +202,7 @@ static bool ensure_private_dir(const char *dir) {
 }
 
 const char *neowall_secure_runtime_dir(void) {
-    static char dir[MAX_PATH_LENGTH];
+    static char dir[NW_PATH_MAX];
 
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
     if (runtime_dir && runtime_dir[0] != '\0') {

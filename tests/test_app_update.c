@@ -10,6 +10,7 @@
 #include "neowall/app/app.h"
 #include "neowall/core/constants.h"
 #include "neowall/egl/gpu_health.h"
+#include "neowall/core/log.h"
 
 static int failures;
 #define CHECK(c, ...) do { if (!(c)) { failures++; \

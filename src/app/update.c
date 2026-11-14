@@ -14,6 +14,7 @@
 #include "neowall/app/app.h"
 #include "neowall/core/constants.h"
 #include "neowall/egl/gpu_health.h"
+#include "neowall/core/log.h"
 
 static void cmd(rt_cmds *cmds, uint32_t kind, uint32_t id, int64_t v) {
     rt_cmd c = {.kind = kind, .id = id};

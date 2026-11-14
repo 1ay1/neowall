@@ -8,6 +8,8 @@
 #include "neowall/config/config_access.h"
 #include "neowall/egl/egl_core.h"
 #include "output_internal.h"
+#include "neowall/core/log.h"
+#include "neowall/state/state.h"
 
 /* Helper function to configure vsync (swap interval) for shader rendering
  * DRY principle: Single source of truth for vsync configuration logic */

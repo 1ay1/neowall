@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include "neowall/compositor/compositor.h"
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 
 #ifdef HAVE_WAYLAND_BACKEND
 #include <wayland-client.h>
@@ -12,6 +12,8 @@
 
 #ifdef HAVE_X11_BACKEND
 #include "neowall/compositor/backends/x11.h"
+#include "neowall/core/log.h"
+#include "neowall/output/output.h"
 #endif
 
 /*

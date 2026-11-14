@@ -7,6 +7,9 @@
 #include "neowall/config/config_access.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 #include "output_internal.h"
+#include "neowall/config/config.h"
+#include "neowall/core/log.h"
+#include "neowall/state/state.h"
 
 /* Helper function to get the preferred output identifier
  * Prefers connector_name (e.g., "HDMI-A-2", "DP-1") over model name

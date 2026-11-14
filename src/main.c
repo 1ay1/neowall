@@ -18,8 +18,8 @@
 #include <time.h>
 #include <limits.h>
 #include <ctype.h>
-#include "neowall/neowall.h"
 #include "neowall/app/app.h"
+#include "neowall/state/state.h"
 #include "neowall/runtime/sd_notify.h"
 #include "neowall/shader/wall_clock.h"
 #include "neowall/app/watch.h"
@@ -31,15 +31,21 @@
 
 #include "neowall/app/daemon.h"
 #include "neowall/cli/cli.h"
+#include "neowall/config/config.h"
+#include "neowall/core/util.h"
+#include "neowall/output/output.h"
+#include "neowall/shader/term_gpu.h"
+#include "neowall/shader/wallshader.h"
+#include "version.h"
 
 /* The throwaway config (and placeholder) a preview/watch writes. Removed on
  * every exit, not just the clean one. */
-static char g_preview_config[MAX_PATH_LENGTH];
+static char g_preview_config[NW_PATH_MAX];
 
 static void remove_preview_files(void) {
     if (!g_preview_config[0]) return;
     unlink(g_preview_config);
-    char ph[MAX_PATH_LENGTH + 32];
+    char ph[NW_PATH_MAX + 32];
     snprintf(ph, sizeof(ph), "%s.placeholder.glsl", g_preview_config);
     unlink(ph);
     g_preview_config[0] = '\0';
@@ -48,7 +54,7 @@ static void remove_preview_files(void) {
 int main(int argc, char *argv[]) {
 
     struct neowall_state state = {0};
-    char config_path[MAX_PATH_LENGTH] = {0};
+    char config_path[NW_PATH_MAX] = {0};
     bool daemon_mode = true;  /* Default to daemon mode */
     bool verbose = false;
     bool clock_shifted = false;   /* --date/--timelapse moved the shader clock */
@@ -172,15 +178,15 @@ int main(int argc, char *argv[]) {
      * the whole normal load/render path is exercised unchanged. Never touches
      * the user's config. Foreground is implied: a preview you cannot Ctrl-C is
      * not a preview. */
-    char preview_config[MAX_PATH_LENGTH] = {0};
-    char preview_resolved[MAX_PATH_LENGTH] = {0};
+    char preview_config[NW_PATH_MAX] = {0};
+    char preview_resolved[NW_PATH_MAX] = {0};
     if (preview_shader) {
         /* A path that exists wins (./x.glsl, ../x.glsl). Otherwise look the
          * name up in the shader dirs, the same way the config does, so the
          * `neowall watch hello.glsl` that `neowall new` prints works from
          * anywhere. */
-        char resolved[MAX_PATH_LENGTH];
-        char found[MAX_PATH_LENGTH];
+        char resolved[NW_PATH_MAX];
+        char found[NW_PATH_MAX];
         bool ok = realpath(preview_shader, resolved) != NULL;
         if (!ok && !strchr(preview_shader, '/') &&
             shader_resolve_path(preview_shader, found, sizeof(found)))
@@ -288,6 +294,7 @@ int main(int argc, char *argv[]) {
     state.is_preview = preview_shader != NULL;
     pthread_mutex_init(&state.state_mutex, NULL);
     pthread_rwlock_init(&state.output_list_lock, NULL);
+    app_attach(&state);
     pthread_mutex_init(&state.state_file_lock, NULL);
 
     /* Block the command/shutdown signals before any thread starts. */

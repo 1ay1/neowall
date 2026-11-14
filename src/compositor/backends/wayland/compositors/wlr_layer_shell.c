@@ -13,12 +13,15 @@
 #endif
 #include "neowall/compositor/compositor.h"
 #include "neowall/compositor/backends/wayland.h"
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "neowall/shader/reactive.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
 #include "cursor-shape-v1-client-protocol.h"
 #include "wayland_occlusion.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/output/output.h"
 
 /*
  * ============================================================================

@@ -9,10 +9,10 @@
  */
 
 #include <GL/gl.h>
-#include "neowall/neowall.h"
 #include "neowall/core/constants.h"
 #include "neowall/transitions/transitions.h"
 #include "neowall/shader/shader.h"
+#include "neowall/output/output.h"
 
 /* Vertex shader for glitch transition */
 static const char *glitch_vertex_shader_source =

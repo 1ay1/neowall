@@ -13,6 +13,8 @@
 #include "neowall/runtime/sd_notify.h"
 #include "neowall/shader/term_gpu.h"
 #include "neowall/shader/wallshader.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
 
 void app_mark_redraw_all(struct neowall_state *state) {
     pthread_rwlock_rdlock(&state->output_list_lock);

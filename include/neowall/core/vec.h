@@ -3,7 +3,7 @@
  * ============================================================================
  *
  * A single, header-only, type-generic dynamic array. Replaces the fixed-size
- * `T arr[MAX_N]` declarations scattered through the codebase (MAX_OUTPUTS,
+ * `T arr[MAX_N]` declarations scattered through the codebase (NW_MAX_OUTPUTS,
  * MAX_WALLPAPERS, ...) which silently truncate and impose arbitrary caps.
  *
  * Two ways to use it:

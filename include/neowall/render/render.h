@@ -1,6 +1,7 @@
 #ifndef RENDER_H
 #define RENDER_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <GL/gl.h>

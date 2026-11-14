@@ -6,8 +6,9 @@
  * needs to know which display server is in use. */
 
 #include "neowall/occlusion/occlusion.h"
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "neowall/compositor/compositor.h"
+#include "neowall/core/log.h"
 
 bool occlusion_init(struct neowall_state *state) {
     if (!state || !state->compositor_backend) {

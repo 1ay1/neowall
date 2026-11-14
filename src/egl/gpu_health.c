@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "neowall/neowall.h"
+#include "neowall/core/log.h"
 
 /* Not in every header set; values are fixed by the specs. */
 #ifndef GL_NO_ERROR

@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "neowall/cli/cli.h"
-#include "neowall/neowall.h"
+#include "version.h"
 
 void print_usage(const char *program_name) {
     printf("NeoWall v%s - GPU-accelerated wallpapers for Wayland. Take the red pill. 🔴\n\n", NEOWALL_VERSION_STRING);

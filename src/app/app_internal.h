@@ -12,7 +12,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "neowall/runtime/ipc.h"
 #include "neowall/runtime/rt.h"
 

@@ -1,11 +1,14 @@
 /* Show a live terminal as the wallpaper. */
 
-#include "neowall/app/app.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/config/config_access.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 #include "output_internal.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/core/util.h"
+#include "neowall/state/state.h"
 
 /* Built-in enhanced terminal pass-through: sample the whole grid across the
  * frame with the nwTermFX post effects (bloom/scanline/CRT). The effect
@@ -19,7 +22,8 @@ static const char *kTermCrispShader =
 
 /* The terminal reader thread calls this when the child wrote something. */
 static void terminal_output_woke(void *ctx) {
-    app_request_output_redraw((struct output_state *)ctx);
+    struct output_state *o = ctx;
+    state_output_dirty(o->state, o);
 }
 
 nw_result output_set_terminal(struct output_state *output, const char *cmd,

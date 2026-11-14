@@ -15,7 +15,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <GL/gl.h>
-#include "neowall/neowall.h"
 
 #define FA_CELL_W 8
 #define FA_CELL_H 12

@@ -7,10 +7,10 @@
  */
 
 #include <GL/gl.h>
-#include "neowall/neowall.h"
 #include "neowall/core/constants.h"
 #include "neowall/transitions/transitions.h"
 #include "neowall/shader/shader.h"
+#include "neowall/output/output.h"
 
 static bool render_slide_transition(struct output_state *output, float progress, bool slide_left) {
     if (!output || !output->current_image || !output->next_image) {

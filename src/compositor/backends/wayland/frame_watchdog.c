@@ -6,10 +6,13 @@
 #include <stdatomic.h>
 #include <pthread.h>
 #include <wayland-client.h>
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/shader/wallshader.h"
 #include "frame_watchdog.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/output/output.h"
 
 /* A callback unanswered this long means the compositor isn't drawing us. */
 #define OCCLUSION_TIMEOUT_MS 500

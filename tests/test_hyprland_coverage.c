@@ -19,7 +19,6 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#include "neowall/neowall.h"
 #include "neowall/output/output.h"
 #include "hyprland_coverage.h"
 

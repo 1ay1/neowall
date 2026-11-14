@@ -19,8 +19,11 @@
 #include <sys/stat.h>
 
 #include "neowall/app/daemon.h"
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "neowall/runtime/rt.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/core/util.h"
 
 /* For the crash handler: tell other threads to stop. */
 static struct neowall_state *global_state = NULL;
@@ -28,7 +31,7 @@ static int pid_lock_fd = -1;
 
 /* Get PID file path */
 const char *get_pid_file_path(void) {
-    static char pid_path[MAX_PATH_LENGTH];
+    static char pid_path[NW_PATH_MAX];
     const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
 
     if (runtime_dir) {
@@ -294,7 +297,7 @@ bool daemonize(void) {
 
 bool create_config_directory(void) {
     const char *config_home = getenv("XDG_CONFIG_HOME");
-    char config_dir[MAX_PATH_LENGTH];
+    char config_dir[NW_PATH_MAX];
 
     if (config_home) {
         snprintf(config_dir, sizeof(config_dir), "%s/neowall", config_home);
@@ -311,7 +314,7 @@ bool create_config_directory(void) {
      * so the loop creates the leaf as well (cleaner than the previous "loop
      * for parents, then stat-and-mkdir leaf" dance — the stat was dead code
      * because the loop already created the leaf, see audit fix #33). */
-    char tmp[MAX_PATH_LENGTH];
+    char tmp[NW_PATH_MAX];
     int written = snprintf(tmp, sizeof(tmp), "%s/", config_dir);
     if (written < 0 || (size_t)written >= sizeof(tmp)) {
         log_error("Config directory path too long: %s", config_dir);

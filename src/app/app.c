@@ -22,6 +22,9 @@
 #include "neowall/occlusion/occlusion.h"
 #include "neowall/runtime/sd_notify.h"
 #include "neowall/shader/reactive.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/output/output.h"
 
 /* The loop for app_post / app_request_* from other threads. Set for the
  * lifetime of app_run; NULL otherwise, so a post before or after is a no-op.
@@ -89,6 +92,16 @@ void app_request_output_redraw(struct output_state *output) {
 }
 
 /* ── run ──────────────────────────────────────────────────────────────── */
+
+/* The hooks lower layers fire (state.h). Before app_run they reach no loop
+ * and do nothing, like app_post. */
+static void hook_output_dirty(struct output_state *o) { app_request_output_redraw(o); }
+static void hook_outputs_changed(uint32_t name) { app_post(NW_MSG_OUTPUTS_NEW, name, 0); }
+
+void app_attach(struct neowall_state *state) {
+    state->on_output_dirty = hook_output_dirty;
+    state->on_outputs_changed = hook_outputs_changed;
+}
 
 int app_run(struct neowall_state *state) {
     if (!state) {

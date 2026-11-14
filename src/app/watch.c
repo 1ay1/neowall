@@ -8,10 +8,11 @@
 
 #include "neowall/app/watch.h"
 #include "neowall/app/app.h"
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "neowall/output/output.h"
 #include "neowall/shader/wallshader.h"
 #include "neowall/config/config.h"
+#include "neowall/core/log.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -37,7 +38,7 @@ void watch_print_errors(void) {
 int watch_init(const char *path) {
     if (!path || !*path) return -1;
 
-    char resolved[MAX_PATH_LENGTH];
+    char resolved[NW_PATH_MAX];
     if (!realpath(path, resolved)) {
         log_error("watch: cannot resolve %s: %s", path, strerror(errno));
         return -1;
@@ -45,7 +46,7 @@ int watch_init(const char *path) {
 
     /* Split into directory + name. Watching the directory (not the file) is
      * what makes this survive an editor's write-temp-then-rename save. */
-    char dir[MAX_PATH_LENGTH];
+    char dir[NW_PATH_MAX];
     snprintf(dir, sizeof(dir), "%s", resolved);
 
     char *slash = strrchr(dir, '/');

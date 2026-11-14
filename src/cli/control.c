@@ -22,8 +22,12 @@
 #include "neowall/app/app.h"
 #include "neowall/app/daemon.h"
 #include "neowall/cli/cli.h"
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "neowall/runtime/ipc.h"
+#include "neowall/core/log.h"
+#include "neowall/core/util.h"
+#include "neowall/output/state_file.h"
+#include "version.h"
 
 /* Command descriptor structure */
 typedef struct {
@@ -139,7 +143,7 @@ static int state_max_cycle_total(void) {
         log_debug("Failed to lock state file for reading: %s", strerror(errno));
     }
 
-    char line[MAX_PATH_LENGTH];
+    char line[NW_PATH_MAX];
     int max_cycle_total = 0;
 
     /* Check ALL outputs for cycle_total, not just the first one. The state file
@@ -282,7 +286,7 @@ static void report_daemon_version(void) {
     if (kill((pid_t)pid, 0) != 0) return;   /* not running */
 
     char exe_link[64];
-    char exe_path[MAX_PATH_LENGTH];
+    char exe_path[NW_PATH_MAX];
     snprintf(exe_link, sizeof(exe_link), "/proc/%ld/exe", pid);
 
     ssize_t len = readlink(exe_link, exe_path, sizeof(exe_path) - 1);
@@ -294,7 +298,7 @@ static void report_daemon_version(void) {
     /* Compare against our own binary. Different paths are not automatically
      * wrong (an installed daemon plus a dev CLI is a normal combination), but
      * it is exactly the situation where a shader silently misbehaves. */
-    char self_path[MAX_PATH_LENGTH];
+    char self_path[NW_PATH_MAX];
     ssize_t self_len = readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
     if (self_len <= 0) return;
     self_path[self_len] = '\0';

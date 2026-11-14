@@ -12,13 +12,16 @@
 #include <strings.h>
 #include <dirent.h>
 #include <time.h>
+#include "version.h"
 #include "neowall/config/config.h"
 #include "neowall/config/vibe.h"
-#include "neowall/neowall.h"
 #include "neowall/image/image.h"    /* For image_free() */
 #include "neowall/config/config_access.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/shader/shader.h"
+#include "neowall/core/util.h"
+#include "neowall/output/output.h"
+#include "neowall/state/state.h"
 
 /* ============================================================================
  * CONFIGURATION PHILOSOPHY
@@ -44,7 +47,7 @@
 
 /* Get default configuration file path */
 const char *config_get_default_path(void) {
-    static char path[MAX_PATH_LENGTH];
+    static char path[NW_PATH_MAX];
 
     /* Try XDG_CONFIG_HOME first */
     const char *xdg_config_home = getenv("XDG_CONFIG_HOME");
@@ -262,7 +265,7 @@ static char **load_files_from_directory(const char *dir_path, size_t *count,
     if (!dir_path || !count) return NULL;
     *count = 0;
 
-    char expanded_path[MAX_PATH_LENGTH];
+    char expanded_path[NW_PATH_MAX];
     if (!expand_directory_path(dir_path, expanded_path, sizeof(expanded_path)))
         return NULL;
 
@@ -281,7 +284,7 @@ static char **load_files_from_directory(const char *dir_path, size_t *count,
         size_t dir_len = strlen(expanded_path);
         size_t name_len = strlen(entry->d_name);
         if (dir_len > SIZE_MAX - name_len - 2 ||
-            dir_len + name_len + 2 > MAX_PATH_LENGTH) {
+            dir_len + name_len + 2 > NW_PATH_MAX) {
             log_error("Path too long: %s/%s", expanded_path, entry->d_name);
             continue;
         }
@@ -362,10 +365,10 @@ static ValidationResult validate_path(const char *path) {
     }
 
     /* Check for valid path characters (basic check) */
-    if (strlen(path) >= MAX_PATH_LENGTH) {
+    if (strlen(path) >= NW_PATH_MAX) {
         result.valid = false;
         snprintf(result.error_message, sizeof(result.error_message),
-                "Path too long (max %d chars)", MAX_PATH_LENGTH);
+                "Path too long (max %d chars)", NW_PATH_MAX);
         return result;
     }
 
@@ -680,9 +683,9 @@ static bool parse_channels(VibeValue *obj, struct wallpaper_config *config,
     for (size_t i = 0; i < count; i++) {
         VibeValue *e = val->as_array->values[i];
         if (!e || e->type != VIBE_TYPE_STRING || e->as_string[0] == '\0' ||
-            strlen(e->as_string) >= MAX_PATH_LENGTH) {
+            strlen(e->as_string) >= NW_PATH_MAX) {
             log_error("[%s] Channel[%zu] must be a non-empty string shorter than %d bytes",
-                      context_name, i, MAX_PATH_LENGTH);
+                      context_name, i, NW_PATH_MAX);
             free_path_array(paths, i);
             return false;
         }
@@ -977,7 +980,7 @@ void config_free_wallpaper(struct wallpaper_config *config) {
 
 /* mkdir -p, 0755. */
 static bool mkdir_p(const char *path) {
-    char tmp[MAX_PATH_LENGTH];
+    char tmp[NW_PATH_MAX];
     int n = snprintf(tmp, sizeof(tmp), "%s", path);
     if (n <= 0 || (size_t)n >= sizeof(tmp)) return false;
     for (char *p = tmp + 1; *p; p++) {
@@ -993,7 +996,7 @@ static bool mkdir_p(const char *path) {
  * half-written config. Refuses to overwrite an existing dst. */
 static bool copy_file(const char *src, const char *dst) {
     if (access(dst, F_OK) == 0) return false;
-    char tmp[MAX_PATH_LENGTH];
+    char tmp[NW_PATH_MAX];
     int n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", dst);
     if (n <= 0 || (size_t)n >= sizeof(tmp)) return false;
 
@@ -1023,7 +1026,7 @@ static bool copy_file(const char *src, const char *dst) {
 /* Copy every *.glsl / *.neowall / README.md from one installed shader dir. */
 static bool copy_shaders_from(const char *datadir, void *vdst) {
     const char *dst_dir = vdst;
-    char src_dir[MAX_PATH_LENGTH];
+    char src_dir[NW_PATH_MAX];
     int n = snprintf(src_dir, sizeof(src_dir), "%s/shaders", datadir);
     if (n <= 0 || (size_t)n >= sizeof(src_dir)) return false;
     DIR *dir = opendir(src_dir);
@@ -1037,7 +1040,7 @@ static bool copy_shaders_from(const char *datadir, void *vdst) {
                     (len > 8 && strcmp(e->d_name + len - 8, ".neowall") == 0) ||
                     strcmp(e->d_name, "README.md") == 0;
         if (!want) continue;
-        char s[MAX_PATH_LENGTH], d[MAX_PATH_LENGTH];
+        char s[NW_PATH_MAX], d[NW_PATH_MAX];
         int a = snprintf(s, sizeof(s), "%s/%s", src_dir, e->d_name);
         int b = snprintf(d, sizeof(d), "%s/%s", dst_dir, e->d_name);
         if (a <= 0 || (size_t)a >= sizeof(s) || b <= 0 || (size_t)b >= sizeof(d)) continue;
@@ -1051,7 +1054,7 @@ static bool copy_shaders_from(const char *datadir, void *vdst) {
 static bool config_create_default(const char *config_path) {
     if (!config_path) return false;
 
-    char dir_path[MAX_PATH_LENGTH];
+    char dir_path[NW_PATH_MAX];
     int n = snprintf(dir_path, sizeof(dir_path), "%s", config_path);
     if (n <= 0 || (size_t)n >= sizeof(dir_path)) return false;
     char *slash = strrchr(dir_path, '/');
@@ -1062,12 +1065,12 @@ static bool config_create_default(const char *config_path) {
     }
 
     /* The sample configs and shaders ship in neowall's data dir. */
-    char src[MAX_PATH_LENGTH];
+    char src[NW_PATH_MAX];
     bool copied_config = neowall_find_data("config.vibe", src, sizeof(src)) &&
                          copy_file(src, config_path);
     if (copied_config) log_info("Created configuration file from example: %s", config_path);
 
-    char path[MAX_PATH_LENGTH];
+    char path[NW_PATH_MAX];
     n = snprintf(path, sizeof(path), "%s/neowall.vibe", dir_path);
     if (n > 0 && (size_t)n < sizeof(path) &&
         neowall_find_data("neowall.vibe", src, sizeof(src)) && copy_file(src, path)) {
@@ -1099,7 +1102,7 @@ static bool config_create_default(const char *config_path) {
         "  path ~/Pictures/wallpaper.png\n"
         "  mode fill\n"
         "}\n";
-    char tmp[MAX_PATH_LENGTH];
+    char tmp[NW_PATH_MAX];
     n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", config_path);
     if (n <= 0 || (size_t)n >= sizeof(tmp)) return false;
     int fd = mkstemp(tmp);
@@ -1156,7 +1159,7 @@ static bool apply_builtin_default_config(struct neowall_state *state) {
         };
 
         for (int i = 0; try_paths[i] != NULL; i++) {
-            char expanded[MAX_PATH_LENGTH];
+            char expanded[NW_PATH_MAX];
             if (try_paths[i][0] == '~') {
                 snprintf(expanded, sizeof(expanded), "%s%s", home, try_paths[i] + 1);
             } else {

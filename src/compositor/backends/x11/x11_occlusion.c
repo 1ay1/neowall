@@ -18,9 +18,12 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/extensions/Xrandr.h>
-#include "neowall/neowall.h"
+#include "neowall/state/state.h"
 #include "x11_occlusion.h"
 #include "x11_geometry.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/output/output.h"
 
 static Display *x_display = NULL;
 static Window root_window;

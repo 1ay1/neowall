@@ -10,12 +10,12 @@
 #include <GL/glext.h>
 #include "neowall/core/log.h"
 #include "neowall/shader/shader.h"
+#include "neowall/core/constants.h"
 
 /* utils.c; declared here so this file doesn't pull in all of neowall.h. */
 bool neowall_find_data(const char *rel, char *out, size_t size);
 
-#ifndef MAX_PATH_LENGTH
-#define MAX_PATH_LENGTH 4096
+#ifndef NW_PATH_MAX
 #endif
 
 static GLuint compile_shader(GLenum type, const char *source) {
@@ -88,7 +88,7 @@ bool shader_resolve_path(const char *shader_name, char *resolved_path, size_t re
 
     const char *home = getenv("HOME");
     const char *xdg_config_home = getenv("XDG_CONFIG_HOME");
-    char cand[MAX_PATH_LENGTH];
+    char cand[NW_PATH_MAX];
     int n = -1;
     if (xdg_config_home && xdg_config_home[0] == '/') {
         n = snprintf(cand, sizeof(cand), "%s/neowall/shaders/%s", xdg_config_home, shader_name);
@@ -98,7 +98,7 @@ bool shader_resolve_path(const char *shader_name, char *resolved_path, size_t re
         n = snprintf(cand, sizeof(cand), "%s/.config/neowall/shaders/%s", home, shader_name);
         if (n > 0 && (size_t)n < sizeof(cand) && access(cand, R_OK) == 0) goto found;
     }
-    char rel[MAX_PATH_LENGTH];
+    char rel[NW_PATH_MAX];
     n = snprintf(rel, sizeof(rel), "shaders/%s", shader_name);
     if (n > 0 && (size_t)n < sizeof(rel) && neowall_find_data(rel, cand, sizeof(cand))) goto found;
 

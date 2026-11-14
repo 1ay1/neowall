@@ -5,6 +5,8 @@
 #include "neowall/config/config_access.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 #include "output_internal.h"
+#include "neowall/core/log.h"
+#include "neowall/state/state.h"
 
 /* ============================================
  * Span groups — one scene across several monitors
@@ -85,12 +87,12 @@ void outputs_update_spans(struct output_state **outs, size_t count) {
             continue;
         }
 
-        struct span_rect rects[MAX_OUTPUTS];
+        struct span_rect rects[NW_MAX_OUTPUTS];
         size_t n = 0;
         size_t self = 0;
         uint64_t start = 0;
 
-        for (size_t j = 0; j < count && n < MAX_OUTPUTS; j++) {
+        for (size_t j = 0; j < count && n < NW_MAX_OUTPUTS; j++) {
             struct output_state *o = outs[j];
             if (!o || !output_same_span_group(me, o)) {
                 continue;
@@ -296,9 +298,9 @@ size_t output_cycle_group(struct output_state **outs, size_t count, struct outpu
     /* Membership is settled BEFORE the leader moves: a shuffled wrap permutes
      * the leader's list in place, and the members have not been given the new
      * order yet, so asking again afterwards could fail to recognise them. */
-    struct output_state *members[MAX_OUTPUTS];
+    struct output_state *members[NW_MAX_OUTPUTS];
     size_t n = 0;
-    for (size_t i = 0; i < count && n < MAX_OUTPUTS; i++) {
+    for (size_t i = 0; i < count && n < NW_MAX_OUTPUTS; i++) {
         if (outs && outs[i] && outs[i] != leader && output_same_span_group(outs[i], leader)) {
             members[n++] = outs[i];
         }

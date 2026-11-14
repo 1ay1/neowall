@@ -25,8 +25,6 @@
 #include "neowall/core/log.h"
 #include "neowall/core/util.h"
 
-#define MAX_PATH_LENGTH NW_PATH_MAX
-#define MAX_OUTPUTS NW_MAX_OUTPUTS
 
 #define COLOR_GREEN "\033[32m"
 #define COLOR_RESET "\033[0m"
@@ -34,7 +32,7 @@
 /* Get path to the cycle list file (shows all wallpapers with indices) */
 /* Must use same fallback logic as get_state_file_path to stay in sync */
 static const char *get_cycle_list_file_path(void) {
-    static char path[MAX_PATH_LENGTH];
+    static char path[NW_PATH_MAX];
     const char *state_home = getenv("XDG_STATE_HOME");
     const char *config_home = getenv("XDG_CONFIG_HOME");
     const char *home = getenv("HOME");
@@ -67,7 +65,7 @@ static const char *get_cycle_list_file_path(void) {
 }
 
 const char *get_state_file_path(void) {
-    static char state_path[MAX_PATH_LENGTH];
+    static char state_path[NW_PATH_MAX];
     const char *state_home = getenv("XDG_STATE_HOME");
     const char *config_home = getenv("XDG_CONFIG_HOME");
     const char *home = getenv("HOME");
@@ -125,7 +123,7 @@ static bool publish_atomic(FILE *fp, const char *tmp, const char *path) {
 /* Structure to hold output state data */
 typedef struct {
     char output_name[256];
-    char wallpaper_path[MAX_PATH_LENGTH];
+    char wallpaper_path[NW_PATH_MAX];
     char mode[64];
     int cycle_index;
     int cycle_total;
@@ -148,7 +146,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
     pthread_mutex_lock(&state_file_mutex);
     
     /* Ensure state directory exists */
-    char dir_path[MAX_PATH_LENGTH];
+    char dir_path[NW_PATH_MAX];
     snprintf(dir_path, sizeof(dir_path), "%s", state_path);
     char *last_slash = strrchr(dir_path, '/');
     if (last_slash) {
@@ -157,7 +155,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
         struct stat st = {0};
         if (stat(dir_path, &st) == -1) {
             /* Try to create parent first */
-            char parent_path[MAX_PATH_LENGTH];
+            char parent_path[NW_PATH_MAX];
             snprintf(parent_path, sizeof(parent_path), "%s", dir_path);
             char *parent_slash = strrchr(parent_path, '/');
             if (parent_slash) {
@@ -170,13 +168,13 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
     }
     
     /* Read existing states from file */
-    output_state_entry_t states[MAX_OUTPUTS];
+    output_state_entry_t states[NW_MAX_OUTPUTS];
     int state_count = 0;
     bool found_output = false;
     
     FILE *fp_read = fopen(state_path, "r");
     if (fp_read) {
-        char line[MAX_PATH_LENGTH];
+        char line[NW_PATH_MAX];
         output_state_entry_t current_entry = {0};
         bool reading_entry = false;
         
@@ -186,7 +184,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
             if (strncmp(line, "[output]", 8) == 0) {
                 /* Save previous entry if exists */
                 if (reading_entry && current_entry.output_name[0] != '\0') {
-                    if (state_count < MAX_OUTPUTS) {
+                    if (state_count < NW_MAX_OUTPUTS) {
                         states[state_count++] = current_entry;
                     }
                 }
@@ -232,7 +230,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
         
         /* Save last entry */
         if (reading_entry && current_entry.output_name[0] != '\0') {
-            if (state_count < MAX_OUTPUTS) {
+            if (state_count < NW_MAX_OUTPUTS) {
                 states[state_count++] = current_entry;
             }
         }
@@ -258,7 +256,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
     }
     
     /* Add new entry if not found */
-    if (!found_output && state_count < MAX_OUTPUTS) {
+    if (!found_output && state_count < NW_MAX_OUTPUTS) {
         /* snprintf both guarantees NUL-termination (the source is an unbounded
          * caller pointer) and silences GCC -O2 -Wstringop-truncation. */
         memset(&states[state_count], 0, sizeof(states[state_count]));
@@ -278,7 +276,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
     
     /* Write a complete replacement then atomically publish it. Readers see
      * either the old complete snapshot or the new one, never truncation. */
-    char tmp_path[MAX_PATH_LENGTH];
+    char tmp_path[NW_PATH_MAX];
     FILE *fp_write = open_atomic_temp(state_path, tmp_path, sizeof(tmp_path));
     if (!fp_write) {
         log_error("Failed to write state file %s: %s", state_path, strerror(errno));
@@ -308,7 +306,7 @@ static int load_state_entries(const char *path, output_state_entry_t *states, in
     FILE *fp = fopen(path, "r");
     if (!fp) return errno == ENOENT ? 0 : -1;
 
-    char line[MAX_PATH_LENGTH];
+    char line[NW_PATH_MAX];
     output_state_entry_t entry = {0};
     bool reading = false;
     int count = 0;
@@ -355,7 +353,7 @@ static int load_state_entries(const char *path, output_state_entry_t *states, in
 
 static bool publish_state_entries(const char *path,
                                   const output_state_entry_t *states, int count) {
-    char tmp_path[MAX_PATH_LENGTH];
+    char tmp_path[NW_PATH_MAX];
     FILE *fp = open_atomic_temp(path, tmp_path, sizeof(tmp_path));
     if (!fp) return false;
     for (int i = 0; i < count; i++) {
@@ -382,8 +380,8 @@ bool prune_wallpaper_state(const char *const *output_names, size_t output_count)
     if (!path || !path[0]) return false;
 
     pthread_mutex_lock(&state_file_mutex);
-    output_state_entry_t states[MAX_OUTPUTS];
-    int count = load_state_entries(path, states, MAX_OUTPUTS);
+    output_state_entry_t states[NW_MAX_OUTPUTS];
+    int count = load_state_entries(path, states, NW_MAX_OUTPUTS);
     if (count == 0 && access(path, F_OK) != 0 && errno == ENOENT) {
         pthread_mutex_unlock(&state_file_mutex);
         return true;
@@ -411,8 +409,8 @@ bool remove_wallpaper_state(const char *output_name) {
     if (!path || !path[0]) return false;
 
     pthread_mutex_lock(&state_file_mutex);
-    output_state_entry_t states[MAX_OUTPUTS];
-    int count = load_state_entries(path, states, MAX_OUTPUTS);
+    output_state_entry_t states[NW_MAX_OUTPUTS];
+    int count = load_state_entries(path, states, NW_MAX_OUTPUTS);
     if (count == 0 && access(path, F_OK) != 0 && errno == ENOENT) {
         pthread_mutex_unlock(&state_file_mutex);
         return true;
@@ -444,7 +442,7 @@ int restore_cycle_index_from_state(const char *output_name) {
         return 0;
     }
     
-    char line[MAX_PATH_LENGTH];
+    char line[NW_PATH_MAX];
     char current_output[256] = "";
     int cycle_index = 0;
     bool in_matching_output = false;
@@ -496,7 +494,7 @@ bool read_wallpaper_state(void) {
         return false;
     }
     
-    char line[MAX_PATH_LENGTH];
+    char line[NW_PATH_MAX];
     output_state_entry_t current_entry = {0};
     bool reading_entry = false;
     int output_count = 0;
@@ -607,7 +605,7 @@ bool write_cycle_list(const char *output_name, char **paths, size_t count, size_
     const char *list_path = get_cycle_list_file_path();
     
     /* Ensure parent directory exists */
-    char dir_path[MAX_PATH_LENGTH];
+    char dir_path[NW_PATH_MAX];
     snprintf(dir_path, sizeof(dir_path), "%s", list_path);
     char *last_slash = strrchr(dir_path, '/');
     if (last_slash) {
@@ -615,7 +613,7 @@ bool write_cycle_list(const char *output_name, char **paths, size_t count, size_
         mkdir(dir_path, 0755);
     }
     
-    char tmp_path[MAX_PATH_LENGTH];
+    char tmp_path[NW_PATH_MAX];
     FILE *fp = open_atomic_temp(list_path, tmp_path, sizeof(tmp_path));
     if (!fp) {
         log_error("Failed to write cycle list: %s", strerror(errno));
@@ -659,7 +657,7 @@ bool read_cycle_list(void) {
         return false;
     }
     
-    char line[MAX_PATH_LENGTH];
+    char line[NW_PATH_MAX];
     char output_name[256] = {0};
     size_t count = 0;
     size_t current = 0;

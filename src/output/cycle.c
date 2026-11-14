@@ -4,6 +4,10 @@
 #include "neowall/config/config_access.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 #include "output_internal.h"
+#include "neowall/config/config.h"
+#include "neowall/core/log.h"
+#include "neowall/output/state_file.h"
+#include "neowall/state/state.h"
 
 /* Cycle to next wallpaper in the cycle list */
 void output_cycle_wallpaper(struct output_state *output) {
@@ -70,7 +74,7 @@ void output_cycle_wallpaper(struct output_state *output) {
     output->config->current_cycle_index = next_index;
 
     /* Copy path before releasing lock to avoid use-after-free if config reloads */
-    char next_path_copy[MAX_PATH_LENGTH];
+    char next_path_copy[NW_PATH_MAX];
     const char *next_path = output->config->cycle_paths[output->config->current_cycle_index];
     snprintf(next_path_copy, sizeof(next_path_copy), "%s", next_path);
     pthread_mutex_unlock(&output->state->state_mutex);
@@ -231,7 +235,7 @@ void output_set_cycle_index(struct output_state *output, size_t index) {
     output->config->current_cycle_index = index;
 
     /* Copy path before releasing lock */
-    char path_copy[MAX_PATH_LENGTH];
+    char path_copy[NW_PATH_MAX];
     const char *path = output->config->cycle_paths[index];
     snprintf(path_copy, sizeof(path_copy), "%s", path);
     pthread_mutex_unlock(&output->state->state_mutex);

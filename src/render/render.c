@@ -13,7 +13,6 @@
 
 /* Number of consecutive slow frames before marking shader as problematic */
 #define GPU_TIMEOUT_FRAME_THRESHOLD 3
-#include "neowall/neowall.h"
 #include "neowall/image/image.h"    /* Only for legacy wrapper functions */
 #include "neowall/config/config_access.h"
 #include "neowall/core/constants.h"
@@ -28,6 +27,10 @@
 /* For iWindows[]: window rects come from the Hyprland IPC snapshot that the
  * occlusion path already maintains. */
 #include "hyprland_coverage.h"
+#include "neowall/core/time.h"
+#include "neowall/output/frame_clock.h"
+#include "neowall/output/output.h"
+#include "neowall/state/state.h"
 #endif
 
 /* Helper function to get the preferred output identifier

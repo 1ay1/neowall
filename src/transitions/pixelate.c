@@ -8,10 +8,10 @@
  */
 
 #include <GL/gl.h>
-#include "neowall/neowall.h"
 #include "neowall/core/constants.h"
 #include "neowall/transitions/transitions.h"
 #include "neowall/shader/shader.h"
+#include "neowall/output/output.h"
 
 /* Vertex shader for pixelate transition */
 static const char *pixelate_vertex_shader_source =

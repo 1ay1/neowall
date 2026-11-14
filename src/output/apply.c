@@ -5,6 +5,10 @@
 #include "neowall/compositor/compositor.h"
 #include "neowall/config/config_access.h"
 #include "output_internal.h"
+#include "neowall/config/config.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/output/state_file.h"
 
 /* Find output by name */
 

@@ -17,7 +17,6 @@
 #include "neowall/shader/reactive.h"
 #include "neowall/core/child_signals.h"
 #include "neowall/shader/wall_clock.h"
-#include "neowall/neowall.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -525,6 +524,7 @@ static void sample_time(reactive_snapshot_t *s) {
 /* FFT lives in reactive_fft.h (include-style) so it can be exposed as a
  * public symbol for unit tests via NEOWALL_TESTING without duplicating code. */
 #include "reactive_fft.h"
+#include "neowall/core/log.h"
 
 #ifdef NEOWALL_TESTING
     /* Internal call sites use the static name; alias it. */

@@ -475,4 +475,8 @@ bool output_pace_advance(struct output_state *output, uint64_t now_ns);
 void output_pace_note_present(struct output_state *output,
                               uint64_t present_ns, uint64_t refresh_ns);
 
+/* Names for the log and the state file (src/config/config.c). */
+const char *wallpaper_mode_to_string(enum wallpaper_mode mode);
+const char *transition_type_to_string(enum transition_type type);
+
 #endif /* OUTPUT_H */

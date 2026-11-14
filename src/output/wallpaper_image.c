@@ -5,6 +5,11 @@
 #include "neowall/egl/egl_core.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 #include "output_internal.h"
+#include "neowall/core/log.h"
+#include "neowall/core/time.h"
+#include "neowall/core/util.h"
+#include "neowall/output/state_file.h"
+#include "neowall/state/state.h"
 
 void output_set_wallpaper(struct output_state *output, const char *path) {
     if (!output || !path) {

@@ -3,7 +3,8 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "neowall/shader/shader_state.h"
-#include "neowall/neowall.h"
+#include "neowall/core/constants.h"
+#include "neowall/core/log.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -16,7 +17,7 @@
 /* Directory holding one file per shader. */
 static bool state_dir(char *out, size_t out_size) {
     const char *base = getenv("XDG_STATE_HOME");
-    char root[MAX_PATH_LENGTH];
+    char root[NW_PATH_MAX];
 
     if (base && base[0] == '/') {
         snprintf(root, sizeof(root), "%s/neowall", base);
@@ -49,7 +50,7 @@ static void state_key(const char *shader_path, char *out, size_t out_size) {
 }
 
 static bool state_file_path(const char *shader_path, char *out, size_t out_size) {
-    char dir[MAX_PATH_LENGTH];
+    char dir[NW_PATH_MAX];
     if (!state_dir(dir, sizeof(dir))) return false;
 
     char key[512];
@@ -64,7 +65,7 @@ void nw_shader_state_load(const char *shader_path, nw_shader_state_t *out) {
     memset(out, 0, sizeof(*out));
     if (!shader_path || !*shader_path) return;
 
-    char path[MAX_PATH_LENGTH];
+    char path[NW_PATH_MAX];
     if (!state_file_path(shader_path, path, sizeof(path))) return;
 
     FILE *fp = fopen(path, "r");
@@ -92,12 +93,12 @@ void nw_shader_state_load(const char *shader_path, nw_shader_state_t *out) {
 bool nw_shader_state_save(const char *shader_path, const nw_shader_state_t *state) {
     if (!shader_path || !*shader_path || !state) return false;
 
-    char path[MAX_PATH_LENGTH];
+    char path[NW_PATH_MAX];
     if (!state_file_path(shader_path, path, sizeof(path))) return false;
 
     /* Write-then-rename: a crash mid-write leaves the previous good state in
      * place instead of a truncated file that would read back as garbage. */
-    char tmp[MAX_PATH_LENGTH];
+    char tmp[NW_PATH_MAX];
     int n = snprintf(tmp, sizeof(tmp), "%s.tmp", path);
     if (n < 0 || (size_t)n >= sizeof(tmp)) return false;
 

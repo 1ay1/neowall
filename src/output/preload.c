@@ -6,11 +6,13 @@
 #include "neowall/egl/egl_core.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 #include "output_internal.h"
+#include "neowall/core/log.h"
+#include "neowall/state/state.h"
 
 /* Background thread function for async image decoding */
 struct preload_thread_args {
     struct output_state *output;
-    char path[MAX_PATH_LENGTH];
+    char path[NW_PATH_MAX];
     int32_t width;
     int32_t height;
     enum wallpaper_mode mode;
@@ -144,7 +146,7 @@ void output_preload_next_wallpaper(struct output_state *output) {
 
     pthread_mutex_unlock(&output->state->state_mutex);
 
-    char preload_path[MAX_PATH_LENGTH];
+    char preload_path[NW_PATH_MAX];
     snprintf(preload_path, sizeof(preload_path), "%s", args->path);
     log_debug("Starting background preload for output %s: %s",
               output->model[0] ? output->model : "unknown", preload_path);
