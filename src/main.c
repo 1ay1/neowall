@@ -21,7 +21,7 @@
 #include "neowall/app/app.h"
 #include "neowall/state/state.h"
 #include "neowall/runtime/sd_notify.h"
-#include "neowall/shader/wall_clock.h"
+#include "neowall/core/wall_clock.h"
 #include "neowall/app/watch.h"
 #include "neowall/shader/shader.h"
 #include "neowall/compositor/compositor.h"
@@ -329,7 +329,7 @@ int main(int argc, char *argv[]) {
     log_info("Description: %s", state.compositor_backend->description);
 
     /* Initialize EGL/OpenGL */
-    if (!egl_core_init(&state)) {
+    if (!app_graphics_up(&state)) {
         log_error("Failed to initialize EGL");
         compositor_backend_cleanup(state.compositor_backend);
         remove_pid_file();
@@ -357,7 +357,7 @@ int main(int argc, char *argv[]) {
     }
     if (!loaded) {
         log_error("Failed to load configuration");
-        egl_core_cleanup(&state);
+        app_graphics_down(&state);
         compositor_backend_cleanup(state.compositor_backend);
         remove_pid_file();
         return EXIT_FAILURE;
@@ -386,7 +386,7 @@ int main(int argc, char *argv[]) {
     alarm(2);
 
     /* Quick cleanup - don't spend too much time on this during shutdown */
-    egl_core_cleanup(&state);
+    app_graphics_down(&state);
 
     /* Cleanup compositor backend */
     if (state.compositor_backend) {

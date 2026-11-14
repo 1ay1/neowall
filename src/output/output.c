@@ -9,6 +9,7 @@
 #include "neowall/config/config.h"
 #include "neowall/core/log.h"
 #include "neowall/state/state.h"
+#include "neowall/egl/egl_core.h"
 
 /* Helper function to get the preferred output identifier
  * Prefers connector_name (e.g., "HDMI-A-2", "DP-1") over model name
@@ -49,8 +50,7 @@ void output_sync_keyboard_focus(struct output_state *output) {
     }
 }
 
-struct output_state *output_create(struct neowall_state *state,
-                                   void *native_output, uint32_t name) {
+struct output_state *output_new(struct neowall_state *state, void *native_output, uint32_t name) {
     if (!state) {
         log_error("Invalid parameters for output_create");
         return NULL;
@@ -153,15 +153,70 @@ struct output_state *output_create(struct neowall_state *state,
     /* Initialize frame timer for precise pacing when vsync is disabled */
     out->frame_timer_fd = -1;  /* Will be created when needed */
 
-    /* Add to linked list - CALLER MUST HOLD WRITE LOCK */
-    /* Note: List modification moved to caller (wayland.c) to ensure proper locking */
+    log_debug("Created output state (name=%u)", name);
+    return out;
+}
+
+/* ── the output list ─────────────────────────────────────────────────────
+ * Each takes output_list_lock as writer itself. The list holds one
+ * reference per output. */
+
+void output_list_add(struct neowall_state *state, struct output_state *out) {
+    pthread_rwlock_wrlock(&state->output_list_lock);
     out->next = state->outputs;
     state->outputs = out;
     state->output_count++;
+    pthread_rwlock_unlock(&state->output_list_lock);
+}
 
-    log_debug("Created output state (name=%u)", name);
+/* Unlink; the list's reference becomes the caller's. False if it wasn't in
+ * the list (someone else already removed it). */
+bool output_list_take(struct neowall_state *state, struct output_state *out) {
+    bool found = false;
+    pthread_rwlock_wrlock(&state->output_list_lock);
+    for (struct output_state **pp = &state->outputs; *pp; pp = &(*pp)->next) {
+        if (*pp == out) {
+            *pp = out->next;
+            out->next = NULL;
+            state->output_count--;
+            found = true;
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+    return found;
+}
 
-    return out;
+/* Unlink the output with this registry name; NULL if none. */
+struct output_state *output_list_take_name(struct neowall_state *state, uint32_t name) {
+    struct output_state *found = NULL;
+    pthread_rwlock_wrlock(&state->output_list_lock);
+    for (struct output_state **pp = &state->outputs; *pp; pp = &(*pp)->next) {
+        if ((*pp)->name == name) {
+            found = *pp;
+            *pp = found->next;
+            found->next = NULL;
+            state->output_count--;
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+    return found;
+}
+
+/* Empty the list, handing each output to `drop` (which must unref it). */
+void output_list_clear(struct neowall_state *state, void (*drop)(struct output_state *)) {
+    pthread_rwlock_wrlock(&state->output_list_lock);
+    struct output_state *o = state->outputs;
+    state->outputs = NULL;
+    state->output_count = 0;
+    pthread_rwlock_unlock(&state->output_list_lock);
+    while (o) {
+        struct output_state *next = o->next;
+        o->next = NULL;
+        drop(o);
+        o = next;
+    }
 }
 
 void output_destroy(struct output_state *output) {
@@ -492,4 +547,14 @@ bool output_init_render(struct output_state *output) {
     }
 
     return render_init_output(output);
+}
+
+bool output_make_current(struct output_state *output) {
+    if (!output || !output->state || !output->compositor_surface ||
+        output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
+        return false;
+    }
+    return egl_make_surface_current(output->state->egl_display,
+                                    output->compositor_surface->egl_surface,
+                                    output->state->egl_context);
 }

@@ -6,11 +6,9 @@
 #include <EGL/eglext.h>
 #include <GL/gl.h>
 #include "neowall/state/state.h"
-#include "neowall/compositor/compositor.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/egl/gpu_health.h"
 #include "neowall/core/log.h"
-#include "neowall/output/output.h"
 
 /**
  * EGL Core - Simple Desktop OpenGL 3.3 Context Management
@@ -18,32 +16,13 @@
  * Uses desktop OpenGL 3.3 Core profile for Shadertoy compatibility.
  */
 
-bool egl_core_init(struct neowall_state *state) {
+bool egl_core_init(struct neowall_state *state, void *native_display, EGLenum platform) {
     if (!state) {
         log_error("Invalid state");
         return false;
     }
 
     log_info("Initializing EGL with desktop OpenGL 3.3...");
-
-    /* Get native display from compositor backend */
-    if (!state->compositor_backend || !state->compositor_backend->ops) {
-        log_error("No compositor backend available for EGL initialization");
-        return false;
-    }
-
-    const compositor_backend_ops_t *ops = state->compositor_backend->ops;
-    void *backend_data = state->compositor_backend->data;
-
-    void *native_display = NULL;
-    if (ops->get_native_display) {
-        native_display = ops->get_native_display(backend_data);
-    }
-
-    EGLenum platform = EGL_PLATFORM_WAYLAND_KHR;
-    if (ops->get_egl_platform) {
-        platform = ops->get_egl_platform(backend_data);
-    }
 
     /* Get EGL display */
     if (native_display) {
@@ -154,25 +133,6 @@ bool egl_core_init(struct neowall_state *state) {
 
     log_info("Created OpenGL 3.3 Core context%s", robust ? " (robust)" : "");
 
-    /* Create surfaces for outputs */
-    pthread_rwlock_rdlock(&state->output_list_lock);
-
-    struct output_state *output = state->outputs;
-    while (output) {
-        if (output->width > 0 && output->height > 0) {
-            if (output_create_egl_surface(output)) {
-                log_debug("Created EGL surface for output %s",
-                          output->model[0] ? output->model : "unknown");
-            } else {
-                log_error("Failed to create EGL surface for output %s",
-                          output->model[0] ? output->model : "unknown");
-            }
-        }
-        output = output->next;
-    }
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
     /* Context-wide setup can't wait for an output surface: on Wayland outputs
      * usually have no size yet. Make the context current surfaceless for it. */
     if (egl_make_current_raw(state->egl_display, EGL_NO_SURFACE, state->egl_context)) {
@@ -186,78 +146,12 @@ bool egl_core_init(struct neowall_state *state) {
         state->gpu_health_pending = true;
     }
 
-    /* Make context current and enable vsync */
-    pthread_rwlock_rdlock(&state->output_list_lock);
-
-    output = state->outputs;
-    if (output && output->compositor_surface && 
-        output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-        
-        if (!eglSwapInterval(state->egl_display, 1)) {
-            log_debug("Could not set vsync - continuing without");
-        } else {
-            log_info("Enabled vsync");
-        }
-
-        if (egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface, state->egl_context) &&
-            state->gpu_health_pending) {
-            gpu_health_init(state->gl_robust, log_get_level() >= LOG_LEVEL_DEBUG);
-            state->gpu_health_pending = false;
-        }
-    }
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    /* Initialize rendering for outputs */
-    pthread_rwlock_rdlock(&state->output_list_lock);
-
-    output = state->outputs;
-    while (output) {
-        if (output->compositor_surface && 
-            output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-            
-            if (!egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface, state->egl_context)) {
-                log_error("Failed to make context current for output %s",
-                         output->model[0] ? output->model : "unknown");
-                output = output->next;
-                continue;
-            }
-
-            if (!output_init_render(output)) {
-                log_error("Failed to initialize rendering for output %s",
-                          output->model[0] ? output->model : "unknown");
-            }
-        }
-        output = output->next;
-    }
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    /* Apply deferred configuration */
-    pthread_rwlock_rdlock(&state->output_list_lock);
-
-    output = state->outputs;
-    while (output) {
-        output_apply_deferred_config(output);
-        output = output->next;
-    }
-
-    pthread_rwlock_unlock(&state->output_list_lock);
-
     return true;
 }
 
+/* Outputs drop their EGL surfaces first (the app does it, it owns them). */
 void egl_core_cleanup(struct neowall_state *state) {
     if (!state) return;
-
-    struct output_state *output = state->outputs;
-    while (output) {
-        if (output->compositor_surface && 
-            output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-            compositor_surface_destroy_egl(output->compositor_surface, state->egl_display);
-        }
-        output = output->next;
-    }
 
     if (state->egl_display != EGL_NO_DISPLAY) {
         egl_make_current_raw(state->egl_display, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -274,19 +168,3 @@ void egl_core_cleanup(struct neowall_state *state) {
         state->egl_display = EGL_NO_DISPLAY;
     }
 }
-
-bool egl_core_make_current(struct neowall_state *state, struct output_state *output) {
-    if (!state || state->egl_display == EGL_NO_DISPLAY) return false;
-
-    if (!output) {
-        return egl_make_current_raw(state->egl_display, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    }
-
-    if (!output->compositor_surface || 
-        output->compositor_surface->egl_surface == EGL_NO_SURFACE) return false;
-
-    return egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface,
-                                    state->egl_context);
-}
-
-

@@ -429,54 +429,15 @@ static void output_on_configure_callback(struct compositor_surface *surface,
     }
 }
 
-/* Compositor surface closed callback */
+/* The compositor closed this output's surface: drop the output. Another
+ * path (registry global_remove) may already have taken it out of the list;
+ * then there's nothing to do. The unref happens outside the list lock. */
 static void output_on_closed_callback(struct compositor_surface *surface) {
     struct output_state *output = surface->user_data;
-
     log_info("Compositor surface closed for output %s", output->model);
-
-    /* CRITICAL: Must acquire write lock before destroying output and modifying list */
-    struct neowall_state *state = output->state;
-    if (state) {
-        pthread_rwlock_wrlock(&state->output_list_lock);
-
-        /* Verify the output is still in the list before destroying it: another
-         * thread (e.g. registry global_remove) may have already unlinked it. */
-        bool found = false;
-        struct output_state *check = state->outputs;
-        while (check) {
-            if (check == output) {
-                found = true;
-                break;
-            }
-            check = check->next;
-        }
-
-        if (!found) {
-            log_error("Output %s already removed from list, skipping destroy",
-                    output->model);
-            pthread_rwlock_unlock(&state->output_list_lock);
-            return;
-        }
-
-        /* Remove from linked list before destroying */
-        struct output_state **output_ptr = &state->outputs;
-        while (*output_ptr) {
-            if (*output_ptr == output) {
-                *output_ptr = output->next;
-                state->output_count--;
-                break;
-            }
-            output_ptr = &(*output_ptr)->next;
-        }
-
-        frame_watchdog_remove(output);
-        output_unref(output);
-        pthread_rwlock_unlock(&state->output_list_lock);
-    } else {
-        frame_watchdog_remove(output);
-        output_unref(output);
-    }
+    if (output->state && !output_list_take(output->state, output)) return;
+    frame_watchdog_remove(output);
+    output_unref(output);
 }
 
 
@@ -545,12 +506,9 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
         struct wl_output *output_obj = wl_registry_bind(registry, name,
                                                          &wl_output_interface, 3);
 
-        /* CRITICAL: Acquire write lock before creating output and modifying list */
-        pthread_rwlock_wrlock(&state->output_list_lock);
-        struct output_state *output = output_create(state, output_obj, name);
-        pthread_rwlock_unlock(&state->output_list_lock);
-
+        struct output_state *output = output_new(state, output_obj, name);
         if (output) {
+            output_list_add(state, output);
             wl_output_add_listener(output_obj, &output_listener, output);
 
             /* Get xdg_output for connector name if manager is available */
@@ -601,6 +559,13 @@ static void release_output_proxies(struct neowall_state *state,
     }
 }
 
+/* output_list_clear's drop: everything an output holds, then the ref. */
+static void drop_output(struct output_state *o) {
+    frame_watchdog_remove(o);
+    release_output_proxies(o->state, o);
+    output_unref(o);
+}
+
 static void registry_handle_global_remove(void *data, struct wl_registry *registry,
                                           uint32_t name) {
     struct neowall_state *state = data;
@@ -608,35 +573,16 @@ static void registry_handle_global_remove(void *data, struct wl_registry *regist
 
     log_info("Registry: global removed (name=%u)", name);
 
-    /* CRITICAL: Acquire write lock before modifying output list */
-    pthread_rwlock_wrlock(&state->output_list_lock);
-
-    /* Find and remove the output with this name */
-    struct output_state **output_ptr = &state->outputs;
-    while (*output_ptr) {
-        struct output_state *output = *output_ptr;
-        if (output->name == name) {
-            log_info("Removing output %s (name=%u)", output->model, name);
-            *output_ptr = output->next;
-            state->output_count--;
-
-            /* Unlock before destroying (destroy might take time) */
-            pthread_rwlock_unlock(&state->output_list_lock);
-            const char *identifier = output->connector_name[0]
-                ? output->connector_name : output->model;
-            if (identifier[0] && !remove_wallpaper_state(identifier)) {
-                log_warn("Failed to remove persisted state for Wayland output %s",
-                         identifier);
-            }
-            frame_watchdog_remove(output);
-            release_output_proxies(state, output);
-            output_unref(output);
-            return;
-        }
-        output_ptr = &output->next;
+    struct output_state *output = output_list_take_name(state, name);
+    if (!output) return;
+    log_info("Removing output %s (name=%u)", output->model, name);
+    const char *identifier = output->connector_name[0] ? output->connector_name : output->model;
+    if (identifier[0] && !remove_wallpaper_state(identifier)) {
+        log_warn("Failed to remove persisted state for Wayland output %s", identifier);
     }
-
-    pthread_rwlock_unlock(&state->output_list_lock);
+    frame_watchdog_remove(output);
+    release_output_proxies(state, output);
+    output_unref(output);
 }
 
 static const struct wl_registry_listener registry_listener = {
@@ -831,17 +777,7 @@ void wayland_cleanup(void) {
     struct neowall_state *state = wl->state;
 
     if (state) {
-        /* Destroy all outputs - acquire write lock since we're modifying the list */
-        pthread_rwlock_wrlock(&state->output_list_lock);
-        while (state->outputs) {
-            struct output_state *next = state->outputs->next;
-            frame_watchdog_remove(state->outputs);
-            release_output_proxies(state, state->outputs);
-            output_unref(state->outputs);
-            state->outputs = next;
-        }
-        state->output_count = 0;
-        pthread_rwlock_unlock(&state->output_list_lock);
+        output_list_clear(state, drop_output);
 
         /* Cleanup compositor backend */
         if (state->compositor_backend) {

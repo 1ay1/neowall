@@ -179,6 +179,7 @@ inc_dirs_build = include_directories('.')
 # core: logging, paths, small containers. Depends on nothing else here.
 core_sources = files(
   'src/core/log.c',
+  'src/core/wall_clock.c',
   'src/core/vibe.c',   # vendored libvibe, compiled once
   'src/core/util.c',
   'src/core/base.c',
@@ -213,6 +214,7 @@ app_sources = files(
   'src/app/host.c',
   'src/app/watch.c',
   'src/app/configure.c',
+  'src/app/graphics.c',
 )
 
 # EGL sources (desktop OpenGL 3.3)
@@ -244,7 +246,6 @@ gfx_sources = files(
 
 # Shader engine sources
 shader_sources = files(
-  'src/shader/wall_clock.c',
   'src/shader/source.c',
   'src/shader/assemble.c',
   'src/shader/compat.c',
@@ -758,7 +759,7 @@ test('source', test_source_exe)
 # silently rather than crashing) and that the occlusion contract survived.
 test_source_reactive_exe = executable('test_source_reactive',
   files('tests/test_source_reactive.c', 'src/source/reactive.c', 'src/core/log.c', 'src/core/util.c',
-        'src/shader/wall_clock.c')
+        'src/core/wall_clock.c')
     + source_sources + source_reactive_sources,
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
@@ -810,7 +811,7 @@ test('shader_source', executable('test_shader_source',
 # and the `#pragma neowall requires` floor. All GL-free, so they run in CI.
 test_authoring_exe = executable('test_shader_authoring',
   files('tests/test_shader_authoring.c', 'src/core/base.c', 'src/shader/source.c',
-        'src/core/vibe.c', 'src/core/log.c', 'src/core/util.c', 'src/shader/wall_clock.c'),
+        'src/core/vibe.c', 'src/core/log.c', 'src/core/util.c', 'src/core/wall_clock.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
   build_by_default: false,

@@ -195,11 +195,10 @@ int main(void) {
     fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(1.0, 0.5, 0.0, 1.0); }\n", f);
     fclose(f);
 
-    struct output_state *o = output_create(&st, NULL, 1);
-    CHECK(o != NULL, "output_create");
+    struct output_state *o = output_new(&st, NULL, 1);
+    CHECK(o != NULL, "output_new");
     if (!o) return 1;
-    st.outputs = o;
-    st.output_count = 1;
+    output_list_add(&st, o);
     snprintf(o->connector_name, sizeof(o->connector_name), "TEST-1");
     snprintf(o->model, sizeof(o->model), "Test");
     o->width = o->pixel_width = o->logical_width = W;

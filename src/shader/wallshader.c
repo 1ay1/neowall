@@ -9,7 +9,7 @@
 #include <time.h>
 
 #include "neowall/core/base.h"
-#include "neowall/shader/wall_clock.h"
+#include "neowall/core/wall_clock.h"
 #include "neowall/core/log.h"
 #include <GL/gl.h>
 #include <GL/glext.h>

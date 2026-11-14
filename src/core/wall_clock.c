@@ -1,8 +1,8 @@
-/* Virtual shader clock. See include/neowall/shader/wall_clock.h for the rationale. */
+/* Virtual shader clock. See include/neowall/core/wall_clock.h for the rationale. */
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "neowall/shader/wall_clock.h"
+#include "neowall/core/wall_clock.h"
 
 #include <ctype.h>
 #include <stdatomic.h>

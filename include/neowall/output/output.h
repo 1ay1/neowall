@@ -267,25 +267,29 @@ static inline int32_t output_normalized_scale(const struct output_state *output)
     return output->scale;
 }
 
-/* Output management */
-struct output_state *output_create(struct neowall_state *state,
-                                   void *native_output, uint32_t name);
+/* A new output with default config and refcount 1, not in any list yet. */
+struct output_state *output_new(struct neowall_state *state, void *native_output, uint32_t name);
 void output_destroy(struct output_state *output);
 
-/* Reference counting for safe concurrent lifetime management.
- *
- * output_create() returns an output with refcount 1 (the list's reference).
- * Take a ref before using an output across a window where the list lock is not
- * held; drop it with output_unref() when done. When the count reaches zero the
- * output is torn down via output_destroy() and freed.
- *
- * Removal from the output list is: unlink under the write lock, then
- * output_unref() the list's reference. Any outstanding refs (e.g. a render
- * snapshot) keep the object alive until they too are dropped. */
+/* The output list (state->outputs). Each takes output_list_lock as writer;
+ * don't call them holding it. The list owns one reference per output: add
+ * gives it the new output's, take/take_name hand it back to the caller, who
+ * output_unref()s it when done. clear hands every output to `drop`. */
+void output_list_add(struct neowall_state *state, struct output_state *output);
+bool output_list_take(struct neowall_state *state, struct output_state *output);
+struct output_state *output_list_take_name(struct neowall_state *state, uint32_t name);
+void output_list_clear(struct neowall_state *state, void (*drop)(struct output_state *));
+
+/* Reference counting: take a ref before using an output across a window
+ * where the list lock isn't held; output_unref() when done. At zero the
+ * output is destroyed. A render snapshot holds refs, so hotplug can't free
+ * an output mid-frame. */
 void output_ref(struct output_state *output);
 void output_unref(struct output_state *output);
 bool output_configure_compositor_surface(struct output_state *output);
 bool output_create_egl_surface(struct output_state *output);
+/* Make the shared context current on this output's surface. */
+bool output_make_current(struct output_state *output);
 void output_set_wallpaper(struct output_state *output, const char *path);
 /* Notify the output core that its physical render dimensions changed. Safe in
  * compositor callbacks: only atomics are touched; image/GL replacement occurs

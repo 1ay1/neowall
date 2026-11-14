@@ -16,7 +16,7 @@
 
 #include "neowall/source/reactive.h"
 #include "neowall/core/child_signals.h"
-#include "neowall/shader/wall_clock.h"
+#include "neowall/core/wall_clock.h"
 
 #include <stdio.h>
 #include <stdlib.h>

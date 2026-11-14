@@ -527,7 +527,7 @@ static void bring_up_output(struct neowall_state *state, struct output_state *o)
         log_info("Reconnect: output %s has no size yet, waiting for the compositor", name);
         return;
     }
-    if (!output_create_egl_surface(o) || !egl_core_make_current(state, o) || !output_init_render(o)) {
+    if (!output_create_egl_surface(o) || !output_make_current(o) || !output_init_render(o)) {
         log_error("Reconnect: GL bring-up failed for output %s", name);
         return;
     }

@@ -638,16 +638,7 @@ static void x11_backend_cleanup(void *backend_data) {
      * display must still be open). The Wayland backend does the same in
      * wayland_cleanup(). */
     struct neowall_state *state = backend->state;
-    if (state) {
-        pthread_rwlock_wrlock(&state->output_list_lock);
-        while (state->outputs) {
-            struct output_state *next = state->outputs->next;
-            output_unref(state->outputs);
-            state->outputs = next;
-        }
-        state->output_count = 0;
-        pthread_rwlock_unlock(&state->output_list_lock);
-    }
+    if (state) output_list_clear(state, output_unref);
 
     if (backend->x_display) {
         /* Shutdown does not tear surfaces down one by one — main() cleans up EGL
@@ -1549,83 +1540,17 @@ static int x11_enumerate_monitors(x11_backend_data_t *backend, x11_monitor_t *mo
  * compositor surface is created lazily by the caller. Returns NULL on OOM. */
 static struct output_state *x11_make_output(struct neowall_state *state,
                                             const x11_monitor_t *mon) {
-    struct output_state *out = calloc(1, sizeof(struct output_state));
-    if (!out) {
-        log_error("Failed to allocate X11 output");
-        return NULL;
-    }
-
-    out->state = state;
-    out->native_output = NULL;  /* X11 doesn't use Wayland outputs */
-    out->name = 0;
+    struct output_state *out = output_new(state, NULL, 0);
+    if (!out) return NULL;
     /* model and connector_name both carry the real RandR name so per-output
      * config blocks (matched by either) work and `neowall current` is right. */
     snprintf(out->model, sizeof(out->model), "%.63s", mon->name);
     snprintf(out->connector_name, sizeof(out->connector_name), "%.63s", mon->name);
-
     out->x_offset = mon->x;
     out->y_offset = mon->y;
-    out->pixel_width = mon->width;
-    out->pixel_height = mon->height;
-    out->width = mon->width;
-    out->height = mon->height;
-    out->logical_width = mon->width;
-    out->logical_height = mon->height;
-    out->scale = 1;
-    out->configured = true;
-    atomic_init(&out->needs_redraw, true);
-    atomic_init(&out->occluded, false);
-    atomic_init(&out->refcount, 1);  /* the output list's reference */
-
-    out->config = calloc(1, sizeof(struct wallpaper_config));
-    if (!out->config) {
-        log_error("Failed to allocate config for X11 output");
-        free(out);
-        return NULL;
-    }
-
-    /* Defaults; the real config is applied by app_config_load via output_apply_config. */
-    out->config->mode = MODE_FILL;
-    out->config->duration = 0;
-    out->config->transition = TRANSITION_NONE;
-    out->config->transition_duration = 300;
-    out->config->cycle = false;
-    out->config->cycle_paths = NULL;
-    out->config->cycle_count = 0;
-    out->config->current_cycle_index = 0;
-    out->config->type = WALLPAPER_IMAGE;
-    out->config->path[0] = '\0';
-    out->config->shader_path[0] = '\0';
-    out->config->shader_speed = 1.0f;
-    out->config->shader_fps = 60;
-    /* See output_create(): calloc leaves vsync false, which requests async
-     * presentation and makes motion jerk. config.c's parsed default is true. */
-    out->config->vsync = true;
-    out->config->show_fps = false;
-    out->config->channel_paths = NULL;
-    out->config->channel_count = 0;
-
-    out->preload_texture = 0;
-    out->preload_image = NULL;
-    out->preload_path[0] = '\0';
-    atomic_init(&out->preload_ready, false);
-
-    pthread_mutex_init(&out->preload_mutex, NULL);
-    out->preload_decoded_image = NULL;
-    atomic_init(&out->preload_thread_active, false);
-    atomic_init(&out->preload_thread_join_pending, false);
-    atomic_init(&out->preload_should_stop, false);
-    atomic_init(&out->preprocessing_generation, 1);
-    atomic_init(&out->geometry_change_pending, false);
-    atomic_init(&out->preload_upload_pending, false);
-
-    out->fps_last_log_time = 0;
-    out->fps_frame_count = 0;
-    out->fps_current = 0.0f;
-    out->frame_timer_fd = -1;
-    out->mouse_x = -1.0f;
-    out->mouse_y = -1.0f;
-
+    out->pixel_width = out->width = out->logical_width = mon->width;
+    out->pixel_height = out->height = out->logical_height = mon->height;
+    out->configured = true;   /* X11 has no configure round trip */
     return out;
 }
 
@@ -1682,25 +1607,10 @@ static bool x11_init_outputs(void *backend_data, struct neowall_state *state) {
         struct output_state *out = x11_make_output(state, &mons[i]);
         if (!out) continue;
 
-        /* Link into the output list under the write lock. */
-        pthread_rwlock_wrlock(&state->output_list_lock);
-        out->next = state->outputs;
-        state->outputs = out;
-        state->output_count++;
-        pthread_rwlock_unlock(&state->output_list_lock);
-
+        output_list_add(state, out);
         if (!x11_attach_surface(state, out)) {
             log_error("Failed to create compositor surface for monitor %s", mons[i].name);
-            /* Unlink and drop the output we just added. */
-            pthread_rwlock_wrlock(&state->output_list_lock);
-            struct output_state **pp = &state->outputs;
-            while (*pp && *pp != out) pp = &(*pp)->next;
-            if (*pp == out) {
-                *pp = out->next;
-                if (state->output_count > 0) state->output_count--;
-            }
-            pthread_rwlock_unlock(&state->output_list_lock);
-            output_unref(out);
+            if (output_list_take(state, out)) output_unref(out);
             continue;
         }
 
@@ -1749,7 +1659,7 @@ static bool x11_bring_output_online(struct neowall_state *state, struct output_s
         log_error("Hotplug: %s has no dimensions", out->connector_name);
         return false;
     }
-    if (!output_create_egl_surface(out) || !egl_core_make_current(state, out) ||
+    if (!output_create_egl_surface(out) || !output_make_current(out) ||
         !output_init_render(out)) {
         log_error("Hotplug: GL bring-up failed for %s", out->connector_name);
         return false;
@@ -1797,17 +1707,7 @@ static void x11_reconcile_outputs(x11_backend_data_t *backend) {
         struct output_state *o = stale[i];
         log_info("Hotplug: removing output %s (%dx%d at +%d+%d)",
                  o->connector_name, o->width, o->height, o->x_offset, o->y_offset);
-        pthread_rwlock_wrlock(&state->output_list_lock);
-        struct output_state **pp = &state->outputs;
-        while (*pp && *pp != o) pp = &(*pp)->next;
-        bool unlinked = false;
-        if (*pp == o) {
-            *pp = o->next;
-            if (state->output_count > 0) state->output_count--;
-            unlinked = true;
-        }
-        pthread_rwlock_unlock(&state->output_list_lock);
-        if (unlinked) {
+        if (output_list_take(state, o)) {
             if (!remove_wallpaper_state(o->connector_name)) {
                 log_warn("Hotplug: failed to remove persisted state for %s",
                          o->connector_name);
@@ -1869,21 +1769,8 @@ static void x11_reconcile_outputs(x11_backend_data_t *backend) {
         struct output_state *out = x11_make_output(state, &mons[i]);
         if (!out) continue;
 
-        pthread_rwlock_wrlock(&state->output_list_lock);
-        out->next = state->outputs;
-        state->outputs = out;
-        state->output_count++;
-        pthread_rwlock_unlock(&state->output_list_lock);
-
-        if (!x11_bring_output_online(state, out)) {
-            pthread_rwlock_wrlock(&state->output_list_lock);
-            struct output_state **pp = &state->outputs;
-            while (*pp && *pp != out) pp = &(*pp)->next;
-            if (*pp == out) {
-                *pp = out->next;
-                if (state->output_count > 0) state->output_count--;
-            }
-            pthread_rwlock_unlock(&state->output_list_lock);
+        output_list_add(state, out);
+        if (!x11_bring_output_online(state, out) && output_list_take(state, out)) {
             output_unref(out);
         }
     }
@@ -1932,7 +1819,7 @@ static void x11_recreate_surfaces(x11_backend_data_t *backend) {
         struct output_state *o = outs[i];
 
         /* Release the EGL surface from this thread before destroying it. */
-        egl_core_make_current(state, NULL);
+        egl_make_current_raw(state->egl_display, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
         if (o->compositor_surface) {
             if (o->compositor_surface->egl_surface != EGL_NO_SURFACE) {
@@ -1944,7 +1831,7 @@ static void x11_recreate_surfaces(x11_backend_data_t *backend) {
 
         if (!x11_attach_surface(state, o) ||
             !output_create_egl_surface(o) ||
-            !egl_core_make_current(state, o)) {
+            !output_make_current(o)) {
             log_error("X11: failed to recreate wallpaper window for %s",
                       o->connector_name);
             output_unref(o);

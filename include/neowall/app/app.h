@@ -60,6 +60,11 @@ bool app_config_load(struct neowall_state *state, const char *path);
 bool app_config_reload(struct neowall_state *state, const char *path);
 bool app_config_output(struct neowall_state *state, struct output_state *output);
 
+/* The GL context and every output's surface and render state; the reverse.
+ * After the backend is up and before the config is applied. */
+bool app_graphics_up(struct neowall_state *state);
+void app_graphics_down(struct neowall_state *state);
+
 /* Wake the loop from another thread with a message. False if it isn't
  * running. Safe to call before app_run (the message is dropped). */
 bool app_post(uint32_t kind, uint32_t id, int64_t value);
