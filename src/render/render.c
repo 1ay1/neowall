@@ -14,7 +14,6 @@
 /* Number of consecutive slow frames before marking shader as problematic */
 #define GPU_TIMEOUT_FRAME_THRESHOLD 3
 #include "neowall/image/image.h"    /* Only for legacy wrapper functions */
-#include "neowall/config/config_access.h"
 #include "neowall/core/constants.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/transitions/transitions.h"

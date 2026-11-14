@@ -63,6 +63,8 @@ struct neowall_state {
      * (e.g. in tests) means nobody's listening. */
     void (*on_output_dirty)(struct output_state *output);   /* needs a redraw */
     void (*on_outputs_changed)(uint32_t name);               /* added or resized */
+    /* an output is up (surface + GL) and wants its wallpaper now */
+    bool (*on_output_ready)(struct neowall_state *state, struct output_state *output);
 };
 
 /* Fire the hooks; a no-op when unset. */
@@ -71,6 +73,9 @@ static inline void state_output_dirty(struct neowall_state *s, struct output_sta
 }
 static inline void state_outputs_changed(struct neowall_state *s, uint32_t name) {
     if (s && s->on_outputs_changed) s->on_outputs_changed(name);
+}
+static inline bool state_output_ready(struct neowall_state *s, struct output_state *o) {
+    return s && s->on_output_ready && s->on_output_ready(s, o);
 }
 
 #endif /* NEOWALL_STATE_H */

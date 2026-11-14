@@ -531,7 +531,7 @@ static void bring_up_output(struct neowall_state *state, struct output_state *o)
         log_error("Reconnect: GL bring-up failed for output %s", name);
         return;
     }
-    if (config_apply_to_output(state, o)) {
+    if (app_config_output(state, o)) {
         atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
         log_info("Reconnect: output %s online (%dx%d)", name, o->width, o->height);
     }

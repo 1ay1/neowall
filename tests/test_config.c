@@ -1,6 +1,6 @@
 /* config.c, the real thing, headless.
  *
- * Drives config_load / config_reload with crafted files against two fake
+ * Drives app_config_load / app_config_reload with crafted files against two fake
  * outputs. output_apply_config is stubbed to record what each output was
  * given, so the parser, validation, precedence (default -> per-output) and the
  * reload-keeps-last-good contract are all tested without GL.
@@ -15,6 +15,7 @@
 #include "neowall/state/state.h"
 #include "neowall/config/config.h"
 #include "neowall/output/output.h"
+#include "neowall/app/app.h"
 #include <stdatomic.h>
 
 /* ---- stub: record the last config applied to each output ---- */
@@ -95,7 +96,7 @@ int main(void) {
              a, b);
     write_cfg(text);
     g_applied = 0;
-    CHECK(config_load(&st, cfg));
+    CHECK(app_config_load(&st, cfg));
     CHECK(g_applied == 2);   /* one apply per output, not default-then-override */
     CHECK(left.config && left.config->type == WALLPAPER_SHADER);
     CHECK(left.config && strstr(left.config->shader_path, "a.glsl"));
@@ -106,7 +107,7 @@ int main(void) {
     /* outputs also match by model name */
     snprintf(text, sizeof(text), "output {\n  \"Dell U2720Q\" { shader %s }\n}\n", b);
     write_cfg(text);
-    CHECK(config_reload(&st, cfg));
+    CHECK(app_config_reload(&st, cfg));
     CHECK(left.config && strstr(left.config->shader_path, "b.glsl"));
 
     /* reload is strict: each bad file is rejected and nothing changes */
@@ -123,7 +124,7 @@ int main(void) {
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         write_cfg(bad[i]);
         int before = g_applied;
-        bool ok = config_reload(&st, cfg);
+        bool ok = app_config_reload(&st, cfg);
         if (ok) printf("  accepted bad config #%zu\n", i);
         CHECK(!ok);
         CHECK(g_applied == before);
@@ -132,7 +133,7 @@ int main(void) {
 
     /* a missing file on reload keeps the live config too */
     unlink(cfg);
-    CHECK(!config_reload(&st, cfg));
+    CHECK(!app_config_reload(&st, cfg));
     CHECK(left.config && strstr(left.config->shader_path, "b.glsl"));
 
     /* unknown keys are ignored (forward compatible), with a typo hint */
@@ -142,25 +143,25 @@ int main(void) {
     CHECK(config_edit_distance("", "abc") == 3);
     snprintf(text, sizeof(text), "default {\n  shader %s\n  shader_sped 9\n}\n", a);
     write_cfg(text);
-    CHECK(config_reload(&st, cfg));
+    CHECK(app_config_reload(&st, cfg));
     CHECK(left.config && left.config->shader_speed == 1.0f);
 
     /* a shader directory becomes a cycle */
     snprintf(text, sizeof(text), "default {\n  shader %s/\n  duration 60\n  shuffle false\n}\n",
              shaders);
     write_cfg(text);
-    CHECK(config_load(&st, cfg));
+    CHECK(app_config_load(&st, cfg));
     CHECK(left.config && left.config->duration == 60.0f);
 
     /* a bad channel after a directory cycle is built: rejected, no leak (ASan) */
     snprintf(text, sizeof(text), "default {\n  shader %s/\n  channels [ \"rgba_noise\" 5 ]\n}\n",
              shaders);
     write_cfg(text);
-    CHECK(!config_reload(&st, cfg));
+    CHECK(!app_config_reload(&st, cfg));
 
     /* channels are for shaders only */
     write_cfg("default {\n  path /x.png\n  channels [ \"rgba_noise\" ]\n}\n");
-    CHECK(!config_reload(&st, cfg));
+    CHECK(!app_config_reload(&st, cfg));
 
     /* an empty directory with dir syntax is an error, not a single file */
     char empty[600];
@@ -168,12 +169,12 @@ int main(void) {
     mkdir(empty, 0755);
     snprintf(text, sizeof(text), "default {\n  shader %s/\n}\n", empty);
     write_cfg(text);
-    CHECK(!config_reload(&st, cfg));
+    CHECK(!app_config_reload(&st, cfg));
 
     /* terminal block: command, ints, colours and clamped effects */
     write_cfg("default {\n  terminal \"htop -d 10\"\n  term_cols 120\n  term_fg \"#a0b0c0\"\n"
               "  term_bloom 3\n  term_crt 0.25\n}\n");
-    CHECK(config_load(&st, cfg));
+    CHECK(app_config_load(&st, cfg));
     CHECK(left.config && left.config->type == WALLPAPER_TERMINAL);
     CHECK(left.config && strcmp(left.config->term_cmd, "htop -d 10") == 0);
     CHECK(left.config && left.config->term_cols == 120);
@@ -181,9 +182,9 @@ int main(void) {
     CHECK(left.config && left.config->term_bloom == 1.0f);   /* clamped */
     CHECK(left.config && left.config->term_crt == 0.25f);
     write_cfg("default {\n  terminal htop\n  term_fg \"blue\"\n}\n");
-    CHECK(!config_reload(&st, cfg));
+    CHECK(!app_config_reload(&st, cfg));
     write_cfg("default {\n  terminal htop\n  term_rows 9999\n}\n");
-    CHECK(!config_reload(&st, cfg));
+    CHECK(!app_config_reload(&st, cfg));
 
     /* every key: wrong type, wrong wallpaper type and out of range are
      * refused; good values land in the config */
@@ -231,19 +232,19 @@ int main(void) {
         }
         snprintf(text, sizeof(text), "default {\n  %s\n}\n", body);
         write_cfg(text);
-        bool ok = config_reload(&st, cfg);
+        bool ok = app_config_reload(&st, cfg);
         if (ok != cases[i].ok) printf("  case %zu: %s\n", i, cases[i].body);
         CHECK(ok == cases[i].ok);
     }
     /* and the values from the good cases arrive */
     write_cfg("default {\n  path /x.png\n  mode fit\n  transition fade\n  transition_duration 0.5\n  duration 10\n}\n");
-    CHECK(config_reload(&st, cfg));
+    CHECK(app_config_reload(&st, cfg));
     CHECK(left.config && left.config->mode == MODE_FIT && left.config->transition == TRANSITION_FADE);
     CHECK(left.config && left.config->transition_duration == 0.5f && left.config->duration == 10.0f);
     snprintf(text, sizeof(text), "default {\n  shader %s\n  show_fps true\n  pause_on_fullscreen true\n"
              "  pause_coverage_threshold 0.4\n  shader_fps 30.0\n  vsync false\n  span_group desk\n}\n", a);
     write_cfg(text);
-    CHECK(config_reload(&st, cfg));
+    CHECK(app_config_reload(&st, cfg));
     CHECK(left.config && left.config->show_fps && left.config->pause_on_fullscreen);
     CHECK(left.config && left.config->pause_coverage_threshold == 0.4f);
     CHECK(left.config && left.config->shader_fps == 30 && !left.config->vsync);
@@ -253,13 +254,13 @@ int main(void) {
     snprintf(text, sizeof(text), "mouse_interaction false\ndefault {\n  shader %s\n}\n", a);
     write_cfg(text);
     atomic_store(&st.mouse_interaction, true);
-    CHECK(config_load(&st, cfg));
+    CHECK(app_config_load(&st, cfg));
     CHECK(!atomic_load(&st.mouse_interaction));
 
     /* first run with no file writes a starter config and loads it */
     char fresh[600];
     snprintf(fresh, sizeof(fresh), "%s/new/neowall/config.vibe", dir);
-    CHECK(config_load(&st, fresh));
+    CHECK(app_config_load(&st, fresh));
     CHECK(access(fresh, R_OK) == 0);
 
     free(left.config);

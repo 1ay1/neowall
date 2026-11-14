@@ -24,7 +24,6 @@
 #include "neowall/shader/wall_clock.h"
 #include "neowall/app/watch.h"
 #include "neowall/shader/shader.h"
-#include "neowall/config/config_access.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/egl/gpu_health.h"
@@ -344,7 +343,7 @@ int main(int argc, char *argv[]) {
          * don't exit: show its errors, run a placeholder, and swap the real
          * file in on the first save that compiles. */
         log_quiet_errors(true);
-        loaded = config_load(&state, config_path);
+        loaded = app_config_load(&state, config_path);
         log_quiet_errors(false);
         if (!loaded) {
             printf("\n%s doesn't compile yet:\n", preview_resolved);
@@ -354,7 +353,7 @@ int main(int argc, char *argv[]) {
             loaded = watch_load_placeholder(&state, preview_config);
         }
     } else {
-        loaded = config_load(&state, config_path);
+        loaded = app_config_load(&state, config_path);
     }
     if (!loaded) {
         log_error("Failed to load configuration");

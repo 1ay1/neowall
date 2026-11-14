@@ -161,7 +161,7 @@ present. Every other thread only produces input:
 |--------|------|----------------------|
 | slideshow preload (per output) | decodes the next image | mutex-guarded handoff + atomic flag; cooperatively cancelled, always joined in `output_destroy` (libpng/libjpeg aren't cancel-safe) |
 | terminal reader (per terminal) | drains the PTY into the screen model | sets `needs_redraw`, posts a wake only if the loop armed one (`app_request_output_redraw`) |
-| reactive sampler | reads /proc, /sys, hwmon at 4 Hz | publishes a snapshot under `g_lock` (`src/shader/reactive.c`) |
+| reactive sampler | reads /proc, /sys, hwmon at 4 Hz | publishes a snapshot under `g_lock` (`src/source/reactive.c`) |
 | audio capture | runs `parec` on `@DEFAULT_MONITOR@`, FFT | same snapshot; only started when a shader reads audio |
 | nvidia-smi reader | parses `nvidia-smi -lms 500` | same snapshot |
 

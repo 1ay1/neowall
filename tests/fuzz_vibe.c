@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "neowall/config/vibe.h"
+#include "neowall/core/vibe.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     /* vibe_parse_string expects a NUL-terminated C string; the fuzzer buffer

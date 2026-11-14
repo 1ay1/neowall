@@ -14,7 +14,7 @@
 #include <GL/gl.h>
 #include <GL/glext.h>
 #include "neowall/core/log.h"
-#include "neowall/shader/reactive.h"
+#include "neowall/source/reactive.h"
 #include "neowall/shader/shader_source.h"
 #include "neowall/shader/shader_state.h"
 #include "neowall/source/source.h"

@@ -25,7 +25,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 
-#include "neowall/config/vibe.h"
+#include "neowall/core/vibe.h"
 #include "version.h"
 
 /* ── text with a line map ────────────────────────────────────────────── */

@@ -165,7 +165,7 @@ is enough).
 |------|----------|---------|
 | `src/terminal/vendor/stb_truetype.h` | stb_truetype 1.26 | MIT or public domain |
 | `src/terminal/vendor/stb_image.h` | stb_image 2.30 | MIT or public domain |
-| `include/neowall/config/vibe.h` | libvibe (same author) | MIT |
+| `include/neowall/core/vibe.h` | libvibe (same author) | MIT |
 
 Both stb headers can be swapped for the distro's with `-Dsystem_stb`. Each
 header carries its license text at the end.

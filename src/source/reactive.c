@@ -14,7 +14,7 @@
 #define _DEFAULT_SOURCE
 #endif
 
-#include "neowall/shader/reactive.h"
+#include "neowall/source/reactive.h"
 #include "neowall/core/child_signals.h"
 #include "neowall/shader/wall_clock.h"
 

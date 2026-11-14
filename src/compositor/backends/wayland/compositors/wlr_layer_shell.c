@@ -14,7 +14,7 @@
 #include "neowall/compositor/compositor.h"
 #include "neowall/compositor/backends/wayland.h"
 #include "neowall/state/state.h"
-#include "neowall/shader/reactive.h"
+#include "neowall/source/reactive.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "tearing-control-v1-client-protocol.h"
 #include "cursor-shape-v1-client-protocol.h"
@@ -1390,7 +1390,7 @@ static void wlr_occlusion_cleanup(void *data) {
     }
 }
 
-/* Re-apply input config (currently just mouse_interaction) after config_load.
+/* Re-apply input config (currently just mouse_interaction) after a config load.
  * The seat's `capabilities` event already fired during the init roundtrip
  * — before config was parsed — so if the user set mouse_interaction=false
  * we have an unwanted wl_pointer binding to release. Conversely if they

@@ -11,7 +11,7 @@
 #include "gl_headless.h"
 #include "neowall/core/log.h"
 #include "neowall/shader/wallshader.h"
-#include "neowall/shader/reactive.h"
+#include "neowall/source/reactive.h"
 #include <time.h>
 
 static int W = 480, H = 200;

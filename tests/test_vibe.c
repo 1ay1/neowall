@@ -1,5 +1,5 @@
 /* Unit tests for the VIBE config parser (vendored single-header libvibe,
- *  compiled via src/config/vibe_impl.c).
+ *  compiled via src/core/vibe.c).
  *
  * vibe.c has no GL / Wayland / filesystem deps in its string-parse path, so
  * these run headless in CI. They lock down both the happy path and several
@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "neowall/config/vibe.h"
+#include "neowall/core/vibe.h"
 
 static int failures = 0;
 static int checks = 0;

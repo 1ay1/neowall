@@ -14,14 +14,9 @@
 #include <time.h>
 #include "version.h"
 #include "neowall/config/config.h"
-#include "neowall/config/vibe.h"
-#include "neowall/image/image.h"    /* For image_free() */
-#include "neowall/config/config_access.h"
-#include "neowall/compositor/compositor.h"
-#include "neowall/shader/shader.h"
+#include "neowall/core/vibe.h"
+#include "neowall/core/log.h"
 #include "neowall/core/util.h"
-#include "neowall/output/output.h"
-#include "neowall/state/state.h"
 
 /* ============================================================================
  * CONFIGURATION PHILOSOPHY
@@ -1051,7 +1046,7 @@ static bool copy_shaders_from(const char *datadir, void *vdst) {
     return true;   /* only take shaders from the first data dir that has them */
 }
 
-static bool config_create_default(const char *config_path) {
+bool config_create_default(const char *config_path) {
     if (!config_path) return false;
 
     char dir_path[NW_PATH_MAX];
@@ -1127,14 +1122,7 @@ static bool config_create_default(const char *config_path) {
  * Built-in fallback configuration (used when config file fails)
  * ============================================================================ */
 
-static bool apply_builtin_default_config(struct neowall_state *state) {
-    /* config_load() forwards a NULL state straight here on its early-out path,
-     * so guard before dereferencing state->output_list_lock below. */
-    if (!state) {
-        log_error("Cannot apply built-in default config: state is NULL");
-        return false;
-    }
-
+void config_builtin_default(struct wallpaper_config *out) {
     log_info("Applying built-in default configuration");
 
     /* Create a minimal working config */
@@ -1201,24 +1189,7 @@ static bool apply_builtin_default_config(struct neowall_state *state) {
         log_info("Continuing without wallpaper - outputs will show black screen.");
         /* Don't return false - we'll just have black screens which is acceptable */
     }
-
-    /* Apply to all outputs - even if no image found, outputs need valid config
-     * If no image was found, the config will have an empty path and outputs
-     * will render black (which is better than crashing or having invalid state) */
-    /* Use read lock for safe output list traversal */
-    pthread_rwlock_rdlock(&state->output_list_lock);
-    struct output_state *output = state->outputs;
-    while (output) {
-        struct wallpaper_config config_copy;
-        memcpy(&config_copy, &default_config, sizeof(struct wallpaper_config));
-        output_apply_config(output, &config_copy);
-        log_debug("Applied default config to output %s",
-                 output->model[0] ? output->model : "unknown");
-        output = output->next;
-    }
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    return true;
+    *out = default_config;
 }
 
 /* ============================================================================
@@ -1297,11 +1268,17 @@ static VibeValue *read_and_parse_config(const char *config_path,
     return root;
 }
 
+struct config_doc {
+    VibeParser *parser;
+    VibeValue *root;
+};
+
 /* The one place that decides which block applies to an output: its own block
- * under `output` (matched by connector, then model), else `default`. Parses
- * into *out. Returns false if neither exists or parsing fails. */
-static bool resolve_output_config(VibeValue *root, const struct output_state *output,
-                                  struct wallpaper_config *out) {
+ * under `output` (matched by connector, then model), else `default`. */
+bool config_doc_for_output(const config_doc *doc, const char *connector, const char *model,
+                           struct wallpaper_config *out) {
+    if (!doc || !out) return false;
+    VibeValue *root = doc->root;
     VibeValue *outputs_obj = vibe_object_get(root->as_object, "output");
     if (!outputs_obj) outputs_obj = vibe_object_get(root->as_object, "outputs");
 
@@ -1310,9 +1287,8 @@ static bool resolve_output_config(VibeValue *root, const struct output_state *ou
             const char *key = outputs_obj->as_object->entries[i].key;
             VibeValue *blk = outputs_obj->as_object->entries[i].value;
             if (blk->type != VIBE_TYPE_OBJECT) continue;
-            bool matches =
-                (output->connector_name[0] && strcmp(output->connector_name, key) == 0) ||
-                strcmp(output->model, key) == 0;
+            bool matches = (connector && connector[0] && strcmp(connector, key) == 0) ||
+                           (model && strcmp(model, key) == 0);
             if (!matches) continue;
             char ctx[128];
             snprintf(ctx, sizeof(ctx), "output.%s", key);
@@ -1325,35 +1301,6 @@ static bool resolve_output_config(VibeValue *root, const struct output_state *ou
         return parse_wallpaper_config(default_obj, out, "default");
     }
     return false;
-}
-
-/* Re-read the config and apply what belongs to one (hotplugged) output. */
-bool config_apply_to_output(struct neowall_state *state, struct output_state *output) {
-    if (!state || !output) {
-        return false;
-    }
-
-    const char *name = output->connector_name[0] ? output->connector_name
-                                                 : output->model;
-
-    VibeParser *parser = NULL;
-    VibeValue *root = read_and_parse_config(state->config_path, &parser, false);
-    struct wallpaper_config cfg;
-    bool ok;
-    if (root && resolve_output_config(root, output, &cfg)) {
-        ok = output_apply_config(output, &cfg);
-        config_free_wallpaper(&cfg);
-    } else {
-        log_info("No usable config for output %s, using built-in default",
-                 name[0] ? name : "unknown");
-        init_wallpaper_config_defaults(&cfg);
-        ok = output_apply_config(output, &cfg);
-    }
-    if (root) {
-        vibe_value_free(root);
-        vibe_parser_free(parser);
-    }
-    return ok;
 }
 
 /* Validate every recognized block before config_load_internal() mutates any
@@ -1425,118 +1372,43 @@ static bool validate_config_tree(VibeValue *root, bool *out_has_config) {
     return true;
 }
 
-static bool config_load_internal(struct neowall_state *state, const char *config_path,
-                                 bool allow_builtin_fallback) {
-    if (!state || !config_path) {
-        log_error("Invalid parameters for config_load");
-        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
+config_doc *config_doc_load(const char *path) {
+    if (!path) return NULL;
+    config_doc *doc = calloc(1, sizeof(*doc));
+    if (!doc) return NULL;
+    doc->root = read_and_parse_config(path, &doc->parser, true);
+    bool has = false;
+    if (!doc->root || !validate_config_tree(doc->root, &has)) {
+        config_doc_free(doc);
+        return NULL;
     }
-
-    log_info("Loading configuration from: %s", config_path);
-
-    /* A missing file on first run gets a starter config; on reload it's an
-     * error and the live config stays. */
-    struct stat st;
-    if (stat(config_path, &st) == -1) {
-        if (!allow_builtin_fallback) {
-            log_error("Reload could not stat configuration '%s': %s; live configuration unchanged",
-                      config_path, strerror(errno));
-            return false;
-        }
-        log_info("Configuration file not found, creating default: %s", config_path);
-        if (!config_create_default(config_path)) {
-            log_error("Failed to create default configuration, using built-in defaults");
-            return apply_builtin_default_config(state);
-        }
-    }
-
-    VibeParser *parser = NULL;
-    VibeValue *root = read_and_parse_config(config_path, &parser, true);
-    if (!root) {
-        log_error("%s", allow_builtin_fallback ? "Using built-in default configuration"
-                                               : "Configuration rejected; live configuration is unchanged");
-        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
-    }
-
-    /* This is the transaction boundary for syntax/type/semantic validation:
-     * do not store a global or call output_apply_config() until the complete
-     * parsed model has passed. In particular, a malformed later output block
-     * can no longer leave earlier outputs running a new configuration. */
-    bool validated_has_config = false;
-    if (!validate_config_tree(root, &validated_has_config)) {
-        vibe_value_free(root);
-        vibe_parser_free(parser);
-        log_error("Configuration rejected; live configuration is unchanged");
-        return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
-    }
-
-    /* Global options live at the root: they configure the daemon, not one
-     * wallpaper. Validation already checked their types. */
-    VibeValue *mouse_val = vibe_object_get(root->as_object, "mouse_interaction");
-    if (mouse_val && mouse_val->type == VIBE_TYPE_BOOLEAN) {
-        atomic_store_explicit(&state->mouse_interaction, mouse_val->as_boolean,
-                              memory_order_release);
-    }
-    /* term_raw_input: pass Ctrl-C/D/\\/Z to a focused terminal wallpaper. */
-    VibeValue *raw_val = vibe_object_get(root->as_object, "term_raw_input");
-    if (raw_val && raw_val->type == VIBE_TYPE_BOOLEAN) {
-        atomic_store_explicit(&state->term_raw_input, raw_val->as_boolean,
-                              memory_order_release);
-    }
-
-    /* Each output gets exactly one config, applied once: its own block, or
-     * default. Outputs that aren't connected get theirs on hotplug through
-     * config_apply_to_output, which uses the same resolver. */
-    bool config_applied = false;
-    bool application_failed = false;
-    pthread_rwlock_rdlock(&state->output_list_lock);
-    for (struct output_state *o = state->outputs; o; o = o->next) {
-        const char *name = o->connector_name[0] ? o->connector_name : o->model;
-        struct wallpaper_config cfg;
-        if (!resolve_output_config(root, o, &cfg)) {
-            log_debug("No config block applies to output '%s'", name);
-            continue;
-        }
-        if (output_apply_config(o, &cfg)) {
-            config_applied = true;
-            log_info("Output %s: %s", name,
-                     cfg.type == WALLPAPER_SHADER   ? cfg.shader_path :
-                     cfg.type == WALLPAPER_TERMINAL ? cfg.term_cmd : cfg.path);
-        } else {
-            log_error("Failed to apply config to output '%s'", name);
-            application_failed = true;
-        }
-        config_free_wallpaper(&cfg);
-    }
-    pthread_rwlock_unlock(&state->output_list_lock);
-
-    vibe_value_free(root);
-    vibe_parser_free(parser);
-
-    /* Backends may need to react to the globals (e.g. release wl_pointer when
-     * mouse_interaction is off). */
-    if (state->compositor_backend && state->compositor_backend->ops &&
-        state->compositor_backend->ops->apply_input_config) {
-        state->compositor_backend->ops->apply_input_config(
-            state->compositor_backend->data, state);
-    }
-
-    if (application_failed) {
-        log_error("Configuration was valid, but one or more outputs failed to apply it");
-        return false;
-    }
-    if (config_applied || (validated_has_config && !allow_builtin_fallback)) {
-        log_info("Configuration loaded from %s", config_path);
-        return true;
-    }
-    log_error("%s has no default or output blocks", config_path);
-    return allow_builtin_fallback ? apply_builtin_default_config(state) : false;
+    return doc;
 }
 
-bool config_load(struct neowall_state *state, const char *config_path) {
-    return config_load_internal(state, config_path, true);
+void config_doc_free(config_doc *doc) {
+    if (!doc) return;
+    if (doc->root) vibe_value_free(doc->root);
+    if (doc->parser) vibe_parser_free(doc->parser);
+    free(doc);
 }
 
-bool config_reload(struct neowall_state *state, const char *config_path) {
-    return config_load_internal(state, config_path, false);
+/* Validation already checked their types. */
+config_globals config_doc_globals(const config_doc *doc) {
+    config_globals g = {0};
+    if (!doc) return g;
+    VibeValue *v = vibe_object_get(doc->root->as_object, "mouse_interaction");
+    if (v && v->type == VIBE_TYPE_BOOLEAN) {
+        g.has_mouse_interaction = true;
+        g.mouse_interaction = v->as_boolean;
+    }
+    v = vibe_object_get(doc->root->as_object, "term_raw_input");
+    if (v && v->type == VIBE_TYPE_BOOLEAN) {
+        g.has_term_raw_input = true;
+        g.term_raw_input = v->as_boolean;
+    }
+    return g;
+}
+
+void config_wallpaper_defaults(struct wallpaper_config *out) {
+    init_wallpaper_config_defaults(out);
 }

@@ -4,7 +4,6 @@
 #include <errno.h>
 #include <unistd.h>
 #include "neowall/compositor/compositor.h"
-#include "neowall/config/config_access.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 #include "output_internal.h"
 #include "neowall/config/config.h"

@@ -2,7 +2,6 @@
  * together and share a virtual canvas. */
 
 #include <stdio.h>
-#include "neowall/config/config_access.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 #include "output_internal.h"
 #include "neowall/core/log.h"
@@ -209,8 +208,8 @@ static size_t cycle_restore_index(char *const *paths, size_t count, const char *
  * randomises each output's copy separately), so the leader's index means nothing
  * here and the entry is located in o's own list by path. */
 static void output_adopt_group_wallpaper(struct output_state *o, struct output_state *leader) {
-    char entry[OUTPUT_MAX_PATH_LENGTH];
-    char live[OUTPUT_MAX_PATH_LENGTH];
+    char entry[NW_PATH_MAX];
+    char live[NW_PATH_MAX];
 
     pthread_mutex_lock(&o->state->state_mutex);
     size_t index = leader->config->current_cycle_index;

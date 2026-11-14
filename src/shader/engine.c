@@ -8,7 +8,7 @@
 #define _DEFAULT_SOURCE
 
 #include "neowall/shader/engine.h"
-#include "neowall/shader/reactive.h"
+#include "neowall/source/reactive.h"
 #include "neowall/core/log.h"
 
 #include <ctype.h>

@@ -22,7 +22,7 @@
  */
 
 #include "neowall/source/source.h"
-#include "neowall/shader/reactive.h"
+#include "neowall/source/reactive.h"
 
 #include <stddef.h>
 #include <stdio.h>

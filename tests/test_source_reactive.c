@@ -20,7 +20,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#include "neowall/shader/reactive.h"
+#include "neowall/source/reactive.h"
 #include "neowall/source/source.h"
 
 static int checks   = 0;

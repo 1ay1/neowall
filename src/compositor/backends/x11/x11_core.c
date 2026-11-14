@@ -1584,7 +1584,7 @@ static struct output_state *x11_make_output(struct neowall_state *state,
         return NULL;
     }
 
-    /* Defaults; the real config is applied by config_load via output_apply_config. */
+    /* Defaults; the real config is applied by app_config_load via output_apply_config. */
     out->config->mode = MODE_FILL;
     out->config->duration = 0;
     out->config->transition = TRANSITION_NONE;
@@ -1754,7 +1754,7 @@ static bool x11_bring_output_online(struct neowall_state *state, struct output_s
         log_error("Hotplug: GL bring-up failed for %s", out->connector_name);
         return false;
     }
-    if (config_apply_to_output(state, out)) {
+    if (state_output_ready(state, out)) {
         atomic_store_explicit(&out->needs_redraw, true, memory_order_release);
     }
     log_info("Hotplug: output %s online (%dx%d at +%d+%d)",

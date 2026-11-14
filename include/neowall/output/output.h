@@ -7,6 +7,7 @@
 #include <stdatomic.h>
 #include <GL/gl.h>
 #include "neowall/core/constants.h"
+#include "neowall/config/wallpaper.h"
 #include "neowall/core/result.h"        /* For nw_result */
 #include "neowall/image/image.h"   /* For struct image_data and enum image_format */
 #include "neowall/shader/wallshader.h"
@@ -15,100 +16,11 @@
 #include "neowall/output/span.h"   /* For struct span_view */
 
 /* Constants */
-#define OUTPUT_MAX_PATH_LENGTH NW_PATH_MAX
 
 /* Forward declarations for external types */
 struct neowall_state;
 struct compositor_surface;
 
-/* Thread-safe atomic types */
-typedef atomic_bool atomic_bool_t;
-typedef atomic_int atomic_int_t;
-
-/* Wallpaper display modes */
-enum wallpaper_mode {
-    MODE_CENTER,    /* Center the image without scaling */
-    MODE_STRETCH,   /* Stretch to fill entire screen */
-    MODE_FIT,       /* Scale to fit inside screen, maintain aspect ratio */
-    MODE_FILL,      /* Scale to fill screen, maintain aspect ratio, crop if needed */
-    MODE_TILE,      /* Tile the image */
-};
-
-/* Wallpaper transition types */
-enum transition_type {
-    TRANSITION_NONE,
-    TRANSITION_FADE,
-    TRANSITION_SLIDE_LEFT,
-    TRANSITION_SLIDE_RIGHT,
-    TRANSITION_GLITCH,
-    TRANSITION_PIXELATE,
-};
-
-/* Wallpaper type */
-enum wallpaper_type {
-    WALLPAPER_IMAGE,    /* Static image file */
-    WALLPAPER_SHADER,   /* Live GLSL shader */
-    WALLPAPER_TERMINAL, /* Live terminal (a program rendered as the wallpaper) */
-};
-
-/* Wallpaper types that drive the multipass GLSL pipeline and need continuous
- * frame scheduling (frame timer / repeated needs_redraw). Both GLSL shaders and
- * terminal wallpapers render through render_frame_shader(); a static image does
- * not. Kept as one predicate so every animation gate in the render loop and the
- * event loop stays in agreement. */
-static inline bool wallpaper_is_animated(enum wallpaper_type t) {
-    return t == WALLPAPER_SHADER || t == WALLPAPER_TERMINAL;
-}
-
-/* Wallpaper configuration for a specific output */
-struct wallpaper_config {
-    enum wallpaper_type type;           /* Wallpaper type (image or shader) */
-    char path[OUTPUT_MAX_PATH_LENGTH];  /* Path to wallpaper image */
-    char shader_path[OUTPUT_MAX_PATH_LENGTH];  /* Path to GLSL shader file */
-    enum wallpaper_mode mode;           /* Display mode */
-    float duration;                     /* Duration in seconds (for cycling) */
-    enum transition_type transition;    /* Transition effect */
-    float transition_duration;          /* Transition duration in seconds */
-    float shader_speed;                 /* Shader animation speed multiplier (default 1.0) */
-    int shader_fps;                     /* Target FPS for shader rendering (default 60) */
-    bool vsync;                         /* Enable vsync (sync to monitor refresh, ignores shader_fps) */
-    bool show_fps;                      /* Show FPS watermark on screen (default false) */
-    bool pause_on_fullscreen;           /* Pause rendering when output is occluded by fullscreen window */
-    float pause_coverage_threshold;     /* Fraction (0.0-1.0) of wallpaper region that must be covered by tiled windows to count as occluded. Default 0.8 */
-    bool span;                          /* Explicitly span compatible sources across outputs (default false) */
-    char span_group[64];                /* Optional explicit span group name (empty = source-based group) */
-    bool cycle;                         /* Enable wallpaper cycling */
-    bool shuffle;                       /* Randomise cycle order on load + on every wrap (issue #47).
-                                         * Applies to both image and shader directory cycles. */
-    char **cycle_paths;                 /* Array of paths for cycling */
-    size_t cycle_count;                 /* Number of wallpapers to cycle */
-    size_t current_cycle_index;         /* Current index in cycle */
-    
-    /* iChannel texture configuration */
-    char **channel_paths;               /* Array of texture paths/names for iChannels */
-    size_t channel_count;               /* Number of configured channels */
-
-    /* Terminal wallpaper (WALLPAPER_TERMINAL). The program named by term_cmd is
-     * spawned under a PTY and rendered as the background; term_shader (optional)
-     * is a GLSL file that samples it via nwTerm() for CRT/glow styling — empty
-     * means the built-in crisp pass-through. */
-    char term_cmd[OUTPUT_MAX_PATH_LENGTH];   /* command to run, e.g. "htop" */
-    char term_font[OUTPUT_MAX_PATH_LENGTH];  /* font file path ('' = system search) */
-    char term_font_bold[OUTPUT_MAX_PATH_LENGTH];   /* optional bold face ('' = synth) */
-    char term_font_italic[OUTPUT_MAX_PATH_LENGTH]; /* optional italic face ('' = synth) */
-    char term_cwd[OUTPUT_MAX_PATH_LENGTH];   /* working directory ('' = inherit) */
-    char term_env[OUTPUT_MAX_PATH_LENGTH];   /* TERM value ('' = xterm-256color) */
-    int  term_cols;                          /* grid width  (0 = auto from output) */
-    int  term_rows;                          /* grid height (0 = auto from output) */
-    int  term_font_size;                     /* cell height in px (0 = default 18) */
-    long term_fg;                            /* default fg 0xRRGGBB (-1 = built-in) */
-    long term_bg;                            /* default bg 0xRRGGBB (-1 = built-in) */
-    float term_bloom;                        /* nwTermFX bloom    0..1 (-1 = default) */
-    float term_scanline;                     /* nwTermFX scanline 0..1 (-1 = default) */
-    float term_crt;                          /* nwTermFX CRT curve+vignette 0..1 (-1) */
-    float term_chroma;                       /* nwTermFX chromatic aberration 0..1 (-1) */
-    float term_fade;                         /* change-driven fade 0..1 (-1 = default) */
-};
 
 /* Output (monitor) state */
 struct output_state {
@@ -175,15 +87,15 @@ struct output_state {
      * per-output cycle indices can start out disagreeing (a restored index, a
      * hotplug mid-cycle). Recording the path we last converged on stops a
      * shader that fails to compile here from being retried every frame. */
-    char span_synced_path[OUTPUT_MAX_PATH_LENGTH];
+    char span_synced_path[NW_PATH_MAX];
 
     char make[64];
     char model[64];
     char connector_name[64];    /* Connector name (e.g., HDMI-A-2, DP-1) from xdg-output */
 
     bool configured;
-    atomic_bool_t needs_redraw;         /* Atomic: written from main loop, occlusion callbacks, render */
-    atomic_bool_t occluded;             /* Output is fully occluded by a fullscreen window */
+    atomic_bool needs_redraw;         /* Atomic: written from main loop, occlusion callbacks, render */
+    atomic_bool occluded;             /* Output is fully occluded by a fullscreen window */
 
     /* Lifetime reference count. Starts at 1 (the output-list's reference).
      * The render loop takes a transient ref on each output it snapshots so a
@@ -207,16 +119,16 @@ struct output_state {
     /* Double-buffered preload for zero-stall transitions */
     GLuint preload_texture;             /* Next texture to transition to */
     struct image_data *preload_image;   /* Image data for preloaded texture */
-    char preload_path[OUTPUT_MAX_PATH_LENGTH];  /* Path of preloaded image */
-    atomic_bool_t preload_ready;        /* Is preload_texture ready for use? */
+    char preload_path[NW_PATH_MAX];  /* Path of preloaded image */
+    atomic_bool preload_ready;        /* Is preload_texture ready for use? */
     
     /* Background thread for async image loading */
     pthread_t preload_thread;           /* Background preload thread */
-    atomic_bool_t preload_thread_active; /* Is background thread running? */
-    atomic_bool_t preload_thread_join_pending; /* A completed/running joinable thread must be joined */
-    atomic_bool_t preload_should_stop;   /* Cooperative cancellation flag for preload thread */
+    atomic_bool preload_thread_active; /* Is background thread running? */
+    atomic_bool preload_thread_join_pending; /* A completed/running joinable thread must be joined */
+    atomic_bool preload_should_stop;   /* Cooperative cancellation flag for preload thread */
     atomic_uint_fast64_t preprocessing_generation; /* Invalidates geometry/config-dependent images */
-    atomic_bool_t geometry_change_pending; /* Callback-safe request; GL work is deferred to event loop */
+    atomic_bool geometry_change_pending; /* Callback-safe request; GL work is deferred to event loop */
     bool terminal_auto_cols;
     bool terminal_auto_rows;
     uint64_t preload_generation;
@@ -225,7 +137,7 @@ struct output_state {
     enum wallpaper_mode preload_mode;
     pthread_mutex_t preload_mutex;      /* Protects preload_image during thread handoff */
     struct image_data *preload_decoded_image; /* Image decoded in background, ready for GPU upload */
-    atomic_bool_t preload_upload_pending; /* Background thread finished, main thread should upload */
+    atomic_bool preload_upload_pending; /* Background thread finished, main thread should upload */
     
     /* the config's `channels` as iChannel0..3 (0 = the shader's own binding) */
     GLuint channel_tex[4];
@@ -237,7 +149,7 @@ struct output_state {
     wallshader *shader;                 /* the running shader (shader and terminal wallpapers) */
     /* a shader compiling in the background to replace it (cycling, reload) */
     struct wallshader_pending *pending_shader;
-    char pending_shader_path[OUTPUT_MAX_PATH_LENGTH];
+    char pending_shader_path[NW_PATH_MAX];
     size_t pending_failures;            /* broken cycle entries skipped in a row */
     /* A reload whose shader is still compiling: the whole config waits here
      * and goes live with the shader. NULL when none. stage_failed records a
@@ -474,9 +386,5 @@ bool output_pace_advance(struct output_state *output, uint64_t now_ns);
  * own predicted deadline and quantises the period to whole refreshes. */
 void output_pace_note_present(struct output_state *output,
                               uint64_t present_ns, uint64_t refresh_ns);
-
-/* Names for the log and the state file (src/config/config.c). */
-const char *wallpaper_mode_to_string(enum wallpaper_mode mode);
-const char *transition_type_to_string(enum transition_type type);
 
 #endif /* OUTPUT_H */

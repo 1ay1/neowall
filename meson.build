@@ -179,6 +179,7 @@ inc_dirs_build = include_directories('.')
 # core: logging, paths, small containers. Depends on nothing else here.
 core_sources = files(
   'src/core/log.c',
+  'src/core/vibe.c',   # vendored libvibe, compiled once
   'src/core/util.c',
   'src/core/base.c',
 )
@@ -211,6 +212,7 @@ app_sources = files(
   'src/app/present.c',
   'src/app/host.c',
   'src/app/watch.c',
+  'src/app/configure.c',
 )
 
 # EGL sources (desktop OpenGL 3.3)
@@ -230,6 +232,7 @@ source_sources = files(
 # Reactive signals as providers. Split out because it pulls in reactive.h,
 # unlike the rest of the source layer which is dependency-free.
 source_reactive_sources = files(
+  'src/source/reactive.c',
   'src/source/builtin_reactive.c',
 )
 
@@ -257,7 +260,6 @@ shader_sources = files(
   'src/shader/glsl_shadow.c',
   'src/shader/shader_scaffold.c',
   'src/shader/shader_clock.c',
-  'src/shader/reactive.c',
 )
 
 # Transition sources
@@ -299,7 +301,6 @@ output_sources = files(
 config_sources = files(
   'src/config/config.c',
   'src/config/shuffle.c',
-  'src/config/vibe_impl.c',  # compiles vendored single-header libvibe (VIBE_IMPLEMENTATION)
 )
 
 # Render sources
@@ -756,7 +757,7 @@ test('source', test_source_exe)
 # Pins that every legacy bind name still resolves (a dropped one reads 0
 # silently rather than crashing) and that the occlusion contract survived.
 test_source_reactive_exe = executable('test_source_reactive',
-  files('tests/test_source_reactive.c', 'src/shader/reactive.c', 'src/core/log.c', 'src/core/util.c',
+  files('tests/test_source_reactive.c', 'src/source/reactive.c', 'src/core/log.c', 'src/core/util.c',
         'src/shader/wall_clock.c')
     + source_sources + source_reactive_sources,
   include_directories: [inc_dirs, inc_dirs_build],
@@ -782,7 +783,7 @@ test('gfx', test_gfx_exe)
 # Shadertoy -> desktop GLSL source fixes. GL-free.
 test('shadertoy_import', executable('test_shadertoy_import',
   files('tests/test_shadertoy_import.c', 'src/core/base.c', 'src/shader/shadertoy_import.c',
-        'src/shader/source.c', 'src/config/vibe_impl.c', 'src/core/log.c', 'src/core/util.c'),
+        'src/shader/source.c', 'src/core/vibe.c', 'src/core/log.c', 'src/core/util.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   build_by_default: false,
 ))
@@ -800,7 +801,7 @@ test('shader_source', executable('test_shader_source',
   files('tests/test_shader_source.c', 'src/core/base.c', 'src/shader/source.c',
         'src/shader/assemble.c', 'src/shader/compat.c',
         'src/shader/shader_hint.c',
-        'src/shader/glsl_shadow.c', 'src/config/vibe_impl.c', 'src/core/log.c', 'src/core/util.c'),
+        'src/shader/glsl_shadow.c', 'src/core/vibe.c', 'src/core/log.c', 'src/core/util.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   build_by_default: false,
 ))
@@ -809,7 +810,7 @@ test('shader_source', executable('test_shader_source',
 # and the `#pragma neowall requires` floor. All GL-free, so they run in CI.
 test_authoring_exe = executable('test_shader_authoring',
   files('tests/test_shader_authoring.c', 'src/core/base.c', 'src/shader/source.c',
-        'src/config/vibe_impl.c', 'src/core/log.c', 'src/core/util.c', 'src/shader/wall_clock.c'),
+        'src/core/vibe.c', 'src/core/log.c', 'src/core/util.c', 'src/shader/wall_clock.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   dependencies: [m_dep, thread_dep],
   build_by_default: false,
@@ -867,7 +868,7 @@ test('completions', find_program('tests/check-completions.sh'),
 
 # VIBE config parser is filesystem/GL-free in its string-parse path.
 test_vibe_exe = executable('test_vibe',
-  files('tests/test_vibe.c', 'src/config/vibe_impl.c'),
+  files('tests/test_vibe.c', 'src/core/vibe.c'),
   include_directories: [inc_dirs, inc_dirs_build],
   build_by_default: false,
 )
@@ -908,8 +909,8 @@ test('config_str_set', test_config_str_exe)
 # and reload keeping the last good config. output_apply_config is stubbed.
 test('config', executable('test_config',
   files('tests/test_config.c', 'src/config/config.c', 'src/config/shuffle.c',
-        'src/config/vibe_impl.c', 'src/core/log.c', 'src/core/util.c'),
-  include_directories: [inc_dirs, inc_dirs_build],
+        'src/app/configure.c', 'src/core/vibe.c', 'src/core/log.c', 'src/core/util.c'),
+  include_directories: [inc_dirs, inc_dirs_build, include_directories('src/app')],
   dependencies: [m_dep, thread_dep, egl_dep, gl_dep],
   build_by_default: false,
 ))
@@ -1067,7 +1068,7 @@ endif
 # shipped shader compiled and drawn. Skips (77) without software GL.
 test('shader_gl', executable('test_shader_gl',
   files('tests/test_shader_gl.c', 'tests/gl_headless.c',
-        'src/config/vibe_impl.c') +
+        'src/core/vibe.c') +
     core_sources + shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
     gfx_sources + terminal_sources,
   include_directories: has_terminal
@@ -1083,7 +1084,7 @@ test('shader_gl', executable('test_shader_gl',
 foreach tool : ['bench_shader_build', 'bench_async_build', 'probe_shaders']
 executable(tool,
   files('tests' / tool + '.c', 'tests/gl_headless.c',
-        'src/config/vibe_impl.c') +
+        'src/core/vibe.c') +
     core_sources + shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
     gfx_sources + terminal_sources,
   include_directories: has_terminal
@@ -1101,7 +1102,7 @@ endforeach
 if has_wayland
   test('output_render', executable('test_output_render',
     files('tests/test_output_render.c',
-          'src/config/vibe_impl.c', 'src/config/config.c', 'src/config/shuffle.c',
+          'src/core/vibe.c', 'src/config/config.c', 'src/config/shuffle.c',
           'src/output/output.c', 'src/output/apply.c', 'src/output/cycle.c',
           'src/output/span_group.c', 'src/output/preload.c', 'src/output/pace.c',
           'src/output/wallpaper_image.c', 'src/output/wallpaper_shader.c',
@@ -1160,13 +1161,13 @@ endif
 # they also build as real libFuzzer binaries for long runs:
 #   ./build/fuzz_terminal -max_total_time=600 corpus/
 fuzz_harnesses = {
-  'vibe':      [files('tests/fuzz_vibe.c', 'src/config/vibe_impl.c'), 'config', []],
+  'vibe':      [files('tests/fuzz_vibe.c', 'src/core/vibe.c'), 'config', []],
   'shader':    [files('tests/fuzz_shader.c', 'src/core/base.c', 'src/shader/source.c',
                       'src/shader/assemble.c', 'src/shader/compat.c',
                       'src/shader/glsl_shadow.c',
-                      'src/config/vibe_impl.c', 'src/core/log.c', 'src/core/util.c'), 'examples/shaders', []],
+                      'src/core/vibe.c', 'src/core/log.c', 'src/core/util.c'), 'examples/shaders', []],
   'import':    [files('tests/fuzz_import.c', 'src/core/base.c', 'src/shader/shadertoy_import.c',
-                      'src/shader/source.c', 'src/config/vibe_impl.c', 'src/core/log.c', 'src/core/util.c'),
+                      'src/shader/source.c', 'src/core/vibe.c', 'src/core/log.c', 'src/core/util.c'),
                 'tests/fixtures/fuzz-import', []],
   'exif':      [files('tests/fuzz_exif.c', 'src/image/exif.c'), '', []],
   'image':     [files('tests/fuzz_image.c', 'src/image/image.c', 'src/image/exif.c',

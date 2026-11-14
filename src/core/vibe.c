@@ -9,7 +9,7 @@
  * defined, so the implementation is emitted exactly once.
  *
  * Do not add code here — to update libvibe, re-vendor upstream vibe.h into
- * include/neowall/config/vibe.h.
+ * include/neowall/core/vibe.h.
  */
 #define VIBE_IMPLEMENTATION
-#include "neowall/config/vibe.h"
+#include "neowall/core/vibe.h"

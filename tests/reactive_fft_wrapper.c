@@ -4,4 +4,4 @@
  * `neowall_test_fft`. The test target compiles this file and the test driver
  * (test_reactive_fft.c) together. */
 #define NEOWALL_TESTING 1
-#include "../src/shader/reactive_fft.h"
+#include "../src/source/reactive_fft.h"

@@ -93,7 +93,7 @@ static void reload(struct app *a, rt_loop *loop) {
     struct neowall_state *state = a->state;
     log_info("Reloading configuration from %s", state->config_path);
     staged_forget(state);
-    bool ok = config_reload(state, state->config_path);
+    bool ok = app_config_reload(state, state->config_path);
     if (ok) app_mark_redraw_all(state);
     bool building, failed;
     staged_builds(state, &building, &failed);

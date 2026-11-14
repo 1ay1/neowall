@@ -1,7 +1,7 @@
 /*
  * VENDORED — single-header libvibe from https://github.com/1ay1/vibe
  * Do NOT edit here; update by re-vendoring the upstream vibe.h. The
- * implementation is compiled exactly once via src/config/vibe_impl.c
+ * implementation is compiled exactly once via src/core/vibe.c
  * (which #defines VIBE_IMPLEMENTATION before including this header).
  * ============================================================================
  * libvibe — the reference parser and emitter for the VIBE config format

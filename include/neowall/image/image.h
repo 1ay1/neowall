@@ -17,7 +17,7 @@ struct image_data {
     uint32_t height;
     uint32_t channels;      /* Number of channels (3 for RGB, 4 for RGBA) */
     enum image_format format;
-    char path[4096];        /* OUTPUT_MAX_PATH_LENGTH */
+    char path[4096];        /* NW_PATH_MAX */
 };
 
 /* Image loading functions */

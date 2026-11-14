@@ -4,7 +4,7 @@
  *
  * Build example:
  *   gcc -g -O1 -fsanitize=address,undefined -I include -I build/include \
- *       tests/fuzz_vibe.c tests/fuzz_driver.c src/config/vibe_impl.c -o fuzz_vibe_drv
+ *       tests/fuzz_vibe.c tests/fuzz_driver.c src/core/vibe.c -o fuzz_vibe_drv
  */
 #include <stdio.h>
 #include <stdlib.h>

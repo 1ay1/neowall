@@ -53,6 +53,13 @@ int app_run(struct neowall_state *state);
  * state is made and before any thread starts. */
 void app_attach(struct neowall_state *state);
 
+/* The config file and the live outputs (app/configure.c). load is for
+ * startup (falls back to a built-in default), reload keeps the live config
+ * on any problem, output configures one output that just appeared. */
+bool app_config_load(struct neowall_state *state, const char *path);
+bool app_config_reload(struct neowall_state *state, const char *path);
+bool app_config_output(struct neowall_state *state, struct output_state *output);
+
 /* Wake the loop from another thread with a message. False if it isn't
  * running. Safe to call before app_run (the message is dropped). */
 bool app_post(uint32_t kind, uint32_t id, int64_t value);

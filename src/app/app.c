@@ -21,7 +21,7 @@
 #include "neowall/compositor/compositor.h"
 #include "neowall/occlusion/occlusion.h"
 #include "neowall/runtime/sd_notify.h"
-#include "neowall/shader/reactive.h"
+#include "neowall/source/reactive.h"
 #include "neowall/core/log.h"
 #include "neowall/core/time.h"
 #include "neowall/output/output.h"
@@ -101,6 +101,7 @@ static void hook_outputs_changed(uint32_t name) { app_post(NW_MSG_OUTPUTS_NEW, n
 void app_attach(struct neowall_state *state) {
     state->on_output_dirty = hook_output_dirty;
     state->on_outputs_changed = hook_outputs_changed;
+    state->on_output_ready = app_config_output;
 }
 
 int app_run(struct neowall_state *state) {

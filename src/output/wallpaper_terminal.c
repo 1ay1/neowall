@@ -1,7 +1,6 @@
 /* Show a live terminal as the wallpaper. */
 
 #include "neowall/compositor/compositor.h"
-#include "neowall/config/config_access.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 #include "output_internal.h"

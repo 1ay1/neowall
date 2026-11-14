@@ -3,7 +3,6 @@
 
 #include <stdio.h>
 #include "neowall/compositor/compositor.h"
-#include "neowall/config/config_access.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/render/render.h"  /* Only output.c includes render.h */
 #include "output_internal.h"
@@ -231,7 +230,7 @@ bool output_poll_shader_build(struct output_state *output) {
     wallshader_load_cancel(output->pending_shader);
     output->pending_shader = NULL;
     if (st == NW_BUILD_DONE) {
-        char path[OUTPUT_MAX_PATH_LENGTH];
+        char path[NW_PATH_MAX];
         snprintf(path, sizeof(path), "%s", output->pending_shader_path);
         /* a reload was waiting on this shader: its config goes live with it */
         struct wallpaper_config *staged = output->staged_config;
