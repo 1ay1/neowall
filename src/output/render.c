@@ -22,14 +22,14 @@
 #include "neowall/shader/shader_clock.h"
 #include "neowall/textures/textures.h"
 #include "neowall/surface/surface.h"
-#ifdef HAVE_WAYLAND_BACKEND
-/* For iWindows[]: window rects come from the Hyprland IPC snapshot that the
- * occlusion path already maintains. */
-#include "hyprland_coverage.h"
 #include "neowall/core/time.h"
 #include "neowall/output/frame_clock.h"
 #include "neowall/output/output.h"
 #include "neowall/state/state.h"
+#ifdef HAVE_WAYLAND_BACKEND
+/* For iWindows[]: window rects come from the Hyprland IPC snapshot that the
+ * occlusion path already maintains. */
+#include "hyprland_coverage.h"
 #endif
 
 /* Helper function to get the preferred output identifier

@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include "neowall/surface/surface.h"
 #include "neowall/state/state.h"
+#include "neowall/core/log.h"
+#include "neowall/output/output.h"
 
 #ifdef HAVE_WAYLAND_BACKEND
 #include <wayland-client.h>
@@ -12,8 +14,6 @@
 
 #ifdef HAVE_X11_BACKEND
 #include "neowall/backends/x11.h"
-#include "neowall/core/log.h"
-#include "neowall/output/output.h"
 #endif
 
 /*
