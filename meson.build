@@ -428,6 +428,7 @@ if has_wayland
   wayland_sources = files(
     'src/backends/wayland/wayland_core.c',
     'src/backends/wayland/compositors/wlr_layer_shell.c',
+    'src/backends/wayland/compositors/wlr_input.c',
     'src/backends/wayland/compositors/kde_plasma.c',
   )
 endif
