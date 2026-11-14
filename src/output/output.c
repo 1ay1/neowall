@@ -324,6 +324,9 @@ struct output_state *output_create(struct neowall_state *state,
     return out;
 }
 
+static void output_commit_staged(struct output_state *output, struct wallpaper_config *cfg);
+static void output_unstage(struct output_state *output);
+
 void output_destroy(struct output_state *output) {
     if (!output) {
         return;
@@ -338,7 +341,8 @@ void output_destroy(struct output_state *output) {
     wallshader_free(output->shader);
     output->shader = NULL;
 
-    /* Free wallpaper config */
+    /* Free wallpaper config, and a reload still waiting on its shader */
+    output_unstage(output);
     if (output->config) {
         config_free_wallpaper(output->config);
         free(output->config);
@@ -1043,9 +1047,11 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
 /* Put a loaded shader on screen in place of whatever was there. The output's
  * context must be current. */
 static void output_install_shader(struct output_state *output, wallshader *fresh, const char *shader_path) {
-    /* a build that was still going belongs to the shader we're replacing */
+    /* a build that was still going belongs to the shader we're replacing,
+     * and so does a reload waiting on it */
     wallshader_load_cancel(output->pending_shader);
     output->pending_shader = NULL;
+    output_unstage(output);
 
     /* the old one's last frame fades out over the new one, no pop */
     if (output->config->type == WALLPAPER_SHADER) render_snapshot_for_swap(output);
@@ -1141,6 +1147,7 @@ nw_result output_set_shader_async(struct output_state *output, const char *shade
     }
     wallshader_load_cancel(output->pending_shader);
     output->pending_shader = NULL;
+    output_unstage(output);   /* a newer request replaces a waiting reload */
     log_info("Setting shader for output %s: %s (building in the background)",
              output->model[0] ? output->model : "unknown", shader_path);
     nw_result r = wallshader_load_start(shader_path, &output->pending_shader);
@@ -1163,8 +1170,16 @@ bool output_poll_shader_build(struct output_state *output) {
     if (st == NW_BUILD_DONE) {
         char path[OUTPUT_MAX_PATH_LENGTH];
         snprintf(path, sizeof(path), "%s", output->pending_shader_path);
+        /* a reload was waiting on this shader: its config goes live with it */
+        struct wallpaper_config *staged = output->staged_config;
+        output->staged_config = NULL;
         output_install_shader(output, fresh, path);
         output->pending_failures = 0;
+        if (staged) output_commit_staged(output, staged);
+    } else if (output->staged_config) {
+        /* a reload's shader didn't compile: the old config and shader stay */
+        log_error("Failed to load shader: %s (keeping the current config)", output->pending_shader_path);
+        output_unstage(output);
     } else {
         log_error("Failed to load shader: %s (keeping the current one)", output->pending_shader_path);
         /* a broken entry in a cycle: try the next, but give up after a
@@ -1983,6 +1998,81 @@ bool output_should_cycle(struct output_state *output, uint64_t current_time) {
 
 /* Apply wallpaper configuration to an output */
 /* Apply wallpaper configuration to an output */
+/* ── staged reloads ─────────────────────────────────────────────────── */
+
+/* Make a staged config live: its shader has just been installed. */
+static void output_commit_staged(struct output_state *output, struct wallpaper_config *cfg) {
+    struct wallpaper_config *old = output->config;
+    output->config = cfg;
+    atomic_fetch_add(&output->preprocessing_generation, 1);
+    output_configure_vsync(output);
+    output_configure_frame_timer(output);
+    output->last_cycle_time = get_time_ms();
+    atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
+    log_info("Successfully applied config to output %s", output->model);
+    config_free_wallpaper(old);
+    free(old);
+}
+
+/* Drop a staged config whose shader won't arrive (it failed, or a newer
+ * request replaced it). The live config never changed. */
+static void output_unstage(struct output_state *output) {
+    if (!output->staged_config) return;
+    config_free_wallpaper(output->staged_config);
+    free(output->staged_config);
+    output->staged_config = NULL;
+    output->stage_failed = true;
+}
+
+bool output_reload_pending(const struct output_state *output) {
+    return output && output->staged_config != NULL;
+}
+
+bool output_reload_failed(const struct output_state *output) {
+    return output && output->stage_failed;
+}
+
+void output_reload_forget(struct output_state *output) {
+    if (output) output->stage_failed = false;
+}
+
+/* Resume a cycle where this output left off (from the state file) and
+ * publish the list for `neowall list`. */
+static void restore_cycle_position(struct output_state *output, struct wallpaper_config *cfg) {
+    if (cfg->cycle && cfg->cycle_count > 0) {
+        /* Restore cycle index from state file for this specific output.
+         * Skipped under shuffle: the saved index refers to a different
+         * (previous) random permutation of the directory, so resuming at
+         * that slot would just point to an arbitrary file (issue #47). */
+        if (!cfg->shuffle) {
+            const char *output_id = output_get_identifier(output);
+            int saved_index = restore_cycle_index_from_state(output_id);
+            if (saved_index >= 0 && saved_index < (int)cfg->cycle_count) {
+                cfg->current_cycle_index = saved_index;
+                log_info("Restored cycle position for %s: %d/%zu",
+                        output_id, saved_index, cfg->cycle_count);
+
+                /* Update the initial path to use the restored index */
+                if (cfg->type == WALLPAPER_SHADER) {
+                    snprintf(cfg->shader_path,
+                             sizeof(cfg->shader_path), "%s",
+                             cfg->cycle_paths[saved_index]);
+                } else {
+                    snprintf(cfg->path,
+                             sizeof(cfg->path), "%s",
+                             cfg->cycle_paths[saved_index]);
+                }
+            }
+        }
+
+        /* Write cycle list file for 'neowall list' command */
+        write_cycle_list(output_get_identifier(output),
+                        cfg->cycle_paths,
+                        cfg->cycle_count,
+                        cfg->current_cycle_index);
+    }
+}
+
 bool output_apply_config(struct output_state *output, struct wallpaper_config *config) {
     if (!output || !config) {
         log_error("Invalid parameters for output_apply_config");
@@ -2038,42 +2128,40 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         /* Restore cycle index after installing the transactional copy below. */
     }
 
+    /* A shader already on screen and a shader coming: build the new one in
+     * the background and keep drawing the old one. The whole config waits
+     * in staged_config and goes live together with its shader, so the
+     * output never runs the new settings on the old shader. A build that
+     * fails leaves the old config and shader exactly as they were. */
+    if (copy->type == WALLPAPER_SHADER && output->config &&
+        output->config->type == WALLPAPER_SHADER && output->shader && output->configured &&
+        output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
+        restore_cycle_position(output, copy);
+        const char *first = copy->cycle && copy->cycle_count > 0 && copy->cycle_paths
+                                ? copy->cycle_paths[copy->current_cycle_index]
+                                : copy->shader_path;
+        output_unstage(output);                 /* a newer reload wins */
+        if (!first || !first[0] || nw_is_err(output_set_shader_async(output, first))) {
+            log_error("Failed to apply shader config to output %s", output->model);
+            config_free_wallpaper(copy);
+            free(copy);
+            return false;                       /* nothing changed */
+        }
+        if (!output->pending_shader) {          /* built synchronously after all */
+            output_commit_staged(output, copy);
+            return true;
+        }
+        output->staged_config = copy;
+        output->stage_failed = false;
+        return true;
+    }
+    output_unstage(output);
+
     struct wallpaper_config *old_config = output->config;
     output->config = copy;
     atomic_fetch_add(&output->preprocessing_generation, 1);
 
-    if (output->config->cycle && output->config->cycle_count > 0) {
-        /* Restore cycle index from state file for this specific output.
-         * Skipped under shuffle: the saved index refers to a different
-         * (previous) random permutation of the directory, so resuming at
-         * that slot would just point to an arbitrary file (issue #47). */
-        if (!output->config->shuffle) {
-            const char *output_id = output_get_identifier(output);
-            int saved_index = restore_cycle_index_from_state(output_id);
-            if (saved_index >= 0 && saved_index < (int)output->config->cycle_count) {
-                output->config->current_cycle_index = saved_index;
-                log_info("Restored cycle position for %s: %d/%zu",
-                        output_id, saved_index, output->config->cycle_count);
-
-                /* Update the initial path to use the restored index */
-                if (output->config->type == WALLPAPER_SHADER) {
-                    snprintf(output->config->shader_path,
-                             sizeof(output->config->shader_path), "%s",
-                             output->config->cycle_paths[saved_index]);
-                } else {
-                    snprintf(output->config->path,
-                             sizeof(output->config->path), "%s",
-                             output->config->cycle_paths[saved_index]);
-                }
-            }
-        }
-
-        /* Write cycle list file for 'neowall list' command */
-        write_cycle_list(output_get_identifier(output),
-                        output->config->cycle_paths,
-                        output->config->cycle_count,
-                        output->config->current_cycle_index);
-    }
+    restore_cycle_position(output, output->config);
 
     log_debug("Config applied - type=%d, cycle=%d, cycle_count=%zu, cycle_index=%zu",
               output->config->type, output->config->cycle, output->config->cycle_count,

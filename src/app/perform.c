@@ -66,24 +66,36 @@ static void frame_due(struct app *a, uint32_t id) {
     pthread_rwlock_unlock(&state->output_list_lock);
 }
 
+/* Whether any output still has a reload's shader compiling, and whether one
+ * failed (clearing that once read: it's reported to this reload only). */
+static void staged_builds(struct neowall_state *state, bool *building, bool *failed) {
+    *building = *failed = false;
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (output_reload_pending(o)) *building = true;
+        if (output_reload_failed(o)) *failed = true;
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
+}
+
+static void staged_forget(struct neowall_state *state) {
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) output_reload_forget(o);
+    pthread_rwlock_unlock(&state->output_list_lock);
+}
+
 /* Last-known-good: the whole file is checked before anything applies, and a
- * failure keeps the old config. A socket request gets the outcome. */
-static void reload(struct app *a, uint32_t conn) {
+ * failure keeps the old config. A shader swap compiles in the background, so
+ * this never waits on the compiler; update hears whether one is building. */
+static void reload(struct app *a, rt_loop *loop) {
     struct neowall_state *state = a->state;
     log_info("Reloading configuration from %s", state->config_path);
-    nw_sd_notify("RELOADING=1");
+    staged_forget(state);
     bool ok = config_reload(state, state->config_path);
-    if (ok) {
-        log_info("Configuration reloaded");
-        app_mark_redraw_all(state);
-    } else {
-        log_error("Reload failed; previous configuration remains in effect");
-    }
-    nw_sd_notify("READY=1");
-    if (conn)
-        ipc_server_reply(a->host.ipc, conn, ok,
-                         ok ? "configuration reloaded"
-                            : "reload failed; the previous configuration is still in effect");
+    if (ok) app_mark_redraw_all(state);
+    bool building, failed;
+    staged_builds(state, &building, &failed);
+    app_send(loop, NW_MSG_RELOAD_APPLIED, 0, (ok && !failed ? 1 : 0) | (building ? 2 : 0));
 }
 
 void app_perform(void *self, rt_loop *loop, const rt_cmd *c) {
@@ -100,7 +112,17 @@ void app_perform(void *self, rt_loop *loop, const rt_cmd *c) {
         break;
 
     case APP_CMD_RELOAD:
-        reload(a, (uint32_t)c->v.u);
+        reload(a, loop);
+        break;
+
+    case APP_CMD_REPLY:
+        ipc_server_reply(a->host.ipc, c->id, c->v.i != 0,
+                         c->v.i ? "configuration reloaded"
+                                : "reload failed; the previous configuration is still in effect");
+        break;
+
+    case APP_CMD_WATCH_BUILDS:
+        a->view.watch_builds = true;   /* present reports when they settle */
         break;
 
     case APP_CMD_READ_INDEX_FILE: {

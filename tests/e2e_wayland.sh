@@ -268,6 +268,22 @@ expect "reload a bad config is refused" 1 "previous configuration"  "$nw" reload
 expect "daemon still alive after bad reload" 0 "pid $nw_pid"        "$nw" ping
 cp "$tmp/good.vibe" "$cfg"
 
+# A config that's valid but whose shader doesn't compile: the shader builds
+# in the background, the reload's answer waits for it and says it failed,
+# and the previous shader and config stay on screen.
+printf 'void mainImage(out vec4 c, in vec2 p) { c = nope; }\n' > "$tmp/broken.glsl"
+printf 'default {\n  shader %s\n}\n' "$tmp/broken.glsl" > "$cfg"
+expect "reload to a shader that won't compile is refused" 1 "previous configuration" "$nw" reload
+expect "daemon still draws after it"   0 "pid $nw_pid"              "$nw" ping
+cp "$tmp/good.vibe" "$cfg"
+# and while a reload's shader compiles, the daemon still answers
+( "$nw" reload >"$tmp/reload.out" 2>&1; echo $? >"$tmp/reload.rc" ) &
+reload_pid=$!
+expect "answers during a reload"       0 "pid $nw_pid"              "$nw" ping
+wait $reload_pid
+[ "$(cat "$tmp/reload.rc")" = 0 ] && grep -q "configuration reloaded" "$tmp/reload.out" \
+    && ok "that reload succeeds" || bad "that reload succeeds" "$(cat "$tmp/reload.out")"
+
 # ---- terminal wallpaper -------------------------------------------------------
 # A real program under a PTY; set-terminal swaps it and the old child must be
 # gone (no orphans), and leaving terminal mode stops the child too.

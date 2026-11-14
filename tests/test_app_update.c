@@ -104,14 +104,77 @@ static void test_shader_pause(rt_cmds *c) {
           "resume unfreezes");
 }
 
+/* How many REPLY commands, and to whom, with what outcome. */
+static int replies(const rt_cmds *c, uint32_t *conns, int *oks, int max) {
+    int n = 0;
+    for (size_t i = 0; i < rt_cmds_len(c); i++) {
+        const rt_effect *e = rt_cmds_at(c, i);
+        if (e->tag != RT_EFFECT_CMD || e->u.cmd.kind != APP_CMD_REPLY) continue;
+        if (n < max) {
+            conns[n] = e->u.cmd.id;
+            oks[n] = (int)e->u.cmd.v.i;
+        }
+        n++;
+    }
+    return n;
+}
+
+static bool has_cmd(const rt_cmds *c, uint32_t kind) {
+    for (size_t i = 0; i < rt_cmds_len(c); i++)
+        if (is_cmd(c, i, kind)) return true;
+    return false;
+}
+
 static void test_reload(rt_cmds *c) {
+    uint32_t conns[16];
+    int oks[16];
+
+    /* SIGHUP: applies, nobody to answer, systemd hears RELOADING then READY */
     struct app_model a = model();
     step(&a, c, msg(NW_MSG_RELOAD, SIGHUP, 0));
-    CHECK(is_cmd(c, 0, APP_CMD_RELOAD) && rt_cmds_at(c, 0)->u.cmd.v.u == 0,
-          "SIGHUP reload has nobody to answer");
+    CHECK(has_cmd(c, APP_CMD_RELOAD) && a.reload_nwaiters == 0, "SIGHUP reload, no waiter");
+    step(&a, c, msg(NW_MSG_RELOAD_APPLIED, 0, 1));
+    CHECK(replies(c, conns, oks, 16) == 0 && has_cmd(c, APP_CMD_NOTIFY), "applied: READY, no reply");
+
+    /* socket reload with nothing to compile: answered right after applying */
     step(&a, c, msg(NW_MSG_RELOAD, 0, 42));
-    CHECK(is_cmd(c, 0, APP_CMD_RELOAD) && rt_cmds_at(c, 0)->u.cmd.v.u == 42,
-          "socket reload carries its connection");
+    CHECK(replies(c, conns, oks, 16) == 0, "not answered before it's applied");
+    step(&a, c, msg(NW_MSG_RELOAD_APPLIED, 0, 1));
+    CHECK(replies(c, conns, oks, 16) == 1 && conns[0] == 42 && oks[0] == 1, "answered ok");
+
+    /* a shader is building: the answer waits until it lands */
+    step(&a, c, msg(NW_MSG_RELOAD, 0, 7));
+    step(&a, c, msg(NW_MSG_RELOAD_APPLIED, 0, 1 | 2));
+    CHECK(a.reload_building && replies(c, conns, oks, 16) == 0 && has_cmd(c, APP_CMD_WATCH_BUILDS),
+          "building: no answer yet, builds watched");
+    /* a second client asks meanwhile; a newer reload restarts it */
+    step(&a, c, msg(NW_MSG_RELOAD, 0, 8));
+    CHECK(has_cmd(c, APP_CMD_RELOAD) && a.reload_nwaiters == 2, "second client waits too");
+    step(&a, c, msg(NW_MSG_RELOAD_APPLIED, 0, 1 | 2));
+    step(&a, c, msg(NW_MSG_RELOAD_SETTLED, 0, 1));
+    CHECK(replies(c, conns, oks, 16) == 2 && conns[0] == 7 && conns[1] == 8 && oks[0] && oks[1],
+          "both answered when it lands");
+    CHECK(!a.reload_building && a.reload_nwaiters == 0, "and it's over");
+    step(&a, c, msg(NW_MSG_RELOAD_SETTLED, 0, 1));
+    CHECK(replies(c, conns, oks, 16) == 0, "a stray settle answers nobody");
+
+    /* the shader doesn't compile: the waiter hears it failed */
+    step(&a, c, msg(NW_MSG_RELOAD, 0, 9));
+    step(&a, c, msg(NW_MSG_RELOAD_APPLIED, 0, 1 | 2));
+    step(&a, c, msg(NW_MSG_RELOAD_SETTLED, 0, 0));
+    CHECK(replies(c, conns, oks, 16) == 1 && conns[0] == 9 && oks[0] == 0, "failed build reported");
+
+    /* a bad file: answered at once, failed */
+    step(&a, c, msg(NW_MSG_RELOAD, 0, 10));
+    step(&a, c, msg(NW_MSG_RELOAD_APPLIED, 0, 0));
+    CHECK(replies(c, conns, oks, 16) == 1 && oks[0] == 0, "bad config refused");
+
+    /* more clients than slots: the extra ones are refused, not lost */
+    for (uint32_t k = 0; k < APP_RELOAD_WAITERS; k++) step(&a, c, msg(NW_MSG_RELOAD, 0, 100 + k));
+    step(&a, c, msg(NW_MSG_RELOAD, 0, 999));
+    CHECK(replies(c, conns, oks, 16) == 1 && conns[0] == 999 && oks[0] == 0, "overflow refused");
+    step(&a, c, msg(NW_MSG_RELOAD_APPLIED, 0, 1));
+    CHECK(replies(c, conns, oks, 16) == APP_RELOAD_WAITERS, "the rest answered");
 }
 
 static void test_timers_and_display(rt_cmds *c) {

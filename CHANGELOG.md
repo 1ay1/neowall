@@ -5,6 +5,11 @@ All notable changes to neowall. Dates are release dates.
 ## Unreleased
 
 ### Fixed
+- A reload no longer stops the wallpaper while the new shader compiles: the
+  old shader keeps drawing and the daemon keeps answering, and the new
+  config goes live together with its shader. `neowall reload` still waits
+  for the real outcome, so a shader that doesn't compile is reported as a
+  failed reload, with the previous one left on screen.
 - X11: any stray X protocol error (a window going away mid-query) ended the
   daemon, since Xlib's default handler exits. It's now logged and drawing
   goes on. The fullscreen check read window properties without checking

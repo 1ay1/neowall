@@ -23,6 +23,9 @@ enum { APP_TERM_FX_SETTLE_MS = 700 };
 /* Longest set-terminal command. */
 enum { APP_TERMINAL_CMD_MAX = 512 };
 
+/* Clients that can wait on one reload; more are answered at once. */
+enum { APP_RELOAD_WAITERS = 8 };
+
 /* The model. Only update writes it; everything else gets it const. */
 struct app_model {
     /* Requests waiting for present. present reports what it used with
@@ -38,6 +41,13 @@ struct app_model {
     bool cycle_paused;              /* `neowall pause` */
     bool shader_paused;             /* `neowall pause-shader` */
     bool shader_pause_applied;      /* what the last SHADER_PAUSE command did */
+
+    /* A reload in flight: applied, but a shader is still compiling in the
+     * background. Clients that asked wait here for the real outcome, and
+     * any number can pile on; they're all answered when it settles. */
+    bool reload_building;
+    uint32_t reload_waiters[APP_RELOAD_WAITERS];
+    int reload_nwaiters;
 
     bool has_occlusion;             /* fixed at start */
 };
@@ -62,6 +72,7 @@ _Static_assert(sizeof(struct app_applied) <= RT_MSG_PAYLOAD, "app_applied fits a
 struct app_view {
     uint64_t stats_since_ms;
     uint64_t stats_frames;
+    bool watch_builds;      /* report when staged reload builds settle */
 };
 
 /* The host side's: the compositor fd, the watch fd, the socket. */
@@ -89,7 +100,9 @@ enum {
     APP_CMD_NONE = 0,
     APP_CMD_NOTIFY,             /* v.s: an sd_notify line, static storage */
     APP_CMD_STOP,               /* tell other threads we're stopping */
-    APP_CMD_RELOAD,             /* reload config; v.u = ipc conn to answer, or 0 */
+    APP_CMD_RELOAD,             /* apply the config file -> NW_MSG_RELOAD_APPLIED */
+    APP_CMD_REPLY,              /* answer socket conn `id`; v.i = ok */
+    APP_CMD_WATCH_BUILDS,       /* start reporting when staged builds settle */
     APP_CMD_READ_INDEX_FILE,    /* old CLI: index is in a file -> SET_INDEX */
     APP_CMD_READ_TERMINAL_FILE, /* old CLI: command is in a file -> SET_TERMINAL */
     APP_CMD_SHADER_PAUSE,       /* v.i = 1 freeze / 0 unfreeze shader clocks */

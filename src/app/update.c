@@ -45,6 +45,35 @@ static void applied(struct app_model *a, const struct app_applied *done) {
         a->outputs_need_init = false;
 }
 
+/* Answer every client waiting on the reload, and tell systemd it's done. */
+static void reload_finish(struct app_model *a, bool ok, rt_cmds *cmds) {
+    if (ok) log_info("Configuration reloaded");
+    else log_error("Reload failed; previous configuration remains in effect");
+    for (int i = 0; i < a->reload_nwaiters; i++) {
+        rt_cmd c = {.kind = APP_CMD_REPLY, .id = a->reload_waiters[i]};
+        c.v.i = ok;
+        rt_cmd_push(cmds, &c);
+    }
+    a->reload_nwaiters = 0;
+    a->reload_building = false;
+    notify(cmds, "READY=1");
+}
+
+/* A reload arrives. While one is still building, a new one restarts it:
+ * the waiters stay and get the newest outcome, which is what's on screen. */
+static void reload_start(struct app_model *a, uint32_t conn, rt_cmds *cmds) {
+    if (conn) {
+        if (a->reload_nwaiters < APP_RELOAD_WAITERS) {
+            a->reload_waiters[a->reload_nwaiters++] = conn;
+        } else {
+            rt_cmd c = {.kind = APP_CMD_REPLY, .id = conn};   /* too many: refuse */
+            rt_cmd_push(cmds, &c);
+        }
+    }
+    notify(cmds, "RELOADING=1");
+    cmd(cmds, APP_CMD_RELOAD, 0, 0);
+}
+
 void app_model_update(struct app_model *a, const rt_msg *m, rt_cmds *cmds) {
     switch (m->kind) {
     case NW_MSG_QUIT:
@@ -55,8 +84,25 @@ void app_model_update(struct app_model *a, const rt_msg *m, rt_cmds *cmds) {
         return;
 
     case NW_MSG_RELOAD:
-        /* v.u is the socket connection waiting for the outcome, or 0. */
-        cmd(cmds, APP_CMD_RELOAD, 0, from_signal(m) ? 0 : m->v.i);
+        /* v.i is the socket connection waiting for the outcome, or 0. */
+        reload_start(a, from_signal(m) ? 0 : (uint32_t)m->v.i, cmds);
+        return;
+
+    case NW_MSG_RELOAD_APPLIED: {
+        /* The file was applied. If a shader is still compiling, the answer
+         * waits for it: "reloaded" must mean it's on screen. */
+        bool ok = m->v.i & 1, building = m->v.i & 2;
+        if (ok && building) {
+            a->reload_building = true;
+            cmd(cmds, APP_CMD_WATCH_BUILDS, 0, 0);
+            return;
+        }
+        reload_finish(a, ok, cmds);
+        return;
+    }
+
+    case NW_MSG_RELOAD_SETTLED:
+        if (a->reload_building) reload_finish(a, m->v.i != 0, cmds);
         return;
 
     case NW_MSG_NEXT:

@@ -239,6 +239,11 @@ struct output_state {
     struct wallshader_pending *pending_shader;
     char pending_shader_path[OUTPUT_MAX_PATH_LENGTH];
     size_t pending_failures;            /* broken cycle entries skipped in a row */
+    /* A reload whose shader is still compiling: the whole config waits here
+     * and goes live with the shader. NULL when none. stage_failed records a
+     * staged build that failed (or was replaced), for the reload's reply. */
+    struct wallpaper_config *staged_config;
+    bool stage_failed;
     GLuint vao;                         /* Vertex array object (required for OpenGL 3.3 Core) */
     GLuint vbo;
 
@@ -388,6 +393,15 @@ nw_result output_set_shader_async(struct output_state *output, const char *shade
 /* Finish a background shader build if it's done. true while one is going.
  * The output's context must be current. */
 bool output_poll_shader_build(struct output_state *output);
+
+/* A reload that changes one shader for another stages the new config and
+ * builds the shader in the background (output_apply_config returns true at
+ * once). These tell whether it's still waiting, and whether a staged build
+ * failed (the old config and shader are still live then). forget clears
+ * the failure once it's been reported. */
+bool output_reload_pending(const struct output_state *output);
+bool output_reload_failed(const struct output_state *output);
+void output_reload_forget(struct output_state *output);
 
 /* Spawn `cmd` under a PTY and make the live terminal this output's wallpaper.
  * `shader_path` (may be NULL/"") is an optional GLSL file that samples the

@@ -40,6 +40,8 @@ enum {
     NW_MSG_OUTPUTS_NEW,     /* a new output appeared (hotplug / reconnect) */
     NW_MSG_GPU_LOST,        /* present: graphics can't recover in this process */
     NW_MSG_APPLIED,         /* present: requests it used up (struct app_applied) */
+    NW_MSG_RELOAD_APPLIED,  /* perform: config applied; v.i bit0 = ok, bit1 = shaders building */
+    NW_MSG_RELOAD_SETTLED,  /* present: the reload's builds are done; v.i = ok */
 };
 
 /* Run neowall until it's told to stop. Takes over from main() once the

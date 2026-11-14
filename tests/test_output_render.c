@@ -132,6 +132,16 @@ static bool close_rgb(unsigned a, unsigned b) {
     return true;
 }
 
+/* A shader-to-shader apply builds in the background and goes live on a
+ * later frame (with its config). Wait for it, like the frame loop would. */
+static bool land(struct output_state *o) {
+    for (int i = 0; i < 400 && o->pending_shader; i++) {
+        output_poll_shader_build(o);
+        if (o->pending_shader) usleep(5000);
+    }
+    return !o->pending_shader && !output_reload_pending(o);
+}
+
 static bool draw(struct output_state *o) {
     atomic_store(&o->needs_redraw, true);
     bool ok = output_render_frame(o);
@@ -265,6 +275,7 @@ int main(void) {
     fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(1.0, 0.0, 0.0, 0.25); }\n", ts);
     fclose(ts);
     CHECK(output_apply_config(o, &s), "apply translucent shader");
+    CHECK(land(o), "translucent shader lands");
     CHECK(draw(o), "render translucent shader");
     /* a swap crossfades from the old shader; that's covered in 4c */
     CHECK(o->clock_fade_start > 0, "a shader swap starts a crossfade");
@@ -286,6 +297,7 @@ int main(void) {
     fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(0.0, 0.0, 1.0, 1.0); }\n", ts);
     fclose(ts);
     CHECK(output_apply_config(o, &s), "apply blue shader");
+    CHECK(land(o), "blue shader lands");
     CHECK(draw(o), "first frame of the new shader");
     unsigned mid = read_rgb(W / 2, H / 2);
     CHECK((mid >> 16) > 0x80 && (mid & 0xff) < 0x80, "old red still shows at the start: %06x", mid);
@@ -294,6 +306,51 @@ int main(void) {
     CHECK(close_rgb(read_rgb(W / 2, H / 2), 0x0000ff), "only the new shader is left: %06x",
           read_rgb(W / 2, H / 2));
     CHECK(o->clock_fade_tex == 0, "fade texture released");
+
+    /* 4c'. A reload to another shader stages the whole config: until the new
+     *      shader lands the old config is live (here: its speed), and a
+     *      shader that doesn't compile leaves both exactly as they were. */
+    {
+        float old_speed = o->config->shader_speed;
+        struct wallpaper_config s2 = s;
+        s2.shader_speed = old_speed + 1.0f;
+        ts = fopen(shader, "w");
+        fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(0.0, 1.0, 1.0, 1.0); }\n", ts);
+        fclose(ts);
+        CHECK(output_apply_config(o, &s2), "apply returns at once");
+        CHECK(output_reload_pending(o), "the reload is staged while it builds");
+        CHECK(o->config->shader_speed == old_speed, "old config live while building");
+        CHECK(land(o), "staged shader lands");
+        CHECK(o->config->shader_speed == old_speed + 1.0f, "new config live with its shader");
+        CHECK(!output_reload_failed(o), "and it didn't fail");
+
+        ts = fopen(shader, "w");
+        fputs("void mainImage(out vec4 c, in vec2 p){ c = nope; }\n", ts);
+        fclose(ts);
+        struct wallpaper_config s3 = s;
+        s3.shader_speed = old_speed + 5.0f;
+        CHECK(output_apply_config(o, &s3), "broken shader still stages");
+        land(o);
+        CHECK(output_reload_failed(o), "the failure is recorded for the reply");
+        CHECK(o->config->shader_speed == old_speed + 1.0f, "config unchanged after a failed build");
+        CHECK(o->shader != NULL, "the old shader is still there");
+        CHECK(draw(o), "still draws");
+        output_reload_forget(o);
+        CHECK(!output_reload_failed(o), "forget clears it");
+        o->clock_fade_start = 1;
+        CHECK(draw(o), "settle the fade");
+
+        /* put the blue shader back for 4d */
+        ts = fopen(shader, "w");
+        fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(0.0, 0.0, 1.0, 1.0); }\n", ts);
+        fclose(ts);
+        CHECK(output_apply_config(o, &s), "apply blue again");
+        CHECK(land(o), "blue lands");
+        CHECK(draw(o), "first blue frame (starts the fade)");
+        o->clock_fade_start = 1;
+        CHECK(draw(o), "blue settled");
+        CHECK(close_rgb(read_rgb(W / 2, H / 2), 0x0000ff), "blue back: %06x", read_rgb(W / 2, H / 2));
+    }
 
     /* 4d. A background swap: the current shader keeps drawing while the next
      *     compiles, then it lands on a later frame. A broken one never lands

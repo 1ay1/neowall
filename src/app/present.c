@@ -629,7 +629,8 @@ void app_present(void *self, rt_loop *loop) {
     if (!any) {
         pthread_rwlock_rdlock(&state->output_list_lock);
         for (struct output_state *o = state->outputs; o; o = o->next) {
-            if (atomic_load_explicit(&o->needs_redraw, memory_order_acquire)) {
+            /* a background build has to be polled to land, drawn or not */
+            if (atomic_load_explicit(&o->needs_redraw, memory_order_acquire) || o->pending_shader) {
                 any = true;
                 break;
             }
@@ -648,6 +649,22 @@ void app_present(void *self, rt_loop *loop) {
     if (f.gpu_lost) {
         app_send(loop, NW_MSG_GPU_LOST, 0, 0);
         return;
+    }
+
+    /* A reload is waiting on background builds: once none is left, say how
+     * it went. Builds land in render_outputs above. */
+    if (a->view.watch_builds) {
+        bool building = false, failed = false;
+        pthread_rwlock_rdlock(&state->output_list_lock);
+        for (struct output_state *o = state->outputs; o; o = o->next) {
+            if (output_reload_pending(o)) building = true;
+            if (output_reload_failed(o)) failed = true;
+        }
+        pthread_rwlock_unlock(&state->output_list_lock);
+        if (!building) {
+            a->view.watch_builds = false;
+            app_send(loop, NW_MSG_RELOAD_SETTLED, 0, !failed);
+        }
     }
 
     struct app_view *v = &a->view;

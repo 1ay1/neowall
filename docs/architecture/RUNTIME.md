@@ -96,6 +96,29 @@ the request (index, generation), so one that arrived mid-frame survives.
 The CLI side lives in `src/cli/` (usage, tools, talking to a daemon, the
 old command files), so `main.c` is just argument parsing and bring-up.
 
+**Reload, end to end.** It shows how the pieces fit, and why nothing blocks:
+
+1. `RELOAD` arrives (SIGHUP, or `reload` on the socket with its connection).
+   update records the connection in `reload_waiters` and pushes
+   `APP_CMD_RELOAD`.
+2. perform validates and applies the file. An output going from one shader
+   to another doesn't switch yet: its whole new config is *staged* and the
+   shader builds in the background, while the old one keeps drawing.
+   perform sends `RELOAD_APPLIED` saying whether it worked and whether
+   anything is still building.
+3. Nothing building: update answers every waiter now. Something building:
+   update waits (`reload_building`) and asks present to watch.
+4. present polls builds every frame. One that compiles goes live together
+   with its staged config; one that fails is dropped and the old config and
+   shader stay. When none is left, present sends `RELOAD_SETTLED`.
+5. update answers every waiter with the real outcome: "reloaded" means the
+   new shader is on screen.
+
+A second reload during a build restarts it and its client waits for the
+newest outcome. The loop never waits on the compiler where the driver has
+`KHR_parallel_shader_compile` (radeonsi, iris, NVIDIA). llvmpipe doesn't,
+so there it still blocks in the driver while linking.
+
 **Messages** (`include/neowall/app/app.h`):
 
 | message | from |
@@ -111,6 +134,8 @@ old command files), so `main.c` is just argument parsing and bring-up.
 | `REDRAW` | any thread (`app_request_redraw`) |
 | `GPU_LOST` | present: the context or a surface can't recover |
 | `APPLIED` | present: which queued requests this frame used up |
+| `RELOAD_APPLIED` | perform: the file was applied; ok, and whether shaders are building |
+| `RELOAD_SETTLED` | present: a reload's background builds are done; ok |
 
 A message from a signal has `id = signo`; from the socket or `perform` it
 has `id 0` and carries its argument. So `SET_INDEX` from an old CLI's
