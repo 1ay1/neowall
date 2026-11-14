@@ -78,7 +78,8 @@ jobs:
           meson dist -C dist-build --formats xztar
       - name: Two builds from two paths give the same bytes
         run: |
-          tar xJf dist-build/meson-dist/*.tar.xz -C /tmp && mv /tmp/neowall-* /tmp/a
+          # the dist tests leave /tmp/neowall-<uid> behind, so don't glob /tmp
+          mkdir /tmp/a && tar xJf dist-build/meson-dist/*.tar.xz -C /tmp/a --strip-components=1
           cp -a /tmp/a /tmp/b
           for d in a b; do
             (cd /tmp/$d && SOURCE_DATE_EPOCH=1700000000 \
