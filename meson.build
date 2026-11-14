@@ -282,6 +282,14 @@ texture_sources = files(
 # Output sources
 output_sources = files(
   'src/output/output.c',
+  'src/output/apply.c',
+  'src/output/cycle.c',
+  'src/output/span_group.c',
+  'src/output/preload.c',
+  'src/output/pace.c',
+  'src/output/wallpaper_image.c',
+  'src/output/wallpaper_shader.c',
+  'src/output/wallpaper_terminal.c',
   'src/output/state_file.c',
   'src/output/frame_clock.c',
   'src/output/span.c',
@@ -1094,7 +1102,10 @@ if has_wayland
   test('output_render', executable('test_output_render',
     files('tests/test_output_render.c',
           'src/config/vibe_impl.c', 'src/config/config.c', 'src/config/shuffle.c',
-          'src/output/output.c', 'src/output/state_file.c',
+          'src/output/output.c', 'src/output/apply.c', 'src/output/cycle.c',
+          'src/output/span_group.c', 'src/output/preload.c', 'src/output/pace.c',
+          'src/output/wallpaper_image.c', 'src/output/wallpaper_shader.c',
+          'src/output/wallpaper_terminal.c', 'src/output/state_file.c',
           'src/output/frame_clock.c', 'src/output/span.c',
           'src/render/render.c', 'src/compositor/compositor_surface.c', 'src/egl/egl_bind.c') +
       core_sources + shader_sources + texture_sources + image_sources + source_sources + source_reactive_sources +
