@@ -918,6 +918,7 @@ static const compositor_backend_ops_t wlr_backend_ops = {
     .frame_request              = wayland_frame_request,
     .frame_ready                = wayland_frame_ready,
     .frame_cancel               = wayland_frame_cancel,
+    .present_feedback           = wayland_present_feedback,
     .configure_surface          = wlr_configure_surface,
     .set_keyboard_interactivity = wlr_set_keyboard_interactivity,
     .commit_surface             = wlr_commit_surface,
@@ -951,12 +952,9 @@ static const compositor_backend_ops_t wlr_backend_ops = {
     .apply_input_config = wlr_apply_input_config,
 };
 
-struct compositor_backend *compositor_backend_wlr_layer_shell_init(struct neowall_state *state) {
-    (void)state;
-
-    /* Register backend in registry */
-    compositor_backend_register(BACKEND_NAME, BACKEND_DESCRIPTION, BACKEND_PRIORITY,
-                                &wlr_backend_ops);
-
-    return NULL; /* Actual initialization happens in select_backend() */
-}
+const compositor_backend_desc_t wlr_layer_shell_backend = {
+    .name        = BACKEND_NAME,
+    .description = BACKEND_DESCRIPTION,
+    .priority    = BACKEND_PRIORITY,
+    .ops         = &wlr_backend_ops,
+};

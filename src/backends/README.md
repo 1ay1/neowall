@@ -97,15 +97,15 @@ struct compositor_surface {
 
 #### 3. **Backend Registry**
 
-Backends register themselves with priority:
+Each backend exports a const descriptor, and `registry.c` lists them:
 
 ```c
-compositor_backend_register(
-    "wlr-layer-shell",           // Name
-    "wlroots layer shell",       // Description
-    100,                         // Priority (higher = preferred)
-    &wlr_backend_ops             // Operations
-);
+const compositor_backend_desc_t wlr_layer_shell_backend = {
+    .name        = "wlr-layer-shell",
+    .description = "wlroots layer shell",
+    .priority    = 100,
+    .ops         = &wlr_backend_ops,
+};
 ```
 
 #### 4. **Auto-Detection**
@@ -254,41 +254,32 @@ static const compositor_backend_ops_t my_backend_ops = {
     .on_output_removed = my_on_output_removed,
 };
 
-// Registration function
-struct compositor_backend *compositor_backend_my_compositor_init(
-    struct neowall_state *state) {
-    compositor_backend_register(
-        BACKEND_NAME,
-        BACKEND_DESCRIPTION,
-        BACKEND_PRIORITY,
-        &my_backend_ops
-    );
-    return NULL;
-}
+// Descriptor the registry selects from
+const compositor_backend_desc_t my_compositor_backend = {
+    .name        = BACKEND_NAME,
+    .description = BACKEND_DESCRIPTION,
+    .priority    = BACKEND_PRIORITY,
+    .ops         = &my_backend_ops,
+};
 ```
 
 #### 3. Update Registry
 
-Add declaration to `compositor.h`:
+Declare it in `include/neowall/surface/surface.h`:
 
 ```c
-/* Backend implementations */
-struct compositor_backend *compositor_backend_my_compositor_init(
-    struct neowall_state *state);
+extern const compositor_backend_desc_t my_compositor_backend;
 ```
 
-Register in `compositor_registry.c`:
+List it in `src/backends/registry.c` and teach `select_wayland_backend()` when
+to prefer it:
 
 ```c
-struct compositor_backend *compositor_backend_init(struct neowall_state *state) {
-    // ... existing code ...
-    
-    compositor_backend_wlr_layer_shell_init(state);
-    compositor_backend_kde_plasma_init(state);
-    compositor_backend_my_compositor_init(state);  // Add here
-    
-    // ... rest of code ...
-}
+static const compositor_backend_desc_t *const wayland_backends[] = {
+    &wlr_layer_shell_backend,
+    &kde_plasma_backend,
+    &my_compositor_backend,
+};
 ```
 
 #### 4. Update Build System

@@ -338,6 +338,10 @@ typedef struct compositor_backend_ops {
     bool (*frame_ready)(struct compositor_surface *surface);
     void (*frame_cancel)(struct compositor_surface *surface);
 
+    /* Ask for a present timestamp on the NEXT commit, fed to the frame pacer
+     * (optional; NULL = pacer anchors on swap time). */
+    void (*present_feedback)(struct compositor_surface *surface);
+
     /**
      * Change keyboard interactivity on a LIVE surface (optional)
      *
@@ -701,6 +705,9 @@ bool compositor_surface_supports_frame_pacing(struct compositor_surface *surface
 void compositor_surface_frame_request(struct compositor_surface *surface);
 bool compositor_surface_frame_ready(struct compositor_surface *surface);
 
+/* Request present feedback for the next commit; no-op where unsupported. */
+void compositor_surface_present_feedback(struct compositor_surface *surface);
+
 /**
  * Change keyboard interactivity on an already-created surface.
  *
@@ -730,35 +737,22 @@ void compositor_surface_set_callbacks(struct compositor_surface *surface,
                                       void *user_data);
 
 /* ============================================================================
- * BACKEND REGISTRATION (for backend implementations)
+ * BACKEND DESCRIPTORS
  * ============================================================================ */
 
-/**
- * Backend registration function signature
- * Each backend implements this to register itself.
- */
-typedef struct compositor_backend *(*compositor_backend_register_fn)(struct neowall_state *state);
+/* What a Wayland backend is, fixed at compile time. The registry picks one
+ * and calls ops->init. */
+typedef struct compositor_backend_desc {
+    const char *name;
+    const char *description;
+    int priority;
+    const compositor_backend_ops_t *ops;
+} compositor_backend_desc_t;
 
-/**
- * Register a backend (called by backend implementations during init)
- *
- * @param name Backend name
- * @param description Backend description
- * @param priority Selection priority
- * @param ops Backend operations
- * @return true on success
- */
-bool compositor_backend_register(const char *name, const char *description, int priority,
-                                 const compositor_backend_ops_t *ops);
+/* wlroots layer shell (Hyprland, Sway, River, ...) */
+extern const compositor_backend_desc_t wlr_layer_shell_backend;
 
-/* ============================================================================
- * BACKEND IMPLEMENTATIONS (to be implemented in backends/)
- * ============================================================================ */
-
-/* wlr-layer-shell backend (wlroots-based compositors) */
-struct compositor_backend *compositor_backend_wlr_layer_shell_init(struct neowall_state *state);
-
-/* KDE Plasma Shell backend */
-struct compositor_backend *compositor_backend_kde_plasma_init(struct neowall_state *state);
+/* layer shell with click pass-through for KWin */
+extern const compositor_backend_desc_t kde_plasma_backend;
 
 #endif /* COMPOSITOR_H */

@@ -25,9 +25,6 @@
 #include "neowall/core/util.h"
 #include "neowall/proto/proto.h"
 
-/* For the crash handler: tell other threads to stop. */
-static struct neowall_state *global_state = NULL;
-
 /* Handle crash signals - these still need traditional handlers.
  *
  * MUST be async-signal-safe: no printf, no malloc, no localtime, no exit().
@@ -49,12 +46,6 @@ static void handle_crash(int signum) {
     ssize_t n = write(STDERR_FILENO, msg, strlen(msg));
     (void)n;
 
-    /* Best-effort: ask the event loop to shut down. atomic_store on a lock-free
-     * atomic is async-signal-safe (we're not taking any libc lock). */
-    if (global_state) {
-        atomic_store_explicit(&global_state->running, false, memory_order_release);
-    }
-
     /* _exit (not exit) — don't run atexit handlers / stdio cleanup from a
      * signal handler; SA_RESETHAND ensures a repeat signal core-dumps cleanly. */
     _exit(EXIT_FAILURE);
@@ -73,8 +64,7 @@ bool block_signals(void) {
     return true;
 }
 
-void setup_crash_handlers(struct neowall_state *state) {
-    global_state = state;
+void setup_crash_handlers(void) {
     /* Crash signals still need traditional handlers since they're fatal */
     struct sigaction crash_sa;
     memset(&crash_sa, 0, sizeof(crash_sa));

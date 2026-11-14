@@ -19,11 +19,6 @@
 #include "neowall/core/time.h"
 #include "neowall/core/util.h"
 
-#ifdef HAVE_WAYLAND_BACKEND
-bool output_configure_compositor_surface(struct output_state *output);
-void wayland_request_present_feedback(struct output_state *output);
-#endif
-
 struct swap_info {
     struct output_state *output;
     bool render_success;
@@ -191,9 +186,8 @@ static void output_present(struct frame *f, struct output_state *output, uint64_
 
     /* Present feedback and frame callbacks ride the swap's commit, so they're
      * requested before it. */
-#ifdef HAVE_WAYLAND_BACKEND
-    if (wallpaper_is_animated(output->config->type)) wayland_request_present_feedback(output);
-#endif
+    if (wallpaper_is_animated(output->config->type))
+        compositor_surface_present_feedback(output->compositor_surface);
     if (output->config->vsync &&
         compositor_surface_supports_frame_pacing(output->compositor_surface)) {
         compositor_surface_frame_request(output->compositor_surface);

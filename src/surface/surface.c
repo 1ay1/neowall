@@ -412,6 +412,13 @@ bool compositor_surface_frame_ready(struct compositor_surface *surface) {
     return surface->backend->ops->frame_ready(surface);
 }
 
+void compositor_surface_present_feedback(struct compositor_surface *surface) {
+    if (surface && surface->backend && surface->backend->ops &&
+        surface->backend->ops->present_feedback) {
+        surface->backend->ops->present_feedback(surface);
+    }
+}
+
 bool compositor_surface_set_keyboard_interactivity(struct compositor_surface *surface,
                                                    bool enabled) {
     if (!surface) {

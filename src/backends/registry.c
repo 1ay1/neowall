@@ -33,18 +33,14 @@
  * - KDE Plasma: 110 (layer shell with click pass-through)
  */
 
-/* Maximum number of backends that can be registered */
-#define MAX_BACKENDS 16
-
-/* Backend registry */
-static struct {
-    const char *name;
-    const char *description;
-    int priority;
-    const compositor_backend_ops_t *ops;
-} backend_registry[MAX_BACKENDS];
-
-static size_t backend_count = 0;
+#ifdef HAVE_WAYLAND_BACKEND
+/* Every Wayland backend. No generic fallback: a bare wl_surface has no role a
+ * compositor will map as a wallpaper, so it could only ever show nothing. */
+static const compositor_backend_desc_t *const wayland_backends[] = {
+    &wlr_layer_shell_backend,
+    &kde_plasma_backend,
+};
+#endif
 
 /* Protocol detection state */
 typedef struct {
@@ -228,42 +224,6 @@ const char *compositor_type_to_string(compositor_type_t type) {
 }
 
 /* ============================================================================
- * BACKEND REGISTRATION
- * ============================================================================ */
-
-bool compositor_backend_register(const char *name, const char *description, int priority,
-                                 const compositor_backend_ops_t *ops) {
-    if (backend_count >= MAX_BACKENDS) {
-        log_error("Backend registry full, cannot register '%s'", name);
-        return false;
-    }
-
-    if (!name || !ops) {
-        log_error("Invalid backend registration parameters");
-        return false;
-    }
-
-    /* Check if backend already registered */
-    for (size_t i = 0; i < backend_count; i++) {
-        if (strcmp(backend_registry[i].name, name) == 0) {
-            log_error("Backend '%s' already registered", name);
-            return false;
-        }
-    }
-
-    /* Register backend */
-    backend_registry[backend_count].name        = name;
-    backend_registry[backend_count].description = description;
-    backend_registry[backend_count].priority    = priority;
-    backend_registry[backend_count].ops         = ops;
-    backend_count++;
-
-    log_debug("Registered backend: %s (priority: %d) - %s", name, priority, description);
-
-    return true;
-}
-
-/* ============================================================================
  * BACKEND SELECTION
  * ============================================================================ */
 
@@ -326,34 +286,33 @@ static struct compositor_backend *select_wayland_backend(struct neowall_state *s
     }
 
     /* Try to initialize the preferred backend */
-    for (size_t i = 0; i < backend_count; i++) {
-        if (strcmp(backend_registry[i].name, preferred_backend) == 0) {
-            log_debug("Initializing preferred backend: %s", preferred_backend);
+    for (size_t i = 0; i < sizeof wayland_backends / sizeof wayland_backends[0]; i++) {
+        const compositor_backend_desc_t *desc = wayland_backends[i];
+        if (strcmp(desc->name, preferred_backend) != 0) continue;
 
-            void *backend_data = backend_registry[i].ops->init(state);
-            if (!backend_data) {
-                log_error("Failed to initialize preferred backend: %s", preferred_backend);
-                break;
-            }
-
-            /* Create backend structure */
-            struct compositor_backend *backend = calloc(1, sizeof(struct compositor_backend));
-            if (!backend) {
-                log_error("Failed to allocate backend structure");
-                backend_registry[i].ops->cleanup(backend_data);
-                return NULL;
-            }
-
-            backend->name         = backend_registry[i].name;
-            backend->description  = backend_registry[i].description;
-            backend->priority     = backend_registry[i].priority;
-            backend->ops          = backend_registry[i].ops;
-            backend->data         = backend_data;
-            backend->capabilities = backend_registry[i].ops->get_capabilities(backend_data);
-
-            log_info("Selected backend: %s", backend->name);
-            return backend;
+        log_debug("Initializing preferred backend: %s", preferred_backend);
+        void *backend_data = desc->ops->init(state);
+        if (!backend_data) {
+            log_error("Failed to initialize preferred backend: %s", preferred_backend);
+            break;
         }
+
+        struct compositor_backend *backend = calloc(1, sizeof(struct compositor_backend));
+        if (!backend) {
+            log_error("Failed to allocate backend structure");
+            desc->ops->cleanup(backend_data);
+            return NULL;
+        }
+
+        backend->name         = desc->name;
+        backend->description  = desc->description;
+        backend->priority     = desc->priority;
+        backend->ops          = desc->ops;
+        backend->data         = backend_data;
+        backend->capabilities = desc->ops->get_capabilities(backend_data);
+
+        log_info("Selected backend: %s", backend->name);
+        return backend;
     }
 
     /* Do not fall back to a raw wl_surface/subsurface. Such a surface has no
@@ -507,13 +466,6 @@ struct compositor_backend *compositor_backend_init(struct neowall_state *state) 
         log_info("Note: iMouse disabled for proper KDE integration");
         log_info("========================================");
     }
-
-    /* Register all Wayland backends */
-    log_debug("Registering available Wayland backends...");
-    compositor_backend_wlr_layer_shell_init(state);
-    compositor_backend_kde_plasma_init(state);
-    /* No generic fallback: a bare wl_surface has no role a compositor will
-     * map as a wallpaper, so it could only ever show nothing. */
 
     /* Select best backend */
     struct compositor_backend *backend = select_wayland_backend(state, &info);

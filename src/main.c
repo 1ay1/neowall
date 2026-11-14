@@ -273,7 +273,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* Set up crash handlers first */
-    setup_crash_handlers(&state);
+    setup_crash_handlers();
 
     /* Initialize atomic state flags - MUST use atomic_init before any access */
     atomic_init(&state.running, true);

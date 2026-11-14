@@ -902,17 +902,17 @@ static const struct wp_presentation_feedback_listener present_fb_listener = {
     .discarded   = present_fb_discarded,
 };
 
-/* Ask the compositor for a present timestamp on `output`'s surface's NEXT
- * commit. Call once per rendered frame, right BEFORE the commit that publishes
- * it (the feedback associates with the following commit). No-op when the
- * protocol is absent or the clock is unusable, so non-Wayland / old compositors
- * simply fall back to swap-time anchoring. */
-void wayland_request_present_feedback(struct output_state *output) {
+/* Ask the compositor for a present timestamp on this surface's NEXT commit.
+ * Call once per rendered frame, right BEFORE the commit that publishes it (the
+ * feedback associates with the following commit). No-op when the protocol is
+ * absent or the clock is unusable; the pacer then anchors on swap time. */
+void wayland_present_feedback(struct compositor_surface *cs) {
     wayland_t *wl = &g_wayland;
-    if (!output || !wl->presentation || !wl->presentation_clock_ok) return;
-    if (!output->compositor_surface || !output->compositor_surface->native_surface) return;
+    if (!cs || !cs->native_surface || !wl->presentation || !wl->presentation_clock_ok) return;
+    struct output_state *output = cs->user_data;
+    if (!output) return;
 
-    struct wl_surface *surface = (struct wl_surface *)output->compositor_surface->native_surface;
+    struct wl_surface *surface = (struct wl_surface *)cs->native_surface;
 
     struct present_fb_ctx *ctx = calloc(1, sizeof(*ctx));
     if (!ctx) return;

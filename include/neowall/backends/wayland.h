@@ -140,22 +140,12 @@ bool wayland_available(void);
  */
 void wayland_apply_fractional_scale(struct output_state *output);
 
-/**
- * Request wp_presentation feedback for an output's next surface commit.
- *
- * Call once per rendered frame, immediately BEFORE the commit that publishes
- * it. When the compositor supports wp_presentation (and advertises a usable
- * CLOCK_MONOTONIC present clock) the reported flip timestamp + refresh period
- * are fed into that output's phase-locked frame pacer (output_pace_note_present).
- * No-op otherwise — the pacer falls back to swap-completion-time anchoring.
- */
-void wayland_request_present_feedback(struct output_state *output);
-
-/* Compositor-paced vsync rendering, shared by every Wayland backend's ops
- * (frame_request / frame_ready). cancel() must run before a surface is freed. */
+/* Compositor-paced vsync rendering and present feedback, shared by every
+ * Wayland backend's ops. frame_cancel() must run before a surface is freed. */
 struct compositor_surface;
 void wayland_frame_request(struct compositor_surface *surface);
 bool wayland_frame_ready(struct compositor_surface *surface);
 void wayland_frame_cancel(struct compositor_surface *surface);
+void wayland_present_feedback(struct compositor_surface *surface);
 
 #endif /* WAYLAND_H */

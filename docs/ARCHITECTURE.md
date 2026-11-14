@@ -91,9 +91,9 @@ vtable of function pointers; each backend implements it and registers itself.
 - **Capability flags.** `compositor_capabilities_t` advertises what a backend
   supports (layer-shell, viewporter, occlusion, …) so the core can adapt instead
   of hard-coding per-compositor behaviour.
-- **Registration + selection.** Backends call `compositor_backend_register()`;
-  `compositor_registry.c` detects the running compositor (env vars + protocol
-  probe) and picks the highest-priority backend that fits, or refuses with a
+- **Selection.** Each Wayland backend exports a `const compositor_backend_desc_t`
+  listed in `backends/registry.c`, which detects the running compositor (env
+  vars + protocol probe) and picks the backend that fits, or refuses with a
   clear error when nothing can show a wallpaper there.
 
 Backends: `wlr-layer-shell` (Hyprland/Sway/River/wlroots), `kde-plasma`
@@ -101,9 +101,9 @@ and `x11` (EWMH + root window).
 GNOME/Mutter on Wayland is refused with a clear error: it has no wallpaper
 surface role for clients.
 
-**Adding a backend:** implement `compositor_backend_ops`, call
-`compositor_backend_register()` in your init, and the registry auto-selects it.
-No core changes required.
+**Adding a backend:** implement `compositor_backend_ops`, export a descriptor,
+and add it to the `wayland_backends` table and the selection logic in
+`backends/registry.c`. No core changes required.
 
 ---
 

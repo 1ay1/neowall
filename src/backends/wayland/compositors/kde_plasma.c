@@ -622,6 +622,7 @@ static const compositor_backend_ops_t kde_backend_ops = {
     .frame_request      = wayland_frame_request,
     .frame_ready        = wayland_frame_ready,
     .frame_cancel       = wayland_frame_cancel,
+    .present_feedback   = wayland_present_feedback,
     .configure_surface  = kde_configure_surface,
     .commit_surface     = kde_commit_surface,
     .create_egl_window  = kde_create_egl_window,
@@ -651,25 +652,12 @@ static const compositor_backend_ops_t kde_backend_ops = {
     .occlusion_cleanup = kde_occlusion_cleanup,
 };
 
-struct compositor_backend *compositor_backend_kde_plasma_init(struct neowall_state *state) {
-    if (!state) {
-        log_error("Invalid state for KDE backend registration");
-        return NULL;
-    }
-
-    log_debug("Registering KDE Plasma backend");
-
-    /* Register backend in registry */
-    if (!compositor_backend_register(BACKEND_NAME, BACKEND_DESCRIPTION, BACKEND_PRIORITY,
-                                     &kde_backend_ops)) {
-        log_error("Failed to register KDE Plasma backend");
-        return NULL;
-    }
-
-    log_debug("KDE Plasma backend registered successfully");
-
-    return NULL;
-}
+const compositor_backend_desc_t kde_plasma_backend = {
+    .name        = BACKEND_NAME,
+    .description = BACKEND_DESCRIPTION,
+    .priority    = BACKEND_PRIORITY,
+    .ops         = &kde_backend_ops,
+};
 
 /*
  * ============================================================================
