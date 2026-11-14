@@ -85,6 +85,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
+      # TSan re-execs itself with ASLR off when the kernel's mmap randomness is
+      # too high; docker's default seccomp blocks that personality() call.
+      options: --security-opt seccomp=unconfined
     steps:
       - name: Install dependencies
         run: |

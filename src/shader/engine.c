@@ -19,6 +19,7 @@
 #define GL_GLEXT_PROTOTYPES 1
 #include <GL/gl.h>
 #include <GL/glext.h>
+#include <EGL/egl.h>
 
 #include "neowall/gfx/gfx.h"
 #include "neowall/image/image.h"
@@ -337,8 +338,15 @@ static bool parallel_compile(void) {
                       !strcmp(x, "GL_ARB_parallel_shader_compile")))
                 g_parallel = 1;
         }
-        if (g_parallel)
-            glMaxShaderCompilerThreadsKHR(0xFFFFFFFFu); /* as many as the driver likes */
+        if (g_parallel) {
+            /* extension entry points aren't exported by every libGL (musl), so look it up */
+            union {
+                void (*fn)(void);
+                void (*set)(GLuint);
+            } u = {.fn = eglGetProcAddress("glMaxShaderCompilerThreadsKHR")};
+            if (!u.fn) u.fn = eglGetProcAddress("glMaxShaderCompilerThreadsARB");
+            if (u.fn) u.set(0xFFFFFFFFu); /* as many as the driver likes */
+        }
     }
     return g_parallel == 1;
 }
