@@ -35,7 +35,7 @@ COMMIT_MSG.txt
 *.tmp
 *.log
 
-# Core dumps
-core
-core.*
+# Core dumps (files only: src/core/ and include/neowall/core/ are source)
+/core
+core.[0-9]*
 vgcore.*

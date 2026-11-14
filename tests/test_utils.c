@@ -1,14 +1,5 @@
-/* Unit tests for the pure helper functions in src/core/utils.c.
- *
- * These cover the math/format/parse helpers that have no GL, Wayland, or
- * filesystem dependencies, so they can run headless in CI. The graphics and
- * compositor paths still require a live display server and are not covered
- * here — this harness exists to lock down the parts that CAN be tested
- * deterministically.
- *
- * utils.c calls log_*() and references NEOWALL_VERSION; tests/stubs.c provides
- * those so we can link utils.c in isolation without the full daemon.
- */
+/* Unit tests for core/util.c and app/state_file.c: parsing, paths, data
+ * dirs and the state file. No GL or display needed. */
 
 #include <math.h>
 #include <stdbool.h>
@@ -22,21 +13,8 @@
 #include <limits.h>
 #include <time.h>
 
-/* Prototypes from src/core/utils.c (kept in sync with include/neowall/neowall.h). */
-float lerp(float a, float b, float t);
-float clamp(float value, float min, float max);
-float ease_in_out_cubic(float t);
-void format_bytes(uint64_t bytes, char *buf, size_t size);
-bool expand_path(const char *path, char *expanded, size_t size);
-const char *neowall_secure_runtime_dir(void);
-bool neowall_parse_index(const char *s, long *out);
-bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
-                           const char *mode, int cycle_index, int cycle_total,
-                           const char *status);
-int restore_cycle_index_from_state(const char *output_name);
-bool remove_wallpaper_state(const char *output_name);
-bool prune_wallpaper_state(const char *const *output_names, size_t output_count);
-bool neowall_find_data(const char *rel, char *out, size_t size);
+#include "neowall/output/state_file.h"
+#include "neowall/core/util.h"
 
 static int failures = 0;
 static int checks = 0;
@@ -60,20 +38,6 @@ static int checks = 0;
         }                                                                      \
     } while (0)
 
-static void test_lerp(void) {
-    CHECK_FEQ(lerp(0.0f, 10.0f, 0.0f), 0.0f);
-    CHECK_FEQ(lerp(0.0f, 10.0f, 1.0f), 10.0f);
-    CHECK_FEQ(lerp(0.0f, 10.0f, 0.5f), 5.0f);
-    CHECK_FEQ(lerp(-4.0f, 4.0f, 0.25f), -2.0f);
-}
-
-static void test_clamp(void) {
-    CHECK_FEQ(clamp(5.0f, 0.0f, 10.0f), 5.0f);
-    CHECK_FEQ(clamp(-1.0f, 0.0f, 10.0f), 0.0f);
-    CHECK_FEQ(clamp(11.0f, 0.0f, 10.0f), 10.0f);
-    CHECK_FEQ(clamp(0.0f, 0.0f, 0.0f), 0.0f);
-}
-
 static void test_ease(void) {
     /* Endpoints pinned, midpoint symmetric, monotonic non-decreasing. */
     CHECK_FEQ(ease_in_out_cubic(0.0f), 0.0f);
@@ -86,18 +50,6 @@ static void test_ease(void) {
         CHECK(v >= prev - 1e-5f);
         prev = v;
     }
-}
-
-static void test_format_bytes(void) {
-    char buf[64];
-    format_bytes(512, buf, sizeof(buf));
-    CHECK(strcmp(buf, "512 B") == 0);
-    format_bytes(1024, buf, sizeof(buf));
-    CHECK(strcmp(buf, "1.00 KB") == 0);
-    format_bytes(1024ULL * 1024ULL, buf, sizeof(buf));
-    CHECK(strcmp(buf, "1.00 MB") == 0);
-    format_bytes(1536, buf, sizeof(buf));
-    CHECK(strcmp(buf, "1.50 KB") == 0);
 }
 
 static void test_expand_path(void) {
@@ -292,10 +244,7 @@ static void test_find_data(void) {
 }
 
 int main(void) {
-    test_lerp();
-    test_clamp();
     test_ease();
-    test_format_bytes();
     test_expand_path();
     test_parse_index();
     test_secure_runtime_dir();

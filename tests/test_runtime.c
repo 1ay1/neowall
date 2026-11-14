@@ -16,7 +16,8 @@ static int failures = 0, checks = 0;
     fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
     fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
 
-enum { K_TICK = 1, K_ONCE, K_POSTED, K_SIG, K_SELF, K_STOP, K_LATE };
+enum { K_TICK = 1, K_ONCE, K_POSTED, K_SIG, K_SELF, K_STOP, K_LATE, K_EFFECT, K_EFFECT_DONE };
+enum { C_ECHO = 1 };
 
 /* A small program: counts what arrives, and its subscriptions are a pure
  * function of its fields. */
@@ -28,11 +29,15 @@ typedef struct {
     int stop_after_ticks;
     int presents;
     int64_t first_tick_at, last_tick_at;
+    int64_t first_due, last_due, worst_early;   /* from the tick's v.i */
     uint32_t order[64];
     int norder;
+    int performed, effect_dones;
+    uint32_t trace[16];         /* 'u' update / 'p' perform, in run order */
+    int ntrace;
 } prog_t;
 
-static bool upd(void *self, rt_loop *l, const rt_msg *m) {
+static void upd(void *self, const rt_msg *m, rt_cmds *cmds) {
     prog_t *p = self;
     if (p->norder < 64) p->order[p->norder++] = m->kind;
     switch (m->kind) {
@@ -40,23 +45,47 @@ static bool upd(void *self, rt_loop *l, const rt_msg *m) {
         p->ticks++;
         if (!p->first_tick_at) p->first_tick_at = rt_now_ns();
         p->last_tick_at = rt_now_ns();
-        if (p->stop_after_ticks && p->ticks >= p->stop_after_ticks) rt_quit(l, 3);
+        if (!p->first_due) p->first_due = m->v.i;
+        p->last_due = m->v.i;
+        /* how far before its deadline this tick ran (should be <= 0) */
+        if (m->v.i - p->last_tick_at > p->worst_early) p->worst_early = m->v.i - p->last_tick_at;
+        if (p->stop_after_ticks && p->ticks >= p->stop_after_ticks) rt_cmd_quit(cmds, 3);
         break;
     case K_ONCE: p->onces++; break;
     case K_POSTED: p->posted++; break;
-    case K_SIG: p->sigs++; rt_quit(l, 0); break;
+    case K_SIG: p->sigs++; rt_cmd_quit(cmds, 0); break;
     case K_SELF: {
         p->selfs++;
         if (p->selfs < 5) {
             rt_msg again = {.kind = K_SELF};
-            rt_send(l, &again);   /* folded in this same step */
+            rt_cmd_send(cmds, &again);   /* folded in this same step */
         }
         break;
     }
     case K_LATE: p->lates++; break;
-    case K_STOP: return false;
+    case K_STOP: rt_cmd_quit(cmds, 0); break;
+    case K_EFFECT: {
+        if (p->ntrace < 16) p->trace[p->ntrace++] = 'u';
+        rt_cmd c = {.kind = C_ECHO};
+        rt_cmd_push(cmds, &c);
+        rt_cmd_push(cmds, &c);
+        break;
     }
-    return true;
+    case K_EFFECT_DONE:
+        if (p->ntrace < 16) p->trace[p->ntrace++] = 'u';
+        if (++p->effect_dones == 2) rt_cmd_quit(cmds, 7);
+        break;
+    }
+}
+
+/* Runs each command; answers with a message, like a real effect would. */
+static void perform(void *self, rt_loop *l, const rt_cmd *c) {
+    prog_t *p = self;
+    if (c->kind != C_ECHO) return;
+    p->performed++;
+    if (p->ntrace < 16) p->trace[p->ntrace++] = 'p';
+    rt_msg done = {.kind = K_EFFECT_DONE};
+    rt_send(l, &done);
 }
 
 static void subs(void *self, rt_subs *s) {
@@ -68,7 +97,8 @@ static void subs(void *self, rt_subs *s) {
 static void present(void *self, rt_loop *l) { (void)l; ((prog_t *)self)->presents++; }
 
 static rt_program program(prog_t *p) {
-    return (rt_program){.self = p, .update = upd, .subscribe = subs, .present = present};
+    return (rt_program){.self = p, .update = upd, .perform = perform,
+                        .subscribe = subs, .present = present};
 }
 
 /* 1. A repeating timer fires on schedule and keeps its phase. */
@@ -88,17 +118,21 @@ static void test_every(void) {
     rt_loop_free(l);
 }
 
-/* 2. Sub-millisecond precision: a 16.67 ms period isn't padded to 17.
- * Measured from the start, not the first tick: the timer is phase-locked,
- * so a first tick that ran late on a busy machine doesn't shift the rest. */
+/* 2. Sub-millisecond precision: a 16.67 ms period isn't padded to 17, and
+ * stays phase-locked. The schedule (each tick's due time) is checked
+ * exactly; wake latency only loosely, since a loaded machine wakes late. */
 static void test_precise(void) {
     rt_loop *l = rt_loop_new();
     prog_t p = {.want_tick = true, .tick_ns = 16666667, .stop_after_ticks = 31};
     rt_program pr = program(&p);
     int64_t t0 = rt_now_ns();
     rt_run(l, &pr);
+    int64_t span = p.last_due - p.first_due;
+    CHECK(span == 30 * 16666667LL, "30 periods of exactly 16666667 ns, got %lld", (long long)span);
+    CHECK(p.first_due - t0 <= 16666667LL + 1000000, "first tick due one period in");
+    CHECK(p.worst_early <= 0, "a tick ran %lld ns early", (long long)p.worst_early);
     double per = (double)(p.last_tick_at - t0) / 31.0 / 1e6;
-    CHECK(per >= 16.66 && per < 16.95, "mean period %.3f ms, want ~16.667", per);
+    CHECK(per >= 16.66 && per < 25.0, "mean period %.3f ms", per);
     rt_loop_free(l);
 }
 
@@ -234,15 +268,116 @@ static void test_idle(void) {
     rt_loop_free(l);
 }
 
+/* 9. A signal still arrives when fds are watched too (the signalfd and the
+ * watchers share the wait set). */
+static void on_quiet(void *ctx, rt_loop *l, int fd, unsigned ev) {
+    (void)ctx; (void)l; (void)fd; (void)ev;
+}
+
+static void test_signal_after_watch(void) {
+    const int sigs[] = {SIGUSR2, 0};
+    CHECK(rt_block_signals(sigs), "block SIGUSR2");
+    int pp[2];
+    CHECK(pipe(pp) == 0, "pipe");
+    rt_loop *l = rt_loop_new();
+    CHECK(rt_watch(l, pp[0], RT_READ, on_quiet, NULL) > 0, "watch");
+    CHECK(rt_on_signal(l, SIGUSR2, K_SIG), "route SIGUSR2");
+    prog_t p = {0};
+    rt_program pr = program(&p);
+    kill(getpid(), SIGUSR2);
+    int code = rt_run(l, &pr);
+    CHECK(p.sigs == 1 && code == 0, "signal arrived (%d)", p.sigs);
+    rt_loop_free(l);
+    close(pp[0]);
+    close(pp[1]);
+}
+
+/* 10. Many threads post at once while the loop folds; every message lands,
+ * in per-thread order. Run under TSan in CI. */
+#define STRESS_THREADS 8
+#define STRESS_EACH 5000
+
+typedef struct {
+    rt_loop *l;
+    uint32_t who;
+} stress_arg;
+
+typedef struct {
+    int got[STRESS_THREADS];
+    int64_t last[STRESS_THREADS];
+    bool ordered;
+    int total;
+} stress_prog;
+
+static void *stress_poster(void *arg) {
+    stress_arg *a = arg;
+    for (int i = 0; i < STRESS_EACH; i++) {
+        rt_msg m = {.kind = K_POSTED, .id = a->who};
+        m.v.i = i;
+        if (!rt_post(a->l, &m)) return NULL;   /* loop stopped */
+    }
+    return NULL;
+}
+
+static void stress_upd(void *self, const rt_msg *m, rt_cmds *cmds) {
+    stress_prog *s = self;
+    if (m->kind != K_POSTED || m->id >= STRESS_THREADS) return;
+    if (m->v.i != s->last[m->id] + 1) s->ordered = false;
+    s->last[m->id] = m->v.i;
+    s->got[m->id]++;
+    if (++s->total == STRESS_THREADS * STRESS_EACH) rt_cmd_quit(cmds, 0);
+}
+
+static void test_stress(void) {
+    rt_loop *l = rt_loop_new();
+    stress_prog s = {.ordered = true};
+    for (int i = 0; i < STRESS_THREADS; i++) s.last[i] = -1;
+    rt_program pr = {.self = &s, .update = stress_upd};
+    pthread_t th[STRESS_THREADS];
+    stress_arg args[STRESS_THREADS];
+    for (int i = 0; i < STRESS_THREADS; i++) {
+        args[i] = (stress_arg){l, (uint32_t)i};
+        pthread_create(&th[i], NULL, stress_poster, &args[i]);
+    }
+    rt_run(l, &pr);
+    for (int i = 0; i < STRESS_THREADS; i++) pthread_join(th[i], NULL);
+    CHECK(s.total == STRESS_THREADS * STRESS_EACH, "every post folded, got %d", s.total);
+    CHECK(s.ordered, "each thread's posts folded in the order sent");
+    rt_loop_free(l);
+}
+
+/* 5b. Commands run right after the update that pushed them, in order, and a
+ * message a command sends is folded before the step ends. */
+static void test_commands(void) {
+    rt_loop *l = rt_loop_new();
+    prog_t p = {0};
+    rt_program pr = program(&p);
+    rt_msg go = {.kind = K_EFFECT};
+    rt_send(l, &go);
+    int code = rt_run(l, &pr);
+    CHECK(code == 7, "quit command's code comes back, got %d", code);
+    CHECK(p.performed == 2, "both commands ran, got %d", p.performed);
+    CHECK(p.effect_dones == 2, "both results folded, got %d", p.effect_dones);
+    /* u (effect) p p (both commands before anything else) u u (results) */
+    const char want[] = "uppuu";
+    bool same = p.ntrace == 5;
+    for (int i = 0; same && i < 5; i++) same = p.trace[i] == (uint32_t)want[i];
+    CHECK(same, "update, then its commands, then their results");
+    rt_loop_free(l);
+}
+
 int main(void) {
     test_every();
     test_precise();
     test_once();
     test_post();
     test_unsubscribe_and_send();
+    test_commands();
     test_signal();
+    test_signal_after_watch();
     test_fd();
     test_idle();
+    test_stress();
     printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;
 }

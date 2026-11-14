@@ -1,3 +1,11 @@
+/* The wallpaper state file and cycle list: what each output shows, for
+ * `neowall current` and `neowall list`, and to resume after a restart.
+ * See neowall/output/state_file.h. */
+
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE   /* lstat, localtime_r, PATH_MAX, clock_gettime */
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -10,383 +18,22 @@
 #include <strings.h>  /* POSIX strcasecmp — don't redefine it ourselves */
 #include <unistd.h>
 #include <errno.h>
-#include "neowall/neowall.h"
+#include <pthread.h>
+
+#include "neowall/output/state_file.h"
 #include "neowall/core/constants.h"
+#include "neowall/core/log.h"
+#include "neowall/core/util.h"
 
-/* Current log level */
-static int log_level = LOG_LEVEL_INFO;
+#define MAX_PATH_LENGTH NW_PATH_MAX
+#define MAX_OUTPUTS NW_MAX_OUTPUTS
 
-/* Enable colors in terminal */
-static bool use_colors = true;
-
-/* ANSI color codes */
-#define COLOR_RESET   "\033[0m"
-#define COLOR_RED     "\033[31m"
-#define COLOR_GREEN   "\033[32m"
-#define COLOR_YELLOW  "\033[33m"
-#define COLOR_BLUE    "\033[34m"
-#define COLOR_MAGENTA "\033[35m"
-#define COLOR_CYAN    "\033[36m"
-#define COLOR_GRAY    "\033[90m"
-
-/* Get current time in milliseconds */
-uint64_t get_time_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * MS_PER_SECOND + (uint64_t)ts.tv_nsec / MS_PER_NANOSECOND;
-}
-
-/* Microsecond-precision monotonic clock. Same epoch as get_time_ms() so the
- * two can be mixed (ms*1000 == us). Used for shader animation time, where
- * millisecond quantization causes visible micro-stutter at 60+ FPS. */
-uint64_t get_time_us(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
-}
-
-/* Get formatted timestamp. localtime_r: log lines come from several threads,
- * and localtime() shares one static buffer between them. */
-static void get_timestamp(char *buf, size_t size) {
-    time_t now = time(NULL);
-    struct tm tm_buf;
-    if (localtime_r(&now, &tm_buf)) {
-        strftime(buf, size, "%Y-%m-%d %H:%M:%S", &tm_buf);
-    } else if (size) {
-        buf[0] = '\0';
-    }
-}
-
-/* Generic logging function */
-static void log_message(const char *level, const char *color,
-                       const char *format, va_list args) {
-    char timestamp[32];
-    get_timestamp(timestamp, sizeof(timestamp));
-
-    /* Check if stderr (where we actually write) is a TTY for color support */
-    if (use_colors && isatty(STDERR_FILENO)) {
-        fprintf(stderr, "%s[%s]%s %s%s%s: ",
-                COLOR_GRAY, timestamp, COLOR_RESET,
-                color, level, COLOR_RESET);
-    } else {
-        fprintf(stderr, "[%s] %s: ", timestamp, level);
-    }
-
-    vfprintf(stderr, format, args);
-    fprintf(stderr, "\n");
-    fflush(stderr);
-}
-
-/* While set, log_error is demoted to debug: the caller reports the problem
- * itself, in a better form. Loop thread only. */
-static bool g_quiet_errors = false;
-void log_quiet_errors(bool quiet) { g_quiet_errors = quiet; }
-
-/* Log error message */
-void log_error(const char *format, ...) {
-    va_list args;
-    va_start(args, format);
-    if (g_quiet_errors) {
-        if (log_level >= LOG_LEVEL_DEBUG) log_message("DEBUG", COLOR_CYAN, format, args);
-    } else {
-        log_message("ERROR", COLOR_RED, format, args);
-    }
-    va_end(args);
-}
-
-/* Log warning message */
-void log_warn(const char *format, ...) {
-    if (log_level < LOG_LEVEL_WARN) {
-        return;
-    }
-
-    va_list args;
-    va_start(args, format);
-    log_message("WARN", COLOR_YELLOW, format, args);
-    va_end(args);
-}
-
-/* Log info message */
-void log_info(const char *format, ...) {
-    if (log_level < LOG_LEVEL_INFO) {
-        return;
-    }
-
-    va_list args;
-    va_start(args, format);
-    log_message("INFO", COLOR_GREEN, format, args);
-    va_end(args);
-}
-
-/* Log debug message */
-void log_debug(const char *format, ...) {
-    if (log_level < LOG_LEVEL_DEBUG) {
-        return;
-    }
-
-    va_list args;
-    va_start(args, format);
-    log_message("DEBUG", COLOR_CYAN, format, args);
-    va_end(args);
-}
-
-/* Set log level */
-void log_set_level(int level) {
-    if (level >= LOG_LEVEL_ERROR && level <= LOG_LEVEL_DEBUG) {
-        log_level = level;
-    }
-}
-
-int log_get_level(void) {
-    return log_level;
-}
-
-/* Enable/disable colors */
-
-/* NOTE: strcasecmp(3) is provided by POSIX <strings.h>; we used to ship a
- * locale-ignorant duplicate here that shadowed the libc symbol. Removed in
- * audit fix #28. */
-
-/* Parse a non-negative decimal index out of `s`.
- *
- * atoi(3) has no way to report failure, and C11 7.22.1p1 makes it undefined
- * behaviour when the value cannot be represented as an int - so a digit string
- * that overflows int cannot be handled safely by the caller. Values that come
- * from the command line or from the on-disk state file go through this instead.
- *
- * Accepts only a non-empty run of decimal digits: no sign, no leading or
- * trailing whitespace, no trailing garbage. Overflow (ERANGE) is rejected
- * rather than clamped. On success stores the value in *out and returns true;
- * *out is untouched on failure. */
-bool neowall_parse_index(const char *s, long *out) {
-    if (!s || !out || *s == '\0') {
-        return false;
-    }
-
-    for (const char *p = s; *p; p++) {
-        if (*p < '0' || *p > '9') {
-            return false;
-        }
-    }
-
-    errno = 0;
-    char *end = NULL;
-    long value = strtol(s, &end, 10);
-    if (end == s || *end != '\0' || errno == ERANGE || value < 0) {
-        return false;
-    }
-
-    *out = value;
-    return true;
-}
-
-/* Path expansion (tilde expansion) */
-bool expand_path(const char *path, char *expanded, size_t size) {
-    if (!path || !expanded || size == 0) {
-        return false;
-    }
-
-    if (path[0] == '~') {
-        const char *home = getenv("HOME");
-        if (!home) {
-            log_error("Cannot expand ~: HOME not set");
-            return false;
-        }
-
-        size_t home_len = strlen(home);
-        size_t path_len = strlen(path + 1);
-
-        if (home_len + path_len + 1 > size) {
-            log_error("Expanded path too long");
-            return false;
-        }
-
-        snprintf(expanded, size, "%s%s", home, path + 1);
-        return true;
-    }
-
-    /* No expansion needed */
-    if (strlen(path) >= size) {
-        log_error("Path too long");
-        return false;
-    }
-
-    strncpy(expanded, path, size - 1);
-    expanded[size - 1] = '\0';
-    return true;
-}
-
-bool neowall_each_data_dir(bool (*fn)(const char *dir, void *ctx), void *ctx) {
-    char dir[PATH_MAX];
-    int n;
-
-    const char *dh = getenv("XDG_DATA_HOME");
-    const char *home = getenv("HOME");
-    if (dh && dh[0] == '/') {
-        n = snprintf(dir, sizeof(dir), "%s/neowall", dh);
-    } else if (home && home[0]) {
-        n = snprintf(dir, sizeof(dir), "%s/.local/share/neowall", home);
-    } else {
-        n = -1;
-    }
-    if (n > 0 && (size_t)n < sizeof(dir) && access(dir, F_OK) == 0 && fn(dir, ctx)) return true;
-
-    /* XDG says relative entries are invalid, and an unset/empty value means
-     * /usr/local/share:/usr/share. */
-    const char *dirs = getenv("XDG_DATA_DIRS");
-    if (!dirs || !dirs[0]) dirs = "/usr/local/share:/usr/share";
-    bool seen_builtin = false;
-    for (const char *p = dirs; *p;) {
-        const char *end = strchr(p, ':');
-        size_t len = end ? (size_t)(end - p) : strlen(p);
-        if (len > 0 && p[0] == '/') {
-            n = snprintf(dir, sizeof(dir), "%.*s/neowall", (int)len, p);
-            if (n > 0 && (size_t)n < sizeof(dir)) {
-                if (strcmp(dir, NEOWALL_DATADIR) == 0) seen_builtin = true;
-                if (access(dir, F_OK) == 0 && fn(dir, ctx)) return true;
-            }
-        }
-        p += len;
-        if (*p == ':') p++;
-    }
-
-    if (!seen_builtin && access(NEOWALL_DATADIR, F_OK) == 0 && fn(NEOWALL_DATADIR, ctx)) {
-        return true;
-    }
-    return false;
-}
-
-struct find_data_ctx {
-    const char *rel;
-    char *out;
-    size_t size;
-};
-
-static bool find_data_in(const char *dir, void *vctx) {
-    struct find_data_ctx *c = vctx;
-    int n = snprintf(c->out, c->size, "%s/%s", dir, c->rel);
-    return n > 0 && (size_t)n < c->size && access(c->out, F_OK) == 0;
-}
-
-bool neowall_find_data(const char *rel, char *out, size_t size) {
-    if (!rel || !out || size == 0) return false;
-    struct find_data_ctx c = {rel, out, size};
-    if (neowall_each_data_dir(find_data_in, &c)) return true;
-    out[0] = '\0';
-    return false;
-}
-
-void config_str_set(char *dst, size_t dst_size, const char *src) {
-    if (!dst || dst_size == 0) return;
-    if (!src) {
-        dst[0] = '\0';
-        return;
-    }
-    if (dst == src) return;   /* already holds the value */
-    snprintf(dst, dst_size, "%s", src);
-}
-
-/* Check if file exists */
-bool file_exists(const char *path) {
-    return access(path, F_OK) == 0;
-}
-
-/* Get file size */
-
-/* Format bytes to human readable string */
-void format_bytes(uint64_t bytes, char *buf, size_t size) {
-    const char *units[] = {"B", "KB", "MB", "GB", "TB"};
-    int unit_index = 0;
-    double value = (double)bytes;
-
-    while (value >= 1024.0 && unit_index < 4) {
-        value /= 1024.0;
-        unit_index++;
-    }
-
-    if (unit_index == 0) {
-        snprintf(buf, size, "%" PRIu64 " %s", (uint64_t)value, units[unit_index]);
-    } else {
-        snprintf(buf, size, "%.2f %s", value, units[unit_index]);
-    }
-}
-
-/* Linear interpolation */
-float lerp(float a, float b, float t) {
-    return a + (b - a) * t;
-}
-
-/* Clamp value between min and max */
-float clamp(float value, float min, float max) {
-    if (value < min) return min;
-    if (value > max) return max;
-    return value;
-}
-
-/* Ease in-out cubic function for smooth transitions */
-float ease_in_out_cubic(float t) {
-    if (t < 0.5f) {
-        return 4.0f * t * t * t;
-    } else {
-        float f = (2.0f * t) - 2.0f;
-        return 0.5f * f * f * f + 1.0f;
-    }
-}
-
-/* Get state file path - use persistent location that survives reboots */
-/* Create `dir` 0700 if absent, then verify it is a directory we own with no
- * group/other access and is not a symlink. Returns true only when the path is
- * safe to drop predictable-named files into. lstat (not stat) is deliberate so
- * a symlink planted by another user is rejected rather than followed. */
-static bool ensure_private_dir(const char *dir) {
-    if (mkdir(dir, 0700) != 0 && errno != EEXIST) {
-        return false;
-    }
-    struct stat st;
-    if (lstat(dir, &st) != 0) {
-        return false;
-    }
-    if (!S_ISDIR(st.st_mode)) {
-        return false;      /* symlink or regular file squatting the name */
-    }
-    if (st.st_uid != getuid()) {
-        return false;      /* someone else owns it */
-    }
-    if (st.st_mode & (S_IRWXG | S_IRWXO)) {
-        /* Tighten perms if a previous umask left it group/other-accessible. */
-        if (chmod(dir, 0700) != 0) {
-            return false;
-        }
-    }
-    return true;
-}
-
-const char *neowall_secure_runtime_dir(void) {
-    static char dir[MAX_PATH_LENGTH];
-
-    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
-    if (runtime_dir && runtime_dir[0] != '\0') {
-        /* $XDG_RUNTIME_DIR is already a per-user 0700 tmpfs; a neowall/
-         * subdir under it inherits that isolation. */
-        snprintf(dir, sizeof(dir), "%s/neowall", runtime_dir);
-        if (ensure_private_dir(dir)) {
-            return dir;
-        }
-    }
-
-    /* Fallback: /tmp is world-writable, so the per-uid subdir MUST be created
-     * and ownership-checked rather than blindly written into. */
-    snprintf(dir, sizeof(dir), "/tmp/neowall-%d", (int)getuid());
-    if (ensure_private_dir(dir)) {
-        return dir;
-    }
-
-    return NULL;
-}
+#define COLOR_GREEN "\033[32m"
+#define COLOR_RESET "\033[0m"
 
 /* Get path to the cycle list file (shows all wallpapers with indices) */
 /* Must use same fallback logic as get_state_file_path to stay in sync */
-const char *get_cycle_list_file_path(void) {
+static const char *get_cycle_list_file_path(void) {
     static char path[MAX_PATH_LENGTH];
     const char *state_home = getenv("XDG_STATE_HOME");
     const char *config_home = getenv("XDG_CONFIG_HOME");
@@ -1049,13 +696,13 @@ bool read_cycle_list(void) {
             filename = filename ? filename + 1 : path;
             
             if ((size_t)current_index == current) {
-                if (use_colors && isatty(STDOUT_FILENO)) {
+                if (isatty(STDOUT_FILENO)) {
                     printf("  %s➜ [%d] %s%s\n", COLOR_GREEN, current_index, filename, COLOR_RESET);
                 } else {
                     printf("  > [%d] %s\n", current_index, filename);
                 }
             } else {
-                 if (use_colors && isatty(STDOUT_FILENO)) {
+                 if (isatty(STDOUT_FILENO)) {
                     printf("    [%d] %s\n", current_index, filename);
                 } else {
                     printf("    [%d] %s\n", current_index, filename);

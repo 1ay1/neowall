@@ -14,18 +14,21 @@
 struct neowall_state;
 struct output_state;
 
-/* Message kinds. Values are stable only within one process. */
+/* Message kinds. Values are stable only within one process.
+ *
+ * A message from a signal has id = signo (never 0). From the socket or from
+ * perform it has id 0 and carries its argument. */
 enum {
     NW_MSG_NONE = 0,
-    NW_MSG_QUIT,            /* SIGINT/SIGTERM, or the display went away */
-    NW_MSG_RELOAD,          /* SIGHUP: reload config */
+    NW_MSG_QUIT,            /* SIGINT/SIGTERM, `kill`, or the display went away */
+    NW_MSG_RELOAD,          /* SIGHUP, or `reload` with v.i = socket conn to answer */
     NW_MSG_NEXT,            /* SIGUSR1: advance every cycle group once */
     NW_MSG_CYCLE_PAUSE,     /* SIGUSR2 */
     NW_MSG_CYCLE_RESUME,    /* SIGCONT */
-    NW_MSG_SET_INDEX,       /* SIGRTMIN: v.i = index (read from the index file) */
+    NW_MSG_SET_INDEX,       /* SIGRTMIN (index is in a file), or v.i = index */
     NW_MSG_SHADER_PAUSE,    /* SIGRTMIN+1 */
     NW_MSG_SHADER_RESUME,   /* SIGRTMIN+2 */
-    NW_MSG_SET_TERMINAL,    /* SIGRTMIN+3: command in the terminal file */
+    NW_MSG_SET_TERMINAL,    /* SIGRTMIN+3 (command is in a file), or it's in the model */
     NW_MSG_SIGNAL,          /* any other routed signal; id = signo */
     NW_MSG_CYCLE_DUE,       /* timer: a cycling output's duration elapsed; id = output */
     NW_MSG_FRAME_DUE,       /* timer: a vsync-off animated output's frame; id = output */
@@ -35,6 +38,7 @@ enum {
     NW_MSG_REDRAW,          /* any thread: redraw every output (rt_post) */
     NW_MSG_REDRAW_OUTPUT,   /* any thread: redraw one output; v.p = output */
     NW_MSG_OUTPUTS_NEW,     /* a new output appeared (hotplug / reconnect) */
+    NW_MSG_GPU_LOST,        /* present: graphics can't recover in this process */
 };
 
 /* Run neowall until it's told to stop. Takes over from main() once the
@@ -51,6 +55,8 @@ bool app_post(uint32_t kind, uint32_t id, int64_t value);
 void app_request_redraw(struct neowall_state *state);
 void app_request_output_redraw(struct output_state *output);
 
-/* Ask the daemon to stop (any thread). */
+/* The control socket: $XDG_RUNTIME_DIR/neowall.sock, or the private
+ * fallback dir. Static buffer; empty when no private dir is available. */
+const char *app_socket_path(void);
 
 #endif /* NEOWALL_APP_H */

@@ -1,9 +1,11 @@
 /* Shared by the files of the app program (src/app/). Not a public header.
  *
  *   app.c      the model, posting from other threads, app_run
- *   update.c   update + subscribe: fold messages into the model, no GL
+ *   update.c   update + subscribe: msg -> model + commands. No I/O, no GL
+ *   perform.c  runs the commands update asks for
  *   present.c  draw every output that needs it, bring outputs up
- *   host.c     the compositor fd and the shader watch fd */
+ *   host.c     the compositor fd and the shader watch fd -> messages
+ *   control.c  the control socket's requests -> messages */
 #ifndef NEOWALL_APP_INTERNAL_H
 #define NEOWALL_APP_INTERNAL_H
 
@@ -55,13 +57,34 @@ struct app {
     char ipc_terminal_cmd[512];     /* set-terminal's command, for its message */
 };
 
+/* Effects update asks for (rt_cmd.kind). perform.c runs them. */
+enum {
+    APP_CMD_NONE = 0,
+    APP_CMD_NOTIFY,             /* v.s: an sd_notify line, static storage */
+    APP_CMD_STOP,               /* tell other threads we're stopping */
+    APP_CMD_RELOAD,             /* reload config; v.u = ipc conn to answer, or 0 */
+    APP_CMD_READ_INDEX_FILE,    /* old CLI: index is in a file -> SET_INDEX */
+    APP_CMD_READ_TERMINAL_FILE, /* old CLI: command is in a file -> SET_TERMINAL */
+    APP_CMD_SHADER_PAUSE,       /* v.i = 1 freeze / 0 unfreeze shader clocks */
+    APP_CMD_REDRAW_ALL,         /* mark every output dirty */
+    APP_CMD_FRAME,              /* id = output: a paced frame is due */
+    APP_CMD_OCCLUSION,          /* re-check fullscreen windows */
+    APP_CMD_WATCH_RELOAD,       /* reapply the watched shader */
+};
+
 /* app.c */
 void app_send(rt_loop *loop, uint32_t kind, uint32_t id, int64_t v);
 void app_arm_output_wake(bool armed);
 
 /* update.c */
-bool app_update(void *self, rt_loop *loop, const rt_msg *m);
+void app_update(void *self, const rt_msg *m, rt_cmds *cmds);
 void app_subscribe(void *self, rt_subs *subs);
+
+/* perform.c */
+void app_perform(void *self, rt_loop *loop, const rt_cmd *cmd);
+void app_mark_redraw_all(struct neowall_state *state);
+
+/* control.c */
 void app_on_ipc_request(void *ctx, rt_loop *loop, const nw_ipc_request_t *req);
 
 /* present.c */

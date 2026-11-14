@@ -507,7 +507,7 @@ static bool can_cycle_wallpaper(void) {
  * which still say "no daemon" properly. */
 static bool ipc_command(const char *verb, const char *arg, int *rc) {
     char reply[NW_IPC_MAX_LINE];
-    nw_ipc_status st = nw_ipc_request(verb, arg, reply, sizeof(reply), 3000);
+    nw_ipc_status st = nw_ipc_request(app_socket_path(), verb, arg, reply, sizeof(reply), 3000);
     switch (st) {
     case NW_IPC_OK:
         if (reply[0]) printf("%s\n", reply);
@@ -518,7 +518,7 @@ static bool ipc_command(const char *verb, const char *arg, int *rc) {
         *rc = EXIT_FAILURE;
         return true;
     case NW_IPC_FAILED:
-        fprintf(stderr, "The daemon didn't answer on %s\n", nw_ipc_socket_path());
+        fprintf(stderr, "The daemon didn't answer on %s\n", app_socket_path());
         *rc = EXIT_FAILURE;
         return true;
     case NW_IPC_NO_DAEMON:

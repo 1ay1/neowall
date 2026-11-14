@@ -9,6 +9,7 @@
 #include <EGL/egl.h>
 #include <GL/gl.h>
 #include "version.h"
+#include "neowall/core/constants.h"
 #include "neowall/output/output.h"
 #include "neowall/config/config.h"
 
@@ -16,8 +17,8 @@
 typedef atomic_bool atomic_bool_t;
 typedef atomic_int atomic_int_t;
 
-#define MAX_PATH_LENGTH OUTPUT_MAX_PATH_LENGTH  /* Compatibility alias */
-#define MAX_OUTPUTS 16
+#define MAX_PATH_LENGTH NW_PATH_MAX
+#define MAX_OUTPUTS NW_MAX_OUTPUTS
 #define MAX_WALLPAPERS 256
 
 /* Forward declarations */
@@ -122,64 +123,13 @@ void detect_gl_capabilities(struct neowall_state *state);
 
 /* The main loop is the runtime: see neowall/app/app.h (app_run, app_post). */
 
-/* Utility functions */
-uint64_t get_time_ms(void);
-uint64_t get_time_us(void);
 const char *wallpaper_mode_to_string(enum wallpaper_mode mode);
 const char *transition_type_to_string(enum transition_type type);
 
+#include "neowall/output/state_file.h"
 #include "neowall/core/log.h"
-float ease_in_out_cubic(float t);
-
-/* Parse a non-negative decimal index (wallpaper index, cycle_total, ...) from a
- * string that came from the user or from disk. Rejects the empty string, any
- * non-digit character, and values that overflow long, none of which atoi() can
- * report. Returns true and writes *out on success. */
-bool neowall_parse_index(const char *s, long *out);
-
-/* Expand a leading `~` to $HOME and copy into `expanded`. Returns false if the
- * result would not fit, which callers must treat as a hard failure rather than
- * using a truncated path. Defined in utils.c. */
-bool expand_path(const char *path, char *expanded, size_t size);
-
-/* Find `rel` (e.g. "shaders/x.glsl") under neowall's data dirs, in order:
- * $XDG_DATA_HOME/neowall, each $XDG_DATA_DIRS entry + /neowall, then the
- * compiled-in NEOWALL_DATADIR. Writes the first existing path to `out`.
- * Returns false if none exists or a path doesn't fit. */
-bool neowall_find_data(const char *rel, char *out, size_t size);
-
-/* Copy src into a fixed-size field. Safe when src IS dst (the deferred
- * re-apply paths pass a config's own buffer back in, and overlapping
- * snprintf is undefined). NULL src clears the field. */
-void config_str_set(char *dst, size_t dst_size, const char *src);
-
-/* Call `fn` on each existing neowall data dir, same order as above, until it
- * returns true. Returns whether any call returned true. */
-bool neowall_each_data_dir(bool (*fn)(const char *dir, void *ctx), void *ctx);
-
-/* State file functions */
-const char *get_state_file_path(void);
-const char *get_cycle_list_file_path(void);
-
-/* Returns a process-private runtime directory for transient IPC/state files.
- * Prefers $XDG_RUNTIME_DIR/neowall, falling back to /tmp/neowall-<uid>.
- * The directory is created 0700 and validated to be a real directory we own
- * (not a symlink, not attacker-controlled) before being returned, closing the
- * symlink/TOCTOU window that a shared /tmp otherwise opens. Returns NULL if a
- * safe directory could not be established. The returned pointer is to a static
- * buffer; do not free it. */
-const char *neowall_secure_runtime_dir(void);
-bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
-                           const char *mode, int cycle_index, int cycle_total,
-                           const char *status);
-/* Atomically remove one output, or retain only the supplied physical output
- * names. An absent state file/name is a successful no-op. */
-bool remove_wallpaper_state(const char *output_name);
-bool prune_wallpaper_state(const char *const *output_names, size_t output_count);
-bool read_wallpaper_state(void);
-int restore_cycle_index_from_state(const char *output_name);
-bool write_cycle_list(const char *output_name, char **paths, size_t count, size_t current_index);
-bool read_cycle_list(void);
+#include "neowall/core/time.h"
+#include "neowall/core/util.h"
 
 /* Signal handling */
 void signal_handler_init(struct neowall_state *state);

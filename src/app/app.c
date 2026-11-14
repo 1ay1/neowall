@@ -33,11 +33,12 @@ static atomic_int g_posters = 0;
  * costs at most one wake per sleep instead of one per read. */
 static atomic_bool g_output_wake_armed = true;
 
-/* Post from the loop thread itself (a host hook that can't return a msg). */
+/* Send from the loop thread itself (host hooks, perform, control). Folded in
+ * this same step, before present. */
 void app_send(rt_loop *l, uint32_t kind, uint32_t id, int64_t v) {
     rt_msg m = {.kind = kind, .id = id};
     m.v.i = v;
-    rt_post(l, &m);
+    rt_send(l, &m);
 }
 
 void app_arm_output_wake(bool armed) {
@@ -129,7 +130,7 @@ int app_run(struct neowall_state *state) {
     /* The control socket. A preview runs beside the real daemon and must not
      * take it; neither does an instance that finds another one listening. */
     if (!state->is_preview) {
-        a.ipc = ipc_server_start(a.loop, app_on_ipc_request, &a);
+        a.ipc = ipc_server_start(a.loop, app_socket_path(), app_on_ipc_request, &a);
         if (!a.ipc) log_warn("Control socket unavailable; CLI commands fall back to signals");
     }
 
@@ -138,6 +139,7 @@ int app_run(struct neowall_state *state) {
     rt_program prog = {
         .self = &a,
         .update = app_update,
+        .perform = app_perform,
         .subscribe = app_subscribe,
         .present = app_present,
         .wait_hint_ns = app_wait_hint,

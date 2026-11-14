@@ -60,12 +60,14 @@ include/neowall/          PUBLIC headers (the project's API surface)
   terminal/                  in-tree VT/xterm emulator (terminal-as-wallpaper)
 src/                       IMPLEMENTATION (.c) + truly-private impl headers
   main.c                     CLI, daemonize, startup/shutdown
-  core/                      utils.c (log, paths, state file), base.c (arena, str)
+  core/                      log.c (log, time), util.c (paths, data dirs),
+                             base.c (arena, str)
   runtime/                   rt.c (wait, messages, timers, mailbox), ipc.c
                              (control socket), sd_notify.c
-  app/                       the program on rt: app.c (model, run), update.c,
-                             present.c, host.c (compositor + watch fds),
-                             watch.c (`neowall watch`); app_internal.h
+  app/                       the program on rt: app.c (run), update.c (pure),
+                             perform.c (effects), subscribe.c, present.c,
+                             host.c + control.c (fds/socket -> msgs), watch.c
+  output/state_file.c        what each output shows, on disk
   shader/wall_clock.c        virtual calendar clock (`--date`, `--timelapse`)
   compositor/backends/{wayland,x11}/   backend implementations; private headers
                                        (frame_watchdog.h, *_occlusion.h) live here

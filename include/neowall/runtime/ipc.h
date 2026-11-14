@@ -10,8 +10,9 @@
  * not anything happened; and the CLI found the daemon through a pid file,
  * which can be stale.
  *
- * Now there is one unix socket at $XDG_RUNTIME_DIR/neowall.sock. A client
- * connects, writes one request line, reads one reply line, and closes:
+ * Now there is one unix socket (the program picks the path; neowall uses
+ * app_socket_path()). A client connects, writes one request line, reads one
+ * reply line, and closes:
  *
  *   request:  <verb>[ <arg>]\n         e.g. "next\n", "set 3\n", "set-terminal htop\n"
  *   reply:    ok[ <text>]\n | err <text>\n
@@ -33,10 +34,6 @@
  * command; anything longer is refused. */
 #define NW_IPC_MAX_LINE 1024
 
-/* $XDG_RUNTIME_DIR/neowall.sock (or the secure fallback dir). Static buffer;
- * empty string when no private directory is available. */
-const char *nw_ipc_socket_path(void);
-
 /* ── client ───────────────────────────────────────────────────────────── */
 
 typedef enum {
@@ -48,7 +45,7 @@ typedef enum {
 
 /* Send one request and wait for the reply (bounded by `timeout_ms`). `reply`
  * receives the text after "ok " / "err " (may be empty). */
-nw_ipc_status nw_ipc_request(const char *verb, const char *arg,
+nw_ipc_status nw_ipc_request(const char *path, const char *verb, const char *arg,
                              char *reply, size_t reply_size, int timeout_ms);
 
 /* ── server (daemon) ──────────────────────────────────────────────────── */
@@ -71,7 +68,8 @@ typedef struct nw_ipc_server nw_ipc_server;
 /* Bind the socket and start accepting on `loop`. Refuses to steal the socket
  * from a live daemon (a connect that succeeds means someone is listening); a
  * stale socket file from a crashed daemon is replaced. NULL on failure. */
-nw_ipc_server *ipc_server_start(rt_loop *loop, nw_ipc_on_request on_request, void *ctx);
+nw_ipc_server *ipc_server_start(rt_loop *loop, const char *path,
+                                nw_ipc_on_request on_request, void *ctx);
 
 /* Answer request `conn` and close it. `ok` selects "ok"/"err"; `text` may be
  * NULL. A conn that already went away is ignored. */

@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <GL/gl.h>
+#include "neowall/core/constants.h"
 #include "neowall/core/result.h"        /* For nw_result */
 #include "neowall/image/image.h"   /* For struct image_data and enum image_format */
 #include "neowall/shader/wallshader.h"
@@ -14,7 +15,7 @@
 #include "neowall/output/span.h"   /* For struct span_view */
 
 /* Constants */
-#define OUTPUT_MAX_PATH_LENGTH 4096
+#define OUTPUT_MAX_PATH_LENGTH NW_PATH_MAX
 
 /* Forward declarations for external types */
 struct neowall_state;

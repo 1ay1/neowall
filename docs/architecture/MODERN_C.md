@@ -6,8 +6,9 @@ ownership, single-owner state, narrow module boundaries, and errors that
 can't be dropped. Every number here was measured on the tree, not guessed.
 
 This is a plan, not a description. Landed so far: step 7 (the program
-lives in `src/app/`, split into update/present/host, no `.c`-in-`.c`) and
-the loose `src/*.c` files moved into `core/`, `runtime/` and `app/`.
+lives in `src/app/`, no `.c`-in-`.c`); the loose `src/*.c` files moved
+into `core/`, `runtime/` and `app/` with a CI layer check; update is pure
+and returns effects that `perform` runs (docs/architecture/RUNTIME.md).
 
 ## Where it already is
 

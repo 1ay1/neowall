@@ -25,6 +25,8 @@ jobs:
         run: ./scripts/version.sh check
       - name: No unused functions
         run: ./scripts/check-unused.sh
+      - name: Layers (core <- runtime <- app)
+        run: ./scripts/check-layers.sh
 
   sanitizers:
     name: ASan + UBSan (unit tests)

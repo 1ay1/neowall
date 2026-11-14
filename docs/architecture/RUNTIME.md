@@ -9,14 +9,20 @@ polled somewhere far away.
 ```
   OS: fds, timers, signals            program (src/app/)
   ────────────────────────            ───────────────────
-  rt wait ── signal / fd / post ──▶   update(model, msg)      the only place
-                                         │                    state changes
+  rt wait ── signal / fd / post ──▶   update(model, msg)      changes the model,
+                                         │                    lists effects; no I/O
+                                         ▼
+      ◀── result msgs (rt_send) ───   perform(cmd)            files, reload, sd_notify
+                                         │
                                          ▼
                   timers  ◀────────   subscribe(model)        reconciled by key
                                          │
                                          ▼
                                       present(model)          GL, EGL, swap
 ```
+
+Layers: `core` (log, time, paths, containers) ← `runtime` (rt, ipc,
+sd_notify) ← `app`. `scripts/check-layers.sh` fails CI if one reaches up.
 
 ## rt: the loop
 
@@ -30,11 +36,18 @@ polled somewhere far away.
 3. **turn what happened into messages**, in a fixed order: signals, fd
    callbacks, the host's after-wait hook (Wayland dispatch), the mailbox,
    due timers.
-4. **fold** every message through `update`, re-run `subscribe`, then
-   `present`. A step that folded nothing doesn't draw.
+4. **fold** every message through `update`. Right after each update, rt runs
+   the effects it pushed, in order: program commands go to `perform`,
+   `rt_cmd_send` queues another message, `rt_cmd_quit` stops the loop. A
+   message `perform` sends back is folded in the same step. Then
+   `subscribe`, then `present`. A step that folded nothing doesn't draw.
 
 Rules it enforces:
 
+- **update is pure.** It gets the model and the message, and an effect list
+  to push into. It never sees the loop, so it can't post, quit or do I/O.
+  `rt_cmds_new()` lets a test run update with no loop at all and read back
+  what it asked for (`tests/test_app_update.c`).
 - **One thread changes state.** Other threads `rt_post()` a message; it is
   folded on the loop thread, in order, never dropped. After the loop stops,
   `app_post` returns false, and `app_run` waits for posts already in flight
@@ -55,28 +68,43 @@ Rules it enforces:
   timerfd by hand. A repeating timer that fell behind (stall, suspend) fires
   once and re-phases, never a burst.
 
-`tests/test_runtime.c` checks these: timers never fire early, a 16.67 ms
-period isn't padded to 17, every posted message arrives, signals become
-messages, an idle loop sleeps.
+`tests/test_runtime.c` checks these: timers never fire early and a 16.67 ms
+period is exact, commands run right after their update and in order, 8
+threads posting 40,000 messages all arrive in per-thread order, signals
+become messages alongside watched fds, an idle loop sleeps. CI runs it
+under TSan.
 
 ## The program (`src/app/`)
+
+| file | role |
+|---|---|
+| `app.c` | the loop's setup, posting from other threads, `app_run` |
+| `update.c` | message → model + effects. No I/O, no GL |
+| `perform.c` | runs the effects: reload, file reads, shader clock pause, sd_notify, occlusion |
+| `subscribe.c` | which timers exist, from the model |
+| `present.c` | draw every output that needs it, bring outputs up |
+| `host.c` | the compositor and watch fds → messages |
+| `control.c` | control-socket requests → messages |
 
 **Messages** (`include/neowall/app/app.h`):
 
 | message | from |
 |---|---|
-| `QUIT` | SIGINT, SIGTERM, a compositor error or hangup |
-| `RELOAD` | SIGHUP |
+| `QUIT` | SIGINT, SIGTERM, `kill`, a compositor error or hangup |
+| `RELOAD` | SIGHUP, or `reload` (carries the connection to answer) |
 | `NEXT`, `CYCLE_PAUSE`, `CYCLE_RESUME` | SIGUSR1, SIGUSR2, SIGCONT |
-| `SET_INDEX`, `SHADER_PAUSE`, `SHADER_RESUME`, `SET_TERMINAL` | SIGRTMIN+0..3 (the CLI writes the argument to a file first) |
+| `SET_INDEX`, `SHADER_PAUSE`, `SHADER_RESUME`, `SET_TERMINAL` | SIGRTMIN+0..3, or the socket |
 | `CYCLE_DUE`, `FRAME_DUE`, `TRANSITION` | timers from `subscribe` |
 | `DISPLAY` | the compositor fd was serviced |
 | `OUTPUTS_NEW` | the Wayland registry saw a new output |
 | `WATCH` | `neowall watch`: the shader file changed |
 | `REDRAW` | any thread (`app_request_redraw`) |
+| `GPU_LOST` | present: the context or a surface can't recover |
 
-Control-socket requests (below) are answered on the loop thread and then go
-through the same messages.
+A message from a signal has `id = signo`; from the socket or `perform` it
+has `id 0` and carries its argument. So `SET_INDEX` from an old CLI's
+signal makes update ask `perform` to read the index file, and `perform`
+answers with `SET_INDEX` carrying the index.
 
 **The model** (`struct app`) holds what used to be atomics on
 `neowall_state`: queued `next` requests, the requested index and terminal

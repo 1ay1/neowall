@@ -9,17 +9,26 @@
  *   - a mailbox that other threads and signal delivery post messages into
  *
  * It knows nothing about wallpapers. A program supplies:
- *   update(prog, msg)     fold one message; the only place state changes
+ *   update(prog, msg, cmds)  fold one message into the model and say which
+ *                         effects to run. It gets no rt_loop: it can't post,
+ *                         quit or touch the world, only push commands.
+ *   perform(prog, cmd)    run one command (file I/O, a reload, a syscall).
+ *                         Results come back as messages via rt_send.
  *   subscribe(prog, sub)  declare which timers should exist right now
  *   present(prog)         draw, after a step that changed something
  *
- * Messages are opaque to rt: a small fixed-size POD (rt_msg) whose `kind`
- * and payload belong to the program.
+ * Messages and commands are opaque to rt: small fixed-size PODs whose `kind`
+ * and payload belong to the program. A command runs right after the update
+ * that pushed it, before the next message, so the order is the order the
+ * program wrote. Two commands are rt's own: rt_cmd_send (fold another
+ * message) and rt_cmd_quit.
  *
  * Threading: everything runs on the loop thread except rt_post(), which any
- * thread may call. It is also async-signal-safe EXCEPT that it may take a
- * mutex; signals are delivered through a signalfd, not a handler, so that
- * never matters in practice. */
+ * thread may call while the loop exists. After rt_run returns, rt_post
+ * returns false. rt_loop_free must not race a post: the caller makes sure
+ * no thread is inside rt_post (app.c counts posters in flight for that).
+ * rt_post takes a mutex, so it isn't async-signal-safe; signals come in
+ * through a signalfd instead (rt_on_signal). */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -31,21 +40,31 @@ extern "C" {
 
 /* ── messages ─────────────────────────────────────────────────────────── */
 
-/* Big enough for every neowall message (a path is carried by reference to
- * the program's own storage, never inline). */
+/* Big enough for every neowall message or command (a path is carried by
+ * reference to the program's own storage, never inline). */
 #define RT_MSG_PAYLOAD 48
+
+typedef union rt_payload {
+    int64_t  i;
+    uint64_t u;
+    double   d;
+    void    *p;
+    const char *s;                      /* static storage only */
+    unsigned char bytes[RT_MSG_PAYLOAD];
+} rt_payload;
 
 typedef struct rt_msg {
     uint32_t kind;                      /* program-defined; 0 is reserved */
     uint32_t id;                        /* program-defined target (an output) */
-    union {
-        int64_t  i;
-        uint64_t u;
-        double   d;
-        void    *p;
-        unsigned char bytes[RT_MSG_PAYLOAD];
-    } v;
+    rt_payload v;
 } rt_msg;
+
+/* An effect update asks for. Same shape as a message, separate type. */
+typedef struct rt_cmd {
+    uint32_t kind;                      /* program-defined; 0 is reserved */
+    uint32_t id;
+    rt_payload v;
+} rt_cmd;
 
 /* ── the loop ─────────────────────────────────────────────────────────── */
 
@@ -54,10 +73,16 @@ typedef struct rt_loop rt_loop;
 /* A subscription set under construction. Passed to the program's subscribe(). */
 typedef struct rt_subs rt_subs;
 
+/* The commands one update call pushes. Passed to the program's update(). */
+typedef struct rt_cmds rt_cmds;
+
 typedef struct rt_program {
     void *self;
-    /* Fold one message. Return false to ask the loop to stop. */
-    bool (*update)(void *self, rt_loop *loop, const rt_msg *msg);
+    /* Fold one message into the model. Effects go in `cmds`. */
+    void (*update)(void *self, const rt_msg *msg, rt_cmds *cmds);
+    /* Run one program command. Loop thread; may rt_send results. Optional
+     * if update never pushes a program command. */
+    void (*perform)(void *self, rt_loop *loop, const rt_cmd *cmd);
     /* Declare the timers that should exist now (rt_sub_every / rt_sub_at).
      * Called after every step that ran update. Optional. */
     void (*subscribe)(void *self, rt_subs *subs);
@@ -72,19 +97,49 @@ typedef struct rt_program {
 rt_loop *rt_loop_new(void);
 void rt_loop_free(rt_loop *loop);
 
-/* Run until update returns false, rt_quit() is called, or a fatal error.
- * Returns the exit code given to rt_quit (0 by default). */
+/* Run until a quit command, rt_quit(), or a fatal error. Returns the exit
+ * code given to the quit (0 by default). */
 int rt_run(rt_loop *loop, const rt_program *prog);
 
-/* Ask the loop to stop after the current step. Loop thread only. */
+/* Ask the loop to stop after the current step. Loop thread only, from
+ * host code or present; update uses rt_cmd_quit. */
 void rt_quit(rt_loop *loop, int code);
 
 /* Post a message from ANY thread. Folded in order on the loop thread.
  * Returns false only if the mailbox is closed (the loop has stopped). */
 bool rt_post(rt_loop *loop, const rt_msg *msg);
 
-/* Post from the loop thread itself: folded next, in this same step. */
+/* Post from the loop thread itself (host code, perform): folded in this
+ * same step. */
 void rt_send(rt_loop *loop, const rt_msg *msg);
+
+/* ── commands (inside update) ─────────────────────────────────────────── */
+
+/* A program command, handed to perform() right after this update. */
+void rt_cmd_push(rt_cmds *cmds, const rt_cmd *cmd);
+/* Fold `msg` after this one, in this same step. */
+void rt_cmd_send(rt_cmds *cmds, const rt_msg *msg);
+/* Stop the loop after this step with `code`. Later commands still run. */
+void rt_cmd_quit(rt_cmds *cmds, int code);
+
+/* What update asked for, one entry per push. */
+typedef enum { RT_EFFECT_CMD, RT_EFFECT_SEND, RT_EFFECT_QUIT } rt_effect_tag;
+typedef struct rt_effect {
+    rt_effect_tag tag;
+    union {
+        rt_cmd cmd;                     /* RT_EFFECT_CMD */
+        rt_msg msg;                     /* RT_EFFECT_SEND */
+        int code;                       /* RT_EFFECT_QUIT */
+    } u;
+} rt_effect;
+
+/* Run update by hand, with no loop, and look at what it asked for. This is
+ * how a program's update is tested: message in, model + effects out. */
+rt_cmds *rt_cmds_new(void);
+void rt_cmds_free(rt_cmds *cmds);
+void rt_cmds_clear(rt_cmds *cmds);
+size_t rt_cmds_len(const rt_cmds *cmds);
+const rt_effect *rt_cmds_at(const rt_cmds *cmds, size_t i);   /* NULL past the end */
 
 /* ── fds ──────────────────────────────────────────────────────────────── */
 

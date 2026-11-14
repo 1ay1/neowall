@@ -10,6 +10,10 @@
 /* ============================================================================
  * Time Constants (in milliseconds)
  * ============================================================================ */
+/* Limits shared by the daemon and the state file. */
+#define NW_PATH_MAX             4096
+#define NW_MAX_OUTPUTS          16
+
 #define MS_PER_SECOND           1000ULL
 #define NS_PER_MS               1000000ULL
 #define MS_PER_NANOSECOND       1000000ULL

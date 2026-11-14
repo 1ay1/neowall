@@ -17,7 +17,7 @@
 #include <sys/eventfd.h>
 #include <sys/signalfd.h>
 
-#include "neowall/neowall.h"   /* log_* */
+#include "neowall/core/log.h"
 
 /* ── time ─────────────────────────────────────────────────────────────── */
 
@@ -49,6 +49,11 @@ struct rt_subs {
     rt_loop *loop;
 };
 
+struct rt_cmds {
+    rt_effect *buf;
+    size_t n, cap;
+};
+
 /* Mailbox: a growable ring under a mutex, plus an eventfd to wake the wait.
  * Unbounded on purpose: a message from a worker or a signal must never be
  * dropped because the loop was busy for a moment. */
@@ -73,6 +78,8 @@ struct rt_loop {
     rt_msg *local;              /* rt_send queue, folded this step */
     size_t nlocal, caplocal;
 
+    rt_cmds cmds;               /* what the current update pushed; reused */
+
     rt_mailbox mb;
 
     int sfd;                    /* signalfd, -1 until first rt_on_signal */
@@ -89,12 +96,16 @@ struct rt_loop {
     uint64_t steps;
 };
 
-/* Grow a dynamic array by doubling. Returns false on OOM. */
+/* Grow a dynamic array by doubling. False on OOM or size overflow. */
 static bool grow(void **buf, size_t *cap, size_t need, size_t elem) {
     if (need <= *cap) return true;
     size_t n = *cap ? *cap : 8;
-    while (n < need) n *= 2;
-    void *p = realloc(*buf, n * elem);
+    while (n < need) {
+        if (__builtin_mul_overflow(n, 2, &n)) return false;
+    }
+    size_t bytes;
+    if (__builtin_mul_overflow(n, elem, &bytes)) return false;
+    void *p = realloc(*buf, bytes);
     if (!p) return false;
     *buf = p;
     *cap = n;
@@ -133,6 +144,7 @@ void rt_loop_free(rt_loop *l) {
     free(l->watch);
     free(l->timers);
     free(l->local);
+    free(l->cmds.buf);
     free(l);
 }
 
@@ -154,9 +166,10 @@ bool rt_post(rt_loop *l, const rt_msg *msg) {
     }
     if (mb->len == mb->cap) {
         /* Unroll the ring into a bigger linear buffer. */
-        size_t ncap = mb->cap ? mb->cap * 2 : 16;
-        rt_msg *nb = malloc(ncap * sizeof(*nb));
-        if (!nb) {
+        size_t ncap, bytes;
+        rt_msg *nb = NULL;
+        if (__builtin_mul_overflow(mb->cap ? mb->cap : 8, 2, &ncap) ||
+            __builtin_mul_overflow(ncap, sizeof(*nb), &bytes) || !(nb = malloc(bytes))) {
             pthread_mutex_unlock(&mb->mu);
             return false;
         }
@@ -178,12 +191,15 @@ bool rt_post(rt_loop *l, const rt_msg *msg) {
 }
 
 /* Take everything posted so far. Messages posted while we fold arrive next
- * step, so a busy producer can't starve the wait. */
-static size_t mailbox_take(rt_loop *l, rt_msg **out, size_t *outcap) {
+ * step, so a busy producer can't starve the wait. The eventfd is reset only
+ * when it fired; a post landing after that just wakes the next wait. */
+static size_t mailbox_take(rt_loop *l, bool woke, rt_msg **out, size_t *outcap) {
     rt_mailbox *mb = &l->mb;
-    uint64_t drain;
-    ssize_t r = read(mb->efd, &drain, sizeof(drain));
-    (void)r;
+    if (woke) {
+        uint64_t drain;
+        ssize_t r = read(mb->efd, &drain, sizeof(drain));
+        (void)r;
+    }
     pthread_mutex_lock(&mb->mu);
     size_t n = mb->len;
     if (n && grow((void **)out, outcap, n, sizeof(rt_msg))) {
@@ -205,6 +221,47 @@ void rt_send(rt_loop *l, const rt_msg *msg) {
     l->local[l->nlocal++] = *msg;
 }
 
+/* ── commands ─────────────────────────────────────────────────────────── */
+
+static void cmds_add(rt_cmds *c, const rt_effect *e) {
+    if (!grow((void **)&c->buf, &c->cap, c->n + 1, sizeof(*c->buf))) {
+        log_error("rt: out of memory queueing a command");
+        return;
+    }
+    c->buf[c->n++] = *e;
+}
+
+void rt_cmd_push(rt_cmds *c, const rt_cmd *cmd) {
+    rt_effect e = {.tag = RT_EFFECT_CMD, .u.cmd = *cmd};
+    cmds_add(c, &e);
+}
+
+void rt_cmd_send(rt_cmds *c, const rt_msg *msg) {
+    rt_effect e = {.tag = RT_EFFECT_SEND, .u.msg = *msg};
+    cmds_add(c, &e);
+}
+
+void rt_cmd_quit(rt_cmds *c, int code) {
+    rt_effect e = {.tag = RT_EFFECT_QUIT, .u.code = code};
+    cmds_add(c, &e);
+}
+
+rt_cmds *rt_cmds_new(void) { return calloc(1, sizeof(rt_cmds)); }
+
+void rt_cmds_free(rt_cmds *c) {
+    if (!c) return;
+    free(c->buf);
+    free(c);
+}
+
+void rt_cmds_clear(rt_cmds *c) { c->n = 0; }
+
+size_t rt_cmds_len(const rt_cmds *c) { return c->n; }
+
+const rt_effect *rt_cmds_at(const rt_cmds *c, size_t i) {
+    return i < c->n ? &c->buf[i] : NULL;
+}
+
 /* ── fds ──────────────────────────────────────────────────────────────── */
 
 uint32_t rt_watch(rt_loop *l, int fd, unsigned interest, rt_fd_fn fn, void *ctx) {
@@ -223,6 +280,7 @@ uint32_t rt_watch(rt_loop *l, int fd, unsigned interest, rt_fd_fn fn, void *ctx)
         if (!grow((void **)&l->watch, &l->capwatch, l->nwatch + 1, sizeof(rt_watcher))) return 0;
         l->nwatch++;
     }
+    if (l->next_handle == 0) l->next_handle = 1;   /* 0 means a free slot */
     l->watch[slot] = (rt_watcher){l->next_handle++, fd, interest, fn, ctx};
     return l->watch[slot].handle;
 }
@@ -383,17 +441,37 @@ static int64_t next_deadline(const rt_loop *l) {
 
 /* ── the loop ─────────────────────────────────────────────────────────── */
 
-/* Fold the local queue. update() may rt_send() more, folded in this same
- * step; the cap bounds a program that keeps sending itself messages. */
+/* Run what one update pushed, in order. perform may rt_send results. Each
+ * entry is copied out, so nothing perform does can shift the list. */
+static void run_cmds(rt_loop *l, const rt_program *p) {
+    const size_t n = l->cmds.n;
+    for (size_t i = 0; i < n; i++) {
+        const rt_effect e = l->cmds.buf[i];
+        switch (e.tag) {
+        case RT_EFFECT_SEND: rt_send(l, &e.u.msg); break;
+        case RT_EFFECT_QUIT:
+            l->quitting = true;
+            l->exit_code = e.u.code;
+            break;
+        case RT_EFFECT_CMD:
+            if (p->perform) p->perform(p->self, l, &e.u.cmd);
+            else log_error("rt: command %u but the program has no perform", e.u.cmd.kind);
+            break;
+        }
+    }
+    l->cmds.n = 0;
+}
+
+/* Fold the local queue. A command may send more messages, folded in this
+ * same step; the cap bounds a program that keeps sending itself messages. */
 static bool fold(rt_loop *l, const rt_program *p, size_t *folded) {
     size_t i = 0;
     const size_t cap = 4096;
     while (i < l->nlocal && !l->quitting) {
         rt_msg m = l->local[i++];
-        if (!p->update(p->self, l, &m)) {
-            l->quitting = true;
-            break;
-        }
+        l->cmds.n = 0;
+        p->update(p->self, &m, &l->cmds);
+        run_cmds(l, p);
         if (++(*folded) >= cap) break;
     }
     /* Keep anything left over (cap reached) for the next step. */
@@ -424,9 +502,12 @@ int rt_run(rt_loop *l, const rt_program *p) {
             l->exit_code = 70;
             break;
         }
+        const size_t mb_slot = n;
         pfd[n] = (struct pollfd){.fd = l->mb.efd, .events = POLLIN};
         pfd_handle[n++] = 0;
+        size_t sig_slot = SIZE_MAX;
         if (l->sfd >= 0) {
+            sig_slot = n;
             pfd[n] = (struct pollfd){.fd = l->sfd, .events = POLLIN};
             pfd_handle[n++] = 0;
         }
@@ -450,7 +531,10 @@ int rt_run(rt_loop *l, const rt_program *p) {
         int64_t until = next_deadline(l);
         if (p->wait_hint_ns) {
             const int64_t h = p->wait_hint_ns(p->self);
-            if (h >= 0 && (until < 0 || now + h < until)) until = now + h;
+            int64_t at;
+            if (h >= 0 && !__builtin_add_overflow(now, h, &at) && (until < 0 || at < until)) {
+                until = at;
+            }
         }
         struct timespec ts, *tp = NULL;
         if (host_pending || l->nlocal) {
@@ -481,7 +565,7 @@ int rt_run(rt_loop *l, const rt_program *p) {
         /* 4. Turn what happened into messages, in a fixed order: signals,
          * fds (the host emits), then the host's after-wait (its dispatch, which
          * must see what the fd callbacks just read), the mailbox, timers. */
-        if (r > 0 && l->sfd >= 0 && (pfd[1].revents & POLLIN)) signals_take(l);
+        if (r > 0 && sig_slot != SIZE_MAX && (pfd[sig_slot].revents & POLLIN)) signals_take(l);
         if (r > 0) {
             for (size_t i = first_watch; i < n; i++) {
                 if (!pfd[i].revents) continue;
@@ -496,7 +580,8 @@ int rt_run(rt_loop *l, const rt_program *p) {
             }
         }
         if (l->after_wait) l->after_wait(l->host_ctx, l, fd_ready);
-        size_t got = mailbox_take(l, &inbox, &capinbox);
+        const bool mb_woke = r > 0 && (pfd[mb_slot].revents & POLLIN);
+        size_t got = mailbox_take(l, mb_woke, &inbox, &capinbox);
         for (size_t i = 0; i < got; i++) rt_send(l, &inbox[i]);
         timers_fire(l, rt_now_ns());
 

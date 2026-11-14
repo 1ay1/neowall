@@ -4,13 +4,13 @@
 #include <stdio.h>
 
 #include "app_internal.h"
+#include "neowall/app/app.h"
 #include "neowall/compositor/compositor.h"
 #include "neowall/core/constants.h"
 #include "neowall/core/vec.h"
 #include "neowall/egl/egl_core.h"
 #include "neowall/egl/gpu_health.h"
 #include "neowall/output/output.h"
-#include "neowall/runtime/sd_notify.h"
 #include "neowall/shader/term_gpu.h"
 #include "neowall/shader/wallshader.h"
 
@@ -624,9 +624,9 @@ void app_present(void *self, rt_loop *loop) {
     }
     if (any) render_outputs(a);
     if (a->gpu_lost) {
-        log_error("Graphics can't recover in this process; exiting to restart cleanly");
-        nw_sd_notify("STOPPING=1");
-        rt_quit(loop, NW_EXIT_GPU_LOST);
+        /* update decides what that means (stop, exit code); present just reports. */
+        a->gpu_lost = false;
+        app_send(loop, NW_MSG_GPU_LOST, 0, 0);
         return;
     }
 

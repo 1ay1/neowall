@@ -16,30 +16,13 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 
-#include "neowall/neowall.h"
+#include "neowall/core/log.h"
 #include "neowall/runtime/rt.h"
 
 /* A connection that hasn't sent a whole line in this long is dropped, so a
  * stuck or hostile client can't hold a slot forever. */
 #define IPC_CLIENT_TIMEOUT_MS 2000
 #define IPC_MAX_CONNS 32
-
-const char *nw_ipc_socket_path(void) {
-    static char path[sizeof(((struct sockaddr_un *)0)->sun_path)];
-    const char *rt = getenv("XDG_RUNTIME_DIR");
-    if (rt && rt[0]) {
-        /* $XDG_RUNTIME_DIR is per-user and 0700 already. */
-        int n = snprintf(path, sizeof(path), "%s/neowall.sock", rt);
-        if (n > 0 && (size_t)n < sizeof(path)) return path;
-    }
-    const char *dir = neowall_secure_runtime_dir();
-    if (dir) {
-        int n = snprintf(path, sizeof(path), "%s/neowall.sock", dir);
-        if (n > 0 && (size_t)n < sizeof(path)) return path;
-    }
-    path[0] = '\0';
-    return path;
-}
 
 static bool fill_addr(struct sockaddr_un *a, const char *path) {
     memset(a, 0, sizeof(*a));
@@ -72,11 +55,11 @@ static bool write_all(int fd, const char *buf, size_t len, int64_t deadline) {
 
 /* ── client ───────────────────────────────────────────────────────────── */
 
-nw_ipc_status nw_ipc_request(const char *verb, const char *arg,
+nw_ipc_status nw_ipc_request(const char *path, const char *verb, const char *arg,
                              char *reply, size_t reply_size, int timeout_ms) {
     if (reply && reply_size) reply[0] = '\0';
     struct sockaddr_un addr;
-    if (!fill_addr(&addr, nw_ipc_socket_path())) return NW_IPC_NO_DAEMON;
+    if (!path || !fill_addr(&addr, path)) return NW_IPC_NO_DAEMON;
 
     int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (fd < 0) return NW_IPC_FAILED;
@@ -290,8 +273,9 @@ static void on_listen(void *ctx, rt_loop *loop, int fd, unsigned ev) {
     }
 }
 
-nw_ipc_server *ipc_server_start(rt_loop *loop, nw_ipc_on_request on_request, void *ctx) {
-    const char *path = nw_ipc_socket_path();
+nw_ipc_server *ipc_server_start(rt_loop *loop, const char *path,
+                                nw_ipc_on_request on_request, void *ctx) {
+    if (!path) path = "";
     struct sockaddr_un addr;
     if (!fill_addr(&addr, path)) {
         log_error("ipc: no usable socket path");
@@ -305,7 +289,7 @@ nw_ipc_server *ipc_server_start(rt_loop *loop, nw_ipc_on_request on_request, voi
         bool live = connect(probe, (struct sockaddr *)&addr, sizeof(addr)) == 0;
         close(probe);
         if (live) {
-            log_error("ipc: %s is in use by another neowall", path);
+            log_error("ipc: %s is in use by another server", path);
             return NULL;
         }
     }
