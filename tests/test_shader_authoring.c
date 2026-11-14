@@ -15,15 +15,15 @@
 #include "neowall/shader/shader_source.h"
 
 static int failures = 0;
-static int checks = 0;
+static int checks   = 0;
 
-#define CHECK(cond)                                                            \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
-        }                                                                      \
+#define CHECK(cond)                                                                                \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                        \
+        }                                                                                          \
     } while (0)
 
 /* ------------------------------------------------------------------ *
@@ -34,15 +34,14 @@ static int checks = 0;
  * later mention of "Buffer A" anywhere — even in prose describing the shader —
  * retroactively relabelled an earlier pass. This is that regression. */
 static void test_marker_scan_is_line_bounded(void) {
-    static const char *src =
-        "// Buffer A\n"
-        "void mainImage(out vec4 c, in vec2 f) { c = vec4(0.0); }\n"
-        "\n"
-        "// Image\n"
-        "void mainImage(out vec4 c, in vec2 f) {\n"
-        "    // we composite Buffer A here\n"
-        "    c = vec4(1.0);\n"
-        "}\n";
+    static const char *src = "// Buffer A\n"
+                             "void mainImage(out vec4 c, in vec2 f) { c = vec4(0.0); }\n"
+                             "\n"
+                             "// Image\n"
+                             "void mainImage(out vec4 c, in vec2 f) {\n"
+                             "    // we composite Buffer A here\n"
+                             "    c = vec4(1.0);\n"
+                             "}\n";
 
     nw_shader_source *s = NULL;
     CHECK(nw_is_ok(nw_shader_source_parse(src, NULL, NULL, &s)));
@@ -59,9 +58,8 @@ static void test_marker_scan_is_line_bounded(void) {
 
 /* A marker only counts when it is the comment on (or just above) the pass. */
 static void test_marker_prefers_nearest_comment(void) {
-    static const char *src =
-        "// Image\n"
-        "void mainImage(out vec4 c, in vec2 f) { c = vec4(0.5); }\n";
+    static const char *src = "// Image\n"
+                             "void mainImage(out vec4 c, in vec2 f) { c = vec4(0.5); }\n";
 
     nw_shader_source *s = NULL;
     CHECK(nw_is_ok(nw_shader_source_parse(src, NULL, NULL, &s)));
@@ -84,7 +82,7 @@ static void test_clock_offset_parsing(void) {
     CHECK(nw_clock_parse_offset("-2h", &secs) && secs == -2 * 3600);
     CHECK(nw_clock_parse_offset("90m", &secs) && secs == 90 * 60);
     CHECK(nw_clock_parse_offset("3600", &secs) && secs == 3600);
-    CHECK(nw_clock_parse_offset("1w",  &secs) && secs == 7 * 86400);
+    CHECK(nw_clock_parse_offset("1w", &secs) && secs == 7 * 86400);
 
     /* Garbage must be rejected, not silently treated as zero — a typo'd
      * offset that reads as "now" would look like the feature is broken. */
@@ -104,9 +102,9 @@ static void test_clock_timelapse_parsing(void) {
     CHECK(nw_clock_parse_timelapse("1h/1s", &scale));
     CHECK(scale > 3599.0 && scale < 3601.0);
 
-    CHECK(!nw_clock_parse_timelapse("30d", &scale));      /* no duration */
-    CHECK(!nw_clock_parse_timelapse("/20s", &scale));     /* no span */
-    CHECK(!nw_clock_parse_timelapse("30d/0s", &scale));   /* zero duration */
+    CHECK(!nw_clock_parse_timelapse("30d", &scale));    /* no duration */
+    CHECK(!nw_clock_parse_timelapse("/20s", &scale));   /* no span */
+    CHECK(!nw_clock_parse_timelapse("30d/0s", &scale)); /* zero duration */
     CHECK(!nw_clock_parse_timelapse("abc/20s", &scale));
 }
 
@@ -115,7 +113,7 @@ static void test_clock_default_is_real_time(void) {
      * feature costs nothing when unused. */
     CHECK(!nw_clock_is_virtual());
 
-    time_t real = time(NULL);
+    time_t real   = time(NULL);
     time_t shader = nw_clock_now();
     CHECK(shader >= real && shader <= real + 1);
 }
@@ -127,7 +125,7 @@ static void test_clock_offset_shifts_time(void) {
     CHECK(nw_clock_is_virtual());
 
     time_t shifted = nw_clock_now();
-    long delta = (long)(shifted - before);
+    long delta     = (long)(shifted - before);
     /* Six days ahead, allowing a second of slop for the calls themselves. */
     CHECK(delta >= 6 * 86400 - 2 && delta <= 6 * 86400 + 2);
 
@@ -152,7 +150,8 @@ static void test_version_pragma(void) {
     CHECK(!nw_shader_requires_ok("#pragma neowall requires 99.0\nvoid mainImage() {}", "t.glsl"));
 
     /* Leading whitespace is legal for a preprocessor directive. */
-    CHECK(!nw_shader_requires_ok("   #pragma neowall requires 99.0.1\nvoid mainImage() {}", "t.glsl"));
+    CHECK(!nw_shader_requires_ok("   #pragma neowall requires 99.0.1\nvoid mainImage() {}",
+                                 "t.glsl"));
 
     /* A mention inside a comment is not a directive. */
     CHECK(nw_shader_requires_ok("// #pragma neowall requires 99.0\nvoid mainImage() {}", "t.glsl"));
@@ -172,10 +171,10 @@ static void test_version_pragma(void) {
  * doesn't move the current instant. Last test: it leaves the scale set. */
 static void test_timelapse_is_smooth(void) {
     double before = nw_clock_now_f();
-    nw_clock_set_scale(3600.0);               /* 1 s real = 1 h shader */
+    nw_clock_set_scale(3600.0); /* 1 s real = 1 h shader */
     double at = nw_clock_now_f();
     CHECK(at - before > -0.5 && at - before < 0.5);
-    struct timespec ts = {0, 20 * 1000000L};  /* 20 ms real */
+    struct timespec ts = {0, 20 * 1000000L}; /* 20 ms real */
     nanosleep(&ts, NULL);
     double after = nw_clock_now_f();
     /* ~72 s of shader time in 20 ms; the old 1 s resolution gave 0 here */

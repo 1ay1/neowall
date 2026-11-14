@@ -67,8 +67,7 @@ int watch_init(const char *path) {
         return -1;
     }
 
-    int wd = inotify_add_watch(fd, dir,
-                               IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE);
+    int wd = inotify_add_watch(fd, dir, IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE);
     if (wd < 0) {
         log_error("watch: cannot watch %s: %s", dir, strerror(errno));
         close(fd);
@@ -76,7 +75,7 @@ int watch_init(const char *path) {
     }
 
     printf("Watching %s for changes (Ctrl-C to stop)\n", resolved);
-    fflush(stdout);   /* the log goes to stderr; keep this in order when piped */
+    fflush(stdout); /* the log goes to stderr; keep this in order when piped */
     return fd;
 }
 
@@ -97,7 +96,7 @@ bool watch_consume(int fd) {
             break;
         }
 
-        for (char *p = buf; p < buf + len; ) {
+        for (char *p = buf; p < buf + len;) {
             struct inotify_event *ev = (struct inotify_event *)p;
             if (ev->len > 0 && strcmp(ev->name, g_watch_name) == 0) {
                 changed = true;

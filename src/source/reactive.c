@@ -40,7 +40,7 @@
 #endif
 
 /* ---- FFT config ---- */
-#define FFT_SIZE 1024              /* must be power of two; bins = FFT_SIZE/2 */
+#define FFT_SIZE    1024 /* must be power of two; bins = FFT_SIZE/2 */
 #define SAMPLE_RATE 44100
 
 /* ============================================================================
@@ -48,22 +48,22 @@
  * ============================================================================ */
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
-static reactive_snapshot_t g_snap;          /* protected by g_lock */
+static reactive_snapshot_t g_snap; /* protected by g_lock */
 static atomic_bool g_inited = false;
 
 /* Sampler thread: sysfs reads can take milliseconds, so they never run on the
  * render thread. g_sys is its private copy; only publishing takes g_lock. */
 static pthread_t g_sys_thread;
-static atomic_bool g_sys_run = false;
+static atomic_bool g_sys_run         = false;
 static pthread_mutex_t g_sample_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_sys_cond;           /* CLOCK_MONOTONIC, see init_conds */
-static reactive_snapshot_t g_sys;           /* protected by g_sample_lock */
+static pthread_cond_t g_sys_cond; /* CLOCK_MONOTONIC, see init_conds */
+static reactive_snapshot_t g_sys; /* protected by g_sample_lock */
 
 /* Audio and NVIDIA data come from helper processes, each read on its own
  * thread (capture.c). Both are opt-in: a request before init is remembered. */
 static capture g_audio, g_nv;
 static atomic_bool g_audio_wanted = false;
-static atomic_bool g_nv_wanted = false;
+static atomic_bool g_nv_wanted    = false;
 
 /* Timed waits on the monotonic clock, so a wall-clock step (NTP, the user
  * setting the time) can't stall the sampler. */
@@ -71,13 +71,23 @@ static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 static void audio_read(capture_run *c, int fd, void *ctx);
 static void nv_read(capture_run *c, int fd, void *ctx);
 static char *const kParecArgv[] = {
-    "parec", "-d", "@DEFAULT_MONITOR@", "--format=float32le", "--channels=1",
-    "--rate", "44100", "--latency-msec=30", NULL,
+    "parec",
+    "-d",
+    "@DEFAULT_MONITOR@",
+    "--format=float32le",
+    "--channels=1",
+    "--rate",
+    "44100",
+    "--latency-msec=30",
+    NULL,
 };
 static char *const kNvArgv[] = {
     "nvidia-smi",
     "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit",
-    "--format=csv,noheader,nounits", "-lms", "500", NULL,
+    "--format=csv,noheader,nounits",
+    "-lms",
+    "500",
+    NULL,
 };
 static void init_once(void) {
     pthread_condattr_t a;
@@ -86,7 +96,7 @@ static void init_once(void) {
     pthread_cond_init(&g_sys_cond, &a);
     pthread_condattr_destroy(&a);
     g_audio = (capture){.name = "audio", .argv = kParecArgv, .read = audio_read};
-    g_nv = (capture){.name = "NVIDIA", .argv = kNvArgv, .read = nv_read};
+    g_nv    = (capture){.name = "NVIDIA", .argv = kNvArgv, .read = nv_read};
 }
 
 static struct timespec mono_in(long ms) {
@@ -94,12 +104,15 @@ static struct timespec mono_in(long ms) {
     clock_gettime(CLOCK_MONOTONIC, &t);
     t.tv_sec += ms / 1000;
     t.tv_nsec += (ms % 1000) * 1000000L;
-    if (t.tv_nsec >= 1000000000L) { t.tv_sec++; t.tv_nsec -= 1000000000L; }
+    if (t.tv_nsec >= 1000000000L) {
+        t.tv_sec++;
+        t.tv_nsec -= 1000000000L;
+    }
     return t;
 }
 
 /* input energy accumulators (written from input handlers, decayed in sample) */
-static atomic_int g_key_hits = 0;
+static atomic_int g_key_hits       = 0;
 static _Atomic float g_mouse_accum = 0.0f;
 
 /* ============================================================================
@@ -129,27 +142,30 @@ static long read_file(const char *path, char *buf, size_t cap) {
  * CPU / RAM / NET / BATTERY / TIME
  * ============================================================================ */
 
-typedef struct { unsigned long long idle, total; } cpu_times_t;
+typedef struct {
+    unsigned long long idle, total;
+} cpu_times_t;
 
 static bool parse_cpu_line(const char *line, cpu_times_t *out) {
     unsigned long long v[10] = {0};
-    int got = sscanf(line, "cpu%*[^ ] %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
-                     &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9]);
+    int got = sscanf(line, "cpu%*[^ ] %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu", &v[0],
+                     &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9]);
     if (got < 4) {
         /* try the aggregate "cpu " line (no suffix) */
-        got = sscanf(line, "cpu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
-                     &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9]);
+        got = sscanf(line, "cpu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu", &v[0], &v[1],
+                     &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9]);
         if (got < 4) return false;
     }
     unsigned long long total = 0;
-    for (int i = 0; i < 10; i++) total += v[i];
-    out->idle = v[3] + v[4];   /* idle + iowait */
+    for (int i = 0; i < 10; i++)
+        total += v[i];
+    out->idle  = v[3] + v[4]; /* idle + iowait */
     out->total = total;
     return true;
 }
 
 static void sample_cpu(reactive_snapshot_t *s) {
-    static cpu_times_t prev_total = {0};
+    static cpu_times_t prev_total                        = {0};
     static cpu_times_t prev_core[REACTIVE_MAX_CPU_CORES] = {{0}};
 
     /* /proc/stat's cpu block is (1 + ncores) lines of ~80 bytes. Size the read
@@ -159,7 +175,7 @@ static void sample_cpu(reactive_snapshot_t *s) {
     if (read_file("/proc/stat", buf, sizeof(buf)) <= 0) return;
 
     char *line = buf;
-    int core = 0;
+    int core   = 0;
     bool first = true;
     while (line && *line) {
         char *nl = strchr(line, '\n');
@@ -174,7 +190,7 @@ static void sample_cpu(reactive_snapshot_t *s) {
                     unsigned long long di = cur.idle - prev_total.idle;
                     if (dt > 0) s->cpu = clampf(1.0f - (float)di / (float)dt, 0.0f, 1.0f);
                     prev_total = cur;
-                    first = false;
+                    first      = false;
                 } else if (!is_agg && core < REACTIVE_MAX_CPU_CORES) {
                     unsigned long long dt = cur.total - prev_core[core].total;
                     unsigned long long di = cur.idle - prev_core[core].idle;
@@ -193,10 +209,16 @@ static void sample_cpu(reactive_snapshot_t *s) {
     /* derived: hottest core + load imbalance across cores */
     if (core > 0) {
         float mx = 0.0f, mean = 0.0f;
-        for (int i = 0; i < core; i++) { mx = fmaxf(mx, s->cpu_per[i]); mean += s->cpu_per[i]; }
+        for (int i = 0; i < core; i++) {
+            mx = fmaxf(mx, s->cpu_per[i]);
+            mean += s->cpu_per[i];
+        }
         mean /= (float)core;
         float var = 0.0f;
-        for (int i = 0; i < core; i++) { float d = s->cpu_per[i] - mean; var += d * d; }
+        for (int i = 0; i < core; i++) {
+            float d = s->cpu_per[i] - mean;
+            var += d * d;
+        }
         var /= (float)core;
         s->cpu_max = mx;
         /* spread: normalised std-dev, ~1.0 when a single core is pegged and
@@ -218,10 +240,12 @@ static void sample_ram(reactive_snapshot_t *s) {
         s->ram = clampf(1.0f - (float)avail / (float)total, 0.0f, 1.0f);
         /* meminfo values are in kiB */
         s->ram_total_gb = (float)total / (1024.0f * 1024.0f);
-        s->ram_gb = (float)(total - avail) / (1024.0f * 1024.0f);
+        s->ram_gb       = (float)(total - avail) / (1024.0f * 1024.0f);
     }
-    if (swtotal > 0) s->swap = clampf(1.0f - (float)swfree / (float)swtotal, 0.0f, 1.0f);
-    else s->swap = 0.0f;
+    if (swtotal > 0)
+        s->swap = clampf(1.0f - (float)swfree / (float)swtotal, 0.0f, 1.0f);
+    else
+        s->swap = 0.0f;
 }
 
 static void sample_net(reactive_snapshot_t *s, double dt_sec) {
@@ -230,22 +254,24 @@ static void sample_net(reactive_snapshot_t *s, double dt_sec) {
     if (read_file("/proc/net/dev", buf, sizeof(buf)) <= 0) return;
 
     unsigned long long rx = 0, tx = 0;
-    char *line = strchr(buf, '\n');       /* skip 2 header lines */
+    char *line = strchr(buf, '\n'); /* skip 2 header lines */
     if (line) line = strchr(line + 1, '\n');
     if (line) line++;
     while (line && *line) {
         char iface[64];
         unsigned long long r = 0, t = 0;
-        if (sscanf(line, " %63[^:]: %llu %*u %*u %*u %*u %*u %*u %*u %llu",
-                   iface, &r, &t) == 3) {
-            if (strcmp(iface, "lo") != 0) { rx += r; tx += t; }
+        if (sscanf(line, " %63[^:]: %llu %*u %*u %*u %*u %*u %*u %*u %llu", iface, &r, &t) == 3) {
+            if (strcmp(iface, "lo") != 0) {
+                rx += r;
+                tx += t;
+            }
         }
         char *nl = strchr(line, '\n');
-        line = nl ? nl + 1 : NULL;
+        line     = nl ? nl + 1 : NULL;
     }
 
     if (prev_rx != 0 && dt_sec > 0.0) {
-        double dn = (double)(rx - prev_rx) / dt_sec;   /* bytes/sec */
+        double dn = (double)(rx - prev_rx) / dt_sec; /* bytes/sec */
         double up = (double)(tx - prev_tx) / dt_sec;
         /* log-scale to 0..1: ~30 MB/s saturates */
         s->net_down = clampf((float)(log10(1.0 + dn) / log10(3.0e7)), 0.0f, 1.0f);
@@ -254,13 +280,14 @@ static void sample_net(reactive_snapshot_t *s, double dt_sec) {
         s->net_down_mbs = (float)(dn / 1.0e6);
         s->net_up_mbs   = (float)(up / 1.0e6);
     }
-    prev_rx = rx; prev_tx = tx;
+    prev_rx = rx;
+    prev_tx = tx;
 }
 
 static void sample_battery(reactive_snapshot_t *s) {
     char buf[256];
     /* default: assume desktop (full, on AC) */
-    s->battery = 1.0f;
+    s->battery  = 1.0f;
     s->charging = true;
     for (int i = 0; i < 4; i++) {
         char path[128];
@@ -288,23 +315,27 @@ static void sample_disk(reactive_snapshot_t *s, double dt_sec) {
         /* fields: major minor name rd_ios rd_merges rd_sectors ... wr_sectors */
         char name[64];
         unsigned long long rsec = 0, wsec = 0;
-        if (sscanf(line, " %*u %*u %63s %*u %*u %llu %*u %*u %*u %llu",
-                   name, &rsec, &wsec) == 3) {
+        if (sscanf(line, " %*u %*u %63s %*u %*u %llu %*u %*u %*u %llu", name, &rsec, &wsec) == 3) {
             /* whole disks only: sd?, nvme?n?, vd?, mmcblk? — skip partitions
              * (names ending in a digit for sd*, or 'p<digit>' for nvme). */
-            size_t L = strlen(name);
+            size_t L       = strlen(name);
             bool partition = false;
-            if (L > 0 && name[L-1] >= '0' && name[L-1] <= '9') {
+            if (L > 0 && name[L - 1] >= '0' && name[L - 1] <= '9') {
                 if (strncmp(name, "sd", 2) == 0 || strncmp(name, "vd", 2) == 0 ||
-                    strncmp(name, "hd", 2) == 0) partition = true;
+                    strncmp(name, "hd", 2) == 0)
+                    partition = true;
                 if (strstr(name, "p") && strncmp(name, "nvme", 4) == 0) partition = true;
             }
             if (strncmp(name, "loop", 4) == 0 || strncmp(name, "ram", 3) == 0 ||
-                strncmp(name, "zram", 4) == 0 || strncmp(name, "dm-", 3) == 0) partition = true;
-            if (!partition) { rd += rsec; wr += wsec; }
+                strncmp(name, "zram", 4) == 0 || strncmp(name, "dm-", 3) == 0)
+                partition = true;
+            if (!partition) {
+                rd += rsec;
+                wr += wsec;
+            }
         }
         char *nl = strchr(line, '\n');
-        line = nl ? nl + 1 : NULL;
+        line     = nl ? nl + 1 : NULL;
     }
 
     if (prev_rd != 0 && dt_sec > 0.0) {
@@ -315,7 +346,8 @@ static void sample_disk(reactive_snapshot_t *s, double dt_sec) {
         s->disk_read  = clampf((float)(log10(1.0 + rbps) / log10(5.0e8)), 0.0f, 1.0f);
         s->disk_write = clampf((float)(log10(1.0 + wbps) / log10(5.0e8)), 0.0f, 1.0f);
     }
-    prev_rd = rd; prev_wr = wr;
+    prev_rd = rd;
+    prev_wr = wr;
 }
 
 /* --- load average + nproc normalisation --- */
@@ -327,7 +359,7 @@ static void sample_load(reactive_snapshot_t *s) {
     int total_proc = 0, run_proc = 0;
     sscanf(buf, "%lf %*f %*f %d/%d", &l1, &run_proc, &total_proc);
     s->load_raw = (float)l1;
-    long nproc = sysconf(_SC_NPROCESSORS_ONLN);
+    long nproc  = sysconf(_SC_NPROCESSORS_ONLN);
     if (nproc < 1) nproc = 1;
     s->load_avg = clampf((float)(l1 / (double)nproc), 0.0f, 1.0f);
     if (total_proc > 0) {
@@ -341,7 +373,7 @@ static void sample_load(reactive_snapshot_t *s) {
 static void sample_uptime(reactive_snapshot_t *s) {
     char buf[128];
     if (read_file("/proc/uptime", buf, sizeof(buf)) <= 0) return;
-    double up = atof(buf);
+    double up       = atof(buf);
     s->uptime_hours = (float)(up / 3600.0);
 }
 
@@ -363,10 +395,8 @@ static void sample_cpu_temp(reactive_snapshot_t *s) {
         char namep[512], name[64] = {0};
         snprintf(namep, sizeof(namep), "/sys/class/hwmon/%s/name", e->d_name);
         if (read_file(namep, name, sizeof(name)) <= 0) continue;
-        bool is_cpu = strncmp(name, "coretemp", 8) == 0 ||
-                      strncmp(name, "k10temp", 7) == 0 ||
-                      strncmp(name, "zenpower", 8) == 0 ||
-                      strncmp(name, "cpu_thermal", 11) == 0;
+        bool is_cpu = strncmp(name, "coretemp", 8) == 0 || strncmp(name, "k10temp", 7) == 0 ||
+                      strncmp(name, "zenpower", 8) == 0 || strncmp(name, "cpu_thermal", 11) == 0;
         if (!is_cpu) continue;
         /* temp1_input is usually the package; take the max of temp1..temp4 */
         for (int i = 1; i <= 4; i++) {
@@ -382,7 +412,7 @@ static void sample_cpu_temp(reactive_snapshot_t *s) {
     closedir(d);
     if (best > 0.0f) {
         s->cpu_temp_c = best;
-        s->cpu_temp = clampf((best - 30.0f) / 65.0f, 0.0f, 1.0f); /* 30..95C */
+        s->cpu_temp   = clampf((best - 30.0f) / 65.0f, 0.0f, 1.0f); /* 30..95C */
     }
 }
 
@@ -408,18 +438,16 @@ static void sample_gpu(reactive_snapshot_t *s) {
             char namep[512], name[64] = {0};
             snprintf(namep, sizeof(namep), "/sys/class/hwmon/%s/name", e->d_name);
             if (read_file(namep, name, sizeof(name)) <= 0) continue;
-            bool is_gpu = strncmp(name, "amdgpu", 6) == 0 ||
-                          strncmp(name, "nouveau", 7) == 0 ||
-                          strncmp(name, "nvidia", 6) == 0 ||
-                          strncmp(name, "i915", 4) == 0;
+            bool is_gpu = strncmp(name, "amdgpu", 6) == 0 || strncmp(name, "nouveau", 7) == 0 ||
+                          strncmp(name, "nvidia", 6) == 0 || strncmp(name, "i915", 4) == 0;
             if (!is_gpu) continue;
             char tp[512];
             snprintf(tp, sizeof(tp), "/sys/class/hwmon/%s/temp1_input", e->d_name);
             long milli = read_long(tp, -1);
             if (milli > 0) {
-                float cc = (float)milli / 1000.0f;
+                float cc      = (float)milli / 1000.0f;
                 s->gpu_temp_c = cc;
-                s->gpu_temp = clampf((cc - 30.0f) / 65.0f, 0.0f, 1.0f);
+                s->gpu_temp   = clampf((cc - 30.0f) / 65.0f, 0.0f, 1.0f);
             }
             break;
         }
@@ -432,15 +460,15 @@ static void sample_time(reactive_snapshot_t *s) {
      * iTimeOfDay/iSun/iDayFraction together with iDate. Identical to
      * time(NULL) unless a preview is active. */
     double now = nw_clock_now_f();
-    time_t t = (time_t)floor(now);
+    time_t t   = (time_t)floor(now);
     struct tm tmv;
     localtime_r(&t, &tmv);
     float secs = tmv.tm_hour * 3600.0f + tmv.tm_min * 60.0f + tmv.tm_sec + (float)(now - (double)t);
     s->time_of_day = secs / 86400.0f;
     /* sun elevation proxy: cosine peaking at solar noon (~13:00 local-ish) */
-    float h = secs / 3600.0f;
-    float sun = cosf((h - 13.0f) * (float)M_PI / 12.0f);
-    s->sun = clampf((sun + 0.15f) / 1.15f, 0.0f, 1.0f);
+    float h         = secs / 3600.0f;
+    float sun       = cosf((h - 13.0f) * (float)M_PI / 12.0f);
+    s->sun          = clampf((sun + 0.15f) / 1.15f, 0.0f, 1.0f);
     s->day_fraction = (float)tmv.tm_yday / 365.0f;
 }
 
@@ -454,7 +482,7 @@ static void sample_time(reactive_snapshot_t *s) {
 #include "neowall/core/log.h"
 
 #ifdef NEOWALL_TESTING
-    /* Internal call sites use the static name; alias it. */
+/* Internal call sites use the static name; alias it. */
 #define fft neowall_test_fft
 #endif
 
@@ -480,8 +508,8 @@ static void audio_read(capture_run *c, int fd, void *ctx) {
     }
 
     float pcm[FFT_SIZE];
-    int filled = 0;
-    float beat_avg = 0.0f;       /* running average bass energy for onset detect */
+    int filled     = 0;
+    float beat_avg = 0.0f; /* running average bass energy for onset detect */
 
     while (capture_poll(c, fd)) {
         float chunk[256];
@@ -498,11 +526,15 @@ static void audio_read(capture_run *c, int fd, void *ctx) {
 
             /* RMS loudness */
             float sum2 = 0.0f;
-            for (int k = 0; k < FFT_SIZE; k++) sum2 += pcm[k] * pcm[k];
+            for (int k = 0; k < FFT_SIZE; k++)
+                sum2 += pcm[k] * pcm[k];
             float rms = sqrtf(sum2 / FFT_SIZE);
 
             float re[FFT_SIZE], im[FFT_SIZE];
-            for (int k = 0; k < FFT_SIZE; k++) { re[k] = pcm[k] * window[k]; im[k] = 0.0f; }
+            for (int k = 0; k < FFT_SIZE; k++) {
+                re[k] = pcm[k] * window[k];
+                im[k] = 0.0f;
+            }
             fft(re, im, FFT_SIZE);
 
             float spec[REACTIVE_AUDIO_BINS];
@@ -513,11 +545,16 @@ static void audio_read(capture_run *c, int fd, void *ctx) {
                 /* perceptual: log compress */
                 float v = clampf(log10f(1.0f + mag * 40.0f), 0.0f, 1.0f);
                 spec[k] = v;
-                if (k < bins / 8)        bass += v;
-                else if (k < bins / 2)   mid += v;
-                else                     treble += v;
+                if (k < bins / 8)
+                    bass += v;
+                else if (k < bins / 2)
+                    mid += v;
+                else
+                    treble += v;
             }
-            bass /= (bins / 8); mid /= (bins * 3 / 8); treble /= (bins / 2);
+            bass /= (bins / 8);
+            mid /= (bins * 3 / 8);
+            treble /= (bins / 2);
 
             /* simple beat: bass energy jumping above its running average */
             float beat = 0.0f;
@@ -525,21 +562,21 @@ static void audio_read(capture_run *c, int fd, void *ctx) {
             beat_avg = beat_avg * 0.92f + bass * 0.08f;
 
             pthread_mutex_lock(&g_lock);
-            float sm = 0.6f;
+            float sm            = 0.6f;
             g_snap.audio_active = true;
-            g_snap.audio_level  = g_snap.audio_level  * sm + clampf(rms * 4.0f, 0, 1) * (1 - sm);
-            g_snap.audio_bass   = g_snap.audio_bass   * sm + clampf(bass, 0, 1)       * (1 - sm);
-            g_snap.audio_mid    = g_snap.audio_mid    * sm + clampf(mid, 0, 1)        * (1 - sm);
-            g_snap.audio_treble = g_snap.audio_treble * sm + clampf(treble, 0, 1)     * (1 - sm);
+            g_snap.audio_level  = g_snap.audio_level * sm + clampf(rms * 4.0f, 0, 1) * (1 - sm);
+            g_snap.audio_bass   = g_snap.audio_bass * sm + clampf(bass, 0, 1) * (1 - sm);
+            g_snap.audio_mid    = g_snap.audio_mid * sm + clampf(mid, 0, 1) * (1 - sm);
+            g_snap.audio_treble = g_snap.audio_treble * sm + clampf(treble, 0, 1) * (1 - sm);
             g_snap.audio_beat   = fmaxf(beat, g_snap.audio_beat * 0.85f);
             for (int k = 0; k < REACTIVE_AUDIO_BINS; k++) {
                 g_snap.audio_spectrum[k] = g_snap.audio_spectrum[k] * 0.5f + spec[k] * 0.5f;
-                g_snap.audio_waveform[k] = clampf(pcm[k * (FFT_SIZE / REACTIVE_AUDIO_BINS)] * 0.5f + 0.5f, 0, 1);
+                g_snap.audio_waveform[k] =
+                    clampf(pcm[k * (FFT_SIZE / REACTIVE_AUDIO_BINS)] * 0.5f + 0.5f, 0, 1);
             }
             pthread_mutex_unlock(&g_lock);
         }
     }
-
 }
 
 /* ============================================================================
@@ -555,22 +592,22 @@ static void audio_read(capture_run *c, int fd, void *ctx) {
 /* One CSV row: util, mem used, mem total, temp, power draw, power limit. */
 static void nv_row(capture_run *c, const char *line) {
     float util = 0, mem_used = 0, mem_total = 0, temp = 0, pdraw = 0, plimit = 0;
-    int got = sscanf(line, "%f , %f , %f , %f , %f , %f",
-                     &util, &mem_used, &mem_total, &temp, &pdraw, &plimit);
-    if (got < 4) return;  /* malformed / [N/A] row */
+    int got = sscanf(line, "%f , %f , %f , %f , %f , %f", &util, &mem_used, &mem_total, &temp,
+                     &pdraw, &plimit);
+    if (got < 4) return; /* malformed / [N/A] row */
 
-    float u   = clampf(util / 100.0f, 0.0f, 1.0f);
-    float vr  = mem_total > 0.0f ? clampf(mem_used / mem_total, 0.0f, 1.0f) : 0.0f;
-    float pw  = plimit > 0.0f ? clampf(pdraw / plimit, 0.0f, 1.0f) : 0.0f;
+    float u  = clampf(util / 100.0f, 0.0f, 1.0f);
+    float vr = mem_total > 0.0f ? clampf(mem_used / mem_total, 0.0f, 1.0f) : 0.0f;
+    float pw = plimit > 0.0f ? clampf(pdraw / plimit, 0.0f, 1.0f) : 0.0f;
 
     pthread_mutex_lock(&g_lock);
     capture_set_live(c, true);
     /* light smoothing so beams don't jitter between polls */
-    float sm = 0.5f;
-    g_snap.nv_gpu    = g_snap.nv_gpu    * sm + u  * (1 - sm);
-    g_snap.nv_vram   = g_snap.nv_vram   * sm + vr * (1 - sm);
+    float sm         = 0.5f;
+    g_snap.nv_gpu    = g_snap.nv_gpu * sm + u * (1 - sm);
+    g_snap.nv_vram   = g_snap.nv_vram * sm + vr * (1 - sm);
     g_snap.nv_temp_c = temp;
-    g_snap.nv_power  = g_snap.nv_power  * sm + pw * (1 - sm);
+    g_snap.nv_power  = g_snap.nv_power * sm + pw * (1 - sm);
     g_snap.nv_active = true;
     pthread_mutex_unlock(&g_lock);
 }
@@ -596,7 +633,7 @@ static void nv_read(capture_run *c, int fd, void *ctx) {
             have -= (size_t)(nl + 1 - buf);
             memmove(buf, nl + 1, have + 1);
         }
-        if (have >= sizeof(buf) - 1) have = 0;   /* an absurd line: drop it */
+        if (have >= sizeof(buf) - 1) have = 0; /* an absurd line: drop it */
     }
 }
 
@@ -610,7 +647,7 @@ bool reactive_init(void) {
     if (atomic_load(&g_inited)) return true;
     pthread_once(&g_once, init_once);
     memset(&g_snap, 0, sizeof(g_snap));
-    g_snap.battery = 1.0f;
+    g_snap.battery  = 1.0f;
     g_snap.charging = true;
     atomic_store(&g_inited, true);
 
@@ -668,18 +705,18 @@ void reactive_shutdown(void) {
  * other threads own (audio, nv_*) and the ones computed below. */
 static void publish_system_fields(reactive_snapshot_t *dst, const reactive_snapshot_t *src) {
     reactive_snapshot_t keep = *dst;
-    *dst = *src;
-    dst->nv_gpu    = keep.nv_gpu;
-    dst->nv_vram   = keep.nv_vram;
-    dst->nv_temp_c = keep.nv_temp_c;
-    dst->nv_power  = keep.nv_power;
-    dst->nv_active = keep.nv_active;
-    dst->audio_active = keep.audio_active;
-    dst->audio_level  = keep.audio_level;
-    dst->audio_bass   = keep.audio_bass;
-    dst->audio_mid    = keep.audio_mid;
-    dst->audio_treble = keep.audio_treble;
-    dst->audio_beat   = keep.audio_beat;
+    *dst                     = *src;
+    dst->nv_gpu              = keep.nv_gpu;
+    dst->nv_vram             = keep.nv_vram;
+    dst->nv_temp_c           = keep.nv_temp_c;
+    dst->nv_power            = keep.nv_power;
+    dst->nv_active           = keep.nv_active;
+    dst->audio_active        = keep.audio_active;
+    dst->audio_level         = keep.audio_level;
+    dst->audio_bass          = keep.audio_bass;
+    dst->audio_mid           = keep.audio_mid;
+    dst->audio_treble        = keep.audio_treble;
+    dst->audio_beat          = keep.audio_beat;
     memcpy(dst->audio_spectrum, keep.audio_spectrum, sizeof(dst->audio_spectrum));
     memcpy(dst->audio_waveform, keep.audio_waveform, sizeof(dst->audio_waveform));
     dst->key_energy   = keep.key_energy;
@@ -692,16 +729,16 @@ static void publish_system_fields(reactive_snapshot_t *dst, const reactive_snaps
 /* One sampling pass. The slow reads happen without g_lock, so reactive_get()
  * never waits on them. Caller holds g_sample_lock. */
 static void sample_once_locked(void) {
-    static double last = 0.0;
+    static double last      = 0.0;
     static double last_slow = 0.0;
-    static double phase = 0.0;
+    static double phase     = 0.0;
 
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    double now = ts.tv_sec + ts.tv_nsec / 1e9;
-    double dt = last == 0.0 ? 0.0 : now - last;
+    double now  = ts.tv_sec + ts.tv_nsec / 1e9;
+    double dt   = last == 0.0 ? 0.0 : now - last;
     double prev = last;
-    last = now;
+    last        = now;
 
     sample_cpu(&g_sys);
     sample_ram(&g_sys);
@@ -724,9 +761,9 @@ static void sample_once_locked(void) {
     publish_system_fields(&g_snap, &g_sys);
 
     /* decay + fold in input energy */
-    int keys = atomic_exchange(&g_key_hits, 0);
-    float mouse = atomic_exchange(&g_mouse_accum, 0.0f);
-    g_snap.key_energy   = clampf(g_snap.key_energy   * 0.80f + keys * 0.25f, 0.0f, 1.0f);
+    int keys            = atomic_exchange(&g_key_hits, 0);
+    float mouse         = atomic_exchange(&g_mouse_accum, 0.0f);
+    g_snap.key_energy   = clampf(g_snap.key_energy * 0.80f + keys * 0.25f, 0.0f, 1.0f);
     g_snap.mouse_energy = clampf(g_snap.mouse_energy * 0.80f + mouse / 400.0f, 0.0f, 1.0f);
 
     if (!capture_live(&g_audio)) {
@@ -742,28 +779,28 @@ static void sample_once_locked(void) {
      * same 4 Hz snapshot everything else does. */
     {
         /* thermal: hottest of CPU/GPU (prefer NVIDIA reading if live), 30..95C */
-        float gtc = g_snap.nv_active ? g_snap.nv_temp_c : g_snap.gpu_temp_c;
-        float hot = fmaxf(g_snap.cpu_temp_c, gtc);
+        float gtc      = g_snap.nv_active ? g_snap.nv_temp_c : g_snap.gpu_temp_c;
+        float hot      = fmaxf(g_snap.cpu_temp_c, gtc);
         g_snap.thermal = clampf((hot - 30.0f) / 65.0f, 0.0f, 1.0f);
 
         /* activity: weighted fusion of the things that make a machine feel busy.
          * GPU term prefers the live NVIDIA util when present. */
         float gpu_u = g_snap.nv_active ? g_snap.nv_gpu : g_snap.gpu;
-        float io = fmaxf(fmaxf(g_snap.disk_read, g_snap.disk_write),
-                         fmaxf(g_snap.net_down, g_snap.net_up));
-        float act = 0.42f * g_snap.cpu + 0.24f * gpu_u + 0.18f * io
-                  + 0.10f * g_snap.ram + 0.06f * g_snap.load_avg;
+        float io    = fmaxf(fmaxf(g_snap.disk_read, g_snap.disk_write),
+                            fmaxf(g_snap.net_down, g_snap.net_up));
+        float act   = 0.42f * g_snap.cpu + 0.24f * gpu_u + 0.18f * io + 0.10f * g_snap.ram +
+                      0.06f * g_snap.load_avg;
         /* smooth so it eases rather than steps between 4 Hz samples */
         g_snap.activity = g_snap.activity * 0.5f + clampf(act, 0.0f, 1.0f) * 0.5f;
 
         /* pulse: a heartbeat whose rate rises with activity. Free-running phase
          * accumulator (independent of frame rate); output is a sharp 0..1 beat.
          * Idle ~0.6 Hz, maxed-out ~2.6 Hz. */
-        double rate = 0.6 + 2.0 * (double)g_snap.activity;   /* Hz */
+        double rate = 0.6 + 2.0 * (double)g_snap.activity; /* Hz */
         if (prev != 0.0) phase += rate * dt;
-        phase = fmod(phase, 1.0);
-        float b = (float)sin(phase * 2.0 * M_PI);
-        b = powf(clampf(b, 0.0f, 1.0f), 3.0f);   /* sharpen into a systolic spike */
+        phase        = fmod(phase, 1.0);
+        float b      = (float)sin(phase * 2.0 * M_PI);
+        b            = powf(clampf(b, 0.0f, 1.0f), 3.0f); /* sharpen into a systolic spike */
         g_snap.pulse = b;
     }
     pthread_mutex_unlock(&g_lock);
@@ -804,7 +841,8 @@ static void *sys_thread_fn(void *arg) {
             /* 4 Hz, but wake at once on shutdown. */
             struct timespec until = mono_in(250);
             while (atomic_load(&g_sys_run) &&
-                   pthread_cond_timedwait(&g_sys_cond, &g_sample_lock, &until) == 0) { }
+                   pthread_cond_timedwait(&g_sys_cond, &g_sample_lock, &until) == 0) {
+            }
         } else {
             /* Nobody's reading: sleep until a reader or shutdown signals. */
             while (atomic_load(&g_sys_run) &&
@@ -820,13 +858,18 @@ void reactive_note_mouse(float dx, float dy) {
     float d = sqrtf(dx * dx + dy * dy);
     /* relaxed atomic float add */
     float cur = atomic_load(&g_mouse_accum);
-    while (!atomic_compare_exchange_weak(&g_mouse_accum, &cur, cur + d)) { }
+    while (!atomic_compare_exchange_weak(&g_mouse_accum, &cur, cur + d)) {
+    }
 }
 
 void reactive_get(reactive_snapshot_t *out) {
     if (!out) return;
-    if (!atomic_load(&g_inited)) { memset(out, 0, sizeof(*out)); out->battery = 1.0f; return; }
-    uint64_t now = mono_ms();
+    if (!atomic_load(&g_inited)) {
+        memset(out, 0, sizeof(*out));
+        out->battery = 1.0f;
+        return;
+    }
+    uint64_t now  = mono_ms();
     uint64_t last = atomic_exchange(&g_last_read_ms, now);
     if (now - last >= SAMPLER_IDLE_MS) {
         /* The sampler went to sleep; wake it, and take a fresh sample now so
@@ -840,4 +883,3 @@ void reactive_get(reactive_snapshot_t *out) {
     *out = g_snap;
     pthread_mutex_unlock(&g_lock);
 }
-

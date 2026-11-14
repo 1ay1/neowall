@@ -36,7 +36,6 @@ typedef struct {
  * Returns the number written, never more than `max`. Zero when Hyprland IPC is
  * unavailable -- callers must treat "no windows" as a normal state rather than
  * an error, because that is what every non-Hyprland compositor reports. */
-int hyprland_output_windows(const struct output_state *o,
-                            nw_window_rect *out, int max);
+int hyprland_output_windows(const struct output_state *o, nw_window_rect *out, int max);
 
 #endif /* HYPRLAND_COVERAGE_H */

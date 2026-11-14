@@ -19,7 +19,9 @@ void output_configure_vsync(struct output_state *output) {
     }
 
     /* Make EGL context current */
-    if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
+    if (!egl_make_surface_current(output->state->egl_display,
+                                  output->compositor_surface->egl_surface,
+                                  output->state->egl_context)) {
         log_error("Failed to make EGL context current for vsync config");
         return;
     }
@@ -31,8 +33,8 @@ void output_configure_vsync(struct output_state *output) {
      *   rest (#85). So the interval is 0 there.
      * - vsync=true without frame callbacks (X11): interval 1, so presents land
      *   on the refresh; the frame timer paces the loop at the refresh rate. */
-    bool paced = output->config->vsync &&
-                 compositor_surface_supports_frame_pacing(output->compositor_surface);
+    bool paced        = output->config->vsync &&
+                        compositor_surface_supports_frame_pacing(output->compositor_surface);
     int swap_interval = (output->config->vsync && !paced) ? 1 : 0;
 
     if (!eglSwapInterval(output->state->egl_display, swap_interval)) {
@@ -44,12 +46,11 @@ void output_configure_vsync(struct output_state *output) {
     } else {
         if (output->config->vsync) {
             log_debug("Enabled vsync for output %s (will sync to monitor refresh rate)",
-                     output->model[0] ? output->model : "unknown");
+                      output->model[0] ? output->model : "unknown");
         } else {
             log_debug("Disabled vsync for output %s (shader_fps=%d, target frame time: %.1fms)",
-                     output->model[0] ? output->model : "unknown",
-                     output->config->shader_fps,
-                     1000.0f / output->config->shader_fps);
+                      output->model[0] ? output->model : "unknown", output->config->shader_fps,
+                      1000.0f / output->config->shader_fps);
         }
     }
 
@@ -79,7 +80,8 @@ bool output_configure_frame_timer(struct output_state *output) {
         if (output->frame_timer_fd >= 0) {
             close(output->frame_timer_fd);
             output->frame_timer_fd = -1;
-            log_debug("Closed frame timer for output %s (vsync enabled)", output_get_identifier(output));
+            log_debug("Closed frame timer for output %s (vsync enabled)",
+                      output_get_identifier(output));
         }
         return true;
     }
@@ -99,41 +101,41 @@ bool output_configure_frame_timer(struct output_state *output) {
         output->frame_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
         if (output->frame_timer_fd < 0) {
             log_error("Failed to create frame timer for output %s: %s",
-                     output_get_identifier(output), strerror(errno));
+                      output_get_identifier(output), strerror(errno));
             return false;
         }
-        log_debug("Created frame timer fd=%d for output %s",
-                 output->frame_timer_fd, output_get_identifier(output));
+        log_debug("Created frame timer fd=%d for output %s", output->frame_timer_fd,
+                  output_get_identifier(output));
     }
 
     /* Configure timer for target FPS */
     int target_fps = shader_fps_resolve(output->config->shader_fps);
-    
+
     /* Calculate interval in seconds and nanoseconds
      * tv_nsec must be < 1000000000 (less than 1 second) */
     time_t interval_sec = 0;
-    long interval_ns = 0;
-    
+    long interval_ns    = 0;
+
     if (target_fps >= 1) {
         /* For FPS >= 1, interval is less than or equal to 1 second */
         long total_ns = 1000000000L / target_fps;
-        interval_sec = total_ns / 1000000000L;
-        interval_ns = total_ns % 1000000000L;
-        
+        interval_sec  = total_ns / 1000000000L;
+        interval_ns   = total_ns % 1000000000L;
+
         /* Handle the edge case where FPS=1 results in exactly 1 second */
         if (interval_ns == 0 && target_fps == 1) {
             interval_sec = 1;
-            interval_ns = 0;
+            interval_ns  = 0;
         }
     } else {
         /* FPS < 1 means interval > 1 second (e.g., 0.5 FPS = 2 seconds) */
         interval_sec = 1;
-        interval_ns = 0;
+        interval_ns  = 0;
     }
 
     struct itimerspec timer_spec = {
-        .it_interval = { .tv_sec = interval_sec, .tv_nsec = interval_ns },  /* Recurring */
-        .it_value = { .tv_sec = interval_sec, .tv_nsec = interval_ns }      /* Initial expiration */
+        .it_interval = {.tv_sec = interval_sec, .tv_nsec = interval_ns}, /* Recurring */
+        .it_value    = {.tv_sec = interval_sec, .tv_nsec = interval_ns}  /* Initial expiration */
     };
 
     /* Record the target period for the phase-locked pacer. The recurring
@@ -151,13 +153,13 @@ bool output_configure_frame_timer(struct output_state *output) {
     }
 
     if (timerfd_settime(output->frame_timer_fd, 0, &timer_spec, NULL) < 0) {
-        log_error("Failed to set frame timer for output %s: %s",
-                 output_get_identifier(output), strerror(errno));
+        log_error("Failed to set frame timer for output %s: %s", output_get_identifier(output),
+                  strerror(errno));
         return false;
     }
 
-    log_debug("Configured frame timer for %d FPS (interval: %ld.%09ld s) on output %s",
-             target_fps, (long)interval_sec, interval_ns, output_get_identifier(output));
+    log_debug("Configured frame timer for %d FPS (interval: %ld.%09ld s) on output %s", target_fps,
+              (long)interval_sec, interval_ns, output_get_identifier(output));
 
     return true;
 }
@@ -213,8 +215,8 @@ bool output_pace_advance(struct output_state *output, uint64_t now_ns) {
      * panel locks to 59.94, not a fractional cadence that beats against it).
      * Never below one refresh. */
     if (output->pace_hw_refresh_ns > 0) {
-        uint64_t hw = output->pace_hw_refresh_ns;
-        uint64_t mult = (period + hw / 2) / hw;      /* round to nearest N vblanks */
+        uint64_t hw   = output->pace_hw_refresh_ns;
+        uint64_t mult = (period + hw / 2) / hw; /* round to nearest N vblanks */
         if (mult < 1) mult = 1;
         period = mult * hw;
     }
@@ -223,8 +225,8 @@ bool output_pace_advance(struct output_state *output, uint64_t now_ns) {
      * truth for where the display's phase actually is), otherwise to our own
      * previous deadline. Advancing by exactly one period keeps average FPS with
      * zero long-term drift. */
-    uint64_t anchor = output->pace_last_present_ns ? output->pace_last_present_ns
-                                                   : output->pace_next_deadline_ns;
+    uint64_t anchor =
+        output->pace_last_present_ns ? output->pace_last_present_ns : output->pace_next_deadline_ns;
     uint64_t deadline = anchor + period;
 
     /* Overrun / stale-anchor recovery: if the next target is already in the
@@ -237,11 +239,12 @@ bool output_pace_advance(struct output_state *output, uint64_t now_ns) {
     output->pace_next_deadline_ns = deadline;
 
     struct itimerspec ts = {
-        .it_interval = { .tv_sec = 0, .tv_nsec = 0 },   /* one-shot: we re-arm each present */
-        .it_value = {
-            .tv_sec  = (time_t)(deadline / 1000000000ULL),
-            .tv_nsec = (long)(deadline % 1000000000ULL),
-        },
+        .it_interval = {.tv_sec = 0, .tv_nsec = 0}, /* one-shot: we re-arm each present */
+        .it_value =
+            {
+                        .tv_sec  = (time_t)(deadline / 1000000000ULL),
+                        .tv_nsec = (long)(deadline % 1000000000ULL),
+                        },
     };
     if (timerfd_settime(output->frame_timer_fd, TFD_TIMER_ABSTIME, &ts, NULL) < 0) {
         /* Fall back to the free-running arming already in place; not fatal. */
@@ -260,8 +263,8 @@ bool output_pace_advance(struct output_state *output, uint64_t now_ns) {
  * it via wp_presentation.clock_id; the caller only routes feedback here when it
  * matches our timer clock), so present_ns is directly comparable to the
  * absolute deadlines the frame timer is armed with. */
-void output_pace_note_present(struct output_state *output,
-                              uint64_t present_ns, uint64_t refresh_ns) {
+void output_pace_note_present(struct output_state *output, uint64_t present_ns,
+                              uint64_t refresh_ns) {
     if (!output) return;
     output->pace_last_present_ns = present_ns;
     if (refresh_ns > 0) {

@@ -12,15 +12,23 @@
 #include "neowall/core/log.h"
 
 static int failures, checks;
-#define CHECK(c, ...) do { checks++; if (!(c)) { failures++; \
-    fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
-    fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
+#define CHECK(c, ...)                                                                              \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(c)) {                                                                                \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fputc('\n', stderr);                                                                   \
+        }                                                                                          \
+    } while (0)
 
 static int count_fds(void) {
-    int n = 0;
+    int n  = 0;
     DIR *d = opendir("/proc/self/fd");
     if (!d) return -1;
-    while (readdir(d)) n++;
+    while (readdir(d))
+        n++;
     closedir(d);
     return n;
 }
@@ -31,7 +39,8 @@ static int count_children(void) {
     FILE *f = fopen(path, "r");
     if (!f) return -1;
     int n = 0;
-    while (fscanf(f, "%63s", b) == 1) n++;
+    while (fscanf(f, "%63s", b) == 1)
+        n++;
     fclose(f);
     return n;
 }
@@ -63,9 +72,11 @@ static void read_all(capture_run *r, int fd, void *ctx) {
 /* Ignores stop for a while: the abandon path. */
 static atomic_bool g_release;
 static void read_stuck(capture_run *r, int fd, void *ctx) {
-    (void)fd; (void)ctx;
+    (void)fd;
+    (void)ctx;
     capture_set_live(r, true);
-    while (!atomic_load(&g_release)) sleep_ms(5);
+    while (!atomic_load(&g_release))
+        sleep_ms(5);
 }
 
 int main(void) {
@@ -73,13 +84,14 @@ int main(void) {
     int fds = count_fds();
 
     static char *const yes_argv[] = {"yes", NULL};
-    capture c = {.name = "test", .argv = yes_argv, .read = read_all};
+    capture c                     = {.name = "test", .argv = yes_argv, .read = read_all};
 
     /* start, data flows, stop is quick and leaves nothing */
     for (int i = 0; i < 5; i++) {
         CHECK(capture_start(&c), "start %d", i);
         CHECK(capture_start(&c), "start again is a no-op");
-        for (int w = 0; w < 200 && !capture_live(&c); w++) sleep_ms(2);
+        for (int w = 0; w < 200 && !capture_live(&c); w++)
+            sleep_ms(2);
         CHECK(capture_live(&c), "live %d", i);
         struct timespec t0;
         clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -94,7 +106,7 @@ int main(void) {
 
     /* a program that isn't there: the run ends by itself */
     static char *const none_argv[] = {"neowall-no-such-program", NULL};
-    capture missing = {.name = "missing", .argv = none_argv, .read = read_all};
+    capture missing                = {.name = "missing", .argv = none_argv, .read = read_all};
     CHECK(capture_start(&missing), "start a missing program");
     sleep_ms(50);
     CHECK(!capture_live(&missing), "never live");
@@ -104,19 +116,22 @@ int main(void) {
      * gets a fresh run that works while the old one is still stuck */
     capture s = {.name = "stuck", .argv = yes_argv, .read = read_stuck};
     CHECK(capture_start(&s), "start stuck");
-    for (int w = 0; w < 200 && !capture_live(&s); w++) sleep_ms(2);
+    for (int w = 0; w < 200 && !capture_live(&s); w++)
+        sleep_ms(2);
     struct timespec t0;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     CHECK(!capture_stop(&s, 100), "abandoned");
     CHECK(ms_since(&t0) < 400, "within the bound (%.0f ms)", ms_since(&t0));
-    s.read = read_all;
+    s.read      = read_all;
     long before = atomic_load(&g_bytes);
     CHECK(capture_start(&s), "restart after abandon");
-    for (int w = 0; w < 200 && atomic_load(&g_bytes) == before; w++) sleep_ms(2);
+    for (int w = 0; w < 200 && atomic_load(&g_bytes) == before; w++)
+        sleep_ms(2);
     CHECK(atomic_load(&g_bytes) > before, "the new run reads");
     CHECK(capture_stop(&s, 1000), "the new run stops cleanly");
-    atomic_store(&g_release, true);   /* the old reader finishes and frees its run */
-    for (int w = 0; w < 200 && count_children() > 0; w++) sleep_ms(5);
+    atomic_store(&g_release, true); /* the old reader finishes and frees its run */
+    for (int w = 0; w < 200 && count_children() > 0; w++)
+        sleep_ms(5);
     CHECK(count_children() == 0, "the abandoned run reaps its child too");
 
     printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);

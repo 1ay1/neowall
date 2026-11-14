@@ -18,19 +18,21 @@
 
 static void cmd(rt_cmds *cmds, uint32_t kind, uint32_t id, int64_t v) {
     rt_cmd c = {.kind = kind, .id = id};
-    c.v.i = v;
+    c.v.i    = v;
     rt_cmd_push(cmds, &c);
 }
 
 static void notify(rt_cmds *cmds, const char *line) {
     rt_cmd c = {.kind = APP_CMD_NOTIFY};
-    c.v.s = line;
+    c.v.s    = line;
     rt_cmd_push(cmds, &c);
 }
 
 /* Signals carry id = signo. Messages from the socket or from perform carry
  * id 0, with any argument already in hand. */
-static bool from_signal(const rt_msg *m) { return m->id != 0; }
+static bool from_signal(const rt_msg *m) {
+    return m->id != 0;
+}
 
 void app_model_init(struct app_model *a) {
     *a = (struct app_model){.set_index = -1};
@@ -48,11 +50,13 @@ static void applied(struct app_model *a, const struct app_applied *done) {
 
 /* Answer every client waiting on the reload, and tell systemd it's done. */
 static void reload_finish(struct app_model *a, bool ok, rt_cmds *cmds) {
-    if (ok) log_info("Configuration reloaded");
-    else log_error("Reload failed; previous configuration remains in effect");
+    if (ok)
+        log_info("Configuration reloaded");
+    else
+        log_error("Reload failed; previous configuration remains in effect");
     for (int i = 0; i < a->reload_nwaiters; i++) {
         rt_cmd c = {.kind = APP_CMD_REPLY, .id = a->reload_waiters[i]};
-        c.v.i = ok;
+        c.v.i    = ok;
         rt_cmd_push(cmds, &c);
     }
     a->reload_nwaiters = 0;
@@ -67,7 +71,7 @@ static void reload_start(struct app_model *a, uint32_t conn, rt_cmds *cmds) {
         if (a->reload_nwaiters < APP_RELOAD_WAITERS) {
             a->reload_waiters[a->reload_nwaiters++] = conn;
         } else {
-            rt_cmd c = {.kind = APP_CMD_REPLY, .id = conn};   /* too many: refuse */
+            rt_cmd c = {.kind = APP_CMD_REPLY, .id = conn}; /* too many: refuse */
             rt_cmd_push(cmds, &c);
         }
     }
@@ -138,7 +142,7 @@ void app_model_update(struct app_model *a, const rt_msg *m, rt_cmds *cmds) {
 
     case NW_MSG_SHADER_PAUSE:
     case NW_MSG_SHADER_RESUME: {
-        bool want = m->kind == NW_MSG_SHADER_PAUSE;
+        bool want        = m->kind == NW_MSG_SHADER_PAUSE;
         a->shader_paused = want;
         if (want != a->shader_pause_applied) {
             cmd(cmds, APP_CMD_SHADER_PAUSE, 0, want);
@@ -163,9 +167,7 @@ void app_model_update(struct app_model *a, const rt_msg *m, rt_cmds *cmds) {
         log_info("Swapping terminal wallpaper to: %s", a->terminal_cmd);
         return;
 
-    case NW_MSG_SIGNAL:
-        log_debug("Received signal: %u", m->id);
-        return;
+    case NW_MSG_SIGNAL: log_debug("Received signal: %u", m->id); return;
 
     case NW_MSG_CYCLE_DUE:
         /* present decides which outputs actually cycle (output_should_cycle),
@@ -173,9 +175,7 @@ void app_model_update(struct app_model *a, const rt_msg *m, rt_cmds *cmds) {
         cmd(cmds, APP_CMD_REDRAW_ALL, 0, 0);
         return;
 
-    case NW_MSG_FRAME_DUE:
-        cmd(cmds, APP_CMD_FRAME, m->id, 0);
-        return;
+    case NW_MSG_FRAME_DUE: cmd(cmds, APP_CMD_FRAME, m->id, 0); return;
 
     case NW_MSG_OUTPUTS_NEW:
         /* A new wl_output (hotplug, monitor back from DPMS). present brings
@@ -193,8 +193,7 @@ void app_model_update(struct app_model *a, const rt_msg *m, rt_cmds *cmds) {
 
     case NW_MSG_TRANSITION:
     case NW_MSG_REDRAW:
-    case NW_MSG_REDRAW_OUTPUT:
-        return;
+    case NW_MSG_REDRAW_OUTPUT: return;
 
     case NW_MSG_DISPLAY:
         if (a->has_occlusion) cmd(cmds, APP_CMD_OCCLUSION, 0, 0);
@@ -208,9 +207,7 @@ void app_model_update(struct app_model *a, const rt_msg *m, rt_cmds *cmds) {
         rt_cmd_quit(cmds, NW_EXIT_GPU_LOST);
         return;
 
-    case NW_MSG_WATCH:
-        cmd(cmds, APP_CMD_WATCH_RELOAD, 0, 0);
-        return;
+    case NW_MSG_WATCH: cmd(cmds, APP_CMD_WATCH_RELOAD, 0, 0); return;
     }
 }
 

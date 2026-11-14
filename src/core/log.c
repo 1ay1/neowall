@@ -1,20 +1,20 @@
 /* Logging and monotonic time. See neowall/core/log.h. */
 
 #ifndef _DEFAULT_SOURCE
-#define _DEFAULT_SOURCE   /* lstat, localtime_r, PATH_MAX, clock_gettime */
+#define _DEFAULT_SOURCE /* lstat, localtime_r, PATH_MAX, clock_gettime */
 #endif
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdatomic.h>
-#include <inttypes.h>  /* PRIu64 */
+#include <inttypes.h> /* PRIu64 */
 #include <limits.h>
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <string.h>
-#include <strings.h>  /* POSIX strcasecmp — don't redefine it ourselves */
+#include <strings.h> /* POSIX strcasecmp — don't redefine it ourselves */
 #include <unistd.h>
 #include <errno.h>
 
@@ -73,7 +73,7 @@ static _Atomic int g_sink = SINK_UNKNOWN;
 static enum log_sink sink(void) {
     int s = g_sink;
     if (s != SINK_UNKNOWN) return (enum log_sink)s;
-    s = SINK_PLAIN;
+    s              = SINK_PLAIN;
     const char *js = getenv("JOURNAL_STREAM");
     struct stat st;
     unsigned long long dev, ino;
@@ -97,8 +97,7 @@ static int priority(const char *level) {
     }
 }
 
-static void log_message(const char *level, const char *color,
-                       const char *format, va_list args) {
+static void log_message(const char *level, const char *color, const char *format, va_list args) {
     enum log_sink s = sink();
     if (s == SINK_JOURNAL) {
         fprintf(stderr, "<%d>", priority(level));
@@ -106,7 +105,8 @@ static void log_message(const char *level, const char *color,
         char timestamp[32];
         get_timestamp(timestamp, sizeof(timestamp));
         if (s == SINK_TTY)
-            fprintf(stderr, "%s[%s]%s %s%s%s: ", COLOR_GRAY, timestamp, COLOR_RESET, color, level, COLOR_RESET);
+            fprintf(stderr, "%s[%s]%s %s%s%s: ", COLOR_GRAY, timestamp, COLOR_RESET, color, level,
+                    COLOR_RESET);
         else
             fprintf(stderr, "[%s] %s: ", timestamp, level);
     }
@@ -119,7 +119,9 @@ static void log_message(const char *level, const char *color,
 /* While set, log_error is demoted to debug: the caller reports the problem
  * itself, in a better form. Loop thread only. */
 static bool g_quiet_errors = false;
-void log_quiet_errors(bool quiet) { g_quiet_errors = quiet; }
+void log_quiet_errors(bool quiet) {
+    g_quiet_errors = quiet;
+}
 
 /* Log error message */
 void log_error(const char *format, ...) {
@@ -179,4 +181,3 @@ void log_set_level(int level) {
 int log_get_level(void) {
     return log_level;
 }
-

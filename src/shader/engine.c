@@ -36,14 +36,19 @@ typedef struct {
 static nw_target *nw_target_new(int w, int h, nw_format format, nw_filter filter, nw_wrap wrap) {
     nw_target *t = calloc(1, sizeof(*t));
     if (!t) return NULL;
-    nw_gfx_format f = format == NW_FMT_RGBA8 ? NW_GFX_FMT_RGBA8 : format == NW_FMT_RGBA32F ? NW_GFX_FMT_RGBA32F : NW_GFX_FMT_RGBA16F;
-    nw_gfx_filter fl = filter == NW_FILTER_NEAREST ? NW_GFX_FILTER_NEAREST
-                       : filter == NW_FILTER_MIPMAP ? NW_GFX_FILTER_MIPMAP : NW_GFX_FILTER_LINEAR;
+    nw_gfx_format f  = format == NW_FMT_RGBA8     ? NW_GFX_FMT_RGBA8
+                       : format == NW_FMT_RGBA32F ? NW_GFX_FMT_RGBA32F
+                                                  : NW_GFX_FMT_RGBA16F;
+    nw_gfx_filter fl = filter == NW_FILTER_NEAREST  ? NW_GFX_FILTER_NEAREST
+                       : filter == NW_FILTER_MIPMAP ? NW_GFX_FILTER_MIPMAP
+                                                    : NW_GFX_FILTER_LINEAR;
     if (nw_is_err(nw_gfx_target_create(&t->t, w, h, f, fl, true))) {
         free(t);
         return NULL;
     }
-    GLint gl_wrap = wrap == NW_WRAP_REPEAT ? GL_REPEAT : wrap == NW_WRAP_MIRROR ? GL_MIRRORED_REPEAT : GL_CLAMP_TO_EDGE;
+    GLint gl_wrap = wrap == NW_WRAP_REPEAT   ? GL_REPEAT
+                    : wrap == NW_WRAP_MIRROR ? GL_MIRRORED_REPEAT
+                                             : GL_CLAMP_TO_EDGE;
     for (int k = 0; k < 2; k++) {
         if (!t->t.textures[k].id) continue;
         glBindTexture(GL_TEXTURE_2D, t->t.textures[k].id);
@@ -112,10 +117,10 @@ typedef struct {
     nw_target *target; /* buffer passes; NULL for the image pass */
     /* cube passes: two cube maps (this frame, last frame) and an FBO */
     GLuint cube_tex[2], cube_fbo;
-    int cube_read;     /* which of cube_tex holds last frame */
-    bool cube_static;  /* reads no time, input or channel: drawn once */
+    int cube_read;    /* which of cube_tex holds last frame */
+    bool cube_static; /* reads no time, input or channel: drawn once */
     bool cube_drawn;
-    GLint u_face;      /* nwCubeFace */
+    GLint u_face; /* nwCubeFace */
     int w, h;
     GLint u_time, u_res, u_mouse, u_frame, u_dt, u_fps, u_date, u_rate, u_span;
     GLint u_ch[NW_CHANNELS], u_chres, u_chtime;
@@ -125,35 +130,39 @@ typedef struct {
      * lookup is one pointer compare, not a string search */
     NW_LIST(const char *) slot_name;
     NW_LIST(GLint) slot_loc;
-    NW_LIST(GLint) params; /* parallel to src->params */
+    NW_LIST(GLint) params;           /* parallel to src->params */
     input_tex image_ch[NW_CHANNELS]; /* NW_IN_IMAGE textures, per channel */
 } pass_gl;
 
 struct nw_engine {
     const nw_shader_source *src; /* borrowed: the caller keeps it alive */
     NW_LIST(pass_gl) passes;
-    NW_LIST(float) param_values;  /* 4 per param */
+    NW_LIST(float) param_values; /* 4 per param */
     GLuint vao;
     GLuint tex_audio, tex_keyboard;
-    bool uses_audio, uses_keyboard;  /* some pass samples it: worth uploading */
+    bool uses_audio, uses_keyboard; /* some pass samples it: worth uploading */
 };
 
 static nw_str g_errors;
 
-const char *nw_engine_last_errors(void) { return nw_str_cstr(&g_errors); }
-bool nw_engine_animated(const nw_engine *e) { return e->src->animated; }
+const char *nw_engine_last_errors(void) {
+    return nw_str_cstr(&g_errors);
+}
+bool nw_engine_animated(const nw_engine *e) {
+    return e->src->animated;
+}
 
 /* ── errors back to file:line ────────────────────────────────────────── */
 
 static const char *source_line_of(const char *path, int line, char *buf, size_t cap) {
     FILE *f = fopen(path, "r");
     if (!f) return NULL;
-    int n = 1;
+    int n           = 1;
     const char *got = NULL;
     while (fgets(buf, (int)cap, f)) {
         if (n++ == line) {
             buf[strcspn(buf, "\r\n")] = '\0';
-            got = buf;
+            got                       = buf;
             break;
         }
     }
@@ -163,7 +172,8 @@ static const char *source_line_of(const char *path, int line, char *buf, size_t 
 
 static long read_num(const char **p) {
     long v = 0;
-    while (isdigit((unsigned char)**p)) v = v * 10 + (*(*p)++ - '0');
+    while (isdigit((unsigned char)**p))
+        v = v * 10 + (*(*p)++ - '0');
     return v;
 }
 
@@ -174,10 +184,12 @@ static long read_num(const char **p) {
 static void report_log(const nw_shader_source *src, const char *pass, const char *log) {
     for (const char *ln = log; ln && *ln;) {
         const char *eol = strchr(ln, '\n');
-        size_t len = eol ? (size_t)(eol - ln) : strlen(ln);
-        const char *p = ln;
-        if (!strncmp(p, "ERROR: ", 7)) p += 7;
-        else if (!strncmp(p, "WARNING: ", 9)) p += 9;
+        size_t len      = eol ? (size_t)(eol - ln) : strlen(ln);
+        const char *p   = ln;
+        if (!strncmp(p, "ERROR: ", 7))
+            p += 7;
+        else if (!strncmp(p, "WARNING: ", 9))
+            p += 9;
         long s = -1, line = -1, col = 0;
         const char *msg = NULL;
         if (isdigit((unsigned char)*p)) {
@@ -195,18 +207,22 @@ static void report_log(const nw_shader_source *src, const char *pass, const char
                     if (*p == ')') p++;
                 }
             }
-            while (*p == ' ' || *p == ':') p++;
+            while (*p == ' ' || *p == ':')
+                p++;
             if (!strncmp(p, "error", 5)) p += 5;
-            while (*p == ' ' || *p == ':') p++;
+            while (*p == ' ' || *p == ':')
+                p++;
             if (*p == 'C' && isdigit((unsigned char)p[1])) { /* NVIDIA "C1503:" */
-                while (*p && *p != ':') p++;
-                while (*p == ':' || *p == ' ') p++;
+                while (*p && *p != ':')
+                    p++;
+                while (*p == ':' || *p == ' ')
+                    p++;
             }
             msg = p;
         }
         if (msg && line > 0 && s >= 0 && (size_t)s < src->includes.len) {
             const char *file = src->includes.data[s];
-            int mlen = (int)(len - (size_t)(msg - ln));
+            int mlen         = (int)(len - (size_t)(msg - ln));
             /* drivers repeat themselves (NVIDIA prints some errors twice) */
             char head[768];
             snprintf(head, sizeof(head), "%s:%ld: [%s] %.*s\n", file, line, pass, mlen, msg);
@@ -225,7 +241,8 @@ static void report_log(const nw_shader_source *src, const char *pass, const char
                     for (const char *q = msg; q < msg + mlen && at <= 0; q++) {
                         if (*q != '\'' && *q != '"' && *q != '`') continue;
                         const char *e = q + 1;
-                        while (isalnum((unsigned char)*e) || *e == '_') e++;
+                        while (isalnum((unsigned char)*e) || *e == '_')
+                            e++;
                         if (e > q + 1) {
                             char name[64];
                             snprintf(name, sizeof(name), "%.*s", (int)(e - q - 1), q + 1);
@@ -249,7 +266,8 @@ static void report_log(const nw_shader_source *src, const char *pass, const char
 
 /* ── build ───────────────────────────────────────────────────────────── */
 
-static GLuint make_tex(GLenum ifmt, int w, int h, GLenum fmt, GLenum type, const void *data, bool linear) {
+static GLuint make_tex(GLenum ifmt, int w, int h, GLenum fmt, GLenum type, const void *data,
+                       bool linear) {
     GLuint t = 0;
     glGenTextures(1, &t);
     glBindTexture(GL_TEXTURE_2D, t);
@@ -263,17 +281,17 @@ static GLuint make_tex(GLenum ifmt, int w, int h, GLenum fmt, GLenum type, const
 }
 
 static void cache_locations(pass_gl *g, const nw_shader_source *src) {
-    GLuint p = g->prog;
-    g->u_time = glGetUniformLocation(p, "iTime");
-    g->u_res = glGetUniformLocation(p, "iResolution");
-    g->u_mouse = glGetUniformLocation(p, "iMouse");
-    g->u_frame = glGetUniformLocation(p, "iFrame");
-    g->u_dt = glGetUniformLocation(p, "iTimeDelta");
-    g->u_fps = glGetUniformLocation(p, "iFrameRate");
-    g->u_date = glGetUniformLocation(p, "iDate");
-    g->u_rate = glGetUniformLocation(p, "iSampleRate");
-    g->u_span = glGetUniformLocation(p, "iSpanOffset");
-    g->u_chres = glGetUniformLocation(p, "iChannelResolution");
+    GLuint p    = g->prog;
+    g->u_time   = glGetUniformLocation(p, "iTime");
+    g->u_res    = glGetUniformLocation(p, "iResolution");
+    g->u_mouse  = glGetUniformLocation(p, "iMouse");
+    g->u_frame  = glGetUniformLocation(p, "iFrame");
+    g->u_dt     = glGetUniformLocation(p, "iTimeDelta");
+    g->u_fps    = glGetUniformLocation(p, "iFrameRate");
+    g->u_date   = glGetUniformLocation(p, "iDate");
+    g->u_rate   = glGetUniformLocation(p, "iSampleRate");
+    g->u_span   = glGetUniformLocation(p, "iSpanOffset");
+    g->u_chres  = glGetUniformLocation(p, "iChannelResolution");
     g->u_chtime = glGetUniformLocation(p, "iChannelTime");
     for (int c = 0; c < NW_CHANNELS; c++) {
         char n[16];
@@ -284,8 +302,8 @@ static void cache_locations(pass_gl *g, const nw_shader_source *src) {
         (void)nw_list_push(&g->params, glGetUniformLocation(p, src->params.data[i].name));
 }
 
-static GLuint g_vs;           /* the one vertex shader, shared */
-static int g_parallel = -1;   /* KHR_parallel_shader_compile: -1 unknown */
+static GLuint g_vs;         /* the one vertex shader, shared */
+static int g_parallel = -1; /* KHR_parallel_shader_compile: -1 unknown */
 
 /* ── build ───────────────────────────────────────────────────────────────── */
 
@@ -294,9 +312,9 @@ static int g_parallel = -1;   /* KHR_parallel_shader_compile: -1 unknown */
  * nw_engine_new then waits for all of them. */
 typedef struct {
     GLuint fs, prog;
-    bool linked;   /* glLinkProgram issued (or loaded from the cache) */
-    uint64_t key;  /* program cache key */
-    bool cached;   /* came from the cache: nothing to store */
+    bool linked;  /* glLinkProgram issued (or loaded from the cache) */
+    uint64_t key; /* program cache key */
+    bool cached;  /* came from the cache: nothing to store */
 } pending_pass;
 
 struct nw_engine_build {
@@ -311,14 +329,16 @@ static bool parallel_compile(void) {
     if (g_parallel < 0) {
         if (!glGetString(GL_VERSION)) return false; /* no context yet: ask again later */
         g_parallel = 0;
-        GLint n = 0;
+        GLint n    = 0;
         glGetIntegerv(GL_NUM_EXTENSIONS, &n);
         for (GLint i = 0; i < n; i++) {
             const char *x = (const char *)glGetStringi(GL_EXTENSIONS, (GLuint)i);
-            if (x && (!strcmp(x, "GL_KHR_parallel_shader_compile") || !strcmp(x, "GL_ARB_parallel_shader_compile")))
+            if (x && (!strcmp(x, "GL_KHR_parallel_shader_compile") ||
+                      !strcmp(x, "GL_ARB_parallel_shader_compile")))
                 g_parallel = 1;
         }
-        if (g_parallel) glMaxShaderCompilerThreadsKHR(0xFFFFFFFFu); /* as many as the driver likes */
+        if (g_parallel)
+            glMaxShaderCompilerThreadsKHR(0xFFFFFFFFu); /* as many as the driver likes */
     }
     return g_parallel == 1;
 }
@@ -326,8 +346,10 @@ static bool parallel_compile(void) {
 static bool done_compiling(GLuint obj, bool is_prog) {
     if (!parallel_compile()) return true; /* the next query just blocks */
     GLint v = 0;
-    if (is_prog) glGetProgramiv(obj, GL_COMPLETION_STATUS_KHR, &v);
-    else glGetShaderiv(obj, GL_COMPLETION_STATUS_KHR, &v);
+    if (is_prog)
+        glGetProgramiv(obj, GL_COMPLETION_STATUS_KHR, &v);
+    else
+        glGetShaderiv(obj, GL_COMPLETION_STATUS_KHR, &v);
     return v != 0;
 }
 
@@ -335,11 +357,11 @@ static bool done_compiling(GLuint obj, bool is_prog) {
 nw_result nw_engine_build_start(const nw_shader_source *src, nw_engine_build **out) {
     nw_engine_build *b = calloc(1, sizeof(*b));
     if (!b) return nw_err(NW_ERR_OOM, "engine");
-    b->src = src;
+    b->src   = src;
     b->state = NW_BUILD_PENDING;
     (void)parallel_compile();
     if (!g_vs) {
-        g_vs = glCreateShader(GL_VERTEX_SHADER);
+        g_vs          = glCreateShader(GL_VERTEX_SHADER);
         const char *v = vertex_src;
         glShaderSource(g_vs, 1, &v, NULL);
         glCompileShader(g_vs);
@@ -359,7 +381,7 @@ nw_result nw_engine_build_start(const nw_shader_source *src, nw_engine_build **o
         if ((pp.prog = program_cache_load(pp.key))) {
             pp.linked = pp.cached = true;
         } else {
-            pp.fs = glCreateShader(GL_FRAGMENT_SHADER);
+            pp.fs         = glCreateShader(GL_FRAGMENT_SHADER);
             const char *t = text;
             glShaderSource(pp.fs, 1, &t, NULL);
             glCompileShader(pp.fs);
@@ -379,8 +401,10 @@ nw_result nw_engine_build_start(const nw_shader_source *src, nw_engine_build **o
 
 static void collect_log(nw_engine_build *b, size_t i, GLuint obj, bool is_prog) {
     char log[8192] = "";
-    if (is_prog) glGetProgramInfoLog(obj, sizeof(log), NULL, log);
-    else glGetShaderInfoLog(obj, sizeof(log), NULL, log);
+    if (is_prog)
+        glGetProgramInfoLog(obj, sizeof(log), NULL, log);
+    else
+        glGetShaderInfoLog(obj, sizeof(log), NULL, log);
     nw_str_clear(&g_errors);
     report_log(b->src, b->src->passes.data[i].name, log[0] ? log : "failed with no driver log");
     nw_str_append(&b->errors, nw_str_cstr(&g_errors));
@@ -389,12 +413,12 @@ static void collect_log(nw_engine_build *b, size_t i, GLuint obj, bool is_prog) 
 /* Everything compiled and linked: the rest of what nw_engine_new did. */
 static nw_engine *finish(nw_engine_build *b) {
     const nw_shader_source *src = b->src;
-    nw_engine *e = calloc(1, sizeof(*e));
+    nw_engine *e                = calloc(1, sizeof(*e));
     if (!e) return NULL;
-    e->src = src;
+    e->src       = src;
     bool uses_nv = false;
     for (size_t i = 0; i < b->p.len; i++) {
-        pass_gl g = {.prog = b->p.data[i].prog};
+        pass_gl g         = {.prog = b->p.data[i].prog};
         b->p.data[i].prog = 0; /* the engine owns it now */
         cache_locations(&g, src);
         /* the compiler drops unused uniforms, so this is exact */
@@ -439,7 +463,8 @@ static nw_engine *finish(nw_engine_build *b) {
         }
     }
     for (size_t i = 0; i < src->params.len; i++)
-        for (int k = 0; k < 4; k++) (void)nw_list_push(&e->param_values, src->params.data[i].def[k]);
+        for (int k = 0; k < 4; k++)
+            (void)nw_list_push(&e->param_values, src->params.data[i].def[k]);
     if (nw_gfx_check_errors("engine build")) {
         nw_engine_free(e);
         return NULL;
@@ -461,7 +486,7 @@ nw_build_state nw_engine_build_poll(nw_engine_build *b) {
             glGetShaderiv(pp->fs, GL_COMPILE_STATUS, &ok);
             if (!ok) {
                 collect_log(b, i, pp->fs, false);
-                failed = true;
+                failed     = true;
                 pp->linked = true; /* nothing more to do for this one */
                 continue;
             }
@@ -471,7 +496,7 @@ nw_build_state nw_engine_build_poll(nw_engine_build *b) {
             glAttachShader(pp->prog, pp->fs);
             glLinkProgram(pp->prog);
             pp->linked = true;
-            all = false; /* check the link next poll */
+            all        = false; /* check the link next poll */
             continue;
         }
         if (!pp->prog) {
@@ -502,11 +527,13 @@ nw_build_state nw_engine_build_poll(nw_engine_build *b) {
 
 nw_engine *nw_engine_build_take(nw_engine_build *b) {
     nw_engine *e = b->done;
-    b->done = NULL;
+    b->done      = NULL;
     return e;
 }
 
-const char *nw_engine_build_errors(const nw_engine_build *b) { return nw_str_cstr(&b->errors); }
+const char *nw_engine_build_errors(const nw_engine_build *b) {
+    return nw_str_cstr(&b->errors);
+}
 
 void nw_engine_build_free(nw_engine_build *b) {
     if (!b) return;
@@ -526,9 +553,10 @@ nw_result nw_engine_new(const nw_shader_source *src, nw_engine **out) {
     nw_build_state s;
     /* we wait anyway, so skip the completion queries: the status calls
      * block until each step is done */
-    int saved = g_parallel;
+    int saved  = g_parallel;
     g_parallel = 0;
-    while ((s = nw_engine_build_poll(b)) == NW_BUILD_PENDING) {}
+    while ((s = nw_engine_build_poll(b)) == NW_BUILD_PENDING) {
+    }
     g_parallel = saved;
     nw_str_clear(&g_errors);
     nw_str_append(&g_errors, nw_engine_build_errors(b));
@@ -597,7 +625,7 @@ static void make_cube(pass_gl *g, const nw_pass_src *ps);
 static void ensure_targets(nw_engine *e, int w, int h) {
     for (size_t i = 0; i < e->passes.len; i++) {
         const nw_pass_src *ps = &e->src->passes.data[i];
-        pass_gl *g = &e->passes.data[i];
+        pass_gl *g            = &e->passes.data[i];
         if ((int)i == e->src->image_pass) continue;
         if (ps->is_cube) {
             if (!g->cube_fbo) make_cube(g, ps);
@@ -622,7 +650,10 @@ static void ensure_targets(nw_engine *e, int w, int h) {
  * every engine. There's one GL context per process. */
 static GLuint builtin(int which) {
     static GLuint tex[3];
-    if (!tex[which]) tex[which] = which == 0 ? texture_create_rgba_noise(256, 256) : which == 1 ? texture_create_blue_noise(256, 256) : texture_create_font_atlas(0, 0);
+    if (!tex[which])
+        tex[which] = which == 0   ? texture_create_rgba_noise(256, 256)
+                     : which == 1 ? texture_create_blue_noise(256, 256)
+                                  : texture_create_font_atlas(0, 0);
     return tex[which];
 }
 
@@ -642,29 +673,39 @@ static GLuint sky_cube(void) {
             for (int x = 0; x < SKY_SIZE; x++) {
                 /* the direction through this texel, in GL's cube map layout */
                 float u = (x + 0.5f) / SKY_SIZE * 2 - 1, v = (y + 0.5f) / SKY_SIZE * 2 - 1;
-                float d[6][3] = {{1, -v, -u}, {-1, -v, u}, {u, 1, v}, {u, -1, -v}, {u, -v, 1}, {-u, -v, -1}};
+                float d[6][3] = {
+                    {1,  -v, -u},
+                    {-1, -v, u },
+                    {u,  1,  v },
+                    {u,  -1, -v},
+                    {u,  -v, 1 },
+                    {-u, -v, -1}
+                };
                 float dx = d[f][0], dy = d[f][1], dz = d[f][2];
                 float len = sqrtf(dx * dx + dy * dy + dz * dz);
                 dx /= len, dy /= len, dz /= len;
                 float r, g, b;
                 if (dy >= 0) {
                     float t = powf(dy, 0.5f); /* horizon pale, zenith deep */
-                    r = 0.75f + (0.25f - 0.75f) * t, g = 0.85f + (0.45f - 0.85f) * t, b = 0.95f + (0.85f - 0.95f) * t;
+                    r = 0.75f + (0.25f - 0.75f) * t, g = 0.85f + (0.45f - 0.85f) * t,
+                    b = 0.95f + (0.85f - 0.95f) * t;
                 } else {
                     float t = fminf(-dy * 4, 1);
-                    r = 0.45f + (0.18f - 0.45f) * t, g = 0.42f + (0.16f - 0.42f) * t, b = 0.38f + (0.14f - 0.38f) * t;
+                    r = 0.45f + (0.18f - 0.45f) * t, g = 0.42f + (0.16f - 0.42f) * t,
+                    b = 0.38f + (0.14f - 0.38f) * t;
                 }
                 /* sun toward +x +y +z */
-                float s = (dx * 0.5f + dy * 0.6f + dz * 0.62f) / 0.99f;
+                float s   = (dx * 0.5f + dy * 0.6f + dz * 0.62f) / 0.99f;
                 float sun = s > 0 ? powf(s, 256) * 3 + powf(s, 8) * 0.25f : 0;
                 r += sun, g += sun * 0.9f, b += sun * 0.7f;
                 unsigned char *o = &px[(y * SKY_SIZE + x) * 4];
-                o[0] = (unsigned char)(fminf(r, 1) * 255), o[1] = (unsigned char)(fminf(g, 1) * 255);
+                o[0]             = (unsigned char)(fminf(r, 1) * 255),
+                o[1]             = (unsigned char)(fminf(g, 1) * 255);
                 o[2] = (unsigned char)(fminf(b, 1) * 255), o[3] = 255;
             }
         }
-        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + (GLenum)f, 0, GL_RGBA8, SKY_SIZE, SKY_SIZE, 0, GL_RGBA,
-                     GL_UNSIGNED_BYTE, px);
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + (GLenum)f, 0, GL_RGBA8, SKY_SIZE, SKY_SIZE, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, px);
     }
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -680,7 +721,7 @@ static GLuint sky_cube(void) {
 static GLuint resolve(nw_engine *e, int pass, int c, float *res) {
     const nw_input *in = &e->src->passes.data[pass].ch[c];
     res[0] = res[1] = 0;
-    res[2] = 1;
+    res[2]          = 1;
     switch (in->kind) {
     case NW_IN_PASS: {
         pass_gl *g = &e->passes.data[in->pass];
@@ -692,12 +733,18 @@ static GLuint resolve(nw_engine *e, int pass, int c, float *res) {
     case NW_IN_NOISE: res[0] = res[1] = 256; return builtin(0);
     case NW_IN_BLUE_NOISE: res[0] = res[1] = 256; return builtin(1);
     case NW_IN_FONT: res[0] = res[1] = 1024; return builtin(2);
-    case NW_IN_AUDIO: res[0] = AUDIO_W; res[1] = 2; return e->tex_audio;
-    case NW_IN_KEYBOARD: res[0] = 256; res[1] = 3; return e->tex_keyboard;
+    case NW_IN_AUDIO:
+        res[0] = AUDIO_W;
+        res[1] = 2;
+        return e->tex_audio;
+    case NW_IN_KEYBOARD:
+        res[0] = 256;
+        res[1] = 3;
+        return e->tex_keyboard;
     case NW_IN_IMAGE: {
         const input_tex *t = &e->passes.data[pass].image_ch[c];
-        res[0] = t->w;
-        res[1] = t->h;
+        res[0]             = t->w;
+        res[1]             = t->h;
         return t->tex;
     }
     case NW_IN_NONE: return 0;
@@ -722,21 +769,23 @@ static GLint extra_location(pass_gl *g, const char *name) {
 }
 
 static void set_uniforms(nw_engine *e, size_t i, pass_gl *g, const nw_frame_in *in, int w, int h) {
-    bool spanned = in->span_w > 0 && in->span_h > 0;
+    bool spanned  = in->span_w > 0 && in->span_h > 0;
     bool is_image = (int)i == e->src->image_pass;
     /* a spanned image pass draws its slice of the whole span */
-    float rw = spanned && is_image ? (float)in->span_w : (float)w;
-    float rh = spanned && is_image ? (float)in->span_h : (float)h;
+    float rw                        = spanned && is_image ? (float)in->span_w : (float)w;
+    float rh                        = spanned && is_image ? (float)in->span_h : (float)h;
     static const float no_offset[2] = {0, 0};
     if (g->u_time >= 0) glUniform1f(g->u_time, (float)in->time);
     if (g->u_res >= 0) glUniform3f(g->u_res, rw, rh, 1.0f);
     if (g->u_mouse >= 0) glUniform4fv(g->u_mouse, 1, in->mouse);
     if (g->u_frame >= 0) glUniform1i(g->u_frame, in->frame);
     if (g->u_dt >= 0) glUniform1f(g->u_dt, (float)in->dt);
-    if (g->u_fps >= 0) glUniform1f(g->u_fps, in->fps > 0 ? in->fps : in->dt > 0 ? (float)(1.0 / in->dt) : 60.0f);
+    if (g->u_fps >= 0)
+        glUniform1f(g->u_fps, in->fps > 0 ? in->fps : in->dt > 0 ? (float)(1.0 / in->dt) : 60.0f);
     if (g->u_date >= 0) glUniform4fv(g->u_date, 1, in->date);
     if (g->u_rate >= 0) glUniform1f(g->u_rate, 44100.0f);
-    if (g->u_span >= 0) glUniform2fv(g->u_span, 1, spanned && is_image ? in->span_offset : no_offset);
+    if (g->u_span >= 0)
+        glUniform2fv(g->u_span, 1, spanned && is_image ? in->span_offset : no_offset);
 
     float chres[NW_CHANNELS * 3], chtime[NW_CHANNELS];
     for (int c = 0; c < NW_CHANNELS; c++) {
@@ -744,8 +793,8 @@ static void set_uniforms(nw_engine *e, size_t i, pass_gl *g, const nw_frame_in *
         /* the config's channels fill what the shader didn't bind itself */
         if (in->channel_override[c] && !e->src->explicit_bindings &&
             e->src->passes.data[i].ch[c].kind != NW_IN_PASS) {
-            t = in->channel_override[c];
-            chres[c * 3] = in->channel_override_size[c][0];
+            t                = in->channel_override[c];
+            chres[c * 3]     = in->channel_override_size[c][0];
             chres[c * 3 + 1] = in->channel_override_size[c][1];
         }
         glActiveTexture(GL_TEXTURE0 + (GLenum)c);
@@ -779,15 +828,21 @@ static void set_uniforms(nw_engine *e, size_t i, pass_gl *g, const nw_frame_in *
         GLint loc = g->params.data[k];
         if (loc < 0) continue;
         const float *v = &e->param_values.data[k * 4];
-        const char *t = e->src->params.data[k].type;
-        if (!strcmp(t, "float")) glUniform1f(loc, v[0]);
-        else if (!strcmp(t, "vec2")) glUniform2fv(loc, 1, v);
-        else if (!strcmp(t, "vec3")) glUniform3fv(loc, 1, v);
-        else if (!strcmp(t, "vec4")) glUniform4fv(loc, 1, v);
-        else glUniform1i(loc, (int)v[0]);
+        const char *t  = e->src->params.data[k].type;
+        if (!strcmp(t, "float"))
+            glUniform1f(loc, v[0]);
+        else if (!strcmp(t, "vec2"))
+            glUniform2fv(loc, 1, v);
+        else if (!strcmp(t, "vec3"))
+            glUniform3fv(loc, 1, v);
+        else if (!strcmp(t, "vec4"))
+            glUniform4fv(loc, 1, v);
+        else
+            glUniform1i(loc, (int)v[0]);
     }
     for (size_t k = 0; k < in->uniform_count + in->uniform2_count; k++) {
-        const nw_uniform_value *u = k < in->uniform_count ? &in->uniforms[k] : &in->uniforms2[k - in->uniform_count];
+        const nw_uniform_value *u =
+            k < in->uniform_count ? &in->uniforms[k] : &in->uniforms2[k - in->uniform_count];
         GLint loc;
         if (k < g->slot_name.len && g->slot_name.data[k] == u->name) {
             loc = g->slot_loc.data[k];
@@ -795,20 +850,27 @@ static void set_uniforms(nw_engine *e, size_t i, pass_gl *g, const nw_frame_in *
             loc = extra_location(g, u->name);
             if (k < g->slot_name.len) {
                 g->slot_name.data[k] = u->name;
-                g->slot_loc.data[k] = loc;
+                g->slot_loc.data[k]  = loc;
             } else if (k == g->slot_name.len && nw_list_push(&g->slot_name, u->name) &&
                        !nw_list_push(&g->slot_loc, loc)) {
                 g->slot_name.len--;
             }
         }
         if (loc < 0) continue;
-        if (u->is_int) glUniform1i(loc, (int)u->v[0]);
-        else if (u->float_array) glUniform1fv(loc, u->count, u->v);
-        else if (u->count == 1) glUniform1f(loc, u->v[0]);
-        else if (u->count == 2) glUniform2fv(loc, 1, u->v);
-        else if (u->count == 3) glUniform3fv(loc, 1, u->v);
-        else if (u->count == 4) glUniform4fv(loc, 1, u->v);
-        else glUniform4fv(loc, u->count / 4, u->v); /* vec4 arrays */
+        if (u->is_int)
+            glUniform1i(loc, (int)u->v[0]);
+        else if (u->float_array)
+            glUniform1fv(loc, u->count, u->v);
+        else if (u->count == 1)
+            glUniform1f(loc, u->v[0]);
+        else if (u->count == 2)
+            glUniform2fv(loc, 1, u->v);
+        else if (u->count == 3)
+            glUniform3fv(loc, 1, u->v);
+        else if (u->count == 4)
+            glUniform4fv(loc, 1, u->v);
+        else
+            glUniform4fv(loc, u->count / 4, u->v); /* vec4 arrays */
     }
 }
 
@@ -816,13 +878,15 @@ static void set_uniforms(nw_engine *e, size_t i, pass_gl *g, const nw_frame_in *
 #define CUBE_SIZE 1024
 
 static void make_cube(pass_gl *g, const nw_pass_src *ps) {
-    GLenum ifmt = ps->format == NW_FMT_RGBA8 ? GL_RGBA8 : ps->format == NW_FMT_RGBA32F ? GL_RGBA32F : GL_RGBA16F;
+    GLenum ifmt = ps->format == NW_FMT_RGBA8     ? GL_RGBA8
+                  : ps->format == NW_FMT_RGBA32F ? GL_RGBA32F
+                                                 : GL_RGBA16F;
     glGenTextures(2, g->cube_tex);
     for (int k = 0; k < 2; k++) {
         glBindTexture(GL_TEXTURE_CUBE_MAP, g->cube_tex[k]);
         for (int f = 0; f < 6; f++)
-            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + (GLenum)f, 0, (GLint)ifmt, CUBE_SIZE, CUBE_SIZE, 0, GL_RGBA,
-                         GL_FLOAT, NULL);
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + (GLenum)f, 0, (GLint)ifmt, CUBE_SIZE,
+                         CUBE_SIZE, 0, GL_RGBA, GL_FLOAT, NULL);
         GLint filt = ps->filter == NW_FILTER_NEAREST ? GL_NEAREST : GL_LINEAR;
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, filt);
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, filt);
@@ -834,19 +898,22 @@ static void make_cube(pass_gl *g, const nw_pass_src *ps) {
     /* no seams where faces meet */
     glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
     glGenFramebuffers(1, &g->cube_fbo);
-    g->w = g->h = CUBE_SIZE;
+    g->w = g->h  = CUBE_SIZE;
     g->cube_read = 0;
-    g->u_face = glGetUniformLocation(g->prog, "nwCubeFace");
+    g->u_face    = glGetUniformLocation(g->prog, "nwCubeFace");
     /* the compiler keeps only uniforms the pass uses: no time, frame, mouse,
      * date, channel or extra uniform means the cube can't change */
-    static const char *const live[] = {"iTime", "iFrame", "iTimeDelta", "iFrameRate", "iMouse", "iDate",
-                                       "iChannel0", "iChannel1", "iChannel2", "iChannel3"};
-    bool any = false;
-    for (size_t k = 0; k < NW_COUNTOF(live) && !any; k++) any = glGetUniformLocation(g->prog, live[k]) >= 0;
+    static const char *const live[] = {"iTime",     "iFrame",   "iTimeDelta", "iFrameRate",
+                                       "iMouse",    "iDate",    "iChannel0",  "iChannel1",
+                                       "iChannel2", "iChannel3"};
+    bool any                        = false;
+    for (size_t k = 0; k < NW_COUNTOF(live) && !any; k++)
+        any = glGetUniformLocation(g->prog, live[k]) >= 0;
     GLint n = 0;
     glGetProgramiv(g->prog, GL_ACTIVE_UNIFORMS, &n);
     /* anything beyond the face index (reactive, params, manifest) is live too */
-    g->cube_static = !any && n <= (g->u_face >= 0 ? 1 : 0) + (glGetUniformLocation(g->prog, "iResolution") >= 0);
+    g->cube_static =
+        !any && n <= (g->u_face >= 0 ? 1 : 0) + (glGetUniformLocation(g->prog, "iResolution") >= 0);
 }
 
 static void set_uniforms(nw_engine *e, size_t i, pass_gl *g, const nw_frame_in *in, int w, int h);
@@ -859,8 +926,8 @@ static void draw_cube(nw_engine *e, size_t i, pass_gl *g, const nw_frame_in *in)
     glUseProgram(g->prog);
     set_uniforms(e, i, g, in, CUBE_SIZE, CUBE_SIZE);
     for (int f = 0; f < 6; f++) {
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + (GLenum)f,
-                               dst, 0);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_CUBE_MAP_POSITIVE_X + (GLenum)f, dst, 0);
         if (g->u_face >= 0) glUniform1i(g->u_face, f);
         glDrawArrays(GL_TRIANGLES, 0, 3);
     }
@@ -890,7 +957,7 @@ void nw_engine_frame(nw_engine *e, const nw_frame_in *in) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_SCISSOR_TEST);
     for (size_t i = 0; i < e->passes.len; i++) {
-        pass_gl *g = &e->passes.data[i];
+        pass_gl *g    = &e->passes.data[i];
         bool is_image = (int)i == e->src->image_pass;
         int w = in->width, h = in->height;
         if (e->src->passes.data[i].is_cube) {
@@ -926,7 +993,8 @@ void nw_engine_frame(nw_engine *e, const nw_frame_in *in) {
     for (size_t i = 0; i < e->passes.len; i++)
         if (e->passes.data[i].target) nw_gfx_target_swap(&e->passes.data[i].target->t);
     for (size_t i = 0; i < e->passes.len; i++)
-        if (e->passes.data[i].cube_fbo && !e->passes.data[i].cube_static) e->passes.data[i].cube_read ^= 1;
+        if (e->passes.data[i].cube_fbo && !e->passes.data[i].cube_static)
+            e->passes.data[i].cube_read ^= 1;
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)screen);
     glBindVertexArray(0);

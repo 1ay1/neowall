@@ -24,8 +24,8 @@ bool app_graphics_up(struct neowall_state *state) {
         return false;
     }
     void *native = b->ops->get_native_display ? b->ops->get_native_display(b->data) : NULL;
-    EGLenum platform = b->ops->get_egl_platform ? b->ops->get_egl_platform(b->data)
-                                                : EGL_PLATFORM_WAYLAND_KHR;
+    EGLenum platform =
+        b->ops->get_egl_platform ? b->ops->get_egl_platform(b->data) : EGL_PLATFORM_WAYLAND_KHR;
     if (!egl_core_init(state, native, platform)) return false;
 
     pthread_rwlock_rdlock(&state->output_list_lock);
@@ -48,9 +48,11 @@ bool app_graphics_up(struct neowall_state *state) {
             }
             first = false;
         }
-        if (!output_init_render(o)) log_error("Failed to initialize rendering for output %s", output_name(o));
+        if (!output_init_render(o))
+            log_error("Failed to initialize rendering for output %s", output_name(o));
     }
-    for (struct output_state *o = state->outputs; o; o = o->next) output_apply_deferred_config(o);
+    for (struct output_state *o = state->outputs; o; o = o->next)
+        output_apply_deferred_config(o);
     pthread_rwlock_unlock(&state->output_list_lock);
     return true;
 }

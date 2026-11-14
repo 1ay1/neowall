@@ -69,7 +69,7 @@ void nw_shader_state_load(const char *shader_path, nw_shader_state_t *out) {
     if (!state_file_path(shader_path, path, sizeof(path))) return;
 
     FILE *fp = fopen(path, "r");
-    if (!fp) return;   /* first run */
+    if (!fp) return; /* first run */
 
     long long saved_at = 0;
     if (fscanf(fp, "%lld", &saved_at) != 1) {
@@ -110,8 +110,7 @@ bool nw_shader_state_save(const char *shader_path, const nw_shader_state_t *stat
 
     fprintf(fp, "%lld\n", (long long)time(NULL));
     for (int i = 0; i < NW_STATE_FLOATS; i++) {
-        fprintf(fp, "%.9g%c", (double)state->values[i],
-                (i % 4 == 3) ? '\n' : ' ');
+        fprintf(fp, "%.9g%c", (double)state->values[i], (i % 4 == 3) ? '\n' : ' ');
     }
 
     /* Flush before rename so the rename publishes complete data. */
@@ -133,6 +132,6 @@ float nw_shader_state_age(const nw_shader_state_t *state) {
 
     int64_t now = (int64_t)time(NULL);
     int64_t age = now - state->saved_at;
-    if (age < 0) age = 0;      /* clock stepped back */
+    if (age < 0) age = 0; /* clock stepped back */
     return (float)age;
 }

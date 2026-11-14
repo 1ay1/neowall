@@ -34,12 +34,12 @@
 typedef struct tracked_toplevel {
     struct zwlr_foreign_toplevel_handle_v1 *handle;
     uint32_t state;
-    output_set outputs;   /* every wl_output this toplevel is currently on */
+    output_set outputs; /* every wl_output this toplevel is currently on */
     struct tracked_toplevel *next;
 } tracked_toplevel_t;
 
 static struct zwlr_foreign_toplevel_manager_v1 *toplevel_manager = NULL;
-static tracked_toplevel_t *toplevels = NULL;
+static tracked_toplevel_t *toplevels                             = NULL;
 
 static void free_toplevel(tracked_toplevel_t *tl) {
     output_set_free(&tl->outputs);
@@ -60,26 +60,32 @@ static void remove_toplevel(tracked_toplevel_t *tl) {
 }
 
 static void tl_title(void *d, struct zwlr_foreign_toplevel_handle_v1 *h, const char *t) {
-    (void)d; (void)h; (void)t;
+    (void)d;
+    (void)h;
+    (void)t;
 }
 static void tl_app_id(void *d, struct zwlr_foreign_toplevel_handle_v1 *h, const char *a) {
-    (void)d; (void)h; (void)a;
+    (void)d;
+    (void)h;
+    (void)a;
 }
 static void tl_output_enter(void *d, struct zwlr_foreign_toplevel_handle_v1 *h,
                             struct wl_output *output) {
-    tracked_toplevel_t *tl = d; (void)h;
+    tracked_toplevel_t *tl = d;
+    (void)h;
     /* A toplevel may be visible on several outputs at once, so accumulate
      * rather than overwrite. */
     output_set_add(&tl->outputs, output);
 }
 static void tl_output_leave(void *d, struct zwlr_foreign_toplevel_handle_v1 *h,
                             struct wl_output *output) {
-    tracked_toplevel_t *tl = d; (void)h;
+    tracked_toplevel_t *tl = d;
+    (void)h;
     output_set_remove(&tl->outputs, output);
 }
-static void tl_state(void *d, struct zwlr_foreign_toplevel_handle_v1 *h,
-                     struct wl_array *state) {
-    tracked_toplevel_t *tl = d; (void)h;
+static void tl_state(void *d, struct zwlr_foreign_toplevel_handle_v1 *h, struct wl_array *state) {
+    tracked_toplevel_t *tl = d;
+    (void)h;
     tl->state = 0;
     uint32_t *s;
     wl_array_for_each(s, state) {
@@ -88,37 +94,43 @@ static void tl_state(void *d, struct zwlr_foreign_toplevel_handle_v1 *h,
         }
     }
 }
-static void tl_done(void *d, struct zwlr_foreign_toplevel_handle_v1 *h) { (void)d; (void)h; }
+static void tl_done(void *d, struct zwlr_foreign_toplevel_handle_v1 *h) {
+    (void)d;
+    (void)h;
+}
 static void tl_closed(void *d, struct zwlr_foreign_toplevel_handle_v1 *h) {
     (void)h;
     remove_toplevel(d);
 }
 static void tl_parent(void *d, struct zwlr_foreign_toplevel_handle_v1 *h,
                       struct zwlr_foreign_toplevel_handle_v1 *p) {
-    (void)d; (void)h; (void)p;
+    (void)d;
+    (void)h;
+    (void)p;
 }
 
 static const struct zwlr_foreign_toplevel_handle_v1_listener tl_listener = {
-    .title = tl_title,
-    .app_id = tl_app_id,
+    .title        = tl_title,
+    .app_id       = tl_app_id,
     .output_enter = tl_output_enter,
     .output_leave = tl_output_leave,
-    .state = tl_state,
-    .done = tl_done,
-    .closed = tl_closed,
-    .parent = tl_parent,
+    .state        = tl_state,
+    .done         = tl_done,
+    .closed       = tl_closed,
+    .parent       = tl_parent,
 };
 
 static void mgr_toplevel(void *d, struct zwlr_foreign_toplevel_manager_v1 *m,
                          struct zwlr_foreign_toplevel_handle_v1 *handle) {
-    (void)d; (void)m;
+    (void)d;
+    (void)m;
     tracked_toplevel_t *tl = calloc(1, sizeof(*tl));
     if (!tl) {
         return;
     }
     tl->handle = handle;
     output_set_init(&tl->outputs);
-    tl->next = toplevels;
+    tl->next  = toplevels;
     toplevels = tl;
     zwlr_foreign_toplevel_handle_v1_add_listener(handle, &tl_listener, tl);
 }
@@ -135,20 +147,22 @@ static const struct zwlr_foreign_toplevel_manager_v1_listener mgr_listener = {
     .finished = mgr_finished,
 };
 
-static void reg_global(void *d, struct wl_registry *r, uint32_t name,
-                       const char *iface, uint32_t version) {
+static void reg_global(void *d, struct wl_registry *r, uint32_t name, const char *iface,
+                       uint32_t version) {
     (void)d;
     if (strcmp(iface, zwlr_foreign_toplevel_manager_v1_interface.name) == 0) {
         uint32_t v = version < 3 ? version : 3;
-        toplevel_manager = wl_registry_bind(r, name,
-                                            &zwlr_foreign_toplevel_manager_v1_interface, v);
+        toplevel_manager =
+            wl_registry_bind(r, name, &zwlr_foreign_toplevel_manager_v1_interface, v);
     }
 }
 static void reg_global_remove(void *d, struct wl_registry *r, uint32_t name) {
-    (void)d; (void)r; (void)name;
+    (void)d;
+    (void)r;
+    (void)name;
 }
 static const struct wl_registry_listener reg_listener = {
-    .global = reg_global,
+    .global        = reg_global,
     .global_remove = reg_global_remove,
 };
 
@@ -246,7 +260,7 @@ void wayland_occlusion_update(struct neowall_state *state) {
         }
         bool hypr_says_occluded = hyprland_output_covered(o, threshold);
 
-        bool was = atomic_load_explicit(&o->occluded, memory_order_acquire);
+        bool was    = atomic_load_explicit(&o->occluded, memory_order_acquire);
         bool nowocc = cb_says_occluded || toplevel_says_occluded || hypr_says_occluded;
 
         atomic_store_explicit(&o->occluded, nowocc, memory_order_release);
@@ -264,11 +278,10 @@ void wayland_occlusion_update(struct neowall_state *state) {
              * this window to rebase a long-running shader clock, where a
              * discontinuity cannot be seen. */
             o->shader_hidden_since = get_time_ms();
-            const char *why = cb_says_occluded
-                ? "compositor stopped frame callbacks"
-                : toplevel_says_occluded
-                    ? "maximized/fullscreen window covering output"
-                    : "tiled windows cover threshold of wallpaper region";
+            const char *why        = cb_says_occluded ? "compositor stopped frame callbacks"
+                                     : toplevel_says_occluded
+                                         ? "maximized/fullscreen window covering output"
+                                         : "tiled windows cover threshold of wallpaper region";
             log_info("Output %s occluded (%s), pausing", name, why);
         }
     }

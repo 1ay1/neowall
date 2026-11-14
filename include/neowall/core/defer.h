@@ -60,10 +60,10 @@ static inline void nw_cleanup_fclose(FILE **f) {
 }
 
 /* Declare a heap pointer that is free()d at end of scope. */
-#define NW_DEFER_FREE  __attribute__((cleanup(nw_cleanup_free)))
+#define NW_DEFER_FREE __attribute__((cleanup(nw_cleanup_free)))
 
 /* Declare a FILE* that is fclose()d at end of scope (if non-NULL). */
-#define NW_DEFER_FILE  __attribute__((cleanup(nw_cleanup_fclose)))
+#define NW_DEFER_FILE __attribute__((cleanup(nw_cleanup_fclose)))
 
 /*
  * NW_DEFER(fn) — attach an arbitrary single-argument cleanup function to a
@@ -72,9 +72,9 @@ static inline void nw_cleanup_fclose(FILE **f) {
  *   NW_DEFER(close_fd) int fd = open(...);
  *   static inline void close_fd(int *fd) { if (*fd >= 0) close(*fd); }
  */
-#define NW_DEFER(fn)   __attribute__((cleanup(fn)))
+#define NW_DEFER(fn) __attribute__((cleanup(fn)))
 
-#else  /* no cleanup attribute */
+#else /* no cleanup attribute */
 
 #define NW_DEFER_FREE
 #define NW_DEFER_FILE

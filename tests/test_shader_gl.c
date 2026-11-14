@@ -23,8 +23,16 @@
 #include "neowall/shader/wallshader.h"
 
 static int fails, checks;
-#define CHECK(c, ...) do { checks++; if (!(c)) { fails++; \
-    printf("  FAIL line %d: ", __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
+#define CHECK(c, ...)                                                                              \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(c)) {                                                                                \
+            fails++;                                                                               \
+            printf("  FAIL line %d: ", __LINE__);                                                  \
+            printf(__VA_ARGS__);                                                                   \
+            printf("\n");                                                                          \
+        }                                                                                          \
+    } while (0)
 
 enum { W = 64, H = 32 };
 static GLuint g_fbo, g_tex;
@@ -44,15 +52,17 @@ static void pixel(int x, int y, unsigned char out[4]) {
     glReadPixels(x, y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, out);
 }
 
-static bool near(int got, int want) { return abs(got - want) <= 2; }
+static bool near(int got, int want) {
+    return abs(got - want) <= 2;
+}
 
 static void draw(wallshader *s, int frames, double t0, const wallshader_frame *base) {
     for (int f = 0; f < frames; f++) {
         glBindFramebuffer(GL_FRAMEBUFFER, g_fbo);
         wallshader_frame fr = base ? *base : (wallshader_frame){0};
-        fr.width = W;
-        fr.height = H;
-        fr.time = t0 + f / 60.0;
+        fr.width            = W;
+        fr.height           = H;
+        fr.time             = t0 + f / 60.0;
         wallshader_draw(s, &fr);
     }
     glFinish();
@@ -91,16 +101,18 @@ int main(void) {
     unsigned char p[4];
 
     /* 1. A Shadertoy mainImage: gradient from fragCoord. */
-    wallshader *s = run(
-        "void mainImage(out vec4 c, in vec2 f) {\n"
-        "    c = vec4(f.x / iResolution.x, f.y / iResolution.y, 0.25, 1.0);\n"
-        "}\n", 1, 0.0);
+    wallshader *s = run("void mainImage(out vec4 c, in vec2 f) {\n"
+                        "    c = vec4(f.x / iResolution.x, f.y / iResolution.y, 0.25, 1.0);\n"
+                        "}\n",
+                        1, 0.0);
     CHECK(s != NULL, "plain mainImage compiles");
     if (s) {
         pixel(0, 0, p);
-        CHECK(near(p[0], 2) && near(p[1], 4) && near(p[2], 64), "bottom-left %d %d %d", p[0], p[1], p[2]);
+        CHECK(near(p[0], 2) && near(p[1], 4) && near(p[2], 64), "bottom-left %d %d %d", p[0], p[1],
+              p[2]);
         pixel(W - 1, H - 1, p);
-        CHECK(near(p[0], 253) && near(p[1], 251) && near(p[2], 64), "top-right %d %d %d", p[0], p[1], p[2]);
+        CHECK(near(p[0], 253) && near(p[1], 251) && near(p[2], 64), "top-right %d %d %d", p[0],
+              p[1], p[2]);
         CHECK(!wallshader_animated(s), "a gradient isn't animated");
         wallshader_free(s);
     }
@@ -117,16 +129,16 @@ int main(void) {
 
     /* 3. A buffer pass feeding the image, with self-feedback: each frame
      *    BufA adds 1/64 to itself, so after N frames red is N/64. */
-    s = run(
-        "// --- Buffer A ---\n"
-        "void mainImage(out vec4 c, in vec2 f) {\n"
-        "    vec4 prev = texelFetch(iChannel0, ivec2(f), 0);\n"
-        "    c = vec4(prev.r + 1.0/64.0, 0, 0, 1);\n"
-        "}\n"
-        "// --- Image ---\n"
-        "void mainImage(out vec4 c, in vec2 f) {\n"
-        "    c = texelFetch(iChannel0, ivec2(f), 0);\n"
-        "}\n", 16, 0.0);
+    s = run("// --- Buffer A ---\n"
+            "void mainImage(out vec4 c, in vec2 f) {\n"
+            "    vec4 prev = texelFetch(iChannel0, ivec2(f), 0);\n"
+            "    c = vec4(prev.r + 1.0/64.0, 0, 0, 1);\n"
+            "}\n"
+            "// --- Image ---\n"
+            "void mainImage(out vec4 c, in vec2 f) {\n"
+            "    c = texelFetch(iChannel0, ivec2(f), 0);\n"
+            "}\n",
+            16, 0.0);
     CHECK(s != NULL, "two-pass feedback shader compiles");
     if (s) {
         CHECK(wallshader_pass_count(s) == 2, "parsed %d passes", wallshader_pass_count(s));
@@ -145,7 +157,7 @@ int main(void) {
                           "    c = vec4(undefined_thing, 0, 0, 1) * iTimee;\n"
                           "}\n");
         wallshader *bad = NULL;
-        nw_result br = wallshader_load(bpath, &bad);
+        nw_result br    = wallshader_load(bpath, &bad);
         CHECK(nw_is_err(br) && !bad, "bad shader doesn't compile");
         const char *e = wallshader_last_errors();
         CHECK(strstr(e, "broken.glsl:2:") && strstr(e, "undefined_thing") && strstr(e, "^"),
@@ -158,7 +170,8 @@ int main(void) {
 
     /* 5. Spanning: the image pass sees the whole span as iResolution and
      *    is shifted by its offset, so two outputs draw one scene. */
-    s = run("void mainImage(out vec4 c, in vec2 f) { c = vec4(f.x / iResolution.x, 0, 0, 1); }\n", 0, 0);
+    s = run("void mainImage(out vec4 c, in vec2 f) { c = vec4(f.x / iResolution.x, 0, 0, 1); }\n",
+            0, 0);
     CHECK(s != NULL, "span shader compiles");
     if (s) {
         wallshader_frame span = {.span_w = W * 2, .span_h = H, .span_x = W, .span_y = 0};
@@ -173,10 +186,11 @@ int main(void) {
      *    system data, so only check they're in range). */
     s = run("void mainImage(out vec4 c, in vec2 f) {\n"
             "    c = vec4(clamp(iCpu, 0.0, 1.0), float(iWindowCount) / 16.0, iSun, 1);\n"
-            "}\n", 1, 0);
+            "}\n",
+            1, 0);
     CHECK(s != NULL, "reactive uniforms compile");
     if (s) {
-        float rect[4] = {0, 0, 10, 10};
+        float rect[4]       = {0, 0, 10, 10};
         wallshader_frame wf = {.windows = rect, .window_count = 1};
         draw(s, 1, 0, &wf);
         pixel(1, 1, p);
@@ -209,7 +223,8 @@ int main(void) {
     /* 8. A shader built twice comes from the program cache the second time
      *    and draws the same. */
     {
-        const char *src = "void mainImage(out vec4 c, in vec2 f) { c = vec4(0.25, f.x / iResolution.x, 0.75, 1); }\n";
+        const char *src =
+            "void mainImage(out vec4 c, in vec2 f) { c = vec4(0.25, f.x / iResolution.x, 0.75, 1); }\n";
         unsigned h0, m0, h1, m1;
         program_cache_stats(&h0, &m0);
         s = run(src, 1, 0);
@@ -235,13 +250,19 @@ int main(void) {
         glBindTexture(GL_TEXTURE_2D, tex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, green);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        s = run("void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel2, vec2(0.5)); }\n", 0, 0);
+        s = run("void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel2, vec2(0.5)); }\n", 0,
+                0);
         CHECK(s != NULL, "channel shader compiles");
         if (s) {
-            wallshader_frame cf = {.channels = {0, 0, tex, 0}, .channel_w = {0, 0, 1, 0}, .channel_h = {0, 0, 1, 0}};
+            wallshader_frame cf = {
+                .channels = {0, 0, tex, 0},
+                  .channel_w = {0, 0, 1,   0},
+                  .channel_h = {0, 0, 1,   0}
+            };
             draw(s, 1, 0, &cf);
             pixel(2, 2, p);
-            CHECK(p[1] == 255 && p[0] == 0, "iChannel2 reads the config texture (%d %d %d)", p[0], p[1], p[2]);
+            CHECK(p[1] == 255 && p[0] == 0, "iChannel2 reads the config texture (%d %d %d)", p[0],
+                  p[1], p[2]);
             wallshader_free(s);
         }
         glDeleteTextures(1, &tex);
@@ -261,26 +282,37 @@ int main(void) {
             "           : k == 3 ? vec3(0,-1,0) : k == 4 ? vec3(0,0,1) : k == 5 ? vec3(0,0,-1)\n"
             "           : normalize(vec3(1, 1, 0));\n"
             "    c = texture(iChannel0, d);\n"
-            "}\n", 1, 0);
+            "}\n",
+            1, 0);
     CHECK(s != NULL, "cube pass compiles");
     if (s) {
         CHECK(wallshader_pass_count(s) == 2, "two passes (%d)", wallshader_pass_count(s));
-        static const int want[7][3] = {{255, 128, 128}, {0, 128, 128}, {128, 255, 128}, {128, 0, 128},
-                                       {128, 128, 255}, {128, 128, 0}, {218, 218, 128}};
+        static const int want[7][3] = {
+            {255, 128, 128},
+            {0,   128, 128},
+            {128, 255, 128},
+            {128, 0,   128},
+            {128, 128, 255},
+            {128, 128, 0  },
+            {218, 218, 128}
+        };
         static const char *const dir[7] = {"+x", "-x", "+y", "-y", "+z", "-z", "+x+y"};
         for (int k = 0; k < 7; k++) {
             pixel(k * 8 + 4, 4, p);
-            bool ok = abs(p[0] - want[k][0]) <= 3 && abs(p[1] - want[k][1]) <= 3 && abs(p[2] - want[k][2]) <= 3;
-            CHECK(ok, "cube %s reads back %d %d %d, want %d %d %d", dir[k], p[0], p[1], p[2], want[k][0], want[k][1],
-                  want[k][2]);
+            bool ok = abs(p[0] - want[k][0]) <= 3 && abs(p[1] - want[k][1]) <= 3 &&
+                      abs(p[2] - want[k][2]) <= 3;
+            CHECK(ok, "cube %s reads back %d %d %d, want %d %d %d", dir[k], p[0], p[1], p[2],
+                  want[k][0], want[k][1], want[k][2]);
         }
         wallshader_free(s);
     }
 
     /* 11. A cube that animates is redrawn every frame (red tracks iTime);
      *     a static one (test 10) stays right after many frames. */
-    s = run("void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(fract(iTime), 0, 0, 1); }\n"
-            "void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, vec3(0, 0, 1)); }\n", 1, 0.25);
+    s = run(
+        "void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(fract(iTime), 0, 0, 1); }\n"
+        "void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, vec3(0, 0, 1)); }\n",
+        1, 0.25);
     CHECK(s != NULL, "animated cube compiles");
     if (s) {
         pixel(4, 4, p);
@@ -290,11 +322,14 @@ int main(void) {
         CHECK(near(p[0], 191), "cube follows time to 0.75: %d", p[0]);
         wallshader_free(s);
     }
-    s = run("void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(rd * 0.5 + 0.5, 1); }\n"
-            "void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, vec3(0, 0, -1)); }\n", 12, 0);
+    s = run(
+        "void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(rd * 0.5 + 0.5, 1); }\n"
+        "void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, vec3(0, 0, -1)); }\n",
+        12, 0);
     if (s) {
         pixel(4, 4, p);
-        CHECK(near(p[0], 128) && near(p[1], 128) && near(p[2], 0), "static cube after 12 frames: %d %d %d", p[0], p[1], p[2]);
+        CHECK(near(p[0], 128) && near(p[1], 128) && near(p[2], 0),
+              "static cube after 12 frames: %d %d %d", p[0], p[1], p[2]);
         wallshader_free(s);
     }
 
@@ -303,7 +338,8 @@ int main(void) {
     s = run("void mainImage(out vec4 c, in vec2 f) {\n"
             "    vec3 d = f.y < 16.0 ? vec3(0.3, -1.0, 0.2) : vec3(0.3, 1.0, 0.2);\n"
             "    c = texture(iChannel0, normalize(d));\n"
-            "}\n", 1, 0);
+            "}\n",
+            1, 0);
     CHECK(s != NULL, "sky cube compiles");
     if (s) {
         unsigned char up[4], down[4];
@@ -317,10 +353,10 @@ int main(void) {
     const char *sdir = getenv("NW_SHADER_DIR");
     if (sdir) {
         static const char *names[] = {
-            "audio_bars", "audio_pulse", "circadian_sky", "fireflies", "garden",
-            "living_aurora", "moon_ocean", "mouse_ripples", "neon_city", "plasma_touch",
-            "rain_window", "scene_demo", "starfield_warp", "star_next", "system_deck",
-            "system_monitor", "time", "window_forge", "window_light", "glass_orb",
+            "audio_bars",     "audio_pulse", "circadian_sky",  "fireflies",    "garden",
+            "living_aurora",  "moon_ocean",  "mouse_ripples",  "neon_city",    "plasma_touch",
+            "rain_window",    "scene_demo",  "starfield_warp", "star_next",    "system_deck",
+            "system_monitor", "time",        "window_forge",   "window_light", "glass_orb",
         };
         for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
             char path[512];

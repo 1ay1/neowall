@@ -83,8 +83,7 @@ bool span_compute(const struct span_rect *rects, size_t count, size_t index,
 
     out->virt_w = scale_ratio(box_w, dev_w, me->logical_w);
     out->virt_h = scale_ratio(box_h, dev_h, me->logical_h);
-    out->off_x = scale_ratio(off_x, dev_w, me->logical_w);
-    out->off_y = scale_ratio(off_y, dev_h, me->logical_h);
+    out->off_x  = scale_ratio(off_x, dev_w, me->logical_w);
+    out->off_y  = scale_ratio(off_y, dev_h, me->logical_h);
     return true;
 }
-

@@ -20,28 +20,28 @@ struct output_state;
  * perform it has id 0 and carries its argument. */
 enum {
     NW_MSG_NONE = 0,
-    NW_MSG_QUIT,            /* SIGINT/SIGTERM, `kill`, or the display went away */
-    NW_MSG_RELOAD,          /* SIGHUP, or `reload` with v.i = socket conn to answer */
-    NW_MSG_NEXT,            /* SIGUSR1: advance every cycle group once */
-    NW_MSG_CYCLE_PAUSE,     /* SIGUSR2 */
-    NW_MSG_CYCLE_RESUME,    /* SIGCONT */
-    NW_MSG_SET_INDEX,       /* SIGRTMIN (index is in a file), or v.i = index */
-    NW_MSG_SHADER_PAUSE,    /* SIGRTMIN+1 */
-    NW_MSG_SHADER_RESUME,   /* SIGRTMIN+2 */
-    NW_MSG_SET_TERMINAL,    /* SIGRTMIN+3 (command is in a file), or v.p = malloc'd command */
-    NW_MSG_SIGNAL,          /* any other routed signal; id = signo */
-    NW_MSG_CYCLE_DUE,       /* timer: a cycling output's duration elapsed; id = output */
-    NW_MSG_FRAME_DUE,       /* timer: a vsync-off animated output's frame; id = output */
-    NW_MSG_TRANSITION,      /* timer: a transition is running; redraw at 60 Hz */
-    NW_MSG_DISPLAY,         /* the compositor fd had events (folded after dispatch) */
-    NW_MSG_WATCH,           /* `neowall watch`: the shader file changed */
-    NW_MSG_REDRAW,          /* any thread: redraw every output (rt_post) */
-    NW_MSG_REDRAW_OUTPUT,   /* any thread: redraw one output; v.p = output */
-    NW_MSG_OUTPUTS_NEW,     /* a new output appeared (hotplug / reconnect) */
-    NW_MSG_GPU_LOST,        /* present: graphics can't recover in this process */
-    NW_MSG_APPLIED,         /* present: requests it used up (struct app_applied) */
-    NW_MSG_RELOAD_APPLIED,  /* perform: config applied; v.i bit0 = ok, bit1 = shaders building */
-    NW_MSG_RELOAD_SETTLED,  /* present: the reload's builds are done; v.i = ok */
+    NW_MSG_QUIT,           /* SIGINT/SIGTERM, `kill`, or the display went away */
+    NW_MSG_RELOAD,         /* SIGHUP, or `reload` with v.i = socket conn to answer */
+    NW_MSG_NEXT,           /* SIGUSR1: advance every cycle group once */
+    NW_MSG_CYCLE_PAUSE,    /* SIGUSR2 */
+    NW_MSG_CYCLE_RESUME,   /* SIGCONT */
+    NW_MSG_SET_INDEX,      /* SIGRTMIN (index is in a file), or v.i = index */
+    NW_MSG_SHADER_PAUSE,   /* SIGRTMIN+1 */
+    NW_MSG_SHADER_RESUME,  /* SIGRTMIN+2 */
+    NW_MSG_SET_TERMINAL,   /* SIGRTMIN+3 (command is in a file), or v.p = malloc'd command */
+    NW_MSG_SIGNAL,         /* any other routed signal; id = signo */
+    NW_MSG_CYCLE_DUE,      /* timer: a cycling output's duration elapsed; id = output */
+    NW_MSG_FRAME_DUE,      /* timer: a vsync-off animated output's frame; id = output */
+    NW_MSG_TRANSITION,     /* timer: a transition is running; redraw at 60 Hz */
+    NW_MSG_DISPLAY,        /* the compositor fd had events (folded after dispatch) */
+    NW_MSG_WATCH,          /* `neowall watch`: the shader file changed */
+    NW_MSG_REDRAW,         /* any thread: redraw every output (rt_post) */
+    NW_MSG_REDRAW_OUTPUT,  /* any thread: redraw one output; v.p = output */
+    NW_MSG_OUTPUTS_NEW,    /* a new output appeared (hotplug / reconnect) */
+    NW_MSG_GPU_LOST,       /* present: graphics can't recover in this process */
+    NW_MSG_APPLIED,        /* present: requests it used up (struct app_applied) */
+    NW_MSG_RELOAD_APPLIED, /* perform: config applied; v.i bit0 = ok, bit1 = shaders building */
+    NW_MSG_RELOAD_SETTLED, /* present: the reload's builds are done; v.i = ok */
 };
 
 /* Run neowall until it's told to stop. Takes over from main() once the

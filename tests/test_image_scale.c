@@ -30,7 +30,7 @@
 #include "../src/image/image.c"
 
 static int failures = 0;
-static int checks = 0;
+static int checks   = 0;
 
 static void check(bool cond, const char *what) {
     checks++;
@@ -43,11 +43,11 @@ static void check(bool cond, const char *what) {
 static struct image_data *mk(uint32_t w, uint32_t h) {
     struct image_data *img = calloc(1, sizeof(*img));
     assert(img);
-    img->width = w;
-    img->height = h;
-    img->format = FORMAT_PNG;
+    img->width    = w;
+    img->height   = h;
+    img->format   = FORMAT_PNG;
     img->channels = 4;
-    img->pixels = malloc((size_t)w * h * 4);
+    img->pixels   = malloc((size_t)w * h * 4);
     assert(img->pixels);
     memset(img->pixels, 0x7F, (size_t)w * h * 4);
     return img;
@@ -67,32 +67,31 @@ static void test_center_pad_no_overflow(void) {
     /* Mixed axes in every combination around the pad target. Under ASan the
      * old code aborts on the wider-than-target rows. */
     static const uint32_t src[][2] = {
-        {1200, 298},  /* wider, shorter  <- the original crash */
-        {800,  300},  /* wider, equal    */
-        {800,  400},  /* wider, taller   */
-        {300,  400},  /* narrower, taller*/
-        {400,  400},  /* equal,  taller  */
-        {100,  100},  /* smaller both    */
-        {1,    1},    /* degenerate      */
-        {401,  301},  /* just over       */
-        {399,  299},  /* just under      */
+        {1200, 298}, /* wider, shorter  <- the original crash */
+        {800,  300}, /* wider, equal    */
+        {800,  400}, /* wider, taller   */
+        {300,  400}, /* narrower, taller*/
+        {400,  400}, /* equal,  taller  */
+        {100,  100}, /* smaller both    */
+        {1,    1  }, /* degenerate      */
+        {401,  301}, /* just over       */
+        {399,  299}, /* just under      */
     };
     const uint32_t pw = 400, ph = 300;
 
     for (size_t i = 0; i < sizeof(src) / sizeof(src[0]); i++) {
         struct image_data *img = mk(src[i][0], src[i][1]);
-        img = image_center_pad(img, pw, ph);
+        img                    = image_center_pad(img, pw, ph);
         char msg[128];
-        snprintf(msg, sizeof(msg), "%ux%u padded to exactly %ux%u",
-                 src[i][0], src[i][1], pw, ph);
+        snprintf(msg, sizeof(msg), "%ux%u padded to exactly %ux%u", src[i][0], src[i][1], pw, ph);
         check(img && img->width == pw && img->height == ph, msg);
         img_free(img);
     }
 
     /* Padding is a no-op when already exact. */
     struct image_data *exact = mk(pw, ph);
-    uint8_t *before = exact->pixels;
-    exact = image_center_pad(exact, pw, ph);
+    uint8_t *before          = exact->pixels;
+    exact                    = image_center_pad(exact, pw, ph);
     check(exact->pixels == before, "exact-size pad is a no-op");
     img_free(exact);
 }
@@ -102,10 +101,13 @@ static void test_center_pad_no_overflow(void) {
 static void test_modes_reach_exact_size(void) {
     printf("test_modes_reach_exact_size\n");
 
-    static const uint32_t dims[] = { 50, 300, 400, 800, 1200 };
-    static const int32_t displays[][2] = { {400, 300}, {300, 400} };
-    static const int modes[] = { MODE_CENTER, MODE_STRETCH, MODE_FIT, MODE_FILL, MODE_TILE };
-    static const char *names[] = { "center", "stretch", "fit", "fill", "tile" };
+    static const uint32_t dims[]       = {50, 300, 400, 800, 1200};
+    static const int32_t displays[][2] = {
+        {400, 300},
+        {300, 400}
+    };
+    static const int modes[]   = {MODE_CENTER, MODE_STRETCH, MODE_FIT, MODE_FILL, MODE_TILE};
+    static const char *names[] = {"center", "stretch", "fit", "fill", "tile"};
 
     size_t nd = sizeof(dims) / sizeof(dims[0]);
 
@@ -116,12 +118,11 @@ static void test_modes_reach_exact_size(void) {
             for (size_t a = 0; a < nd; a++) {
                 for (size_t b = 0; b < nd; b++) {
                     struct image_data *img = mk(dims[a], dims[b]);
-                    img = image_scale_to_display(img, dw, dh, modes[mi]);
+                    img                    = image_scale_to_display(img, dw, dh, modes[mi]);
                     if (!img || (int32_t)img->width != dw || (int32_t)img->height != dh) {
                         if (bad == 0) {
-                            printf("    %s: %ux%u -> %ux%u (want %dx%d)\n",
-                                   names[mi], dims[a], dims[b],
-                                   img ? img->width : 0, img ? img->height : 0, dw, dh);
+                            printf("    %s: %ux%u -> %ux%u (want %dx%d)\n", names[mi], dims[a],
+                                   dims[b], img ? img->width : 0, img ? img->height : 0, dw, dh);
                         }
                         bad++;
                     }
@@ -129,8 +130,8 @@ static void test_modes_reach_exact_size(void) {
                 }
             }
             char msg[128];
-            snprintf(msg, sizeof(msg), "mode %s always reaches %dx%d (%d bad)",
-                     names[mi], dw, dh, bad);
+            snprintf(msg, sizeof(msg), "mode %s always reaches %dx%d (%d bad)", names[mi], dw, dh,
+                     bad);
             check(bad == 0, msg);
         }
     }
@@ -187,9 +188,13 @@ static void test_size_bomb_rejected(const char *fixtures) {
  * every mode, including when EXIF rotates it. */
 static void test_scaled_jpeg_decode(const char *fixtures) {
     printf("test_scaled_jpeg_decode\n");
-    static const char *files[] = {"baseline.jpg", "orient6.jpg", "orient3.jpg"};
-    static const int modes[] = {MODE_CENTER, MODE_STRETCH, MODE_FIT, MODE_FILL, MODE_TILE};
-    static const int32_t disp[][2] = {{16, 9}, {7, 13}, {1, 1}};
+    static const char *files[]     = {"baseline.jpg", "orient6.jpg", "orient3.jpg"};
+    static const int modes[]       = {MODE_CENTER, MODE_STRETCH, MODE_FIT, MODE_FILL, MODE_TILE};
+    static const int32_t disp[][2] = {
+        {16, 9 },
+        {7,  13},
+        {1,  1 }
+    };
     for (size_t f = 0; f < sizeof(files) / sizeof(files[0]); f++) {
         char path[1024];
         snprintf(path, sizeof(path), "%s/%s", fixtures, files[f]);
@@ -197,10 +202,11 @@ static void test_scaled_jpeg_decode(const char *fixtures) {
             for (size_t d = 0; d < sizeof(disp) / sizeof(disp[0]); d++) {
                 struct image_data *img = image_load(path, disp[d][0], disp[d][1], modes[m]);
                 char msg[256];
-                snprintf(msg, sizeof(msg), "%s mode %d -> %dx%d", files[f], modes[m],
-                         disp[d][0], disp[d][1]);
+                snprintf(msg, sizeof(msg), "%s mode %d -> %dx%d", files[f], modes[m], disp[d][0],
+                         disp[d][1]);
                 check(img && (int32_t)img->width == disp[d][0] &&
-                      (int32_t)img->height == disp[d][1], msg);
+                          (int32_t)img->height == disp[d][1],
+                      msg);
                 img_free(img);
             }
         }

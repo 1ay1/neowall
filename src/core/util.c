@@ -2,19 +2,19 @@
  * See neowall/core/util.h. */
 
 #ifndef _DEFAULT_SOURCE
-#define _DEFAULT_SOURCE   /* lstat, localtime_r, PATH_MAX, clock_gettime */
+#define _DEFAULT_SOURCE /* lstat, localtime_r, PATH_MAX, clock_gettime */
 #endif
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include <inttypes.h>  /* PRIu64 */
+#include <inttypes.h> /* PRIu64 */
 #include <limits.h>
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <string.h>
-#include <strings.h>  /* POSIX strcasecmp — don't redefine it ourselves */
+#include <strings.h> /* POSIX strcasecmp — don't redefine it ourselves */
 #include <unistd.h>
 #include <errno.h>
 
@@ -22,7 +22,7 @@
 
 #include "neowall/core/constants.h"
 #include "neowall/core/log.h"
-#include "version.h"   /* NEOWALL_DATADIR */
+#include "version.h" /* NEOWALL_DATADIR */
 
 
 /* Parse a non-negative decimal index out of `s`.
@@ -47,8 +47,8 @@ bool neowall_parse_index(const char *s, long *out) {
         }
     }
 
-    errno = 0;
-    char *end = NULL;
+    errno      = 0;
+    char *end  = NULL;
     long value = strtol(s, &end, 10);
     if (end == s || *end != '\0' || errno == ERANGE || value < 0) {
         return false;
@@ -98,7 +98,7 @@ bool neowall_each_data_dir(bool (*fn)(const char *dir, void *ctx), void *ctx) {
     char dir[PATH_MAX];
     int n;
 
-    const char *dh = getenv("XDG_DATA_HOME");
+    const char *dh   = getenv("XDG_DATA_HOME");
     const char *home = getenv("HOME");
     if (dh && dh[0] == '/') {
         n = snprintf(dir, sizeof(dir), "%s/neowall", dh);
@@ -116,7 +116,7 @@ bool neowall_each_data_dir(bool (*fn)(const char *dir, void *ctx), void *ctx) {
     bool seen_builtin = false;
     for (const char *p = dirs; *p;) {
         const char *end = strchr(p, ':');
-        size_t len = end ? (size_t)(end - p) : strlen(p);
+        size_t len      = end ? (size_t)(end - p) : strlen(p);
         if (len > 0 && p[0] == '/') {
             n = snprintf(dir, sizeof(dir), "%.*s/neowall", (int)len, p);
             if (n > 0 && (size_t)n < sizeof(dir)) {
@@ -142,7 +142,7 @@ struct find_data_ctx {
 
 static bool find_data_in(const char *dir, void *vctx) {
     struct find_data_ctx *c = vctx;
-    int n = snprintf(c->out, c->size, "%s/%s", dir, c->rel);
+    int n                   = snprintf(c->out, c->size, "%s/%s", dir, c->rel);
     return n > 0 && (size_t)n < c->size && access(c->out, F_OK) == 0;
 }
 
@@ -160,7 +160,7 @@ void config_str_set(char *dst, size_t dst_size, const char *src) {
         dst[0] = '\0';
         return;
     }
-    if (dst == src) return;   /* already holds the value */
+    if (dst == src) return; /* already holds the value */
     snprintf(dst, dst_size, "%s", src);
 }
 
@@ -187,10 +187,10 @@ static bool ensure_private_dir(const char *dir) {
         return false;
     }
     if (!S_ISDIR(st.st_mode)) {
-        return false;      /* symlink or regular file squatting the name */
+        return false; /* symlink or regular file squatting the name */
     }
     if (st.st_uid != getuid()) {
-        return false;      /* someone else owns it */
+        return false; /* someone else owns it */
     }
     if (st.st_mode & (S_IRWXG | S_IRWXO)) {
         /* Tighten perms if a previous umask left it group/other-accessible. */

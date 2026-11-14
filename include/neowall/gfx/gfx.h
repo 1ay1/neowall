@@ -50,8 +50,8 @@
 #define NW_GFX_LOG_MAX 4096
 
 typedef struct {
-    GLuint id;                    /* 0 when not built */
-    char   log[NW_GFX_LOG_MAX];   /* compile or link diagnostics, "" on success */
+    GLuint id;                /* 0 when not built */
+    char log[NW_GFX_LOG_MAX]; /* compile or link diagnostics, "" on success */
 } nw_gfx_program;
 
 /*
@@ -89,24 +89,20 @@ typedef enum {
     NW_GFX_FILTER_MIPMAP /* linear + mipmap chain, for textureLod sampling */
 } nw_gfx_filter;
 
-typedef enum {
-    NW_GFX_WRAP_CLAMP = 0,
-    NW_GFX_WRAP_REPEAT
-} nw_gfx_wrap;
+typedef enum { NW_GFX_WRAP_CLAMP = 0, NW_GFX_WRAP_REPEAT } nw_gfx_wrap;
 
 typedef struct {
-    GLuint        id;
-    int           width;
-    int           height;
+    GLuint id;
+    int width;
+    int height;
     nw_gfx_format format;
     nw_gfx_filter filter;
-    nw_gfx_wrap   wrap;
+    nw_gfx_wrap wrap;
 } nw_gfx_texture;
 
 /* Allocate storage. `pixels` may be NULL for an uninitialised target. */
-nw_result nw_gfx_texture_create(nw_gfx_texture *out, int width, int height,
-                                nw_gfx_format format, nw_gfx_filter filter,
-                                nw_gfx_wrap wrap, const void *pixels);
+nw_result nw_gfx_texture_create(nw_gfx_texture *out, int width, int height, nw_gfx_format format,
+                                nw_gfx_filter filter, nw_gfx_wrap wrap, const void *pixels);
 
 /* Reallocate at a new size. No-op when the size already matches, so resize
  * paths can call it unconditionally. */
@@ -136,18 +132,17 @@ void nw_gfx_texture_destroy(nw_gfx_texture *tex);
  * resolves which is which.
  */
 typedef struct {
-    GLuint         fbo;
+    GLuint fbo;
     nw_gfx_texture textures[2];
-    bool           feedback;    /* double-buffered */
-    int            front;       /* index currently being written */
-    bool           needs_clear; /* set on create/resize; cleared on first bind */
+    bool feedback;    /* double-buffered */
+    int front;        /* index currently being written */
+    bool needs_clear; /* set on create/resize; cleared on first bind */
 } nw_gfx_target;
 
 /* Create an FBO and its attachment(s). `feedback` allocates the second
  * texture and enables flipping. */
-nw_result nw_gfx_target_create(nw_gfx_target *out, int width, int height,
-                               nw_gfx_format format, nw_gfx_filter filter,
-                               bool feedback);
+nw_result nw_gfx_target_create(nw_gfx_target *out, int width, int height, nw_gfx_format format,
+                               nw_gfx_filter filter, bool feedback);
 
 
 /* Delete and zero. Safe on a zeroed target. */

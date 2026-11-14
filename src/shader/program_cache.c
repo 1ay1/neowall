@@ -24,12 +24,12 @@
 #include "neowall/core/constants.h"
 #include "neowall/core/log.h"
 
-#define MAGIC 0x4E575042u /* "NWPB" */
-#define VERSION 1u
-#define MAX_BLOB (64u << 20)
+#define MAGIC       0x4E575042u /* "NWPB" */
+#define VERSION     1u
+#define MAX_BLOB    (64u << 20)
 #define MAX_ENTRIES 256
 
-static int g_state = -1;   /* -1 unknown, 0 off, 1 on */
+static int g_state = -1; /* -1 unknown, 0 off, 1 on */
 static char g_dir[NW_PATH_MAX];
 static uint64_t g_driver;
 static unsigned g_hits, g_misses;
@@ -58,19 +58,20 @@ static bool ready(void) {
     if (getenv("NEOWALL_NO_PROGRAM_CACHE")) return false;
     GLint formats = 0;
     glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &formats);
-    while (glGetError() != GL_NO_ERROR) {}
+    while (glGetError() != GL_NO_ERROR) {
+    }
     if (formats <= 0) {
         log_debug("program cache: the driver can't save programs");
         return false;
     }
     /* a driver update must never load an old blob */
-    g_driver = fnv1a((const char *)glGetString(GL_VENDOR), 0xcbf29ce484222325ull);
-    g_driver = fnv1a((const char *)glGetString(GL_RENDERER), g_driver);
-    g_driver = fnv1a((const char *)glGetString(GL_VERSION), g_driver);
+    g_driver        = fnv1a((const char *)glGetString(GL_VENDOR), 0xcbf29ce484222325ull);
+    g_driver        = fnv1a((const char *)glGetString(GL_RENDERER), g_driver);
+    g_driver        = fnv1a((const char *)glGetString(GL_VERSION), g_driver);
     const char *xdg = getenv("XDG_CACHE_HOME"), *home = getenv("HOME");
     int n = xdg && xdg[0] == '/' ? snprintf(g_dir, sizeof(g_dir), "%s/neowall/programs", xdg)
-            : home && home[0]    ? snprintf(g_dir, sizeof(g_dir), "%s/.cache/neowall/programs", home)
-                                 : -1;
+            : home && home[0] ? snprintf(g_dir, sizeof(g_dir), "%s/.cache/neowall/programs", home)
+                              : -1;
     if (n <= 0 || (size_t)n >= sizeof(g_dir)) return false;
     char tmp[sizeof(g_dir)];
     memcpy(tmp, g_dir, sizeof(tmp));
@@ -101,14 +102,15 @@ unsigned program_cache_load(uint64_t key) {
     }
     uint32_t h[4];
     GLuint prog = 0;
-    void *blob = NULL;
-    if (fread(h, sizeof(h), 1, f) == 1 && h[0] == MAGIC && h[1] == VERSION && h[3] && h[3] < MAX_BLOB &&
-        (blob = malloc(h[3])) && fread(blob, h[3], 1, f) == 1) {
+    void *blob  = NULL;
+    if (fread(h, sizeof(h), 1, f) == 1 && h[0] == MAGIC && h[1] == VERSION && h[3] &&
+        h[3] < MAX_BLOB && (blob = malloc(h[3])) && fread(blob, h[3], 1, f) == 1) {
         prog = glCreateProgram();
         glProgramBinary(prog, (GLenum)h[2], blob, (GLsizei)h[3]);
         GLint ok = 0;
         glGetProgramiv(prog, GL_LINK_STATUS, &ok);
-        while (glGetError() != GL_NO_ERROR) {}
+        while (glGetError() != GL_NO_ERROR) {
+        }
         if (!ok) {
             glDeleteProgram(prog);
             prog = 0;
@@ -133,7 +135,7 @@ static void prune(void) {
     struct ent {
         char name[NAME_MAX + 1];
         time_t at;
-    } *ents = NULL;
+    } *ents  = NULL;
     size_t n = 0, cap = 0;
     struct dirent *de;
     while ((de = readdir(d))) {
@@ -145,7 +147,7 @@ static void prune(void) {
         if (w < 0 || (size_t)w >= sizeof(p)) continue;
         if (stat(p, &st) != 0) continue;
         if (n == cap) {
-            cap = cap ? cap * 2 : 64;
+            cap            = cap ? cap * 2 : 64;
             struct ent *ne = realloc(ents, cap * sizeof(*ents));
             if (!ne) break;
             ents = ne;
@@ -174,19 +176,21 @@ void program_cache_store(uint64_t key, unsigned prog) {
     void *blob = malloc((size_t)len);
     if (!blob) return;
     GLsizei got = 0;
-    GLenum fmt = 0;
+    GLenum fmt  = 0;
     glGetProgramBinary(prog, len, &got, &fmt, blob);
     if (got > 0 && glGetError() == GL_NO_ERROR) {
         char path[NW_PATH_MAX + 64], tmp[NW_PATH_MAX + 96];
         path_for(key, path, sizeof(path));
-        int w = snprintf(tmp, sizeof(tmp), "%s.%d.tmp", path, (int)getpid());
+        int w   = snprintf(tmp, sizeof(tmp), "%s.%d.tmp", path, (int)getpid());
         FILE *f = (w > 0 && (size_t)w < sizeof(tmp)) ? fopen(tmp, "wb") : NULL;
         if (f) {
             uint32_t h[4] = {MAGIC, VERSION, (uint32_t)fmt, (uint32_t)got};
-            bool ok = fwrite(h, sizeof(h), 1, f) == 1 && fwrite(blob, (size_t)got, 1, f) == 1;
-            ok = fclose(f) == 0 && ok;
-            if (ok && rename(tmp, path) == 0) prune();
-            else unlink(tmp);
+            bool ok       = fwrite(h, sizeof(h), 1, f) == 1 && fwrite(blob, (size_t)got, 1, f) == 1;
+            ok            = fclose(f) == 0 && ok;
+            if (ok && rename(tmp, path) == 0)
+                prune();
+            else
+                unlink(tmp);
         }
     }
     free(blob);

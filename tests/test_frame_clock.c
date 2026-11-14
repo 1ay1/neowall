@@ -6,36 +6,44 @@
 #include "neowall/output/frame_clock.h"
 
 static int failures = 0, checks = 0;
-#define CHECK(c, ...) do { checks++; if (!(c)) { failures++; \
-    fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
-    fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
+#define CHECK(c, ...)                                                                              \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(c)) {                                                                                \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fputc('\n', stderr);                                                                   \
+        }                                                                                          \
+    } while (0)
 
-#define R 16666667ull          /* 60 Hz */
-#define BASE 1000000000000ull  /* an arbitrary monotonic origin */
+#define R    16666667ull      /* 60 Hz */
+#define BASE 1000000000000ull /* an arbitrary monotonic origin */
 
-static uint64_t g_frame = 0;   /* simulated vblank count, keeps running */
+static uint64_t g_frame = 0; /* simulated vblank count, keeps running */
 
 /* Simulate a display: frames drawn at vblank v + jitter show at v + lat*R.
  * Returns how many stamps were not exactly the real present time. */
-static int run(nw_frame_clock *fc, int frames, int lat, uint64_t jitter_max,
-               int miss_every, uint64_t ts_noise, int *bad_steps) {
-    int wrong = 0;
+static int run(nw_frame_clock *fc, int frames, int lat, uint64_t jitter_max, int miss_every,
+               uint64_t ts_noise, int *bad_steps) {
+    int wrong       = 0;
     uint64_t prev_t = 0, prev_p = 0;
     *bad_steps = 0;
     srand(7);
     for (int i = 0; i < frames; i++) {
-        uint64_t v = BASE + (g_frame++) * R;
+        uint64_t v   = BASE + (g_frame++) * R;
         uint64_t now = v + (jitter_max ? (uint64_t)rand() % jitter_max : 0);
         int used;
-        uint64_t t = nw_frame_clock_target(fc, now, &used);
-        int l = lat + (miss_every && i % miss_every == 0 ? 1 : 0);
-        uint64_t p = v + (uint64_t)l * R;
+        uint64_t t        = nw_frame_clock_target(fc, now, &used);
+        int l             = lat + (miss_every && i % miss_every == 0 ? 1 : 0);
+        uint64_t p        = v + (uint64_t)l * R;
         uint64_t reported = p + (ts_noise ? (uint64_t)rand() % ts_noise : 0);
         nw_frame_clock_presented(fc, t, used, reported, R);
-        if (i < 20 || !t) continue;           /* warm-up */
+        if (i < 20 || !t) continue; /* warm-up */
         if (t != p) wrong++;
         if (prev_t && (t - prev_t) != (p - prev_p)) (*bad_steps)++;
-        prev_t = t; prev_p = p;
+        prev_t = t;
+        prev_p = p;
     }
     return wrong;
 }

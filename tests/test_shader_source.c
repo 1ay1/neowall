@@ -11,31 +11,39 @@
 #include <unistd.h>
 
 static int failures, checks;
-#define CHECK(c, ...) do { checks++; if (!(c)) { failures++; \
-    fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
-    fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
+#define CHECK(c, ...)                                                                              \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(c)) {                                                                                \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fputc('\n', stderr);                                                                   \
+        }                                                                                          \
+    } while (0)
 
 static nw_shader_source *load(const char *text, const char *manifest) {
     nw_shader_source *s = NULL;
-    nw_result r = nw_shader_source_parse(text, NULL, manifest, &s);
+    nw_result r         = nw_shader_source_parse(text, NULL, manifest, &s);
     CHECK(!nw_is_err(r), "should parse: %s", r.context ? r.context : "");
     return s;
 }
 
 static bool rejects(const char *text, const char *manifest) {
     nw_shader_source *s = NULL;
-    nw_result r = nw_shader_source_parse(text, NULL, manifest, &s);
+    nw_result r         = nw_shader_source_parse(text, NULL, manifest, &s);
     if (!nw_is_err(r)) nw_shader_source_free(s);
     return nw_is_err(r);
 }
 
-static int pass(const nw_shader_source *s, const char *name) { return nw_shader_source_find_pass(s, name); }
+static int pass(const nw_shader_source *s, const char *name) {
+    return nw_shader_source_find_pass(s, name);
+}
 
-static const char single[] =
-    "float wave(float x) { return sin(x); }\n"
-    "void mainImage(out vec4 c, in vec2 f) {\n"
-    "    c = vec4(wave(iTime));\n"
-    "}\n";
+static const char single[] = "float wave(float x) { return sin(x); }\n"
+                             "void mainImage(out vec4 c, in vec2 f) {\n"
+                             "    c = vec4(wave(iTime));\n"
+                             "}\n";
 
 static const char multi[] =
     "// Common\n"
@@ -76,12 +84,14 @@ int main(void) {
     s = load(multi, NULL);
     CHECK(s->passes.len == 3, "3 passes, got %zu", s->passes.len);
     CHECK(s->common && strstr(s->common, "float hash"), "common extracted");
-    CHECK(!strstr(s->passes.data[pass(s, "Buffer A")].body, "float hash"), "common not duplicated into a pass");
+    CHECK(!strstr(s->passes.data[pass(s, "Buffer A")].body, "float hash"),
+          "common not duplicated into a pass");
     int a = pass(s, "Buffer A"), b = pass(s, "Buffer B"), img = pass(s, "Image");
     CHECK(a >= 0 && b >= 0 && img == s->image_pass, "names found");
     CHECK(pass(s, "bufferA") == a && pass(s, "a") == a && pass(s, "buffer_b") == b, "shorthands");
     /* default bindings */
-    const nw_pass_src *pa = &s->passes.data[a], *pb = &s->passes.data[b], *pi = &s->passes.data[img];
+    const nw_pass_src *pa = &s->passes.data[a], *pb = &s->passes.data[b],
+                      *pi = &s->passes.data[img];
     CHECK(pa->ch[0].kind == NW_IN_PASS && pa->ch[0].pass == a, "A reads itself (feedback)");
     CHECK(pb->ch[0].kind == NW_IN_PASS && pb->ch[0].pass == a, "B ch0 = A");
     CHECK(pi->ch[0].kind == NW_IN_PASS && pi->ch[0].pass == a, "Image ch0 = A");
@@ -93,30 +103,38 @@ int main(void) {
 
     /* noise detection in a single-pass shader */
     s = load("void mainImage(out vec4 c, in vec2 f) {\n"
-             "  c = texture(iChannel0, f / 256.0);\n  c += texture(iChannel1, f/256.);\n}\n", NULL);
-    CHECK(s->passes.data[0].ch[0].kind == NW_IN_NOISE && s->passes.data[0].ch[0].wrap_repeat, "noise ch0");
+             "  c = texture(iChannel0, f / 256.0);\n  c += texture(iChannel1, f/256.);\n}\n",
+             NULL);
+    CHECK(s->passes.data[0].ch[0].kind == NW_IN_NOISE && s->passes.data[0].ch[0].wrap_repeat,
+          "noise ch0");
     nw_shader_source_free(s);
 
     /* unmarked multipass: Buffer A..., last is Image */
-    s = load("void mainImage(out vec4 c, in vec2 f) { c = vec4(1); }\n"
-             "void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, f/iResolution.xy); }\n", NULL);
+    s = load(
+        "void mainImage(out vec4 c, in vec2 f) { c = vec4(1); }\n"
+        "void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, f/iResolution.xy); }\n",
+        NULL);
     CHECK(s->passes.len == 2 && !strcmp(s->passes.data[0].name, "Buffer A") &&
-          !strcmp(s->passes.data[1].name, "Image"), "positional names");
+              !strcmp(s->passes.data[1].name, "Image"),
+          "positional names");
     nw_shader_source_free(s);
 
     /* named passes: // Pass: Blur */
-    s = load("// Pass: Sim\nvoid mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, f/iResolution.xy); }\n"
-             "// Pass: Blur\nvoid mainImage(out vec4 c, in vec2 f) { c = vec4(1); }\n"
-             "// Image\nvoid mainImage(out vec4 c, in vec2 f) { c = vec4(0); }\n",
-             "pass {\n  Sim {\n    format rgba32f\n    size 256x128\n    filter nearest\n    ch0 self\n  }\n"
-             "  Blur {\n    scale 0.5\n    filter mipmap\n    ch0 Sim\n  }\n}\nimage {\n  ch0 Blur\n}\n");
+    s = load(
+        "// Pass: Sim\nvoid mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, f/iResolution.xy); }\n"
+        "// Pass: Blur\nvoid mainImage(out vec4 c, in vec2 f) { c = vec4(1); }\n"
+        "// Image\nvoid mainImage(out vec4 c, in vec2 f) { c = vec4(0); }\n",
+        "pass {\n  Sim {\n    format rgba32f\n    size 256x128\n    filter nearest\n    ch0 self\n  }\n"
+        "  Blur {\n    scale 0.5\n    filter mipmap\n    ch0 Sim\n  }\n}\nimage {\n  ch0 Blur\n}\n");
     int sim = pass(s, "Sim"), blur = pass(s, "Blur");
     CHECK(sim >= 0 && blur >= 0, "custom pass names");
     const nw_pass_src *ps = &s->passes.data[sim];
     CHECK(ps->format == NW_FMT_RGBA32F && ps->fixed_w == 256 && ps->fixed_h == 128 &&
-          ps->filter == NW_FILTER_NEAREST, "pass target settings");
+              ps->filter == NW_FILTER_NEAREST,
+          "pass target settings");
     CHECK(ps->ch[0].kind == NW_IN_PASS && ps->ch[0].pass == sim, "ch0 self");
-    CHECK(s->passes.data[blur].scale == 0.5 && s->passes.data[blur].filter == NW_FILTER_MIPMAP, "blur settings");
+    CHECK(s->passes.data[blur].scale == 0.5 && s->passes.data[blur].filter == NW_FILTER_MIPMAP,
+          "blur settings");
     CHECK(sim < blur, "Sim runs before Blur, which reads it");
     CHECK(s->explicit_bindings, "manifest bindings are explicit");
     nw_shader_source_free(s);
@@ -128,7 +146,8 @@ int main(void) {
              "image { ch0 a }\nbufferA { ch1 b }\n");
     CHECK(pass(s, "Buffer B") < pass(s, "Buffer A") && pass(s, "Buffer A") < pass(s, "Image"),
           "dependency order B, A, Image");
-    CHECK(s->passes.data[pass(s, "Image")].ch[0].pass == pass(s, "Buffer A"), "binding remapped after sort");
+    CHECK(s->passes.data[pass(s, "Image")].ch[0].pass == pass(s, "Buffer A"),
+          "binding remapped after sort");
     nw_shader_source_free(s);
 
     /* a cycle between buffers is legal (one read becomes last-frame) */
@@ -140,10 +159,11 @@ int main(void) {
     nw_shader_source_free(s);
 
     /* old manifest forms */
-    s = load(single, "channel0 audio\nuniforms {\n  uWind cpu\n  uGlow audio_bass\n  uExp 0.8\n}\n");
+    s = load(single,
+             "channel0 audio\nuniforms {\n  uWind cpu\n  uGlow audio_bass\n  uExp 0.8\n}\n");
     CHECK(s->passes.data[0].ch[0].kind == NW_IN_AUDIO, "channel0 audio");
     CHECK(s->binds.len == 3 && !strcmp(s->binds.data[0].name, "uWind") &&
-          !strcmp(s->binds.data[0].source, "cpu") && !strcmp(s->binds.data[2].source, "0.8"),
+              !strcmp(s->binds.data[0].source, "cpu") && !strcmp(s->binds.data[2].source, "0.8"),
           "uniform binds (%zu)", s->binds.len);
     nw_shader_source_free(s);
 
@@ -154,18 +174,23 @@ int main(void) {
              "uniform vec3 uTint = vec3(1.0, 0.5, 0.25);\n"
              "// @param\n"
              "uniform vec3 uGrey = vec3(0.5);\n"
-             "void mainImage(out vec4 c, in vec2 f) { c = vec4(uTint * uSpeed + uGrey, 1); }\n", NULL);
+             "void mainImage(out vec4 c, in vec2 f) { c = vec4(uTint * uSpeed + uGrey, 1); }\n",
+             NULL);
     CHECK(s->params.len == 3, "3 params, got %zu", s->params.len);
     if (s->params.len == 3) {
         const nw_param *p0 = &s->params.data[0], *p1 = &s->params.data[1], *p2 = &s->params.data[2];
-        CHECK(!strcmp(p0->name, "uSpeed") && !strcmp(p0->type, "float") && p0->def[0] == 1.5f, "float param");
-        CHECK(p0->min == 0.1f && p0->max == 4.0f && p0->step == 0.1f && !strcmp(p0->help, "cloud speed"),
+        CHECK(!strcmp(p0->name, "uSpeed") && !strcmp(p0->type, "float") && p0->def[0] == 1.5f,
+              "float param");
+        CHECK(p0->min == 0.1f && p0->max == 4.0f && p0->step == 0.1f &&
+                  !strcmp(p0->help, "cloud speed"),
               "range/step/help");
-        CHECK(!strcmp(p1->type, "vec3") && p1->def[0] == 1.0f && p1->def[1] == 0.5f && p1->def[2] == 0.25f,
+        CHECK(!strcmp(p1->type, "vec3") && p1->def[0] == 1.0f && p1->def[1] == 0.5f &&
+                  p1->def[2] == 0.25f,
               "vec3 default");
         CHECK(p2->def[0] == 0.5f && p2->def[1] == 0.5f && p2->def[2] == 0.5f, "vec3(0.5) splat");
     }
-    CHECK(!strstr(s->passes.data[0].body, "uniform float uSpeed"), "param uniform line removed from body");
+    CHECK(!strstr(s->passes.data[0].body, "uniform float uSpeed"),
+          "param uniform line removed from body");
     nw_shader_source_free(s);
 
     /* assembly: declarations, stdlib, main, line map */
@@ -180,7 +205,8 @@ int main(void) {
         CHECK(strstr(text, "uniform vec3  iChannelResolution[4];"), "Shadertoy uniforms");
         CHECK(strstr(text, "nwFbm"), "stdlib present");
         CHECK(strstr(text, "float hash"), "common included");
-        CHECK(strstr(text, "mainImage(fragColor, gl_FragCoord.xy + iSpanOffset)"), "main calls mainImage");
+        CHECK(strstr(text, "mainImage(fragColor, gl_FragCoord.xy + iSpanOffset)"),
+              "main calls mainImage");
         /* find the generated line of the Image body's texture() call and
          * check it maps back to the author's line 16 */
         int gen = 0, mapped_line = -1;
@@ -210,7 +236,9 @@ int main(void) {
     fputs("// shared\nfloat twice(float x) {\n  return 2.0 * x;\n}\n", f);
     fclose(f);
     f = fopen(p2, "w");
-    fputs("#include \"lib.glsl\"\nvoid mainImage(out vec4 c, in vec2 x) {\n  c = vec4(twice(1.0));\n}\n", f);
+    fputs(
+        "#include \"lib.glsl\"\nvoid mainImage(out vec4 c, in vec2 x) {\n  c = vec4(twice(1.0));\n}\n",
+        f);
     fclose(f);
     f = fopen(p3, "w");
     fputs("#include \"loop.glsl\"\nvoid mainImage(out vec4 c, in vec2 x) { c = vec4(1); }\n", f);
@@ -220,10 +248,10 @@ int main(void) {
     if (!nw_is_err(r)) {
         CHECK(strstr(s->passes.data[0].body, "float twice"), "include expanded");
         CHECK(s->includes.len == 2, "both files recorded for watch (%zu)", s->includes.len);
-        r = nw_shader_assemble(s, 0, &text, &map, &n);
-        int lib_line = -1;
+        r                    = nw_shader_assemble(s, 0, &text, &map, &n);
+        int lib_line         = -1;
         const char *lib_file = NULL;
-        int gen = 0;
+        int gen              = 0;
         for (const char *p = text; *p; gen++) {
             const char *nl = strchr(p, '\n');
             if (!strncmp(p, "  return 2.0", 12)) {
@@ -247,7 +275,8 @@ int main(void) {
     /* helpers between passes are shared, not owned by the next pass */
     s = load("// Buffer A\nvoid mainImage(out vec4 c, in vec2 f) { c = vec4(blur(1.0)); }\n"
              "float blur(float x) { return x * 0.5; }\n"
-             "// Image\nvoid mainImage(out vec4 c, in vec2 f) { c = vec4(blur(2.0)); }\n", NULL);
+             "// Image\nvoid mainImage(out vec4 c, in vec2 f) { c = vec4(blur(2.0)); }\n",
+             NULL);
     CHECK(s->common && strstr(s->common, "float blur"), "helper after a pass lands in common");
     CHECK(!strstr(s->passes.data[pass(s, "Image")].body, "float blur"), "and not in the next pass");
     CHECK(!strstr(s->common, "mainImage"), "common holds no mainImage");
@@ -255,69 +284,89 @@ int main(void) {
 
     /* more old manifest forms */
     s = load(single, "channel0 texture:art.png\nchannel1 noise.png\nchannel2 terminal\n");
-    CHECK(s->passes.data[0].ch[0].kind == NW_IN_IMAGE && !strcmp(s->passes.data[0].ch[0].path, "art.png"),
+    CHECK(s->passes.data[0].ch[0].kind == NW_IN_IMAGE &&
+              !strcmp(s->passes.data[0].ch[0].path, "art.png"),
           "texture:FILE is an image");
     CHECK(s->passes.data[0].ch[1].kind == NW_IN_IMAGE, "noise.png is a file, not the built-in");
-    CHECK(s->passes.data[0].ch[2].kind == NW_IN_NONE, "terminal is read via iTermCells, not a channel");
+    CHECK(s->passes.data[0].ch[2].kind == NW_IN_NONE,
+          "terminal is read via iTermCells, not a channel");
     nw_shader_source_free(s);
 
     s = load(multi, "state bufferA\n");
     CHECK(s->state_pass && pass(s, s->state_pass) == pass(s, "Buffer A"), "state names a pass");
     nw_shader_source_free(s);
 
-    CHECK(rejects("#pragma neowall requires 99.0\n" "void mainImage(out vec4 c, in vec2 f) { c = vec4(1); }\n", NULL),
+    CHECK(rejects("#pragma neowall requires 99.0\n"
+                  "void mainImage(out vec4 c, in vec2 f) { c = vec4(1); }\n",
+                  NULL),
           "a shader for a newer neowall is refused");
 
     /* a Cube A pass: named by its function, read as a cube by the image */
-    s = load("// Cube A\nvoid mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(rd, 1); }\n"
-             "// Image\nvoid mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, vec3(f, 1)); }\n",
-             NULL);
+    s = load(
+        "// Cube A\nvoid mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(rd, 1); }\n"
+        "// Image\nvoid mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, vec3(f, 1)); }\n",
+        NULL);
     CHECK(s->passes.len == 2 && pass(s, "Cube A") >= 0, "cube pass found");
-    CHECK(s->passes.data[pass(s, "Cube A")].is_cube && !s->passes.data[pass(s, "Cube A")].is_image, "flagged cube");
+    CHECK(s->passes.data[pass(s, "Cube A")].is_cube && !s->passes.data[pass(s, "Cube A")].is_image,
+          "flagged cube");
     CHECK(s->passes.data[s->image_pass].ch[0].kind == NW_IN_CUBE, "image reads it as a cube");
     CHECK(pass(s, "Cube A") < s->image_pass, "cube runs before the image");
     nw_shader_source_free(s);
     /* the manifest can bind it by Shadertoy's name */
-    s = load("void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(rd, 1); }\n"
-             "void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel2, vec3(1)); }\n",
-             "image { ch2 cubemap }\n");
-    CHECK(s->passes.data[s->image_pass].ch[2].kind == NW_IN_CUBE, "manifest 'cubemap' binds the cube");
+    s = load(
+        "void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(rd, 1); }\n"
+        "void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel2, vec3(1)); }\n",
+        "image { ch2 cubemap }\n");
+    CHECK(s->passes.data[s->image_pass].ch[2].kind == NW_IN_CUBE,
+          "manifest 'cubemap' binds the cube");
     nw_shader_source_free(s);
     /* a direction lookup with no cube pass gets the built-in sky */
-    s = load("void mainImage(out vec4 c, in vec2 f) { vec3 rd = vec3(f, 1); c = texture(iChannel0, rd); }\n", NULL);
+    s = load(
+        "void mainImage(out vec4 c, in vec2 f) { vec3 rd = vec3(f, 1); c = texture(iChannel0, rd); }\n",
+        NULL);
     CHECK(s->passes.data[0].ch[0].kind == NW_IN_SKY, "vec3 lookup without a cube pass: sky");
     nw_shader_source_free(s);
-    s = load("void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, normalize(f)); }\n", NULL);
+    s = load("void mainImage(out vec4 c, in vec2 f) { c = texture(iChannel0, normalize(f)); }\n",
+             NULL);
     CHECK(s->passes.data[0].ch[0].kind != NW_IN_SKY, "normalize of a vec2 is still 2D");
     nw_shader_source_free(s);
     /* a sound pass is left out, even when it doesn't compile */
     s = load("vec2 mainSound(int samp, float t) { return vec2(nope); }\n"
-             "void mainImage(out vec4 c, in vec2 f) { c = vec4(1); }\n", NULL);
-    CHECK(s->passes.len == 1 && !strstr(s->passes.data[0].body, "nope") && (!s->common || !strstr(s->common, "nope")),
+             "void mainImage(out vec4 c, in vec2 f) { c = vec4(1); }\n",
+             NULL);
+    CHECK(s->passes.len == 1 && !strstr(s->passes.data[0].body, "nope") &&
+              (!s->common || !strstr(s->common, "nope")),
           "sound pass skipped");
     nw_shader_source_free(s);
-    CHECK(rejects("void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(1); }\n", NULL),
+    CHECK(rejects(
+              "void mainCubemap(out vec4 c, in vec2 f, in vec3 ro, in vec3 rd) { c = vec4(1); }\n",
+              NULL),
           "a cube pass alone has nothing to show");
 
     /* rejections */
-    CHECK(shader_hint_suggest("nwSdSpere") && !strcmp(shader_hint_suggest("nwSdSpere"), "nwSdSphere"),
+    CHECK(shader_hint_suggest("nwSdSpere") &&
+              !strcmp(shader_hint_suggest("nwSdSpere"), "nwSdSphere"),
           "typo -> nwSdSphere");
-    CHECK(shader_hint_suggest("fbm") && !strcmp(shader_hint_suggest("fbm"), "nwFbm"), "fbm -> nwFbm");
-    CHECK(shader_hint_suggest("itime") && !strcmp(shader_hint_suggest("itime"), "iTime"), "itime -> iTime");
+    CHECK(shader_hint_suggest("fbm") && !strcmp(shader_hint_suggest("fbm"), "nwFbm"),
+          "fbm -> nwFbm");
+    CHECK(shader_hint_suggest("itime") && !strcmp(shader_hint_suggest("itime"), "iTime"),
+          "itime -> iTime");
     CHECK(!shader_hint_suggest("glow"), "no wild guess for glow");
     CHECK(!shader_hint_suggest("nwFbm"), "an existing name is not a typo");
     {
         char hint[160];
         CHECK(shader_hint("`iTimee' undeclared", NULL, 4, hint, sizeof(hint)) &&
-                  !strcmp(hint, "did you mean iTime?"), "mesa undeclared -> hint");
+                  !strcmp(hint, "did you mean iTime?"),
+              "mesa undeclared -> hint");
         char tmpl[] = "/tmp/nwhint-XXXXXX";
-        int fd = mkstemp(tmpl);
+        int fd      = mkstemp(tmpl);
         if (fd >= 0) {
             FILE *f = fdopen(fd, "w");
             fputs("void f() {\n    float a = 1.0\n    // note\n    float b = 2.0;\n}\n", f);
             fclose(f);
-            CHECK(shader_hint("syntax error, unexpected IDENTIFIER, expecting ',' or ';'", tmpl, 4, hint,
-                              sizeof(hint)) && strstr(hint, "line 2"),
+            CHECK(shader_hint("syntax error, unexpected IDENTIFIER, expecting ',' or ';'", tmpl, 4,
+                              hint, sizeof(hint)) &&
+                      strstr(hint, "line 2"),
                   "missing ; points at the code line before: %s", hint);
             unlink(tmpl);
         }
@@ -328,8 +377,11 @@ int main(void) {
     CHECK(rejects(single, "bufferQ { ch0 self }\n"), "manifest names a missing pass");
     CHECK(rejects(multi, "pass {\n  \"Buffer A\" {\n    scale 9\n  }\n}\n"), "scale out of range");
     CHECK(rejects(multi, "pass {\n  \"Buffer A\" {\n    format rgb565\n  }\n}\n"), "bad format");
-    CHECK(rejects("// Image\nvoid mainImage(out vec4 c, in vec2 f) {}\n// Image\nvoid mainImage(out vec4 c, in vec2 f) {}\n",
-                  NULL), "two Image passes");
+    CHECK(
+        rejects(
+            "// Image\nvoid mainImage(out vec4 c, in vec2 f) {}\n// Image\nvoid mainImage(out vec4 c, in vec2 f) {}\n",
+            NULL),
+        "two Image passes");
     CHECK(rejects("#include \"x.glsl\"\nvoid mainImage(out vec4 c, in vec2 f) {}\n", NULL),
           "include without a file");
 

@@ -7,10 +7,10 @@
 #include "neowall/shader/wallshader.h"
 
 void app_subscribe(void *self, rt_subs *subs) {
-    const struct app *a = self;
+    const struct app *a         = self;
     struct neowall_state *state = a->state;
-    bool transition = false;
-    bool building = false;
+    bool transition             = false;
+    bool building               = false;
 
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o; o = o->next) {
@@ -21,7 +21,7 @@ void app_subscribe(void *self, rt_subs *subs) {
         if (!a->model.cycle_paused && o->config->cycle && o->config->duration > 0.0f &&
             o->config->cycle_count > 1) {
             uint64_t dur_ms = (uint64_t)(o->config->duration * 1000.0f);
-            int64_t due = (int64_t)(o->last_cycle_time + dur_ms) * 1000000LL;
+            int64_t due     = (int64_t)(o->last_cycle_time + dur_ms) * 1000000LL;
             rt_sub_at(subs, NW_MSG_CYCLE_DUE, o->name, due);
         }
 
@@ -35,8 +35,8 @@ void app_subscribe(void *self, rt_subs *subs) {
         if (!occluded && o->pace_period_ns > 0 && output_get_frame_timer_fd(o) >= 0 &&
             wallpaper_is_animated(o->config->type) &&
             !(o->config->type == WALLPAPER_SHADER && a->model.shader_paused) &&
-            !(o->config->type == WALLPAPER_SHADER && o->shader &&
-              !wallshader_animated(o->shader) && o->frames_rendered > 0)) {
+            !(o->config->type == WALLPAPER_SHADER && o->shader && !wallshader_animated(o->shader) &&
+              o->frames_rendered > 0)) {
             rt_sub_at(subs, NW_MSG_FRAME_DUE, o->name, (int64_t)o->pace_next_deadline_ns);
         }
     }

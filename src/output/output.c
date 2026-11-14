@@ -63,27 +63,27 @@ struct output_state *output_new(struct neowall_state *state, void *native_output
     }
 
     /* Initialize output state */
-    out->native_output = native_output;
-    out->xdg_output = NULL;
-    out->name = name;
-    out->width = 0;
-    out->height = 0;
-    out->logical_width = 0;
+    out->native_output  = native_output;
+    out->xdg_output     = NULL;
+    out->name           = name;
+    out->width          = 0;
+    out->height         = 0;
+    out->logical_width  = 0;
     out->logical_height = 0;
-    out->pixel_width = 0;
-    out->pixel_height = 0;
-    out->scale = 1;
-    out->transform = COMPOSITOR_TRANSFORM_NORMAL;
-    out->configured = false;
+    out->pixel_width    = 0;
+    out->pixel_height   = 0;
+    out->scale          = 1;
+    out->transform      = COMPOSITOR_TRANSFORM_NORMAL;
+    out->configured     = false;
     atomic_init(&out->needs_redraw, true);
     atomic_init(&out->occluded, false);
-    atomic_init(&out->refcount, 1);  /* the output list's reference */
-    out->state = state;
+    atomic_init(&out->refcount, 1); /* the output list's reference */
+    out->state             = state;
     out->connector_name[0] = '\0';
 
     /* Initialize preload state */
     out->preload_texture = 0;
-    out->preload_image = NULL;
+    out->preload_image   = NULL;
     out->preload_path[0] = '\0';
     atomic_init(&out->preload_ready, false);
 
@@ -111,20 +111,20 @@ struct output_state *output_new(struct neowall_state *state, void *native_output
     }
 
     /* Initialize config with defaults */
-    out->config->mode = MODE_FILL;
-    out->config->duration = 0;
-    out->config->transition = TRANSITION_NONE;
+    out->config->mode                = MODE_FILL;
+    out->config->duration            = 0;
+    out->config->transition          = TRANSITION_NONE;
     out->config->transition_duration = 300;
-    out->config->cycle = false;
-    out->config->shuffle = false;
-    out->config->cycle_paths = NULL;
-    out->config->cycle_count = 0;
+    out->config->cycle               = false;
+    out->config->shuffle             = false;
+    out->config->cycle_paths         = NULL;
+    out->config->cycle_count         = 0;
     out->config->current_cycle_index = 0;
-    out->config->type = WALLPAPER_IMAGE;
-    out->config->path[0] = '\0';
-    out->config->shader_path[0] = '\0';
-    out->config->shader_speed = 1.0f;
-    out->config->shader_fps = 60;  /* Default 60 FPS */
+    out->config->type                = WALLPAPER_IMAGE;
+    out->config->path[0]             = '\0';
+    out->config->shader_path[0]      = '\0';
+    out->config->shader_speed        = 1.0f;
+    out->config->shader_fps          = 60; /* Default 60 FPS */
     /* Default: vsync ON, matching config.c's parsed default.
      *
      * calloc leaves this false, and an output that never gets a parsed config
@@ -133,8 +133,8 @@ struct output_state *output_new(struct neowall_state *state, void *native_output
      * then scans out frames the moment they land instead of on the refresh
      * boundary, so the frame interval is never the shader's dt and motion
      * visibly jerks even while the FPS counter looks healthy. */
-    out->config->vsync = true;
-    out->config->show_fps = false;  /* Default: no FPS watermark */
+    out->config->vsync         = true;
+    out->config->show_fps      = false; /* Default: no FPS watermark */
     out->config->channel_paths = NULL;
     out->config->channel_count = 0;
 
@@ -143,15 +143,15 @@ struct output_state *output_new(struct neowall_state *state, void *native_output
 
     /* Initialize FPS tracking */
     out->fps_last_log_time = 0;
-    out->fps_frame_count = 0;
-    out->fps_current = 0.0f;
+    out->fps_frame_count   = 0;
+    out->fps_current       = 0.0f;
 
     /* Initialize mouse tracking (-1 means use default center position) */
     out->mouse_x = -1.0f;
     out->mouse_y = -1.0f;
 
     /* Initialize frame timer for precise pacing when vsync is disabled */
-    out->frame_timer_fd = -1;  /* Will be created when needed */
+    out->frame_timer_fd = -1; /* Will be created when needed */
 
     log_debug("Created output state (name=%u)", name);
     return out;
@@ -163,7 +163,7 @@ struct output_state *output_new(struct neowall_state *state, void *native_output
 
 void output_list_add(struct neowall_state *state, struct output_state *out) {
     pthread_rwlock_wrlock(&state->output_list_lock);
-    out->next = state->outputs;
+    out->next      = state->outputs;
     state->outputs = out;
     state->output_count++;
     pthread_rwlock_unlock(&state->output_list_lock);
@@ -176,7 +176,7 @@ bool output_list_take(struct neowall_state *state, struct output_state *out) {
     pthread_rwlock_wrlock(&state->output_list_lock);
     for (struct output_state **pp = &state->outputs; *pp; pp = &(*pp)->next) {
         if (*pp == out) {
-            *pp = out->next;
+            *pp       = out->next;
             out->next = NULL;
             state->output_count--;
             found = true;
@@ -193,8 +193,8 @@ struct output_state *output_list_take_name(struct neowall_state *state, uint32_t
     pthread_rwlock_wrlock(&state->output_list_lock);
     for (struct output_state **pp = &state->outputs; *pp; pp = &(*pp)->next) {
         if ((*pp)->name == name) {
-            found = *pp;
-            *pp = found->next;
+            found       = *pp;
+            *pp         = found->next;
             found->next = NULL;
             state->output_count--;
             break;
@@ -208,12 +208,12 @@ struct output_state *output_list_take_name(struct neowall_state *state, uint32_t
 void output_list_clear(struct neowall_state *state, void (*drop)(struct output_state *)) {
     pthread_rwlock_wrlock(&state->output_list_lock);
     struct output_state *o = state->outputs;
-    state->outputs = NULL;
-    state->output_count = 0;
+    state->outputs         = NULL;
+    state->output_count    = 0;
     pthread_rwlock_unlock(&state->output_list_lock);
     while (o) {
         struct output_state *next = o->next;
-        o->next = NULL;
+        o->next                   = NULL;
         drop(o);
         o = next;
     }
@@ -224,8 +224,8 @@ void output_destroy(struct output_state *output) {
         return;
     }
 
-    log_debug("Destroying output %s (name=%u)",
-              output->model[0] ? output->model : "unknown", output->name);
+    log_debug("Destroying output %s (name=%u)", output->model[0] ? output->model : "unknown",
+              output->name);
 
     /* Clean up rendering resources */
     render_cleanup_output(output);
@@ -292,8 +292,8 @@ void output_destroy(struct output_state *output) {
     pthread_mutex_unlock(&output->preload_mutex);
     pthread_mutex_destroy(&output->preload_mutex);
 
-    log_debug("Destroying output %s (name=%u)",
-              output->model[0] ? output->model : "unknown", output->name);
+    log_debug("Destroying output %s (name=%u)", output->model[0] ? output->model : "unknown",
+              output->name);
 
     /* Destroy compositor surface (handles all surface cleanup) */
     if (output->compositor_surface) {
@@ -347,8 +347,7 @@ bool output_create_egl_surface(struct output_state *output) {
 
     if (output->width <= 0 || output->height <= 0) {
         log_debug("Output %s dimensions not ready yet: %dx%d (deferring surface creation)",
-                  output->model[0] ? output->model : "unknown",
-                  output->width, output->height);
+                  output->model[0] ? output->model : "unknown", output->width, output->height);
         return false;
     }
 
@@ -360,17 +359,12 @@ bool output_create_egl_surface(struct output_state *output) {
     }
 
     log_debug("Creating EGL surface for output %s: %dx%d",
-              output->model[0] ? output->model : "unknown",
-              output->width, output->height);
+              output->model[0] ? output->model : "unknown", output->width, output->height);
 
     /* Create EGL surface through compositor abstraction */
-    EGLSurface egl_surface = compositor_surface_create_egl(
-        output->compositor_surface,
-        output->state->egl_display,
-        output->state->egl_config,
-        output->width,
-        output->height
-    );
+    EGLSurface egl_surface =
+        compositor_surface_create_egl(output->compositor_surface, output->state->egl_display,
+                                      output->state->egl_config, output->width, output->height);
 
     if (egl_surface == EGL_NO_SURFACE) {
         log_error("Failed to create EGL surface for output %s",
@@ -378,12 +372,10 @@ bool output_create_egl_surface(struct output_state *output) {
         return false;
     }
 
-    log_debug("Created EGL surface for output %s",
-              output->model[0] ? output->model : "unknown");
+    log_debug("Created EGL surface for output %s", output->model[0] ? output->model : "unknown");
 
     log_debug("Created EGL surface for output %s: %dx%d",
-             output->model[0] ? output->model : "unknown",
-             output->width, output->height);
+              output->model[0] ? output->model : "unknown", output->width, output->height);
 
     return true;
 }
@@ -393,16 +385,15 @@ bool output_create_egl_surface(struct output_state *output) {
  * are deliberately left to the event-loop/render thread. */
 void output_notify_geometry_change(struct output_state *output) {
     if (!output) return;
-    atomic_fetch_add_explicit(&output->preprocessing_generation, 1,
-                              memory_order_acq_rel);
+    atomic_fetch_add_explicit(&output->preprocessing_generation, 1, memory_order_acq_rel);
     atomic_store_explicit(&output->preload_should_stop, true, memory_order_release);
     atomic_store_explicit(&output->geometry_change_pending, true, memory_order_release);
     atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
 }
 
 void output_process_geometry_change(struct output_state *output) {
-    if (!output || !atomic_exchange_explicit(&output->geometry_change_pending, false,
-                                              memory_order_acq_rel)) {
+    if (!output ||
+        !atomic_exchange_explicit(&output->geometry_change_pending, false, memory_order_acq_rel)) {
         return;
     }
 
@@ -433,26 +424,25 @@ void output_process_geometry_change(struct output_state *output) {
     atomic_store(&output->preload_ready, false);
     output->preload_path[0] = '\0';
 
-    if (output->config && output->config->type == WALLPAPER_IMAGE &&
-        output->config->path[0] && output->width > 0 && output->height > 0) {
+    if (output->config && output->config->type == WALLPAPER_IMAGE && output->config->path[0] &&
+        output->width > 0 && output->height > 0) {
         /* Build both CPU image and GPU texture before touching the visible pair.
          * A decode/upload failure therefore leaves the old wallpaper intact. */
-        struct image_data *replacement = image_load(output->config->path,
-                                                     output->width, output->height,
-                                                     output->config->mode);
+        struct image_data *replacement =
+            image_load(output->config->path, output->width, output->height, output->config->mode);
         if (replacement) {
             GLuint texture = render_create_texture(replacement);
             if (texture) {
-                struct image_data *old_image = output->current_image;
-                GLuint old_texture = output->texture;
-                output->current_image = replacement;
-                output->texture = texture;
+                struct image_data *old_image   = output->current_image;
+                GLuint old_texture             = output->texture;
+                output->current_image          = replacement;
+                output->texture                = texture;
                 output->gl_state.bound_texture = 0;
                 if (old_texture) render_destroy_texture(old_texture);
                 if (old_image) image_free(old_image);
                 log_info("Reprocessed wallpaper for output %s at %dx%d",
-                         output->model[0] ? output->model : "unknown",
-                         output->width, output->height);
+                         output->model[0] ? output->model : "unknown", output->width,
+                         output->height);
             } else {
                 image_free(replacement);
                 log_error("Keeping old wallpaper after resize texture upload failed");
@@ -462,8 +452,7 @@ void output_process_geometry_change(struct output_state *output) {
                       output->config->path);
         }
         output_preload_next_wallpaper(output);
-    } else if (output->config && output->config->type == WALLPAPER_TERMINAL &&
-               output->shader) {
+    } else if (output->config && output->config->type == WALLPAPER_TERMINAL && output->shader) {
         int cell_h = output->config->term_font_size > 0 ? output->config->term_font_size : 18;
         if (cell_h < 6) cell_h = 6;
         if (cell_h > 96) cell_h = 96;
@@ -498,21 +487,18 @@ bool output_render_frame(struct output_state *output) {
 /* Forward a pointer event to this output's terminal wallpaper, if it has one.
  * px/py are pixel coordinates relative to the output's top-left. Returns true
  * if a mouse report was sent to the child (i.e. the app wanted mouse input). */
-bool output_terminal_mouse(struct output_state *output, int px, int py,
-                           int button, bool pressed, bool motion) {
-    if (!output || output->config->type != WALLPAPER_TERMINAL ||
-        !output->shader) {
+bool output_terminal_mouse(struct output_state *output, int px, int py, int button, bool pressed,
+                           bool motion) {
+    if (!output || output->config->type != WALLPAPER_TERMINAL || !output->shader) {
         return false;
     }
-    return term_gpu_mouse(wallshader_terminal(output->shader), px, py,
-                                    button, pressed, motion);
+    return term_gpu_mouse(wallshader_terminal(output->shader), px, py, button, pressed, motion);
 }
 
 /* Forward already-encoded key bytes to this output's terminal wallpaper child.
  * Returns true if written. No-op unless this output hosts a terminal. */
 bool output_terminal_key(struct output_state *output, const void *bytes, size_t len) {
-    if (!output || output->config->type != WALLPAPER_TERMINAL ||
-        !output->shader) {
+    if (!output || output->config->type != WALLPAPER_TERMINAL || !output->shader) {
         return false;
     }
     return term_gpu_write(wallshader_terminal(output->shader), bytes, len);

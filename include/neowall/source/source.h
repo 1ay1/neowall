@@ -74,10 +74,10 @@ typedef enum {
  * POD and copyable: no ownership, no allocation.
  */
 typedef struct {
-    char     name[NW_SOURCE_NAME_MAX];
-    char     arg[NW_SOURCE_ARG_MAX];
-    double   number;      /* literal value when has_number */
-    bool     has_number;  /* spec was a bare number -> constant source */
+    char name[NW_SOURCE_NAME_MAX];
+    char arg[NW_SOURCE_ARG_MAX];
+    double number;        /* literal value when has_number */
+    bool has_number;      /* spec was a bare number -> constant source */
     uint32_t interval_ms; /* 0 = provider default */
     uint32_t flags;       /* NW_SOURCE_SPEC_* */
 } nw_source_spec;
@@ -87,15 +87,15 @@ typedef struct {
 /* Per-tick context. Everything a provider may need about "now", passed in
  * rather than fetched, so ticking is pure with respect to the clock. */
 typedef struct {
-    uint64_t now_ms;      /* monotonic milliseconds */
-    double   frame_dt;    /* seconds since previous frame */
-    int      width;       /* target size in physical pixels */
-    int      height;
-    bool     visible;     /* is this output actually being seen */
+    uint64_t now_ms; /* monotonic milliseconds */
+    double frame_dt; /* seconds since previous frame */
+    int width;       /* target size in physical pixels */
+    int height;
+    bool visible; /* is this output actually being seen */
 } nw_source_ctx;
 
 typedef struct nw_source_vtable {
-    const char    *name;
+    const char *name;
     nw_source_kind kind;
 
     /* Poll interval when the spec does not override it. 0 = every frame. */
@@ -124,12 +124,12 @@ typedef struct nw_source_vtable {
 /* An opened instance. Treat as opaque; use the accessors. */
 typedef struct nw_source {
     const nw_source_vtable *vt;
-    void                   *self;
-    uint32_t                interval_ms;
-    uint64_t                last_tick_ms;
-    bool                    visible;
-    bool                    ticked_once;
-    float                   cached_scalar;
+    void *self;
+    uint32_t interval_ms;
+    uint64_t last_tick_ms;
+    bool visible;
+    bool ticked_once;
+    float cached_scalar;
 } nw_source;
 
 /* ==========================================================================

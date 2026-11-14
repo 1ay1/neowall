@@ -8,7 +8,7 @@
 #include "compat.h"
 
 static int failures = 0;
-static int checks = 0;
+static int checks   = 0;
 
 static char *fix(const char *src) {
     char *r = nw_compat_fix(src);
@@ -18,22 +18,22 @@ static char *fix(const char *src) {
     return r;
 }
 
-#define CHECK(cond, src, ...)                                                  \
-    do {                                                                       \
-        checks++;                                                              \
-        char *r = fix(src);                                                    \
-        if (!(r && (cond))) {                                                  \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);               \
-            fprintf(stderr, __VA_ARGS__);                                      \
-            fprintf(stderr, "\n--- got:\n%s\n", r ? r : "(null)");             \
-        }                                                                      \
-        free(r);                                                               \
+#define CHECK(cond, src, ...)                                                                      \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        char *r = fix(src);                                                                        \
+        if (!(r && (cond))) {                                                                      \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fprintf(stderr, "\n--- got:\n%s\n", r ? r : "(null)");                                 \
+        }                                                                                          \
+        free(r);                                                                                   \
     } while (0)
 
-#define HAS(src, needle) CHECK(strstr(r, needle), src, "expected \"%s\"", needle)
+#define HAS(src, needle)   CHECK(strstr(r, needle), src, "expected \"%s\"", needle)
 #define LACKS(src, needle) CHECK(!strstr(r, needle), src, "did not expect \"%s\"", needle)
-#define SAME(src) CHECK(!strcmp(r, src), src, "expected it unchanged")
+#define SAME(src)          CHECK(!strcmp(r, src), src, "expected it unchanged")
 
 int main(void) {
     SAME("");
@@ -82,9 +82,10 @@ int main(void) {
     HAS("void f(){ float a, b; }", "float a = float(0), b = float(0);");
     HAS("void f(){ bool hit; }", "bool hit = false;");
     HAS("void f(){ float a = 2.0; }", "float a = 2.0;");
-    LACKS("void f(){ float a[4]; }", "= float(0)");          /* arrays: left alone */
-    LACKS("float g; void f(){}", "= float(0)");               /* globals are zero already */
-    LACKS("void f(in vec3 p, out float d){ d = 1.; }", "= ""vec3(0)"); /* parameters */
+    LACKS("void f(){ float a[4]; }", "= float(0)"); /* arrays: left alone */
+    LACKS("float g; void f(){}", "= float(0)");     /* globals are zero already */
+    LACKS("void f(in vec3 p, out float d){ d = 1.; }", "= "
+                                                       "vec3(0)");     /* parameters */
     LACKS("void f(){ for (int i; i < 3; i++) {} }", "int i = int(0)"); /* inside parens */
     /* struct members can't have initialisers: never touched */
     LACKS("struct Ray { vec3 o; vec3 d; };\n", "vec3 o = vec3(0)");

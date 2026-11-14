@@ -18,12 +18,12 @@
 #define NW_FRAME_CLOCK_VOTES 9
 
 typedef struct {
-    uint64_t grid_ns;       /* a known vblank (last present), 0 = none yet */
-    uint64_t refresh_ns;    /* display refresh period, 0 = unknown */
-    int      latency;       /* refreshes from the draw's nearest vblank to present */
-    uint64_t last_target;   /* target handed out for the previous frame */
-    int      votes[NW_FRAME_CLOCK_VOTES];   /* recent measured latencies */
-    int      nvotes, vote_pos;
+    uint64_t grid_ns;                /* a known vblank (last present), 0 = none yet */
+    uint64_t refresh_ns;             /* display refresh period, 0 = unknown */
+    int latency;                     /* refreshes from the draw's nearest vblank to present */
+    uint64_t last_target;            /* target handed out for the previous frame */
+    int votes[NW_FRAME_CLOCK_VOTES]; /* recent measured latencies */
+    int nvotes, vote_pos;
 } nw_frame_clock;
 
 void nw_frame_clock_init(nw_frame_clock *fc);

@@ -26,15 +26,15 @@
 static int checks   = 0;
 static int failures = 0;
 
-#define CHECK(cond, ...)                                                       \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);               \
-            fprintf(stderr, __VA_ARGS__);                                      \
-            fprintf(stderr, "\n");                                             \
-        }                                                                      \
+#define CHECK(cond, ...)                                                                           \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fprintf(stderr, "\n");                                                                 \
+        }                                                                                          \
     } while (0)
 
 static nw_source_ctx ctx_at(uint64_t now_ms) {
@@ -51,14 +51,13 @@ static nw_source_ctx ctx_at(uint64_t now_ms) {
  * table. If a manifest in the wild used it, it must still work.
  */
 static const char *legacy_names[] = {
-    "cpu",          "ram",        "net_down",   "netdown",     "net_up",
-    "netup",        "battery",    "time_of_day", "timeofday",  "sun",
-    "audio",        "audio_level", "audio_bass", "bass",       "audio_mid",
-    "mid",          "audio_treble", "treble",   "audio_beat",  "beat",
-    "key_energy",   "keys",       "mouse_energy", "mouse",     "swap",
-    "disk_read",    "diskread",   "disk_write", "diskwrite",   "load",
-    "cpu_temp",     "cputemp",    "gpu",        "gpu_temp",    "gputemp",
-    "uptime",       "procs",      "processes",
+    "cpu",        "ram",         "net_down",   "netdown",    "net_up",       "netup",
+    "battery",    "time_of_day", "timeofday",  "sun",        "audio",        "audio_level",
+    "audio_bass", "bass",        "audio_mid",  "mid",        "audio_treble", "treble",
+    "audio_beat", "beat",        "key_energy", "keys",       "mouse_energy", "mouse",
+    "swap",       "disk_read",   "diskread",   "disk_write", "diskwrite",    "load",
+    "cpu_temp",   "cputemp",     "gpu",        "gpu_temp",   "gputemp",      "uptime",
+    "procs",      "processes",
 };
 
 static void test_every_legacy_bind_name_resolves(void) {
@@ -78,7 +77,7 @@ static void test_every_legacy_bind_name_resolves(void) {
     char err[NW_SOURCE_ERR_MAX];
     for (size_t i = 0; i < n; i++) {
         nw_source src;
-        bool      ok = nw_is_ok(nw_source_open_text(legacy_names[i], &src, err, sizeof(err)));
+        bool ok = nw_is_ok(nw_source_open_text(legacy_names[i], &src, err, sizeof(err)));
         CHECK(ok, "legacy name '%s' failed to open: %s", legacy_names[i], err);
         if (ok) {
             nw_source_destroy(&src);
@@ -93,10 +92,10 @@ static void test_newly_exposed_signals(void) {
     nw_source_register_reactive();
 
     static const char *newly[] = {
-        "ram_gb",    "ram_total_gb", "net_down_mbs", "net_up_mbs", "load_raw",
-        "cpu_temp_c", "gpu_temp_c",  "cpu_max",      "cpu_spread", "cpu_cores",
-        "thermal",   "activity",     "pulse",        "day_fraction",
-        "proc_count", "charging",    "audio_active", "nv_gpu",     "nv_vram",
+        "ram_gb",     "ram_total_gb", "net_down_mbs", "net_up_mbs",   "load_raw",
+        "cpu_temp_c", "gpu_temp_c",   "cpu_max",      "cpu_spread",   "cpu_cores",
+        "thermal",    "activity",     "pulse",        "day_fraction", "proc_count",
+        "charging",   "audio_active", "nv_gpu",       "nv_vram",
     };
     for (size_t i = 0; i < sizeof(newly) / sizeof(newly[0]); i++) {
         CHECK(nw_source_find(newly[i]) != NULL, "signal '%s' should be bindable", newly[i]);
@@ -114,7 +113,7 @@ static void test_unknown_signal_is_an_error(void) {
     nw_source_register_reactive();
 
     nw_source src;
-    char      err[NW_SOURCE_ERR_MAX] = {0};
+    char err[NW_SOURCE_ERR_MAX] = {0};
     CHECK(nw_is_err(nw_source_open_text("banana", &src, err, sizeof(err))),
           "unknown signal must fail, not silently read 0");
     CHECK(err[0] != '\0', "failure should explain itself");
@@ -129,8 +128,8 @@ static void test_typed_fields_widen(void) {
     reactive_sample();
     nw_reactive_invalidate();
 
-    nw_source      src;
-    nw_source_ctx  c = ctx_at(1000);
+    nw_source src;
+    nw_source_ctx c = ctx_at(1000);
 
     if (nw_is_ok(nw_source_open_text("charging", &src, NULL, 0))) {
         nw_source_tick(&src, &c);
@@ -142,8 +141,7 @@ static void test_typed_fields_widen(void) {
     if (nw_is_ok(nw_source_open_text("cpu_cores", &src, NULL, 0))) {
         nw_source_tick(&src, &c);
         float v = nw_source_scalar(&src);
-        CHECK(v >= 0.0f && v <= (float)REACTIVE_MAX_CPU_CORES,
-              "cpu_cores out of range: %f", v);
+        CHECK(v >= 0.0f && v <= (float)REACTIVE_MAX_CPU_CORES, "cpu_cores out of range: %f", v);
         nw_source_destroy(&src);
     }
 
@@ -214,11 +212,9 @@ static void test_snapshot_is_shared_per_frame(void) {
     nw_source_register_reactive();
 
     nw_source sources[8];
-    static const char *names[8] = {"cpu", "ram",  "swap",    "load",
-                                   "sun", "gpu",  "battery", "procs"};
+    static const char *names[8] = {"cpu", "ram", "swap", "load", "sun", "gpu", "battery", "procs"};
     for (int i = 0; i < 8; i++) {
-        CHECK(nw_is_ok(nw_source_open_text(names[i], &sources[i], NULL, 0)), "open %s",
-              names[i]);
+        CHECK(nw_is_ok(nw_source_open_text(names[i], &sources[i], NULL, 0)), "open %s", names[i]);
     }
 
     /* Same timestamp across all eight: one underlying snapshot, and every
@@ -239,10 +235,11 @@ static void test_snapshot_is_shared_per_frame(void) {
  * on PATH: a parec that streams forever and an nvidia-smi that ignores
  * SIGTERM, so only the SIGKILL path can stop it. */
 static int count_fds(void) {
-    int n = 0;
+    int n  = 0;
     DIR *d = opendir("/proc/self/fd");
     if (!d) return -1;
-    while (readdir(d)) n++;
+    while (readdir(d))
+        n++;
     closedir(d);
     return n;
 }
@@ -253,7 +250,8 @@ static int count_children(void) {
     FILE *f = fopen(path, "r");
     if (!f) return -1;
     int n = 0;
-    while (fscanf(f, "%511s", buf) == 1) n++;
+    while (fscanf(f, "%511s", buf) == 1)
+        n++;
     fclose(f);
     return n;
 }
@@ -269,7 +267,10 @@ static void test_shutdown_cycles(void) {
     chmod(p, 0755);
     snprintf(p, sizeof(p), "%s/nvidia-smi", dir);
     f = fopen(p, "w");
-    fprintf(f, "#!/bin/sh\n: > %s/nv.ran\ntrap '' TERM\nwhile :; do echo '1, 2, 3, 4, 5, 6'; sleep 0.1; done\n", dir);
+    fprintf(
+        f,
+        "#!/bin/sh\n: > %s/nv.ran\ntrap '' TERM\nwhile :; do echo '1, 2, 3, 4, 5, 6'; sleep 0.1; done\n",
+        dir);
     fclose(f);
     chmod(p, 0755);
     const char *old = getenv("PATH");

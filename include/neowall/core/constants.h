@@ -11,44 +11,44 @@
  * Time Constants (in milliseconds)
  * ============================================================================ */
 /* Limits shared by the daemon and the state file. */
-#define NW_PATH_MAX             4096
-#define NW_MAX_OUTPUTS          16
+#define NW_PATH_MAX    4096
+#define NW_MAX_OUTPUTS 16
 
-#define MS_PER_SECOND           1000ULL
-#define NS_PER_MS               1000000ULL
-#define MS_PER_NANOSECOND       1000000ULL
+#define MS_PER_SECOND     1000ULL
+#define NS_PER_MS         1000000ULL
+#define MS_PER_NANOSECOND 1000000ULL
 
 /* Animation and transition timings */
-#define FPS_TARGET              60
-#define FRAME_TIME_MS           16        /* ~60 FPS (1000/60) - Smooth animations */
-#define DEFAULT_TRANSITION_MS   300
-#define SHADER_FADE_IN_MS       600
-#define SHADER_FADE_OUT_MS      400
+#define FPS_TARGET            60
+#define FRAME_TIME_MS         16 /* ~60 FPS (1000/60) - Smooth animations */
+#define DEFAULT_TRANSITION_MS 300
+#define SHADER_FADE_IN_MS     600
+#define SHADER_FADE_OUT_MS    400
 
 /* Polling and sleep intervals */
-#define POLL_TIMEOUT_INFINITE   (-1)
-#define SLEEP_100MS_NS          100000000  /* 100ms in nanoseconds */
-#define STATS_INTERVAL_MS       10000      /* Print stats every 10 seconds */
+#define POLL_TIMEOUT_INFINITE (-1)
+#define SLEEP_100MS_NS        100000000 /* 100ms in nanoseconds */
+#define STATS_INTERVAL_MS     10000     /* Print stats every 10 seconds */
 
 /* ============================================================================
  * Limits and Thresholds
  * ============================================================================ */
-#define MAX_NEXT_REQUESTS       100       /* Maximum queued 'next' wallpaper requests */
-#define DAEMON_SHUTDOWN_TIMEOUT 50        /* Max attempts to wait for daemon shutdown */
-#define ALPHA_OPAQUE            255       /* Fully opaque alpha value */
+#define MAX_NEXT_REQUESTS       100 /* Maximum queued 'next' wallpaper requests */
+#define DAEMON_SHUTDOWN_TIMEOUT 50  /* Max attempts to wait for daemon shutdown */
+#define ALPHA_OPAQUE            255 /* Fully opaque alpha value */
 
 /* ============================================================================
  * OpenGL/Shader Version
  * ============================================================================ */
-#define GLSL_VERSION_STRING     "#version 330 core\n"   /* OpenGL 3.3 Core */
-#define GLSL_VERSION_LINE       "#version 330 core\\n"  /* For concatenated strings */
+#define GLSL_VERSION_STRING "#version 330 core\n"  /* OpenGL 3.3 Core */
+#define GLSL_VERSION_LINE   "#version 330 core\\n" /* For concatenated strings */
 
 /* ============================================================================
  * Default Values
  * ============================================================================ */
-#define DEFAULT_SHADER_SPEED    1.0f
-#define MIN_SHADER_SPEED        0.1f
-#define SHADER_SPEED_INCREMENT  1.0f
+#define DEFAULT_SHADER_SPEED   1.0f
+#define MIN_SHADER_SPEED       0.1f
+#define SHADER_SPEED_INCREMENT 1.0f
 
 /* Interval at which the shader clock epoch is rebased, in seconds.
  *
@@ -74,7 +74,7 @@
  * only moves in 60+ ms steps. Past this it is reset in view, behind a short
  * cross-fade from the last old-clock frame. */
 #define SHADER_TIME_FADE_REBASE_SECONDS 7200.0
-#define SHADER_TIME_FADE_MS 1200
+#define SHADER_TIME_FADE_MS             1200
 
 /* Resolve a config shader_fps value with the project default fallback.
  * Centralized so we don't have four copies of `? FPS_TARGET` / `? 60`. */

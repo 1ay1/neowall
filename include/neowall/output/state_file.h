@@ -11,9 +11,8 @@
  * place exists. Static buffer. */
 const char *get_state_file_path(void);
 
-bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
-                           const char *mode, int cycle_index, int cycle_total,
-                           const char *status);
+bool write_wallpaper_state(const char *output_name, const char *wallpaper_path, const char *mode,
+                           int cycle_index, int cycle_total, const char *status);
 /* Atomically remove one output, or keep only the given output names. An
  * absent file or name is a successful no-op. */
 bool remove_wallpaper_state(const char *output_name);

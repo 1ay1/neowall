@@ -29,11 +29,11 @@
 /* Everything the rebase decision depends on, in one struct with no GL or
  * compositor types, so a test can construct any situation directly. */
 typedef struct {
-    double elapsed_seconds;     /* current iTime for this output */
-    uint64_t hidden_since_ms;   /* when it stopped being visible; 0 while visible */
-    bool occluded_now;          /* is it covered *right now* */
-    bool paused_now;            /* is its animation frozen right now */
-    bool spanned;               /* part of a multi-output spanned group */
+    double elapsed_seconds;   /* current iTime for this output */
+    uint64_t hidden_since_ms; /* when it stopped being visible; 0 while visible */
+    bool occluded_now;        /* is it covered *right now* */
+    bool paused_now;          /* is its animation frozen right now */
+    bool spanned;             /* part of a multi-output spanned group */
 } shader_clock_state;
 
 /* True when the clock may be reset to zero without anyone seeing it.
@@ -74,19 +74,19 @@ bool shader_clock_defers_to_group(const shader_clock_state *st);
  * One tracker per output; zero-initialise it and feed it every frame.
  */
 typedef struct {
-    double last_time;        /* previous iTime handed to the shader */
-    uint64_t last_epoch_ms;  /* epoch it was derived from */
-    uint64_t frames;         /* frames observed */
-    uint64_t jumps;          /* backward steps seen so far */
-    bool primed;             /* has at least one sample */
+    double last_time;       /* previous iTime handed to the shader */
+    uint64_t last_epoch_ms; /* epoch it was derived from */
+    uint64_t frames;        /* frames observed */
+    uint64_t jumps;         /* backward steps seen so far */
+    bool primed;            /* has at least one sample */
 } shader_clock_tracker;
 
 /* Why a given frame's iTime moved backwards. */
 typedef enum {
-    SHADER_CLOCK_OK = 0,        /* advanced normally */
-    SHADER_CLOCK_JUMP_REBASE,   /* the deliberate precision rebase */
-    SHADER_CLOCK_JUMP_EPOCH,    /* the epoch changed under us (reload/span) */
-    SHADER_CLOCK_JUMP_UNKNOWN,  /* went backwards with no epoch change */
+    SHADER_CLOCK_OK = 0,       /* advanced normally */
+    SHADER_CLOCK_JUMP_REBASE,  /* the deliberate precision rebase */
+    SHADER_CLOCK_JUMP_EPOCH,   /* the epoch changed under us (reload/span) */
+    SHADER_CLOCK_JUMP_UNKNOWN, /* went backwards with no epoch change */
 } shader_clock_event;
 
 /* Feed one frame. Returns what happened, and updates the tracker.
@@ -95,10 +95,8 @@ typedef enum {
  * expected discontinuity is not reported as a mystery. A tolerance absorbs
  * float32 noise; only a real regression is flagged.
  */
-shader_clock_event shader_clock_track(shader_clock_tracker *tr,
-                                      double current_time,
-                                      uint64_t epoch_ms,
-                                      bool rebased);
+shader_clock_event shader_clock_track(shader_clock_tracker *tr, double current_time,
+                                      uint64_t epoch_ms, bool rebased);
 
 /* Human-readable name for a tracked event, for logging. */
 const char *shader_clock_event_name(shader_clock_event ev);

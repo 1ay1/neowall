@@ -18,7 +18,7 @@ bool nw_sd_notify(const char *state) {
     if (!state || !path || !path[0]) return false;
 
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
-    size_t len = strlen(path);
+    size_t len              = strlen(path);
     if (len >= sizeof(addr.sun_path)) return false;
     /* only absolute paths and abstract sockets ('@' -> leading NUL) */
     if (path[0] != '/' && path[0] != '@') return false;
@@ -28,8 +28,7 @@ bool nw_sd_notify(const char *state) {
 
     int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (fd < 0) return false;
-    ssize_t n = sendto(fd, state, strlen(state), MSG_NOSIGNAL,
-                       (struct sockaddr *)&addr, alen);
+    ssize_t n = sendto(fd, state, strlen(state), MSG_NOSIGNAL, (struct sockaddr *)&addr, alen);
     close(fd);
     return n == (ssize_t)strlen(state);
 }

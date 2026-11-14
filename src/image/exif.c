@@ -12,8 +12,7 @@
 
 /* TIFF byte-order helpers. `be` selects big-endian ("MM"). */
 static uint16_t exif_u16(const uint8_t *p, int be) {
-    return be ? (uint16_t)((p[0] << 8) | p[1])
-              : (uint16_t)((p[1] << 8) | p[0]);
+    return be ? (uint16_t)((p[0] << 8) | p[1]) : (uint16_t)((p[1] << 8) | p[0]);
 }
 static uint32_t exif_u32(const uint8_t *p, int be) {
     return be ? ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]
@@ -27,12 +26,15 @@ int exif_parse_orientation(const uint8_t *data, size_t len) {
     if (memcmp(data, "Exif\0\0", 6) != 0) return EXIF_ORIENT_TOP_LEFT;
 
     const uint8_t *tiff = data + 6;
-    size_t tiff_len = len - 6;
+    size_t tiff_len     = len - 6;
 
     int be;
-    if (tiff[0] == 'M' && tiff[1] == 'M') be = 1;
-    else if (tiff[0] == 'I' && tiff[1] == 'I') be = 0;
-    else return EXIF_ORIENT_TOP_LEFT;
+    if (tiff[0] == 'M' && tiff[1] == 'M')
+        be = 1;
+    else if (tiff[0] == 'I' && tiff[1] == 'I')
+        be = 0;
+    else
+        return EXIF_ORIENT_TOP_LEFT;
 
     if (exif_u16(tiff + 2, be) != 0x002A) return EXIF_ORIENT_TOP_LEFT;
 
@@ -46,9 +48,9 @@ int exif_parse_orientation(const uint8_t *data, size_t len) {
 
     for (uint16_t i = 0; i < n_entries; i++) {
         const uint8_t *e = tiff + ifd0_off + 2 + (size_t)i * 12;
-        uint16_t tag  = exif_u16(e, be);
-        uint16_t type = exif_u16(e + 2, be);
-        uint32_t cnt  = exif_u32(e + 4, be);
+        uint16_t tag     = exif_u16(e, be);
+        uint16_t type    = exif_u16(e + 2, be);
+        uint32_t cnt     = exif_u32(e + 4, be);
         if (tag == 0x0112 /* Orientation */ && type == 3 /* SHORT */ && cnt >= 1) {
             /* SHORT inline value lives in the first 2 B of the value field
              * (offset +8); endian handling is the same as any other u16 read. */
@@ -64,11 +66,11 @@ void image_apply_exif_orientation(struct image_data *img, int orientation) {
     if (!img || !img->pixels || orientation == EXIF_ORIENT_TOP_LEFT) return;
     if (orientation < 1 || orientation > 8) return;
 
-    const uint32_t w = img->width;
-    const uint32_t h = img->height;
+    const uint32_t w    = img->width;
+    const uint32_t h    = img->height;
     const int transpose = (orientation >= 5);
-    const uint32_t nw = transpose ? h : w;
-    const uint32_t nh = transpose ? w : h;
+    const uint32_t nw   = transpose ? h : w;
+    const uint32_t nh   = transpose ? w : h;
 
     /* Overflow guard. The product nw*nh*4 must fit in size_t. On 64-bit
      * `(size_t)nw*4 > SIZE_MAX/nh` covers everything we'd reach in practice;
@@ -88,17 +90,41 @@ void image_apply_exif_orientation(struct image_data *img, int orientation) {
         for (uint32_t sx = 0; sx < w; sx++) {
             uint32_t dx = 0, dy = 0;
             switch (orientation) {
-                case EXIF_ORIENT_TOP_RIGHT:    dx = w - 1 - sx; dy = sy;            break;
-                case EXIF_ORIENT_BOTTOM_RIGHT: dx = w - 1 - sx; dy = h - 1 - sy;    break;
-                case EXIF_ORIENT_BOTTOM_LEFT:  dx = sx;         dy = h - 1 - sy;    break;
-                case EXIF_ORIENT_LEFT_TOP:     dx = sy;         dy = sx;            break;
-                case EXIF_ORIENT_RIGHT_TOP:    dx = h - 1 - sy; dy = sx;            break;
-                case EXIF_ORIENT_RIGHT_BOTTOM: dx = h - 1 - sy; dy = w - 1 - sx;    break;
-                case EXIF_ORIENT_LEFT_BOTTOM:  dx = sy;         dy = w - 1 - sx;    break;
-                default:                       dx = sx;         dy = sy;            break;
+            case EXIF_ORIENT_TOP_RIGHT:
+                dx = w - 1 - sx;
+                dy = sy;
+                break;
+            case EXIF_ORIENT_BOTTOM_RIGHT:
+                dx = w - 1 - sx;
+                dy = h - 1 - sy;
+                break;
+            case EXIF_ORIENT_BOTTOM_LEFT:
+                dx = sx;
+                dy = h - 1 - sy;
+                break;
+            case EXIF_ORIENT_LEFT_TOP:
+                dx = sy;
+                dy = sx;
+                break;
+            case EXIF_ORIENT_RIGHT_TOP:
+                dx = h - 1 - sy;
+                dy = sx;
+                break;
+            case EXIF_ORIENT_RIGHT_BOTTOM:
+                dx = h - 1 - sy;
+                dy = w - 1 - sx;
+                break;
+            case EXIF_ORIENT_LEFT_BOTTOM:
+                dx = sy;
+                dy = w - 1 - sx;
+                break;
+            default:
+                dx = sx;
+                dy = sy;
+                break;
             }
-            size_t s = ((size_t)sy * w + sx) * 4;
-            size_t d = ((size_t)dy * nw + dx) * 4;
+            size_t s   = ((size_t)sy * w + sx) * 4;
+            size_t d   = ((size_t)dy * nw + dx) * 4;
             dst[d + 0] = src[s + 0];
             dst[d + 1] = src[s + 1];
             dst[d + 2] = src[s + 2];

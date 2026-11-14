@@ -22,14 +22,14 @@
 
 /* EXIF Orientation tag values (TIFF/EP §4.6.4). 1 = identity. */
 enum exif_orientation {
-    EXIF_ORIENT_TOP_LEFT       = 1, /* identity */
-    EXIF_ORIENT_TOP_RIGHT      = 2, /* mirror horizontal */
-    EXIF_ORIENT_BOTTOM_RIGHT   = 3, /* rotate 180 */
-    EXIF_ORIENT_BOTTOM_LEFT    = 4, /* mirror vertical */
-    EXIF_ORIENT_LEFT_TOP       = 5, /* transpose */
-    EXIF_ORIENT_RIGHT_TOP      = 6, /* rotate 90 CW */
-    EXIF_ORIENT_RIGHT_BOTTOM   = 7, /* transverse */
-    EXIF_ORIENT_LEFT_BOTTOM    = 8, /* rotate 270 CW */
+    EXIF_ORIENT_TOP_LEFT     = 1, /* identity */
+    EXIF_ORIENT_TOP_RIGHT    = 2, /* mirror horizontal */
+    EXIF_ORIENT_BOTTOM_RIGHT = 3, /* rotate 180 */
+    EXIF_ORIENT_BOTTOM_LEFT  = 4, /* mirror vertical */
+    EXIF_ORIENT_LEFT_TOP     = 5, /* transpose */
+    EXIF_ORIENT_RIGHT_TOP    = 6, /* rotate 90 CW */
+    EXIF_ORIENT_RIGHT_BOTTOM = 7, /* transverse */
+    EXIF_ORIENT_LEFT_BOTTOM  = 8, /* rotate 270 CW */
 };
 
 /* Parse an APP1 (EXIF) marker payload and return the Orientation tag value.

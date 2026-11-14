@@ -28,22 +28,32 @@ bool output_apply_config(struct output_state *o, struct wallpaper_config *c) {
     config_free_wallpaper(o->config);
     *o->config = *c;
     /* the caller frees its arrays; keep only the scalar/string fields */
-    o->config->cycle_paths = NULL;
-    o->config->cycle_count = 0;
+    o->config->cycle_paths   = NULL;
+    o->config->cycle_count   = 0;
     o->config->channel_paths = NULL;
     o->config->channel_count = 0;
     return true;
 }
 
 static int fails, checks;
-#define CHECK(c) do { checks++; if (!(c)) { printf("  FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
+#define CHECK(c)                                                                                   \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(c)) {                                                                                \
+            printf("  FAIL line %d: %s\n", __LINE__, #c);                                          \
+            fails++;                                                                               \
+        }                                                                                          \
+    } while (0)
 
 static char dir[] = "/tmp/nw-config-test-XXXXXX";
 static char cfg[512];
 
 static void write_cfg(const char *text) {
     FILE *f = fopen(cfg, "w");
-    if (!f) { perror(cfg); exit(1); }
+    if (!f) {
+        perror(cfg);
+        exit(1);
+    }
     fputs(text, f);
     fclose(f);
 }
@@ -52,11 +62,17 @@ static void touch(const char *name) {
     char p[600];
     snprintf(p, sizeof(p), "%s/%s", dir, name);
     FILE *f = fopen(p, "w");
-    if (f) { fputs("void mainImage(out vec4 c, in vec2 p){c=vec4(1);}\n", f); fclose(f); }
+    if (f) {
+        fputs("void mainImage(out vec4 c, in vec2 p){c=vec4(1);}\n", f);
+        fclose(f);
+    }
 }
 
 int main(void) {
-    if (!mkdtemp(dir)) { perror("mkdtemp"); return 1; }
+    if (!mkdtemp(dir)) {
+        perror("mkdtemp");
+        return 1;
+    }
     snprintf(cfg, sizeof(cfg), "%s/config.vibe", dir);
     touch("a.glsl");
     touch("b.glsl");
@@ -81,8 +97,8 @@ int main(void) {
     snprintf(left.model, sizeof(left.model), "Dell U2720Q");
     snprintf(right.connector_name, sizeof(right.connector_name), "HDMI-A-1");
     snprintf(right.model, sizeof(right.model), "LG 27GL850");
-    left.next = &right;
-    st.outputs = &left;
+    left.next       = &right;
+    st.outputs      = &left;
     st.output_count = 2;
 
     char a[600], b[600], text[2048];
@@ -97,7 +113,7 @@ int main(void) {
     write_cfg(text);
     g_applied = 0;
     CHECK(app_config_load(&st, cfg));
-    CHECK(g_applied == 2);   /* one apply per output, not default-then-override */
+    CHECK(g_applied == 2); /* one apply per output, not default-then-override */
     CHECK(left.config && left.config->type == WALLPAPER_SHADER);
     CHECK(left.config && strstr(left.config->shader_path, "a.glsl"));
     CHECK(left.config && left.config->shader_speed == 0.5f);
@@ -112,19 +128,19 @@ int main(void) {
 
     /* reload is strict: each bad file is rejected and nothing changes */
     const char *bad[] = {
-        "default {\n  shader a.glsl\n  path /x.png\n}\n",          /* two sources */
-        "default {\n  shader_speed -3\n  shader a.glsl\n}\n",      /* out of range */
-        "default {\n  shader_fps 2.5\n  shader a.glsl\n}\n",       /* non-integer fps */
-        "default {\n  mode sideways\n  path /x.png\n}\n",          /* unknown mode */
-        "default {\n  transition warp\n  path /x.png\n}\n",        /* unknown transition */
-        "default {\n  channels 3\n  shader a.glsl\n}\n",           /* not an array */
-        "default {\n  shader a.glsl\n",                            /* syntax */
+        "default {\n  shader a.glsl\n  path /x.png\n}\n",            /* two sources */
+        "default {\n  shader_speed -3\n  shader a.glsl\n}\n",        /* out of range */
+        "default {\n  shader_fps 2.5\n  shader a.glsl\n}\n",         /* non-integer fps */
+        "default {\n  mode sideways\n  path /x.png\n}\n",            /* unknown mode */
+        "default {\n  transition warp\n  path /x.png\n}\n",          /* unknown transition */
+        "default {\n  channels 3\n  shader a.glsl\n}\n",             /* not an array */
+        "default {\n  shader a.glsl\n",                              /* syntax */
         "default {\n  channels [ a b c d e ]\n  shader a.glsl\n}\n", /* > 4 channels */
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         write_cfg(bad[i]);
         int before = g_applied;
-        bool ok = app_config_reload(&st, cfg);
+        bool ok    = app_config_reload(&st, cfg);
         if (ok) printf("  accepted bad config #%zu\n", i);
         CHECK(!ok);
         CHECK(g_applied == before);
@@ -179,7 +195,7 @@ int main(void) {
     CHECK(left.config && strcmp(left.config->term_cmd, "htop -d 10") == 0);
     CHECK(left.config && left.config->term_cols == 120);
     CHECK(left.config && left.config->term_fg == 0xa0b0c0);
-    CHECK(left.config && left.config->term_bloom == 1.0f);   /* clamped */
+    CHECK(left.config && left.config->term_bloom == 1.0f); /* clamped */
     CHECK(left.config && left.config->term_crt == 0.25f);
     write_cfg("default {\n  terminal htop\n  term_fg \"blue\"\n}\n");
     CHECK(!app_config_reload(&st, cfg));
@@ -188,42 +204,47 @@ int main(void) {
 
     /* every key: wrong type, wrong wallpaper type and out of range are
      * refused; good values land in the config */
-    struct { const char *body; bool ok; } cases[] = {
-        {"shader A\n  mode fill", false},                 /* mode is image-only */
-        {"shader A\n  transition fade", false},           /* image-only */
-        {"shader A\n  transition_duration 1", false},     /* image-only */
-        {"path /x.png\n  shader_speed 2", false},         /* shader-only */
-        {"path /x.png\n  shader_fps 30", false},          /* shader/terminal only */
-        {"path /x.png\n  vsync false", false},            /* shader/terminal only */
-        {"path /x.png\n  mode 3", false},                 /* wrong type */
-        {"path /x.png\n  duration fast", false},
-        {"path /x.png\n  duration -5", false},
-        {"path /x.png\n  transition_duration x", false},
-        {"path /x.png\n  transition_duration -1", false},
-        {"shader A\n  shader_speed fast", false},
-        {"shader A\n  shader_fps 0", false},
-        {"shader A\n  shader_fps 241", false},
-        {"shader A\n  shader_fps fast", false},
-        {"shader A\n  vsync 1", false},
-        {"shader A\n  show_fps yes", false},
-        {"shader A\n  pause_on_fullscreen 1", false},
-        {"shader A\n  pause_coverage_threshold 2", false},
-        {"shader A\n  pause_coverage_threshold x", false},
-        {"shader A\n  shuffle 1", false},
-        {"shader A\n  span 1", false},
-        {"shader 5", false},
-        {"", false},                                       /* no source */
-        {"path /x.png\n  terminal htop", false},
-        {"terminal htop\n  shader_fps 30\n  vsync false", true},
-        {"shader A\n  shader_fps 30.0\n  shader_speed 2", true},
-        {"path /x.png\n  mode fit\n  transition fade\n  transition_duration 0.5\n  duration 10", true},
-        {"shader A\n  show_fps true\n  pause_on_fullscreen true\n  pause_coverage_threshold 0.4", true},
-        {"shader A\n  span_group desk", true},
+    struct {
+        const char *body;
+        bool ok;
+    } cases[] = {
+        {"shader A\n  mode fill",                                                                 false}, /* mode is image-only */
+        {"shader A\n  transition fade",                                                           false}, /* image-only */
+        {"shader A\n  transition_duration 1",                                                     false}, /* image-only */
+        {"path /x.png\n  shader_speed 2",                                                         false}, /* shader-only */
+        {"path /x.png\n  shader_fps 30",                                                          false}, /* shader/terminal only */
+        {"path /x.png\n  vsync false",                                                            false}, /* shader/terminal only */
+        {"path /x.png\n  mode 3",                                                                 false}, /* wrong type */
+        {"path /x.png\n  duration fast",                                                          false},
+        {"path /x.png\n  duration -5",                                                            false},
+        {"path /x.png\n  transition_duration x",                                                  false},
+        {"path /x.png\n  transition_duration -1",                                                 false},
+        {"shader A\n  shader_speed fast",                                                         false},
+        {"shader A\n  shader_fps 0",                                                              false},
+        {"shader A\n  shader_fps 241",                                                            false},
+        {"shader A\n  shader_fps fast",                                                           false},
+        {"shader A\n  vsync 1",                                                                   false},
+        {"shader A\n  show_fps yes",                                                              false},
+        {"shader A\n  pause_on_fullscreen 1",                                                     false},
+        {"shader A\n  pause_coverage_threshold 2",                                                false},
+        {"shader A\n  pause_coverage_threshold x",                                                false},
+        {"shader A\n  shuffle 1",                                                                 false},
+        {"shader A\n  span 1",                                                                    false},
+        {"shader 5",                                                                              false},
+        {"",                                                                                      false}, /* no source */
+        {"path /x.png\n  terminal htop",                                                          false},
+        {"terminal htop\n  shader_fps 30\n  vsync false",                                         true },
+        {"shader A\n  shader_fps 30.0\n  shader_speed 2",                                         true },
+        {"path /x.png\n  mode fit\n  transition fade\n  transition_duration 0.5\n  duration 10",
+         true                                                                                          },
+        {"shader A\n  show_fps true\n  pause_on_fullscreen true\n  pause_coverage_threshold 0.4",
+         true                                                                                          },
+        {"shader A\n  span_group desk",                                                           true },
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         /* "A" stands for the real shader file */
         char body[1024] = "";
-        const char *s = cases[i].body;
+        const char *s   = cases[i].body;
         const char *hit = strstr(s, "shader A");
         if (hit) {
             snprintf(body, sizeof(body), "%.*sshader %s%s", (int)(hit - s), s, a, hit + 8);
@@ -237,12 +258,18 @@ int main(void) {
         CHECK(ok == cases[i].ok);
     }
     /* and the values from the good cases arrive */
-    write_cfg("default {\n  path /x.png\n  mode fit\n  transition fade\n  transition_duration 0.5\n  duration 10\n}\n");
+    write_cfg(
+        "default {\n  path /x.png\n  mode fit\n  transition fade\n  transition_duration 0.5\n  duration 10\n}\n");
     CHECK(app_config_reload(&st, cfg));
-    CHECK(left.config && left.config->mode == MODE_FIT && left.config->transition == TRANSITION_FADE);
-    CHECK(left.config && left.config->transition_duration == 0.5f && left.config->duration == 10.0f);
-    snprintf(text, sizeof(text), "default {\n  shader %s\n  show_fps true\n  pause_on_fullscreen true\n"
-             "  pause_coverage_threshold 0.4\n  shader_fps 30.0\n  vsync false\n  span_group desk\n}\n", a);
+    CHECK(left.config && left.config->mode == MODE_FIT &&
+          left.config->transition == TRANSITION_FADE);
+    CHECK(left.config && left.config->transition_duration == 0.5f &&
+          left.config->duration == 10.0f);
+    snprintf(
+        text, sizeof(text),
+        "default {\n  shader %s\n  show_fps true\n  pause_on_fullscreen true\n"
+        "  pause_coverage_threshold 0.4\n  shader_fps 30.0\n  vsync false\n  span_group desk\n}\n",
+        a);
     write_cfg(text);
     CHECK(app_config_reload(&st, cfg));
     CHECK(left.config && left.config->show_fps && left.config->pause_on_fullscreen);

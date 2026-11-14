@@ -12,15 +12,15 @@
 #include "neowall/core/defer.h"
 
 static int failures = 0;
-static int checks = 0;
+static int checks   = 0;
 
-#define CHECK(cond)                                                            \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
-        }                                                                      \
+#define CHECK(cond)                                                                                \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                        \
+        }                                                                                          \
     } while (0)
 
 /* ===== result ===== */
@@ -29,15 +29,15 @@ static nw_result inner_fail(void) {
     return nw_err(NW_ERR_PARSE, "bad token");
 }
 static nw_result outer_propagates(void) {
-    NW_TRY(nw_ok());          /* should not short-circuit */
-    NW_TRY(inner_fail());     /* should return the error */
-    return nw_ok();           /* unreachable */
+    NW_TRY(nw_ok());      /* should not short-circuit */
+    NW_TRY(inner_fail()); /* should return the error */
+    return nw_ok();       /* unreachable */
 }
 
 static void test_result(void) {
     CHECK(nw_is_ok(nw_ok()));
     CHECK(!nw_is_err(nw_ok()));
-    CHECK(nw_ok().status == NW_OK);   /* NW_OK must be the zero value */
+    CHECK(nw_ok().status == NW_OK); /* NW_OK must be the zero value */
 
     nw_result e = nw_err(NW_ERR_OOM, "alloc");
     CHECK(nw_is_err(e));
@@ -68,18 +68,20 @@ static void test_vec_core(void) {
     CHECK(v.cap >= 1000);
     CHECK(*(int *)nw_vec_at(&v, 0) == 0);
     CHECK(*(int *)nw_vec_at(&v, 999) == 999);
-    CHECK(nw_vec_at(&v, 1000) == NULL);   /* out of range */
+    CHECK(nw_vec_at(&v, 1000) == NULL); /* out of range */
 
     nw_vec_clear(&v, NULL);
     CHECK(v.len == 0);
-    CHECK(v.cap >= 1000);                 /* capacity retained */
+    CHECK(v.cap >= 1000); /* capacity retained */
 
     nw_vec_free(&v, NULL);
     CHECK(v.data == NULL && v.cap == 0);
 }
 
 /* vec of owning pointers, freed via dtor */
-static void free_str(void *p) { free(*(char **)p); }
+static void free_str(void *p) {
+    free(*(char **)p);
+}
 
 static void test_vec_owning(void) {
     nw_vec v;
@@ -90,7 +92,7 @@ static void test_vec_owning(void) {
         CHECK(nw_vec_push(&v, &s));
     }
     CHECK(strcmp(*(char **)nw_vec_at(&v, 2), "item-2") == 0);
-    nw_vec_free(&v, free_str);   /* must not leak (LSan checks) */
+    nw_vec_free(&v, free_str); /* must not leak (LSan checks) */
     CHECK(v.data == NULL);
 }
 
@@ -105,7 +107,7 @@ static void test_vec_typed(void) {
     }
     CHECK(v.len == 100);
     CHECK(*int_vec_at(&v, 10) == 100);
-    CHECK(v.data[99] == 99 * 99);     /* direct indexing works */
+    CHECK(v.data[99] == 99 * 99); /* direct indexing works */
     CHECK(int_vec_at(&v, 100) == NULL);
     int_vec_free(&v);
     CHECK(v.data == NULL && v.len == 0);
@@ -116,7 +118,10 @@ static void test_vec_typed(void) {
 static int g_freed = 0;
 static void counting_free(void *p) {
     void **pp = (void **)p;
-    if (*pp) { g_freed++; free(*pp); }
+    if (*pp) {
+        g_freed++;
+        free(*pp);
+    }
 }
 
 static void defer_scope(void) {
@@ -132,7 +137,7 @@ static void test_defer(void) {
 #if NW_HAVE_DEFER
     g_freed = 0;
     defer_scope();
-    CHECK(g_freed == 2);   /* both cleaned up on scope exit */
+    CHECK(g_freed == 2); /* both cleaned up on scope exit */
 
     /* NW_DEFER_FREE on a normal scope exit, no leak (LSan verifies) */
     {

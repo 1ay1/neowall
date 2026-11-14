@@ -19,7 +19,7 @@
 #include "neowall/output/state_file.h"
 
 /* Maximum retries and delay when waiting for compositor to be ready */
-#define COMPOSITOR_READY_MAX_RETRIES 5
+#define COMPOSITOR_READY_MAX_RETRIES    5
 #define COMPOSITOR_READY_RETRY_DELAY_MS 200
 
 /* ============================================================================
@@ -48,9 +48,8 @@ bool wayland_available(void) {
 static bool wait_for_outputs_configured(struct neowall_state *state);
 
 /* XDG Output listener callbacks */
-static void xdg_output_handle_logical_position(void *data,
-                                                 struct zxdg_output_v1 *xdg_output,
-                                                 int32_t x, int32_t y) {
+static void xdg_output_handle_logical_position(void *data, struct zxdg_output_v1 *xdg_output,
+                                               int32_t x, int32_t y) {
     struct output_state *output = data;
     (void)xdg_output;
 
@@ -65,9 +64,8 @@ static void xdg_output_handle_logical_position(void *data,
     }
 }
 
-static void xdg_output_handle_logical_size(void *data,
-                                            struct zxdg_output_v1 *xdg_output,
-                                            int32_t width, int32_t height) {
+static void xdg_output_handle_logical_size(void *data, struct zxdg_output_v1 *xdg_output,
+                                           int32_t width, int32_t height) {
     struct output_state *output = data;
     (void)xdg_output;
 
@@ -75,7 +73,7 @@ static void xdg_output_handle_logical_size(void *data,
      * seam prefers it over reconstructing logical from device/scale, which is a
      * pixel off under fractional scaling (see output_state::xdg_logical_width). */
     if (output && width > 0 && height > 0) {
-        output->xdg_logical_width = width;
+        output->xdg_logical_width  = width;
         output->xdg_logical_height = height;
     }
 }
@@ -86,20 +84,18 @@ static void xdg_output_handle_done(void *data, struct zxdg_output_v1 *xdg_output
 }
 
 static void xdg_output_handle_name(void *data, struct zxdg_output_v1 *xdg_output,
-                                    const char *name) {
+                                   const char *name) {
     struct output_state *output = data;
     (void)xdg_output;
 
     if (name) {
         snprintf(output->connector_name, sizeof(output->connector_name), "%s", name);
-        log_info("Output connector name: %s (model: %s)",
-                 output->connector_name, output->model);
+        log_info("Output connector name: %s (model: %s)", output->connector_name, output->model);
     }
 }
 
-static void xdg_output_handle_description(void *data,
-                                           struct zxdg_output_v1 *xdg_output,
-                                           const char *description) {
+static void xdg_output_handle_description(void *data, struct zxdg_output_v1 *xdg_output,
+                                          const char *description) {
     (void)data;
     (void)xdg_output;
     (void)description;
@@ -107,22 +103,19 @@ static void xdg_output_handle_description(void *data,
 
 static const struct zxdg_output_v1_listener xdg_output_listener = {
     .logical_position = xdg_output_handle_logical_position,
-    .logical_size = xdg_output_handle_logical_size,
-    .done = xdg_output_handle_done,
-    .name = xdg_output_handle_name,
-    .description = xdg_output_handle_description,
+    .logical_size     = xdg_output_handle_logical_size,
+    .done             = xdg_output_handle_done,
+    .name             = xdg_output_handle_name,
+    .description      = xdg_output_handle_description,
 };
 
 /* Output listener callbacks */
-static bool output_apply_render_size(struct output_state *output,
-                                     const char *reason,
+static bool output_apply_render_size(struct output_state *output, const char *reason,
                                      bool *out_changed);
 
-static void output_handle_geometry(void *data, struct wl_output *wl_output,
-                                   int32_t x, int32_t y,
+static void output_handle_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y,
                                    int32_t physical_width, int32_t physical_height,
-                                   int32_t subpixel,
-                                   const char *make, const char *model,
+                                   int32_t subpixel, const char *make, const char *model,
                                    int32_t transform) {
     struct output_state *output = data;
     (void)wl_output;
@@ -140,23 +133,21 @@ static void output_handle_geometry(void *data, struct wl_output *wl_output,
     }
     output->transform = transform;
 
-    log_debug("Output %s: geometry - make=%s, model=%s, transform=%d",
-              output->model, output->make, output->model, transform);
+    log_debug("Output %s: geometry - make=%s, model=%s, transform=%d", output->model, output->make,
+              output->model, transform);
 }
 
-static void output_handle_mode(void *data, struct wl_output *wl_output,
-                               uint32_t flags, int32_t width, int32_t height,
-                               int32_t refresh) {
+static void output_handle_mode(void *data, struct wl_output *wl_output, uint32_t flags,
+                               int32_t width, int32_t height, int32_t refresh) {
     struct output_state *output = data;
     (void)wl_output;
     (void)refresh;
 
     if (flags & WL_OUTPUT_MODE_CURRENT) {
-        output->pixel_width = width;
+        output->pixel_width  = width;
         output->pixel_height = height;
 
-        log_info("Output %s: mode %dx%d @ %d mHz",
-                 output->model[0] ? output->model : "unknown",
+        log_info("Output %s: mode %dx%d @ %d mHz", output->model[0] ? output->model : "unknown",
                  width, height, refresh);
 
         output_apply_render_size(output, "mode event", NULL);
@@ -169,21 +160,20 @@ static void output_handle_done(void *data, struct wl_output *wl_output) {
 
     output->configured = true;
     log_info("Output %s: configuration done (reconnect recovery enabled)",
-              output->model[0] ? output->model : "unknown");
+             output->model[0] ? output->model : "unknown");
 }
 
-static void output_handle_scale(void *data, struct wl_output *wl_output,
-                                int32_t factor) {
+static void output_handle_scale(void *data, struct wl_output *wl_output, int32_t factor) {
     struct output_state *output = data;
     (void)wl_output;
 
     int32_t new_scale = factor > 0 ? factor : 1;
     if (output->scale != new_scale) {
-        log_info("Output %s: scale factor %d",
-                 output->model[0] ? output->model : "unknown", new_scale);
+        log_info("Output %s: scale factor %d", output->model[0] ? output->model : "unknown",
+                 new_scale);
     } else {
-        log_debug("Output %s: scale factor %d",
-                  output->model[0] ? output->model : "unknown", new_scale);
+        log_debug("Output %s: scale factor %d", output->model[0] ? output->model : "unknown",
+                  new_scale);
     }
 
     output->scale = new_scale;
@@ -197,33 +187,32 @@ static void output_handle_scale(void *data, struct wl_output *wl_output,
 
 static const struct wl_output_listener output_listener = {
     .geometry = output_handle_geometry,
-    .mode = output_handle_mode,
-    .done = output_handle_done,
-    .scale = output_handle_scale,
+    .mode     = output_handle_mode,
+    .done     = output_handle_done,
+    .scale    = output_handle_scale,
 };
 
 static inline const char *output_readable_name(const struct output_state *output) {
     if (!output) {
         return "(null)";
     }
-    return output->connector_name[0] ? output->connector_name :
-           (output->model[0] ? output->model : "unknown");
+    return output->connector_name[0] ? output->connector_name
+                                     : (output->model[0] ? output->model : "unknown");
 }
 
 /* output_normalized_scale() lives in neowall/output/output.h: the span code
  * needs the same normalisation to turn a physical size back into the logical
  * one the compositor lays out with. */
 
-static bool output_apply_render_size(struct output_state *output,
-                                     const char *reason,
+static bool output_apply_render_size(struct output_state *output, const char *reason,
                                      bool *out_changed) {
     if (!output) {
         return false;
     }
 
-    int32_t scale = output_normalized_scale(output);
-    int32_t logical_w = output->logical_width;
-    int32_t logical_h = output->logical_height;
+    int32_t scale      = output_normalized_scale(output);
+    int32_t logical_w  = output->logical_width;
+    int32_t logical_h  = output->logical_height;
     int32_t physical_w = 0;
     int32_t physical_h = 0;
 
@@ -246,9 +235,10 @@ static bool output_apply_render_size(struct output_state *output,
         if (out_changed) {
             *out_changed = false;
         }
-        log_debug("Output %s: waiting for complete geometry (reason=%s, logical=%dx%d, pixel=%dx%d, scale=%d)",
-                  output_readable_name(output), reason ? reason : "pending",
-                  logical_w, logical_h, output->pixel_width, output->pixel_height, scale);
+        log_debug(
+            "Output %s: waiting for complete geometry (reason=%s, logical=%dx%d, pixel=%dx%d, scale=%d)",
+            output_readable_name(output), reason ? reason : "pending", logical_w, logical_h,
+            output->pixel_width, output->pixel_height, scale);
         return false;
     }
 
@@ -259,7 +249,7 @@ static bool output_apply_render_size(struct output_state *output,
         return true;
     }
 
-    output->width = physical_w;
+    output->width  = physical_w;
     output->height = physical_h;
     output_notify_geometry_change(output);
 
@@ -268,13 +258,13 @@ static bool output_apply_render_size(struct output_state *output,
     }
 
     log_info("Output %s: render buffer %dx%d (logical %dx%d @ scale %d) [%s]",
-             output_readable_name(output), physical_w, physical_h,
-             logical_w, logical_h, scale, reason ? reason : "update");
+             output_readable_name(output), physical_w, physical_h, logical_w, logical_h, scale,
+             reason ? reason : "update");
 
     if (output->compositor_surface && output->compositor_surface->egl_window) {
         compositor_surface_resize_egl(output->compositor_surface, physical_w, physical_h);
-        log_debug("Resized EGL window for output %s after %s",
-                  output_readable_name(output), reason ? reason : "update");
+        log_debug("Resized EGL window for output %s after %s", output_readable_name(output),
+                  reason ? reason : "update");
     }
 
     return true;
@@ -301,10 +291,10 @@ void wayland_apply_fractional_scale(struct output_state *output) {
 
     /* Logical size the compositor laid this output out with. Prefer xdg-output's
      * exact logical_size; fall back to the layer-configure logical size. */
-    int32_t logical_w = output->xdg_logical_width > 0 ? output->xdg_logical_width
-                                                      : output->logical_width;
-    int32_t logical_h = output->xdg_logical_height > 0 ? output->xdg_logical_height
-                                                       : output->logical_height;
+    int32_t logical_w =
+        output->xdg_logical_width > 0 ? output->xdg_logical_width : output->logical_width;
+    int32_t logical_h =
+        output->xdg_logical_height > 0 ? output->xdg_logical_height : output->logical_height;
     if (logical_w <= 0 || logical_h <= 0) {
         return;
     }
@@ -316,10 +306,10 @@ void wayland_apply_fractional_scale(struct output_state *output) {
     }
 
     if (output->width == dev_w && output->height == dev_h) {
-        return;  /* already at the fractional buffer size */
+        return; /* already at the fractional buffer size */
     }
 
-    output->width = dev_w;
+    output->width  = dev_w;
     output->height = dev_h;
     output_notify_geometry_change(output);
 
@@ -351,19 +341,17 @@ void wayland_apply_fractional_scale(struct output_state *output) {
  * This is compositor-agnostic and works with any Wayland compositor */
 static bool wait_for_outputs_configured(struct neowall_state *state) {
     wayland_t *wl = &g_wayland;
-    
+
     /* Simple retry with short delay - don't be too aggressive during compositor startup */
     int retry_count = 0;
     while (retry_count < COMPOSITOR_READY_MAX_RETRIES && state->output_count == 0) {
         if (retry_count > 0) {
-            log_debug("Waiting for outputs... (retry %d/%d)",
-                     retry_count, COMPOSITOR_READY_MAX_RETRIES);
+            log_debug("Waiting for outputs... (retry %d/%d)", retry_count,
+                      COMPOSITOR_READY_MAX_RETRIES);
 
             /* Sleep briefly */
-            struct timespec ts = {
-                .tv_sec = 0,
-                .tv_nsec = COMPOSITOR_READY_RETRY_DELAY_MS * 1000000L
-            };
+            struct timespec ts = {.tv_sec  = 0,
+                                  .tv_nsec = COMPOSITOR_READY_RETRY_DELAY_MS * 1000000L};
             nanosleep(&ts, NULL);
         }
 
@@ -388,15 +376,15 @@ static bool wait_for_outputs_configured(struct neowall_state *state) {
 
 /* Layer surface listener callbacks */
 /* Compositor surface configure callback */
-static void output_on_configure_callback(struct compositor_surface *surface,
-                                        int32_t width, int32_t height) {
+static void output_on_configure_callback(struct compositor_surface *surface, int32_t width,
+                                         int32_t height) {
     struct output_state *output = surface->user_data;
 
     log_info("Layer surface configured for output %s: logical %dx%d",
              output->model[0] ? output->model : "unknown", width, height);
 
     if (width > 0 && height > 0) {
-        output->logical_width = width;
+        output->logical_width  = width;
         output->logical_height = height;
     }
 
@@ -441,20 +429,19 @@ static void output_on_closed_callback(struct compositor_surface *surface) {
 }
 
 
-
 /* wp_presentation.clock_id: the compositor tells us which POSIX clock its
  * present timestamps are in. We only trust the feedback for pacing when it is
  * CLOCK_MONOTONIC (what our frame timer is armed against); every real-world
  * compositor advertises exactly that. */
-static void presentation_handle_clock_id(void *data,
-                                         struct wp_presentation *presentation,
+static void presentation_handle_clock_id(void *data, struct wp_presentation *presentation,
                                          uint32_t clk_id) {
-    (void)data; (void)presentation;
-    wayland_t *wl = &g_wayland;
-    wl->presentation_clock = clk_id;
+    (void)data;
+    (void)presentation;
+    wayland_t *wl             = &g_wayland;
+    wl->presentation_clock    = clk_id;
     wl->presentation_clock_ok = (clk_id == CLOCK_MONOTONIC);
-    log_info("Presentation-time clock id=%u (%s for phase-locked pacing)",
-             clk_id, wl->presentation_clock_ok ? "usable" : "unusable");
+    log_info("Presentation-time clock id=%u (%s for phase-locked pacing)", clk_id,
+             wl->presentation_clock_ok ? "usable" : "unusable");
 }
 
 static const struct wp_presentation_listener presentation_listener = {
@@ -462,49 +449,45 @@ static const struct wp_presentation_listener presentation_listener = {
 };
 
 /* Registry listener callbacks */
-static void registry_handle_global(void *data, struct wl_registry *registry,
-                                   uint32_t name, const char *interface,
-                                   uint32_t version) {
+static void registry_handle_global(void *data, struct wl_registry *registry, uint32_t name,
+                                   const char *interface, uint32_t version) {
     struct neowall_state *state = data;
-    wayland_t *wl = &g_wayland;
+    wayland_t *wl               = &g_wayland;
     (void)version;
 
     log_debug("Registry: interface=%s, name=%u, version=%u", interface, name, version);
 
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
-        wl->compositor = wl_registry_bind(registry, name,
-                                            &wl_compositor_interface, 4);
+        wl->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
         log_info("Bound to compositor");
     } else if (strcmp(interface, wl_shm_interface.name) == 0) {
         wl->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
         log_info("Bound to shared memory");
     } else if (strcmp(interface, "wp_tearing_control_manager_v1") == 0) {
-        wl->tearing_control_manager = wl_registry_bind(registry, name,
-                                                           &wp_tearing_control_manager_v1_interface, 1);
+        wl->tearing_control_manager =
+            wl_registry_bind(registry, name, &wp_tearing_control_manager_v1_interface, 1);
         log_info("Bound to tearing control manager (immediate presentation support)");
     } else if (strcmp(interface, wp_presentation_interface.name) == 0) {
-        wl->presentation = wl_registry_bind(registry, name,
-                                            &wp_presentation_interface, 1);
+        wl->presentation = wl_registry_bind(registry, name, &wp_presentation_interface, 1);
         wp_presentation_add_listener(wl->presentation, &presentation_listener, state);
         log_info("Bound to wp_presentation (real present-time feedback for pacing)");
     } else if (strcmp(interface, wp_cursor_shape_manager_v1_interface.name) == 0) {
-        wl->cursor_shape_manager = wl_registry_bind(registry, name,
-                                                    &wp_cursor_shape_manager_v1_interface, 1);
+        wl->cursor_shape_manager =
+            wl_registry_bind(registry, name, &wp_cursor_shape_manager_v1_interface, 1);
         log_info("Bound to cursor shape manager (compositor-drawn cursor)");
     } else if (strcmp(interface, zxdg_output_manager_v1_interface.name) == 0) {
-        wl->xdg_output_manager = wl_registry_bind(registry, name,
-                                                      &zxdg_output_manager_v1_interface, 2);
+        wl->xdg_output_manager =
+            wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, 2);
         log_debug("Bound to xdg_output_manager");
     } else if (strcmp(interface, wp_fractional_scale_manager_v1_interface.name) == 0) {
-        wl->fractional_scale_manager = wl_registry_bind(registry, name,
-                                                        &wp_fractional_scale_manager_v1_interface, 1);
+        wl->fractional_scale_manager =
+            wl_registry_bind(registry, name, &wp_fractional_scale_manager_v1_interface, 1);
         log_info("Bound to fractional scale manager (exact HiDPI scaling)");
     } else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
         wl->viewporter = wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
         log_info("Bound to viewporter (fractional-scale destination sizing)");
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
-        struct wl_output *output_obj = wl_registry_bind(registry, name,
-                                                         &wl_output_interface, 3);
+        struct wl_output *output_obj = wl_registry_bind(registry, name, &wl_output_interface, 3);
 
         struct output_state *output = output_new(state, output_obj, name);
         if (output) {
@@ -513,8 +496,8 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
 
             /* Get xdg_output for connector name if manager is available */
             if (wl->xdg_output_manager) {
-                output->xdg_output = zxdg_output_manager_v1_get_xdg_output(
-                    wl->xdg_output_manager, output_obj);
+                output->xdg_output =
+                    zxdg_output_manager_v1_get_xdg_output(wl->xdg_output_manager, output_obj);
                 if (output->xdg_output) {
                     zxdg_output_v1_add_listener(output->xdg_output, &xdg_output_listener, output);
                     log_debug("Created xdg_output for output %u", name);
@@ -533,8 +516,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
     /* Note: wlr-layer-shell binding now handled by compositor abstraction layer */
 }
 
-static void release_output_proxies(struct neowall_state *state,
-                                   struct output_state *output) {
+static void release_output_proxies(struct neowall_state *state, struct output_state *output) {
     if (!output) return;
 
     /* Let the backend clear any focus/ref it holds before proxies and the list
@@ -542,8 +524,8 @@ static void release_output_proxies(struct neowall_state *state,
      * handles passed here are the wl_output being removed. */
     if (state && state->compositor_backend && state->compositor_backend->ops &&
         state->compositor_backend->ops->on_output_removed) {
-        state->compositor_backend->ops->on_output_removed(
-            state->compositor_backend->data, output->native_output);
+        state->compositor_backend->ops->on_output_removed(state->compositor_backend->data,
+                                                          output->native_output);
     }
 
     /* Destroy listener-bearing proxies while output_state is still alive.
@@ -566,8 +548,7 @@ static void drop_output(struct output_state *o) {
     output_unref(o);
 }
 
-static void registry_handle_global_remove(void *data, struct wl_registry *registry,
-                                          uint32_t name) {
+static void registry_handle_global_remove(void *data, struct wl_registry *registry, uint32_t name) {
     struct neowall_state *state = data;
     (void)registry;
 
@@ -586,7 +567,7 @@ static void registry_handle_global_remove(void *data, struct wl_registry *regist
 }
 
 static const struct wl_registry_listener registry_listener = {
-    .global = registry_handle_global,
+    .global        = registry_handle_global,
     .global_remove = registry_handle_global_remove,
 };
 
@@ -676,27 +657,26 @@ bool wayland_init_registry(struct neowall_state *state) {
      * load to the first pointer enter, where we know the output scale and
      * can load a HiDPI-correct theme.
      */
-    const char *xc_theme = getenv("XCURSOR_THEME");
+    const char *xc_theme  = getenv("XCURSOR_THEME");
     wl->cursor_theme_name = (xc_theme && xc_theme[0]) ? strdup(xc_theme) : NULL;
 
-    int base_size = 24;
+    int base_size       = 24;
     const char *xc_size = getenv("XCURSOR_SIZE");
     if (xc_size && xc_size[0]) {
         char *end = NULL;
-        long v = strtol(xc_size, &end, 10);
+        long v    = strtol(xc_size, &end, 10);
         if (end != xc_size && v > 0 && v <= 512) {
             base_size = (int)v;
         }
     }
-    wl->cursor_base_size = base_size;
-    wl->cursor_theme = NULL;
+    wl->cursor_base_size    = base_size;
+    wl->cursor_theme        = NULL;
     wl->cursor_loaded_scale = 0;
 
     wl->cursor_surface = wl_compositor_create_surface(wl->compositor);
     if (wl->cursor_surface) {
         log_info("Cursor surface ready (theme=%s, size=%d, loaded on demand)",
-                 wl->cursor_theme_name ? wl->cursor_theme_name : "<default>",
-                 wl->cursor_base_size);
+                 wl->cursor_theme_name ? wl->cursor_theme_name : "<default>", wl->cursor_base_size);
     } else {
         log_error("Failed to create cursor surface");
         free(wl->cursor_theme_name);
@@ -766,7 +746,7 @@ bool wayland_init_full(struct neowall_state *state) {
 
 void wayland_cleanup(void) {
     wayland_t *wl = &g_wayland;
-    
+
     if (!wl->initialized && !wl->display) {
         return;
     }
@@ -799,7 +779,7 @@ void wayland_cleanup(void) {
     }
 
     free(wl->cursor_theme_name);
-    wl->cursor_theme_name = NULL;
+    wl->cursor_theme_name   = NULL;
     wl->cursor_loaded_scale = 0;
 
     /* Shape device is destroyed with its wl_pointer by the backend; only
@@ -857,7 +837,7 @@ void wayland_cleanup(void) {
     }
 
     wl->initialized = false;
-    wl->state = NULL;
+    wl->state       = NULL;
 
     log_debug("Wayland cleanup complete");
 }
@@ -870,12 +850,11 @@ void wayland_cleanup(void) {
  * which point we drop the ref and free this. */
 struct present_fb_ctx {
     struct output_state *output;
-    uint64_t target_ns;     /* stamp the frame was drawn with, 0 = none */
+    uint64_t target_ns; /* stamp the frame was drawn with, 0 = none */
     int latency_used;
 };
 
-static void present_fb_finish(struct present_fb_ctx *ctx,
-                              struct wp_presentation_feedback *fb) {
+static void present_fb_finish(struct present_fb_ctx *ctx, struct wp_presentation_feedback *fb) {
     if (fb) wp_presentation_feedback_destroy(fb);
     if (ctx) {
         if (ctx->output) output_unref(ctx->output);
@@ -883,37 +862,37 @@ static void present_fb_finish(struct present_fb_ctx *ctx,
     }
 }
 
-static void present_fb_sync_output(void *data,
-                                   struct wp_presentation_feedback *fb,
+static void present_fb_sync_output(void *data, struct wp_presentation_feedback *fb,
                                    struct wl_output *output) {
-    (void)data; (void)fb; (void)output;   /* which output; we already know */
+    (void)data;
+    (void)fb;
+    (void)output; /* which output; we already know */
 }
 
 /* The frame reached the screen: feed the real present timestamp + refresh into
  * this output's pacer. tv_sec is split hi/lo across two u32s. */
-static void present_fb_presented(void *data,
-                                 struct wp_presentation_feedback *fb,
-                                 uint32_t tv_sec_hi, uint32_t tv_sec_lo,
-                                 uint32_t tv_nsec, uint32_t refresh,
-                                 uint32_t seq_hi, uint32_t seq_lo,
+static void present_fb_presented(void *data, struct wp_presentation_feedback *fb,
+                                 uint32_t tv_sec_hi, uint32_t tv_sec_lo, uint32_t tv_nsec,
+                                 uint32_t refresh, uint32_t seq_hi, uint32_t seq_lo,
                                  uint32_t flags) {
-    (void)seq_hi; (void)seq_lo; (void)flags;
+    (void)seq_hi;
+    (void)seq_lo;
+    (void)flags;
     struct present_fb_ctx *ctx = data;
-    wayland_t *wl = &g_wayland;
+    wayland_t *wl              = &g_wayland;
     if (ctx && ctx->output && wl->presentation_clock_ok) {
-        uint64_t sec = ((uint64_t)tv_sec_hi << 32) | (uint64_t)tv_sec_lo;
+        uint64_t sec        = ((uint64_t)tv_sec_hi << 32) | (uint64_t)tv_sec_lo;
         uint64_t present_ns = sec * 1000000000ULL + (uint64_t)tv_nsec;
         output_pace_note_present(ctx->output, present_ns, (uint64_t)refresh);
-        nw_frame_clock_presented(&ctx->output->frame_clock, ctx->target_ns,
-                                 ctx->latency_used, present_ns, (uint64_t)refresh);
+        nw_frame_clock_presented(&ctx->output->frame_clock, ctx->target_ns, ctx->latency_used,
+                                 present_ns, (uint64_t)refresh);
     }
     present_fb_finish(ctx, fb);
 }
 
 /* The update never became visible (superseded / hidden). No timing info; just
  * release the object and our ref. The pacer keeps its previous anchor. */
-static void present_fb_discarded(void *data,
-                                 struct wp_presentation_feedback *fb) {
+static void present_fb_discarded(void *data, struct wp_presentation_feedback *fb) {
     present_fb_finish((struct present_fb_ctx *)data, fb);
 }
 
@@ -933,18 +912,16 @@ void wayland_request_present_feedback(struct output_state *output) {
     if (!output || !wl->presentation || !wl->presentation_clock_ok) return;
     if (!output->compositor_surface || !output->compositor_surface->native_surface) return;
 
-    struct wl_surface *surface =
-        (struct wl_surface *)output->compositor_surface->native_surface;
+    struct wl_surface *surface = (struct wl_surface *)output->compositor_surface->native_surface;
 
     struct present_fb_ctx *ctx = calloc(1, sizeof(*ctx));
     if (!ctx) return;
     output_ref(output);
-    ctx->output = output;
-    ctx->target_ns = output->frame_target_ns;
+    ctx->output       = output;
+    ctx->target_ns    = output->frame_target_ns;
     ctx->latency_used = output->frame_latency_used;
 
-    struct wp_presentation_feedback *fb =
-        wp_presentation_feedback(wl->presentation, surface);
+    struct wp_presentation_feedback *fb = wp_presentation_feedback(wl->presentation, surface);
     if (!fb) {
         output_unref(output);
         free(ctx);
@@ -979,7 +956,7 @@ void wayland_frame_request(struct compositor_surface *surface) {
     struct wl_callback *cb = wl_surface_frame((struct wl_surface *)surface->native_surface);
     if (!cb) return;
     wl_callback_add_listener(cb, &frame_pacer_listener, surface);
-    surface->frame_cb = cb;
+    surface->frame_cb         = cb;
     surface->frame_pending_ms = get_time_ms();
 }
 
@@ -1031,8 +1008,8 @@ bool output_configure_compositor_surface(struct output_state *output) {
     }
 
     log_debug("Configuring compositor surface for output %s (native_output=%p, configured=%d)",
-              output->model[0] ? output->model : "unknown",
-              (void*)output->native_output, output->configured);
+              output->model[0] ? output->model : "unknown", (void *)output->native_output,
+              output->configured);
 
     /* Enable keyboard focus only for terminal wallpapers (so they can be typed
      * into once clicked). Image/shader wallpapers stay keyboard-inert. */
@@ -1040,13 +1017,13 @@ bool output_configure_compositor_surface(struct output_state *output) {
 
     /* Create compositor surface using abstraction layer */
     compositor_surface_config_t config = {
-        .layer = COMPOSITOR_LAYER_BACKGROUND,
-        .anchor = COMPOSITOR_ANCHOR_FILL,
-        .exclusive_zone = -1,
+        .layer                  = COMPOSITOR_LAYER_BACKGROUND,
+        .anchor                 = COMPOSITOR_ANCHOR_FILL,
+        .exclusive_zone         = -1,
         .keyboard_interactivity = want_kbd,
-        .width = 0,   /* Auto-size from compositor */
-        .height = 0,  /* Auto-size from compositor */
-        .output = output->native_output,
+        .width                  = 0, /* Auto-size from compositor */
+        .height                 = 0, /* Auto-size from compositor */
+        .output                 = output->native_output,
         /* Follow the wallpaper's `vsync` setting. Tearing buys latency that a
          * wallpaper cannot use, while async presentation lets the present rate
          * drift off the refresh rate and makes motion jerk at a nominal 60 FPS.
@@ -1063,16 +1040,11 @@ bool output_configure_compositor_surface(struct output_state *output) {
     }
 
     /* Set callbacks for compositor events */
-    compositor_surface_set_callbacks(
-        output->compositor_surface,
-        output_on_configure_callback,
-        output_on_closed_callback,
-        output
-    );
+    compositor_surface_set_callbacks(output->compositor_surface, output_on_configure_callback,
+                                     output_on_closed_callback, output);
 
     /* Ensure buffer scale matches the wl_output before first commit */
-    compositor_surface_set_scale(output->compositor_surface,
-                                 output_normalized_scale(output));
+    compositor_surface_set_scale(output->compositor_surface, output_normalized_scale(output));
 
     /* Commit surface to trigger configure event */
     compositor_surface_commit(output->compositor_surface);

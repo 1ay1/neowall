@@ -155,8 +155,8 @@ static const scaffold_template templates[] = {
 #define TEMPLATE_COUNT (sizeof(templates) / sizeof(templates[0]))
 
 static const char *template_body(const char *name) {
-    if (strcmp(name, "scene") == 0)    return tmpl_scene;
-    if (strcmp(name, "flat") == 0)     return tmpl_flat;
+    if (strcmp(name, "scene") == 0) return tmpl_scene;
+    if (strcmp(name, "flat") == 0) return tmpl_flat;
     if (strcmp(name, "reactive") == 0) return tmpl_reactive;
     return NULL;
 }

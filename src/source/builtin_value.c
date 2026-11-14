@@ -57,8 +57,12 @@ static void *const_open(const nw_source_spec *spec, char *err, size_t err_cap) {
     return st;
 }
 
-static void  const_close(void *self) { free(self); }
-static float const_scalar(void *self) { return ((const_state *)self)->value; }
+static void const_close(void *self) {
+    free(self);
+}
+static float const_scalar(void *self) {
+    return ((const_state *)self)->value;
+}
 
 static const nw_source_vtable const_vtable = {
     .name   = "const",
@@ -73,7 +77,7 @@ static const nw_source_vtable const_vtable = {
  * ========================================================================== */
 
 typedef struct {
-    char  path[NW_SOURCE_ARG_MAX];
+    char path[NW_SOURCE_ARG_MAX];
     float value;
     float scale; /* divisor, so raw counters can be normalised in the manifest */
 } file_state;
@@ -103,12 +107,14 @@ static void *file_open(const nw_source_spec *spec, char *err, size_t err_cap) {
     return st;
 }
 
-static void file_close(void *self) { free(self); }
+static void file_close(void *self) {
+    free(self);
+}
 
 static void file_tick(void *self, const nw_source_ctx *ctx) {
     (void)ctx;
     file_state *st = self;
-    FILE       *fp = fopen(st->path, "r");
+    FILE *fp       = fopen(st->path, "r");
     if (!fp) {
         return; /* keep the last good value; transient /sys races are normal */
     }
@@ -119,7 +125,9 @@ static void file_tick(void *self, const nw_source_ctx *ctx) {
     fclose(fp);
 }
 
-static float file_scalar(void *self) { return ((file_state *)self)->value; }
+static float file_scalar(void *self) {
+    return ((file_state *)self)->value;
+}
 
 static const nw_source_vtable file_vtable = {
     .name                = "file",
@@ -137,18 +145,22 @@ static const nw_source_vtable file_vtable = {
 
 static bool g_exec_allowed = false;
 
-void nw_source_exec_set_allowed(bool allowed) { g_exec_allowed = allowed; }
-bool nw_source_exec_allowed(void) { return g_exec_allowed; }
+void nw_source_exec_set_allowed(bool allowed) {
+    g_exec_allowed = allowed;
+}
+bool nw_source_exec_allowed(void) {
+    return g_exec_allowed;
+}
 
 typedef struct {
-    char     command[NW_SOURCE_ARG_MAX];
-    float    value;
-    pid_t    pid;        /* 0 when nothing is in flight */
-    pid_t    dead_pid;   /* killed, not reaped yet; 0 when none */
-    int      fd;         /* read end of the pipe, -1 when idle */
+    char command[NW_SOURCE_ARG_MAX];
+    float value;
+    pid_t pid;           /* 0 when nothing is in flight */
+    pid_t dead_pid;      /* killed, not reaped yet; 0 when none */
+    int fd;              /* read end of the pipe, -1 when idle */
     uint64_t started_ms; /* for the deadline */
-    char     buf[EXEC_READ_MAX];
-    size_t   buf_len;
+    char buf[EXEC_READ_MAX];
+    size_t buf_len;
 } exec_state;
 
 static void *exec_open(const nw_source_spec *spec, char *err, size_t err_cap) {
@@ -220,7 +232,7 @@ static void exec_close(void *self) {
 
 static void exec_spawn(exec_state *st, uint64_t now_ms) {
     int fds[2];
-    if (nw_pipe_cloexec(fds) != 0) {   /* dup2 in the child clears it on stdout */
+    if (nw_pipe_cloexec(fds) != 0) { /* dup2 in the child clears it on stdout */
         return;
     }
 
@@ -254,7 +266,7 @@ static void exec_spawn(exec_state *st, uint64_t now_ms) {
     }
 
     /* Parent. Non-blocking read end so ticking never stalls a frame. */
-    setpgid(pid, pid);   /* also here, so a kill right away reaches the group */
+    setpgid(pid, pid); /* also here, so a kill right away reaches the group */
     close(fds[1]);
     int flags = fcntl(fds[0], F_GETFL, 0);
     if (flags >= 0) {
@@ -295,8 +307,8 @@ static void exec_finish(exec_state *st) {
     const char *p = st->buf;
     while (*p) {
         if ((*p >= '0' && *p <= '9') || ((*p == '-' || *p == '+' || *p == '.') && p[1])) {
-            char  *end = NULL;
-            double v   = strtod(p, &end);
+            char *end = NULL;
+            double v  = strtod(p, &end);
             if (end != p) {
                 st->value = (float)v;
                 break;
@@ -326,7 +338,9 @@ static void exec_tick(void *self, const nw_source_ctx *ctx) {
     exec_spawn(st, ctx->now_ms);
 }
 
-static float exec_scalar(void *self) { return ((exec_state *)self)->value; }
+static float exec_scalar(void *self) {
+    return ((exec_state *)self)->value;
+}
 
 /* Hidden means no subprocess, full stop. Without this a covered output would
  * keep forking every interval, which is exactly the cost neowall exists to

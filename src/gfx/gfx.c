@@ -20,7 +20,7 @@
  * ========================================================================== */
 
 typedef struct {
-    GLint  internal_format;
+    GLint internal_format;
     GLenum format;
     GLenum type;
     size_t bpp;
@@ -28,7 +28,7 @@ typedef struct {
 } format_info;
 
 static const format_info g_formats[] = {
-    [NW_GFX_FMT_RGBA8]   = {GL_RGBA8,   GL_RGBA, GL_UNSIGNED_BYTE, 4,  "RGBA8"},
+    [NW_GFX_FMT_RGBA8]   = {GL_RGBA8,   GL_RGBA, GL_UNSIGNED_BYTE, 4,  "RGBA8"  },
     [NW_GFX_FMT_RGBA16F] = {GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT,    8,  "RGBA16F"},
     [NW_GFX_FMT_RGBA32F] = {GL_RGBA32F, GL_RGBA, GL_FLOAT,         16, "RGBA32F"},
 };
@@ -40,8 +40,12 @@ static const format_info *format_lookup(nw_gfx_format f) {
     return &g_formats[f];
 }
 
-const char *nw_gfx_format_name(nw_gfx_format format) { return format_lookup(format)->name; }
-size_t      nw_gfx_format_bpp(nw_gfx_format format) { return format_lookup(format)->bpp; }
+const char *nw_gfx_format_name(nw_gfx_format format) {
+    return format_lookup(format)->name;
+}
+size_t nw_gfx_format_bpp(nw_gfx_format format) {
+    return format_lookup(format)->bpp;
+}
 
 /* ==========================================================================
  * Programs
@@ -160,16 +164,10 @@ GLint nw_gfx_program_uniform(const nw_gfx_program *prog, const char *name) {
 static void apply_filter(nw_gfx_filter filter) {
     GLint min_filter;
     switch (filter) {
-        case NW_GFX_FILTER_NEAREST:
-            min_filter = GL_NEAREST;
-            break;
-        case NW_GFX_FILTER_MIPMAP:
-            min_filter = GL_LINEAR_MIPMAP_LINEAR;
-            break;
-        case NW_GFX_FILTER_LINEAR:
-        default:
-            min_filter = GL_LINEAR;
-            break;
+    case NW_GFX_FILTER_NEAREST: min_filter = GL_NEAREST; break;
+    case NW_GFX_FILTER_MIPMAP: min_filter = GL_LINEAR_MIPMAP_LINEAR; break;
+    case NW_GFX_FILTER_LINEAR:
+    default: min_filter = GL_LINEAR; break;
     }
     GLint mag_filter = (filter == NW_GFX_FILTER_NEAREST) ? GL_NEAREST : GL_LINEAR;
 
@@ -183,9 +181,8 @@ static void apply_wrap(nw_gfx_wrap wrap) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, mode);
 }
 
-nw_result nw_gfx_texture_create(nw_gfx_texture *out, int width, int height,
-                                nw_gfx_format format, nw_gfx_filter filter,
-                                nw_gfx_wrap wrap, const void *pixels) {
+nw_result nw_gfx_texture_create(nw_gfx_texture *out, int width, int height, nw_gfx_format format,
+                                nw_gfx_filter filter, nw_gfx_wrap wrap, const void *pixels) {
     if (!out) {
         return nw_err(NW_ERR_INVALID_ARG, "gfx: null texture");
     }
@@ -292,8 +289,8 @@ void nw_gfx_texture_destroy(nw_gfx_texture *tex) {
  * Render targets
  * ========================================================================== */
 
-nw_result nw_gfx_target_create(nw_gfx_target *out, int width, int height,
-                               nw_gfx_format format, nw_gfx_filter filter, bool feedback) {
+nw_result nw_gfx_target_create(nw_gfx_target *out, int width, int height, nw_gfx_format format,
+                               nw_gfx_filter filter, bool feedback) {
     if (!out) {
         return nw_err(NW_ERR_INVALID_ARG, "gfx: null target");
     }
@@ -319,8 +316,8 @@ nw_result nw_gfx_target_create(nw_gfx_target *out, int width, int height,
     /* Validate once at creation. A target that is going to be incomplete is
      * better caught here than as silently black output every frame. */
     glBindFramebuffer(GL_FRAMEBUFFER, out->fbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                           out->textures[0].id, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, out->textures[0].id,
+                           0);
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -367,11 +364,11 @@ void nw_gfx_target_bind(nw_gfx_target *target) {
 
         if (target->feedback) {
             const nw_gfx_texture *other = nw_gfx_target_read(target);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                                   other->id, 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, other->id,
+                                   0);
             glClear(GL_COLOR_BUFFER_BIT);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                                   write->id, 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, write->id,
+                                   0);
         }
         target->needs_clear = false;
     }

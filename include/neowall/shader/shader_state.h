@@ -28,12 +28,12 @@
 #include <stdint.h>
 
 /* Number of vec4 slots exposed to shaders as iState[]. */
-#define NW_STATE_VEC4S 4
+#define NW_STATE_VEC4S  4
 #define NW_STATE_FLOATS (NW_STATE_VEC4S * 4)
 
 typedef struct {
-    float  values[NW_STATE_FLOATS];
-    int64_t saved_at;      /* unix seconds when written; 0 if never */
+    float values[NW_STATE_FLOATS];
+    int64_t saved_at; /* unix seconds when written; 0 if never */
 } nw_shader_state_t;
 
 /* Load the state saved for `shader_path`. Always succeeds: a missing or

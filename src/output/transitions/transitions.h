@@ -29,12 +29,10 @@ typedef struct {
 
 /* High-level transition API - abstracts OpenGL state management */
 bool transition_begin(transition_context_t *ctx, struct output_state *output, GLuint program);
-bool transition_draw_textured_quad(transition_context_t *ctx, GLuint texture, 
-                                    float alpha, const float *custom_vertices);
-bool transition_draw_blended_textures(transition_context_t *ctx, 
-                                       GLuint texture0, GLuint texture1,
-                                       float progress, float time,
-                                       const float *resolution);
+bool transition_draw_textured_quad(transition_context_t *ctx, GLuint texture, float alpha,
+                                   const float *custom_vertices);
+bool transition_draw_blended_textures(transition_context_t *ctx, GLuint texture0, GLuint texture1,
+                                      float progress, float time, const float *resolution);
 void transition_end(transition_context_t *ctx);
 
 /* Individual transition implementations */

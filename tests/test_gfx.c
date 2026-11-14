@@ -21,15 +21,15 @@
 static int checks   = 0;
 static int failures = 0;
 
-#define CHECK(cond, ...)                                                       \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);               \
-            fprintf(stderr, __VA_ARGS__);                                      \
-            fprintf(stderr, "\n");                                             \
-        }                                                                      \
+#define CHECK(cond, ...)                                                                           \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fprintf(stderr, "\n");                                                                 \
+        }                                                                                          \
     } while (0)
 
 /* Build a target the way nw_gfx_target_create would, without touching GL.
@@ -37,16 +37,16 @@ static int failures = 0;
  * framebuffer-completeness checks that only mean something on a real driver. */
 static void fake_target(nw_gfx_target *t, bool feedback) {
     memset(t, 0, sizeof(*t));
-    t->fbo            = 1;
-    t->feedback       = feedback;
-    t->front          = 0;
-    t->needs_clear    = true;
-    t->textures[0].id = 10;
-    t->textures[0].width = 1920;
+    t->fbo                = 1;
+    t->feedback           = feedback;
+    t->front              = 0;
+    t->needs_clear        = true;
+    t->textures[0].id     = 10;
+    t->textures[0].width  = 1920;
     t->textures[0].height = 1080;
     if (feedback) {
-        t->textures[1].id = 11;
-        t->textures[1].width = 1920;
+        t->textures[1].id     = 11;
+        t->textures[1].width  = 1920;
         t->textures[1].height = 1080;
     }
 }
@@ -172,14 +172,14 @@ static void test_format_table(void) {
  * confusingly much later. */
 static void test_rejects_bad_dimensions(void) {
     nw_gfx_texture tex;
-    CHECK(nw_is_err(nw_gfx_texture_create(&tex, 0, 100, NW_GFX_FMT_RGBA8,
-                                          NW_GFX_FILTER_LINEAR, NW_GFX_WRAP_CLAMP, NULL)),
+    CHECK(nw_is_err(nw_gfx_texture_create(&tex, 0, 100, NW_GFX_FMT_RGBA8, NW_GFX_FILTER_LINEAR,
+                                          NW_GFX_WRAP_CLAMP, NULL)),
           "zero width rejected");
-    CHECK(nw_is_err(nw_gfx_texture_create(&tex, 100, -1, NW_GFX_FMT_RGBA8,
-                                          NW_GFX_FILTER_LINEAR, NW_GFX_WRAP_CLAMP, NULL)),
+    CHECK(nw_is_err(nw_gfx_texture_create(&tex, 100, -1, NW_GFX_FMT_RGBA8, NW_GFX_FILTER_LINEAR,
+                                          NW_GFX_WRAP_CLAMP, NULL)),
           "negative height rejected");
-    CHECK(nw_is_err(nw_gfx_texture_create(NULL, 10, 10, NW_GFX_FMT_RGBA8,
-                                          NW_GFX_FILTER_LINEAR, NW_GFX_WRAP_CLAMP, NULL)),
+    CHECK(nw_is_err(nw_gfx_texture_create(NULL, 10, 10, NW_GFX_FMT_RGBA8, NW_GFX_FILTER_LINEAR,
+                                          NW_GFX_WRAP_CLAMP, NULL)),
           "null out rejected");
 
     nw_gfx_texture zeroed;

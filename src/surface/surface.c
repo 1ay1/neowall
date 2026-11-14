@@ -65,7 +65,7 @@ struct compositor_surface *compositor_surface_create(struct compositor_backend *
     /* Set back-pointer to backend */
     surface->backend = backend;
 
-    log_debug("Surface created successfully: %p", (void*)surface);
+    log_debug("Surface created successfully: %p", (void *)surface);
 
     return surface;
 }
@@ -79,7 +79,7 @@ void compositor_surface_destroy(struct compositor_surface *surface) {
         return;
     }
 
-    log_debug("Destroying compositor surface: %p", (void*)surface);
+    log_debug("Destroying compositor surface: %p", (void *)surface);
 
     struct compositor_backend *backend = surface->backend;
 
@@ -102,7 +102,7 @@ void compositor_surface_destroy(struct compositor_surface *surface) {
     /* Delegate to backend implementation */
     backend->ops->destroy_surface(surface);
 
-    log_debug("Surface destroyed: %p", (void*)surface);
+    log_debug("Surface destroyed: %p", (void *)surface);
 }
 
 /* ============================================================================
@@ -133,8 +133,8 @@ bool compositor_surface_configure(struct compositor_surface *surface,
         return false;
     }
 
-    log_debug("Configuring surface: layer=%d, anchor=0x%x, size=%dx%d",
-              config->layer, config->anchor, config->width, config->height);
+    log_debug("Configuring surface: layer=%d, anchor=0x%x, size=%dx%d", config->layer,
+              config->anchor, config->width, config->height);
 
     /* Delegate to backend implementation */
     bool result = backend->ops->configure_surface(surface, config);
@@ -145,7 +145,7 @@ bool compositor_surface_configure(struct compositor_surface *surface,
     }
 
     /* Update surface config cache */
-    surface->config = *config;
+    surface->config     = *config;
     surface->configured = true;
 
     log_debug("Surface configured successfully");
@@ -157,8 +157,7 @@ bool compositor_surface_configure(struct compositor_surface *surface,
  * SURFACE DAMAGE AND COMMIT
  * ============================================================================ */
 
-void compositor_surface_damage(struct compositor_surface *surface,
-                               int32_t x, int32_t y,
+void compositor_surface_damage(struct compositor_surface *surface, int32_t x, int32_t y,
                                int32_t width, int32_t height) {
     if (!surface) {
         log_error("Cannot damage surface: surface is NULL");
@@ -207,10 +206,8 @@ void compositor_surface_commit(struct compositor_surface *surface) {
  * EGL INTEGRATION
  * ============================================================================ */
 
-EGLSurface compositor_surface_create_egl(struct compositor_surface *surface,
-                                         EGLDisplay egl_display,
-                                         EGLConfig egl_config,
-                                         int32_t width, int32_t height) {
+EGLSurface compositor_surface_create_egl(struct compositor_surface *surface, EGLDisplay egl_display,
+                                         EGLConfig egl_config, int32_t width, int32_t height) {
     if (!surface) {
         log_error("Cannot create EGL surface: surface is NULL");
         return EGL_NO_SURFACE;
@@ -256,9 +253,7 @@ EGLSurface compositor_surface_create_egl(struct compositor_surface *surface,
     }
 
     /* Create EGL surface from native window (opaque region handles transparency) */
-    EGLSurface egl_surface = eglCreateWindowSurface(egl_display, egl_config,
-                                                    native_window,
-                                                    NULL);
+    EGLSurface egl_surface = eglCreateWindowSurface(egl_display, egl_config, native_window, NULL);
 
     if (egl_surface == EGL_NO_SURFACE) {
         EGLint error = eglGetError();
@@ -274,25 +269,24 @@ EGLSurface compositor_surface_create_egl(struct compositor_surface *surface,
 
     /* Store EGL surface in compositor surface */
     surface->egl_surface = egl_surface;
-    surface->width = width;
-    surface->height = height;
+    surface->width       = width;
+    surface->height      = height;
 
-    log_debug("EGL surface created successfully: %p", (void*)egl_surface);
+    log_debug("EGL surface created successfully: %p", (void *)egl_surface);
 
     return egl_surface;
 }
 
-void compositor_surface_destroy_egl(struct compositor_surface *surface,
-                                    EGLDisplay egl_display) {
+void compositor_surface_destroy_egl(struct compositor_surface *surface, EGLDisplay egl_display) {
     if (!surface) {
         return;
     }
 
-    log_debug("Destroying EGL surface: %p", (void*)surface->egl_surface);
+    log_debug("Destroying EGL surface: %p", (void *)surface->egl_surface);
 
     /* Destroy EGL surface */
     if (surface->egl_surface != EGL_NO_SURFACE && egl_display != EGL_NO_DISPLAY) {
-        egl_forget_current();   /* a new surface may reuse this handle */
+        egl_forget_current(); /* a new surface may reuse this handle */
         eglDestroySurface(egl_display, surface->egl_surface);
         surface->egl_surface = EGL_NO_SURFACE;
     }
@@ -314,13 +308,13 @@ void compositor_surface_destroy_egl(struct compositor_surface *surface,
 /* Get default surface configuration */
 compositor_surface_config_t compositor_surface_config_default(void *native_output) {
     compositor_surface_config_t config = {
-        .layer = COMPOSITOR_LAYER_BACKGROUND,
-        .anchor = COMPOSITOR_ANCHOR_FILL,
-        .exclusive_zone = -1,
+        .layer                  = COMPOSITOR_LAYER_BACKGROUND,
+        .anchor                 = COMPOSITOR_ANCHOR_FILL,
+        .exclusive_zone         = -1,
         .keyboard_interactivity = false,
-        .width = 0,  /* Auto */
-        .height = 0, /* Auto */
-        .output = native_output,
+        .width                  = 0, /* Auto */
+        .height                 = 0, /* Auto */
+        .output                 = native_output,
         /* Wallpapers have no latency requirement that would justify tearing, and
          * async presentation lets the present rate drift off the refresh rate,
          * which reads as jerky motion even at a nominal 60 FPS. Callers that
@@ -336,8 +330,8 @@ compositor_surface_config_t compositor_surface_config_default(void *native_outpu
 /* Get surface dimensions */
 
 /* Resize EGL window */
-bool compositor_surface_resize_egl(struct compositor_surface *surface,
-                                   int32_t width, int32_t height) {
+bool compositor_surface_resize_egl(struct compositor_surface *surface, int32_t width,
+                                   int32_t height) {
     if (!surface || !surface->egl_window) {
         log_error("Cannot resize: invalid surface or EGL window");
         return false;
@@ -349,8 +343,8 @@ bool compositor_surface_resize_egl(struct compositor_surface *surface,
         return false;
     }
 
-    log_debug("Resizing EGL window: %dx%d -> %dx%d",
-              surface->width, surface->height, width, height);
+    log_debug("Resizing EGL window: %dx%d -> %dx%d", surface->width, surface->height, width,
+              height);
 
     /* Use backend's resize operation if available */
     if (backend->ops && backend->ops->resize_egl_window) {
@@ -359,7 +353,7 @@ bool compositor_surface_resize_egl(struct compositor_surface *surface,
         }
     }
 
-    surface->width = width;
+    surface->width  = width;
     surface->height = height;
 
     return true;
@@ -432,7 +426,7 @@ bool compositor_surface_set_keyboard_interactivity(struct compositor_surface *su
     }
 
     if (surface->config.keyboard_interactivity == enabled) {
-        return true;  /* Already there — don't spam the protocol every frame. */
+        return true; /* Already there — don't spam the protocol every frame. */
     }
 
     log_debug("Setting surface keyboard interactivity: %s", enabled ? "on-demand" : "none");
@@ -447,14 +441,15 @@ bool compositor_surface_set_keyboard_interactivity(struct compositor_surface *su
 
 /* Set surface callbacks */
 void compositor_surface_set_callbacks(struct compositor_surface *surface,
-                                     void (*on_configure)(struct compositor_surface*, int32_t, int32_t),
-                                     void (*on_closed)(struct compositor_surface*),
-                                     void *user_data) {
+                                      void (*on_configure)(struct compositor_surface *, int32_t,
+                                                           int32_t),
+                                      void (*on_closed)(struct compositor_surface *),
+                                      void *user_data) {
     if (!surface) {
         return;
     }
 
     surface->on_configure = on_configure;
-    surface->on_closed = on_closed;
-    surface->user_data = user_data;
+    surface->on_closed    = on_closed;
+    surface->user_data    = user_data;
 }

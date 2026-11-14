@@ -31,22 +31,22 @@
 #include <stddef.h>
 
 typedef enum nw_status {
-    NW_OK = 0,             /* Success. Must stay 0. */
-    NW_ERR_INVALID_ARG,   /* Caller passed NULL / out-of-range / nonsense. */
-    NW_ERR_OOM,           /* Allocation failed. */
-    NW_ERR_IO,            /* read/write/open/socket failure (see errno at site). */
-    NW_ERR_NOT_FOUND,     /* Requested resource does not exist. */
-    NW_ERR_PARSE,         /* Malformed input (config, shader, etc.). */
-    NW_ERR_UNSUPPORTED,   /* Backend/platform cannot do this. */
-    NW_ERR_BACKEND,       /* Compositor/display-server-level failure. */
-    NW_ERR_GL,            /* EGL/OpenGL call failed. */
-    NW_ERR_STATE,         /* Operation invalid for current object state. */
-    NW_ERR_AGAIN,         /* Transient; retry may succeed (EAGAIN-like). */
+    NW_OK = 0,          /* Success. Must stay 0. */
+    NW_ERR_INVALID_ARG, /* Caller passed NULL / out-of-range / nonsense. */
+    NW_ERR_OOM,         /* Allocation failed. */
+    NW_ERR_IO,          /* read/write/open/socket failure (see errno at site). */
+    NW_ERR_NOT_FOUND,   /* Requested resource does not exist. */
+    NW_ERR_PARSE,       /* Malformed input (config, shader, etc.). */
+    NW_ERR_UNSUPPORTED, /* Backend/platform cannot do this. */
+    NW_ERR_BACKEND,     /* Compositor/display-server-level failure. */
+    NW_ERR_GL,          /* EGL/OpenGL call failed. */
+    NW_ERR_STATE,       /* Operation invalid for current object state. */
+    NW_ERR_AGAIN,       /* Transient; retry may succeed (EAGAIN-like). */
 } nw_status;
 
 typedef struct nw_result {
     nw_status status;
-    const char *context;  /* Static string, never owned. May be NULL. */
+    const char *context; /* Static string, never owned. May be NULL. */
 } nw_result;
 
 /* ----- Constructors ----- */
@@ -62,24 +62,28 @@ static inline nw_result nw_err(nw_status status, const char *ctx) {
 
 /* ----- Predicates ----- */
 
-static inline bool nw_is_ok(nw_result r)  { return r.status == NW_OK; }
-static inline bool nw_is_err(nw_result r) { return r.status != NW_OK; }
+static inline bool nw_is_ok(nw_result r) {
+    return r.status == NW_OK;
+}
+static inline bool nw_is_err(nw_result r) {
+    return r.status != NW_OK;
+}
 
 /* ----- Human-readable category name (for logs / test diagnostics) ----- */
 
 static inline const char *nw_status_str(nw_status s) {
     switch (s) {
-        case NW_OK:              return "ok";
-        case NW_ERR_INVALID_ARG: return "invalid-argument";
-        case NW_ERR_OOM:         return "out-of-memory";
-        case NW_ERR_IO:          return "io-error";
-        case NW_ERR_NOT_FOUND:   return "not-found";
-        case NW_ERR_PARSE:       return "parse-error";
-        case NW_ERR_UNSUPPORTED: return "unsupported";
-        case NW_ERR_BACKEND:     return "backend-error";
-        case NW_ERR_GL:          return "gl-error";
-        case NW_ERR_STATE:       return "invalid-state";
-        case NW_ERR_AGAIN:       return "try-again";
+    case NW_OK: return "ok";
+    case NW_ERR_INVALID_ARG: return "invalid-argument";
+    case NW_ERR_OOM: return "out-of-memory";
+    case NW_ERR_IO: return "io-error";
+    case NW_ERR_NOT_FOUND: return "not-found";
+    case NW_ERR_PARSE: return "parse-error";
+    case NW_ERR_UNSUPPORTED: return "unsupported";
+    case NW_ERR_BACKEND: return "backend-error";
+    case NW_ERR_GL: return "gl-error";
+    case NW_ERR_STATE: return "invalid-state";
+    case NW_ERR_AGAIN: return "try-again";
     }
     return "unknown";
 }
@@ -95,12 +99,12 @@ static inline const char *nw_status_str(nw_status s) {
  *       return nw_ok();
  *   }
  */
-#define NW_TRY(expr)                                                            \
-    do {                                                                       \
-        nw_result _nw_try_r = (expr);                                          \
-        if (_nw_try_r.status != NW_OK) {                                       \
-            return _nw_try_r;                                                  \
-        }                                                                      \
+#define NW_TRY(expr)                                                                               \
+    do {                                                                                           \
+        nw_result _nw_try_r = (expr);                                                              \
+        if (_nw_try_r.status != NW_OK) {                                                           \
+            return _nw_try_r;                                                                      \
+        }                                                                                          \
     } while (0)
 
 #endif /* NEOWALL_RESULT_H */

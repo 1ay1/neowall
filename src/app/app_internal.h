@@ -31,16 +31,16 @@ struct app_model {
     /* Requests waiting for present. present reports what it used with
      * NW_MSG_APPLIED, and update clears them. */
     int next_pending;
-    int set_index;                  /* -1 = none */
+    int set_index; /* -1 = none */
     bool terminal_pending;
-    uint32_t terminal_gen;          /* bumps per set-terminal */
+    uint32_t terminal_gen; /* bumps per set-terminal */
     char terminal_cmd[APP_TERMINAL_CMD_MAX];
-    bool outputs_need_init;         /* reconnect / hotplug: bring outputs up */
+    bool outputs_need_init; /* reconnect / hotplug: bring outputs up */
     uint32_t outputs_gen;
 
-    bool cycle_paused;              /* `neowall pause` */
-    bool shader_paused;             /* `neowall pause-shader` */
-    bool shader_pause_applied;      /* what the last SHADER_PAUSE command did */
+    bool cycle_paused;         /* `neowall pause` */
+    bool shader_paused;        /* `neowall pause-shader` */
+    bool shader_pause_applied; /* what the last SHADER_PAUSE command did */
 
     /* A reload in flight: applied, but a shader is still compiling in the
      * background. Clients that asked wait here for the real outcome, and
@@ -49,16 +49,16 @@ struct app_model {
     uint32_t reload_waiters[APP_RELOAD_WAITERS];
     int reload_nwaiters;
 
-    bool has_occlusion;             /* fixed at start */
+    bool has_occlusion; /* fixed at start */
 };
 
 /* What present used up this frame (NW_MSG_APPLIED's payload). The index and
  * generations say which request it was, so a newer one isn't cleared. */
 enum {
-    APP_APPLIED_NEXT = 1u << 0,
-    APP_APPLIED_INDEX = 1u << 1,
+    APP_APPLIED_NEXT     = 1u << 0,
+    APP_APPLIED_INDEX    = 1u << 1,
     APP_APPLIED_TERMINAL = 1u << 2,
-    APP_APPLIED_OUTPUTS = 1u << 3,
+    APP_APPLIED_OUTPUTS  = 1u << 3,
 };
 struct app_applied {
     uint32_t flags;
@@ -72,7 +72,7 @@ _Static_assert(sizeof(struct app_applied) <= RT_MSG_PAYLOAD, "app_applied fits a
 struct app_view {
     uint64_t stats_since_ms;
     uint64_t stats_frames;
-    bool watch_builds;      /* report when staged reload builds settle */
+    bool watch_builds; /* report when staged reload builds settle */
 };
 
 /* The host side's: the compositor fd, the watch fd, the socket. */
@@ -82,7 +82,7 @@ struct app_host {
     bool flush_blocked;
     bool read_prepared;
     uint32_t watch_handle;
-    nw_ipc_server *ipc;             /* NULL for a preview, or if binding failed */
+    nw_ipc_server *ipc; /* NULL for a preview, or if binding failed */
 };
 
 /* Everything the program holds. `state` is the world update doesn't own:

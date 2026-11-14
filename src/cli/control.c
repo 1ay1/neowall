@@ -40,6 +40,7 @@ typedef struct {
 
 /* Centralized command registry - Single source of truth
  * Note: 'set' command is handled specially, not via this table */
+/* clang-format off */
 static const DaemonCommand daemon_commands[] = {
     {"next",              SIGUSR1,      "Skip to next wallpaper",                  "Skipping to next wallpaper...",      NULL,  false, true},   /* check_cycle = true */
     {"pause",             SIGUSR2,      "Pause wallpaper cycling",                 "Pausing wallpaper cycling...",       NULL,  false, false},
@@ -51,11 +52,12 @@ static const DaemonCommand daemon_commands[] = {
     {"status",            0,            "Show current wallpaper",                  NULL,                                 NULL,  true,  false},
     {NULL, 0, NULL, NULL, NULL, false, false}  /* Sentinel */
 };
+/* clang-format on */
 
 /* Kill running daemon */
 static bool kill_daemon(void) {
     const char *pid_path = get_pid_file_path();
-    FILE *fp = fopen(pid_path, "r");
+    FILE *fp             = fopen(pid_path, "r");
 
     if (!fp) {
         printf("No running neowall daemon found (no PID file at %s)\n", pid_path);
@@ -87,9 +89,9 @@ static bool kill_daemon(void) {
     }
 
     /* Wait a bit for graceful shutdown */
-    struct timespec sleep_time = {0, SLEEP_100MS_NS};  /* 100ms */
-    int attempts = 0;
-    while (attempts < 50) {  /* Wait up to 5 seconds */
+    struct timespec sleep_time = {0, SLEEP_100MS_NS}; /* 100ms */
+    int attempts               = 0;
+    while (attempts < 50) { /* Wait up to 5 seconds */
         if (kill(pid, 0) == -1 && errno == ESRCH) {
             printf("NeoWall daemon stopped successfully.\n");
             remove_stale_pid_file();
@@ -121,19 +123,19 @@ static int state_max_cycle_total(void) {
      * separate process from the daemon; only file locks coordinate across
      * processes. */
     const char *state_path = get_state_file_path();
-    FILE *fp = fopen(state_path, "r");
+    FILE *fp               = fopen(state_path, "r");
 
     if (!fp) {
-        return 0;  /* No state file = unknown, let daemon handle it */
+        return 0; /* No state file = unknown, let daemon handle it */
     }
 
     /* Acquire read lock on the file */
-    int fd = fileno(fp);
+    int fd            = fileno(fp);
     struct flock lock = {
-        .l_type = F_RDLCK,      /* Read lock */
+        .l_type   = F_RDLCK, /* Read lock */
         .l_whence = SEEK_SET,
-        .l_start = 0,
-        .l_len = 0              /* Lock entire file */
+        .l_start  = 0,
+        .l_len    = 0 /* Lock entire file */
     };
 
     if (fcntl(fd, F_SETLKW, &lock) == -1) {
@@ -155,7 +157,7 @@ static int state_max_cycle_total(void) {
              * its contents are untrusted input: parse defensively rather than
              * feeding an arbitrary digit string to atoi(). */
             const char *value = line + 12;
-            long cycle_total = 0;
+            long cycle_total  = 0;
             if (!neowall_parse_index(value, &cycle_total) || cycle_total > INT_MAX) {
                 log_debug("Ignoring malformed cycle_total in state file: '%s'", value);
                 continue;
@@ -189,7 +191,8 @@ static bool ipc_command(const char *verb, const char *arg, int *rc) {
     /* reload answers after the new config is applied, which can mean a
      * shader compile: a second or more on software GL or a loaded machine */
     int timeout_ms = strcmp(verb, "reload") == 0 ? 15000 : 3000;
-    nw_ipc_status st = nw_ipc_request(proto_socket_path(), verb, arg, reply, sizeof(reply), timeout_ms);
+    nw_ipc_status st =
+        nw_ipc_request(proto_socket_path(), verb, arg, reply, sizeof(reply), timeout_ms);
     switch (st) {
     case NW_IPC_OK:
         if (reply[0]) printf("%s\n", reply);
@@ -203,15 +206,14 @@ static bool ipc_command(const char *verb, const char *arg, int *rc) {
         fprintf(stderr, "The daemon didn't answer on %s\n", proto_socket_path());
         *rc = EXIT_FAILURE;
         return true;
-    case NW_IPC_NO_DAEMON:
-        break;
+    case NW_IPC_NO_DAEMON: break;
     }
     return false;
 }
 
 static bool send_daemon_signal(int signal, const char *action, bool check_cycle) {
     const char *pid_path = get_pid_file_path();
-    FILE *fp = fopen(pid_path, "r");
+    FILE *fp             = fopen(pid_path, "r");
 
     if (!fp) {
         printf("No running neowall daemon found.\n");
@@ -273,15 +275,15 @@ static void report_daemon_version(void) {
     printf("  CLI:       v%s\n", NEOWALL_VERSION_STRING);
 
     const char *pid_path = get_pid_file_path();
-    FILE *fp = pid_path ? fopen(pid_path, "r") : NULL;
+    FILE *fp             = pid_path ? fopen(pid_path, "r") : NULL;
     if (!fp) return;
 
-    long pid = 0;
+    long pid    = 0;
     int scanned = fscanf(fp, "%ld", &pid);
     fclose(fp);
     if (scanned != 1 || pid <= 0) return;
 
-    if (kill((pid_t)pid, 0) != 0) return;   /* not running */
+    if (kill((pid_t)pid, 0) != 0) return; /* not running */
 
     char exe_link[64];
     char exe_path[NW_PATH_MAX];
@@ -340,12 +342,13 @@ static int cmd_set_index_signal(int argc, char *argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Usage: %s set <index>\n", argv[0]);
         fprintf(stderr, "  <index>  Wallpaper index (0-based)\n");
-        fprintf(stderr, "\nUse '%s current' to see available wallpapers and their indices.\n", argv[0]);
+        fprintf(stderr, "\nUse '%s current' to see available wallpapers and their indices.\n",
+                argv[0]);
         return EXIT_FAILURE;
     }
     /* atoi() can't report failure and is undefined on overflow. */
     const char *index_str = argv[2];
-    long parsed = 0;
+    long parsed           = 0;
     if (!neowall_parse_index(index_str, &parsed) || parsed > INT_MAX) {
         fprintf(stderr, "Error: Index must be a non-negative integer, got '%s'\n", index_str);
         return EXIT_FAILURE;
@@ -389,8 +392,7 @@ static int cmd_set_terminal_signal(int argc, char *argv[]) {
     char cmd_buf[512];
     size_t off = 0;
     for (int i = 2; i < argc; i++) {
-        int w = snprintf(cmd_buf + off, sizeof(cmd_buf) - off,
-                         "%s%s", (i > 2) ? " " : "", argv[i]);
+        int w = snprintf(cmd_buf + off, sizeof(cmd_buf) - off, "%s%s", (i > 2) ? " " : "", argv[i]);
         if (w < 0 || (size_t)w >= sizeof(cmd_buf) - off) {
             fprintf(stderr, "Error: terminal command too long\n");
             return EXIT_FAILURE;
@@ -428,8 +430,8 @@ int cmd_control(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    static const char *const socket_cmds[] = {
-        "next", "pause", "resume", "reload", "pause-shader", "resume-shader", NULL};
+    static const char *const socket_cmds[] = {"next",         "pause",         "resume", "reload",
+                                              "pause-shader", "resume-shader", NULL};
     for (size_t i = 0; socket_cmds[i]; i++) {
         int rc;
         if (strcmp(cmd, socket_cmds[i]) == 0 && ipc_command(cmd, NULL, &rc)) return rc;
@@ -453,11 +455,13 @@ int cmd_control(int argc, char *argv[]) {
      * in the daemon_commands table. */
     if (strcmp(cmd, "pause-shader") == 0) {
         return send_daemon_signal(SIGRTMIN + 1, "Freezing shader animation...", false)
-               ? EXIT_SUCCESS : EXIT_FAILURE;
+                   ? EXIT_SUCCESS
+                   : EXIT_FAILURE;
     }
     if (strcmp(cmd, "resume-shader") == 0) {
         return send_daemon_signal(SIGRTMIN + 2, "Resuming shader animation...", false)
-               ? EXIT_SUCCESS : EXIT_FAILURE;
+                   ? EXIT_SUCCESS
+                   : EXIT_FAILURE;
     }
     if (strcmp(cmd, "set") == 0) return cmd_set_index_signal(argc, argv);
     if (strcmp(cmd, "set-terminal") == 0) return cmd_set_terminal_signal(argc, argv);
@@ -469,10 +473,10 @@ int cmd_control(int argc, char *argv[]) {
             report_daemon_version();
             return ok ? EXIT_SUCCESS : EXIT_FAILURE;
         }
-        return send_daemon_signal(daemon_commands[i].signal,
-                                  daemon_commands[i].action_message,
+        return send_daemon_signal(daemon_commands[i].signal, daemon_commands[i].action_message,
                                   daemon_commands[i].check_cycle)
-               ? EXIT_SUCCESS : EXIT_FAILURE;
+                   ? EXIT_SUCCESS
+                   : EXIT_FAILURE;
     }
 
     fprintf(stderr, "Unknown command: %s\n\n", cmd);
@@ -488,9 +492,9 @@ int cmd_control(int argc, char *argv[]) {
 
 bool cli_control_command(size_t i, const char **name, const char **description) {
     for (size_t k = 0, n = 0; daemon_commands[k].name; k++) {
-        if (strcmp(daemon_commands[k].name, "status") == 0) continue;   /* alias */
+        if (strcmp(daemon_commands[k].name, "status") == 0) continue; /* alias */
         if (n++ == i) {
-            *name = daemon_commands[k].name;
+            *name        = daemon_commands[k].name;
             *description = daemon_commands[k].description;
             return true;
         }

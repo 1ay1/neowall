@@ -13,10 +13,10 @@
 /* Before waiting: dispatch what's queued, flush, and tell rt whether the
  * backend already holds events poll() can't see (Xlib's queue). */
 bool app_host_prepare(void *ctx, rt_loop *loop) {
-    struct app *a = ctx;
+    struct app *a               = ctx;
     struct neowall_state *state = a->state;
-    const compositor_backend_ops_t *ops = state->compositor_backend ?
-                                          state->compositor_backend->ops : NULL;
+    const compositor_backend_ops_t *ops =
+        state->compositor_backend ? state->compositor_backend->ops : NULL;
     void *bd = state->compositor_backend ? state->compositor_backend->data : NULL;
     if (!ops) return false;
 
@@ -46,10 +46,10 @@ bool app_host_prepare(void *ctx, rt_loop *loop) {
 
 void app_on_compositor(void *ctx, rt_loop *loop, int fd, unsigned ev) {
     (void)fd;
-    struct app *a = ctx;
-    struct neowall_state *state = a->state;
+    struct app *a                       = ctx;
+    struct neowall_state *state         = a->state;
     const compositor_backend_ops_t *ops = state->compositor_backend->ops;
-    void *bd = state->compositor_backend->data;
+    void *bd                            = state->compositor_backend->data;
 
     if (ev & RT_HANGUP) {
         log_error("Compositor disconnected, display server shut down");
@@ -82,10 +82,10 @@ void app_on_compositor(void *ctx, rt_loop *loop, int fd, unsigned ev) {
  * queued (frame callbacks), and check for errors. */
 void app_host_after_wait(void *ctx, rt_loop *loop, bool fd_ready) {
     (void)fd_ready;
-    struct app *a = ctx;
-    struct neowall_state *state = a->state;
+    struct app *a                       = ctx;
+    struct neowall_state *state         = a->state;
     const compositor_backend_ops_t *ops = state->compositor_backend->ops;
-    void *bd = state->compositor_backend->data;
+    void *bd                            = state->compositor_backend->data;
 
     if (a->host.read_prepared && ops->cancel_read) ops->cancel_read(bd);
     a->host.read_prepared = false;

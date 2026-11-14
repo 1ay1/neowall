@@ -54,16 +54,16 @@ static void frame_due(struct app *a, uint32_t id) {
     pthread_rwlock_rdlock(&state->output_list_lock);
     struct output_state *o = output_by_id(state, id);
     if (o && !(o->config->type == WALLPAPER_SHADER && a->model.shader_paused)) {
-        bool idle = o->config->type == WALLPAPER_TERMINAL && o->shader &&
-                    o->frames_rendered > 0 &&
+        bool idle = o->config->type == WALLPAPER_TERMINAL && o->shader && o->frames_rendered > 0 &&
                     !term_gpu_animating(wallshader_terminal(o->shader), APP_TERM_FX_SETTLE_MS);
         if (!idle) atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
         /* A frame that won't render must still move the pacer on, or its
          * timer fires once and goes quiet. One that will render moves it
          * after the swap; doing it here too halves the frame rate. */
-        else output_pace_advance(o, (uint64_t)rt_now_ns());
+        else
+            output_pace_advance(o, (uint64_t)rt_now_ns());
     } else if (o) {
-        output_pace_advance(o, (uint64_t)rt_now_ns());   /* paused shader */
+        output_pace_advance(o, (uint64_t)rt_now_ns()); /* paused shader */
     }
     pthread_rwlock_unlock(&state->output_list_lock);
 }
@@ -82,7 +82,8 @@ static void staged_builds(struct neowall_state *state, bool *building, bool *fai
 
 static void staged_forget(struct neowall_state *state) {
     pthread_rwlock_rdlock(&state->output_list_lock);
-    for (struct output_state *o = state->outputs; o; o = o->next) output_reload_forget(o);
+    for (struct output_state *o = state->outputs; o; o = o->next)
+        output_reload_forget(o);
     pthread_rwlock_unlock(&state->output_list_lock);
 }
 
@@ -101,21 +102,15 @@ static void reload(struct app *a, rt_loop *loop) {
 }
 
 void app_perform(void *self, rt_loop *loop, const rt_cmd *c) {
-    struct app *a = self;
+    struct app *a               = self;
     struct neowall_state *state = a->state;
 
     switch (c->kind) {
-    case APP_CMD_NOTIFY:
-        nw_sd_notify(c->v.s);
-        break;
+    case APP_CMD_NOTIFY: nw_sd_notify(c->v.s); break;
 
-    case APP_CMD_STOP:
-        atomic_store_explicit(&state->running, false, memory_order_release);
-        break;
+    case APP_CMD_STOP: atomic_store_explicit(&state->running, false, memory_order_release); break;
 
-    case APP_CMD_RELOAD:
-        reload(a, loop);
-        break;
+    case APP_CMD_RELOAD: reload(a, loop); break;
 
     case APP_CMD_REPLY:
         ipc_server_reply(a->host.ipc, c->id, c->v.i != 0,
@@ -124,7 +119,7 @@ void app_perform(void *self, rt_loop *loop, const rt_cmd *c) {
         break;
 
     case APP_CMD_WATCH_BUILDS:
-        a->view.watch_builds = true;   /* present reports when they settle */
+        a->view.watch_builds = true; /* present reports when they settle */
         break;
 
     case APP_CMD_READ_INDEX_FILE: {
@@ -147,28 +142,18 @@ void app_perform(void *self, rt_loop *loop, const rt_cmd *c) {
         break;
     }
 
-    case APP_CMD_SHADER_PAUSE:
-        shader_pause(state, c->v.i != 0);
-        break;
+    case APP_CMD_SHADER_PAUSE: shader_pause(state, c->v.i != 0); break;
 
-    case APP_CMD_REDRAW_ALL:
-        app_mark_redraw_all(state);
-        break;
+    case APP_CMD_REDRAW_ALL: app_mark_redraw_all(state); break;
 
-    case APP_CMD_FRAME:
-        frame_due(a, c->id);
-        break;
+    case APP_CMD_FRAME: frame_due(a, c->id); break;
 
-    case APP_CMD_OCCLUSION:
-        occlusion_update(state);
-        break;
+    case APP_CMD_OCCLUSION: occlusion_update(state); break;
 
     case APP_CMD_WATCH_RELOAD:
         if (state->watch_path[0]) watch_reload(state, state->watch_path);
         break;
 
-    default:
-        log_error("unknown command %u", c->kind);
-        break;
+    default: log_error("unknown command %u", c->kind); break;
     }
 }

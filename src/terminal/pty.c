@@ -10,7 +10,7 @@
  * self-pipe to unblock the read(), and ALWAYS pthread_join on destroy — never
  * pthread_cancel, because the parser is not async-cancel-safe.
  */
-#define _DEFAULT_SOURCE   /* forkpty (<pty.h>) */
+#define _DEFAULT_SOURCE /* forkpty (<pty.h>) */
 
 #include "neowall/terminal/terminal.h"
 #include "neowall/core/child_signals.h"
@@ -40,28 +40,28 @@
 
 struct terminal {
     term_screen *screen;
-    int          master_fd;    /* PTY master */
-    pid_t        child;
-    int          selfpipe[2];  /* wake the reader to exit */
+    int master_fd; /* PTY master */
+    pid_t child;
+    int selfpipe[2]; /* wake the reader to exit */
 
-    pthread_t    reader;
-    pthread_mutex_t lock;       /* guards screen + snapshot build */
-    atomic_bool  stop;
-    atomic_bool  child_exited;
-    atomic_int   child_status;
+    pthread_t reader;
+    pthread_mutex_t lock; /* guards screen + snapshot build */
+    atomic_bool stop;
+    atomic_bool child_exited;
+    atomic_int child_status;
 
     int cols, rows;
 
     /* snapshot buffer handed to the GL thread (double-buffer: build under lock,
      * expose a stable pointer). */
-    term_cell  *snap_cells;
-    term_frame  frame;
-    uint64_t    epoch;
-    atomic_ullong dirty_epoch;  /* bumped by reader when grid changes */
+    term_cell *snap_cells;
+    term_frame frame;
+    uint64_t epoch;
+    atomic_ullong dirty_epoch; /* bumped by reader when grid changes */
 
     /* Set once at spawn, read by the reader thread only. */
     void (*on_output)(void *ctx);
-    void  *on_output_ctx;
+    void *on_output_ctx;
 };
 
 /* ------------------------------------------------------------------------ */
@@ -75,15 +75,20 @@ static bool write_reply(terminal *t, const char *reply, size_t len) {
     size_t off = 0;
     while (off < len && !atomic_load(&t->stop)) {
         ssize_t w = write(t->master_fd, reply + off, len - off);
-        if (w > 0) { off += (size_t)w; continue; }
+        if (w > 0) {
+            off += (size_t)w;
+            continue;
+        }
         if (w < 0 && errno == EINTR) continue;
         if (w < 0 && errno == EAGAIN) {
             struct pollfd fds[2] = {
-                {.fd = t->master_fd, .events = POLLOUT},
-                {.fd = t->selfpipe[0], .events = POLLIN},
+                {.fd = t->master_fd,   .events = POLLOUT},
+                {.fd = t->selfpipe[0], .events = POLLIN },
             };
             int rv;
-            do { rv = poll(fds, 2, -1); } while (rv < 0 && errno == EINTR && !atomic_load(&t->stop));
+            do {
+                rv = poll(fds, 2, -1);
+            } while (rv < 0 && errno == EINTR && !atomic_load(&t->stop));
             if (rv <= 0 || (fds[1].revents & (POLLIN | POLLHUP | POLLERR))) return false;
             continue;
         }
@@ -100,7 +105,7 @@ static void *reader_main(void *arg) {
         if (atomic_load(&t->stop)) break;
 
         struct pollfd fds[2] = {
-            {.fd = t->master_fd, .events = POLLIN},
+            {.fd = t->master_fd,   .events = POLLIN},
             {.fd = t->selfpipe[0], .events = POLLIN},
         };
         int rv = poll(fds, 2, -1);
@@ -138,7 +143,7 @@ static void *reader_main(void *arg) {
 
     /* reap the child if it has exited */
     int status = 0;
-    pid_t r = waitpid(t->child, &status, WNOHANG);
+    pid_t r    = waitpid(t->child, &status, WNOHANG);
     if (r == t->child) {
         atomic_store(&t->child_status, status);
         atomic_store(&t->child_exited, true);
@@ -158,25 +163,37 @@ nw_result term_spawn(const term_spawn_opts *opts, terminal **out) {
 
     terminal *t = calloc(1, sizeof(*t));
     if (!t) return nw_err(NW_ERR_OOM, "term_spawn: alloc");
-    t->master_fd = -1;
+    t->master_fd   = -1;
     t->selfpipe[0] = t->selfpipe[1] = -1;
-    t->cols = cols; t->rows = rows;
-    t->on_output = opts->on_output;
-    t->on_output_ctx = opts->on_output_ctx;
+    t->cols                         = cols;
+    t->rows                         = rows;
+    t->on_output                    = opts->on_output;
+    t->on_output_ctx                = opts->on_output_ctx;
 
     t->screen = term_screen_create(cols, rows);
-    if (!t->screen) { free(t); return nw_err(NW_ERR_OOM, "term_spawn: screen"); }
+    if (!t->screen) {
+        free(t);
+        return nw_err(NW_ERR_OOM, "term_spawn: screen");
+    }
 
     t->snap_cells = calloc((size_t)cols * rows, sizeof(term_cell));
-    if (!t->snap_cells) { term_screen_destroy(t->screen); free(t); return nw_err(NW_ERR_OOM, "snap"); }
+    if (!t->snap_cells) {
+        term_screen_destroy(t->screen);
+        free(t);
+        return nw_err(NW_ERR_OOM, "snap");
+    }
 
     if (pthread_mutex_init(&t->lock, NULL) != 0) {
-        free(t->snap_cells); term_screen_destroy(t->screen); free(t);
+        free(t->snap_cells);
+        term_screen_destroy(t->screen);
+        free(t);
         return nw_err(NW_ERR_STATE, "mutex");
     }
     if (nw_pipe_cloexec(t->selfpipe) != 0) {
         pthread_mutex_destroy(&t->lock);
-        free(t->snap_cells); term_screen_destroy(t->screen); free(t);
+        free(t->snap_cells);
+        term_screen_destroy(t->screen);
+        free(t);
         return nw_err(NW_ERR_IO, "selfpipe");
     }
 
@@ -184,38 +201,49 @@ nw_result term_spawn(const term_spawn_opts *opts, terminal **out) {
      * calls async-signal-safe chdir/execve/_exit operations. */
     const char *sh = getenv("SHELL");
     if (!sh || !*sh) sh = "/bin/sh";
-    const char *term_name = opts->term_env ? opts->term_env : "xterm-256color";
-    size_t term_len = strlen(term_name) + sizeof("TERM=");
-    char *term_assignment = malloc(term_len);
+    const char *term_name  = opts->term_env ? opts->term_env : "xterm-256color";
+    size_t term_len        = strlen(term_name) + sizeof("TERM=");
+    char *term_assignment  = malloc(term_len);
     char *color_assignment = strdup("COLORTERM=truecolor");
     extern char **environ;
     size_t env_count = 0;
-    while (environ[env_count]) env_count++;
+    while (environ[env_count])
+        env_count++;
     char **child_env = calloc(env_count + 3, sizeof(*child_env));
     if (!term_assignment || !color_assignment || !child_env) {
-        free(term_assignment); free(color_assignment); free(child_env);
-        close(t->selfpipe[0]); close(t->selfpipe[1]);
+        free(term_assignment);
+        free(color_assignment);
+        free(child_env);
+        close(t->selfpipe[0]);
+        close(t->selfpipe[1]);
         pthread_mutex_destroy(&t->lock);
-        free(t->snap_cells); term_screen_destroy(t->screen); free(t);
+        free(t->snap_cells);
+        term_screen_destroy(t->screen);
+        free(t);
         return nw_err(NW_ERR_OOM, "child environment");
     }
     snprintf(term_assignment, term_len, "TERM=%s", term_name);
     size_t child_env_count = 0;
     for (size_t i = 0; i < env_count; i++) {
-        if (strncmp(environ[i], "TERM=", 5) == 0 ||
-            strncmp(environ[i], "COLORTERM=", 10) == 0) continue;
+        if (strncmp(environ[i], "TERM=", 5) == 0 || strncmp(environ[i], "COLORTERM=", 10) == 0)
+            continue;
         child_env[child_env_count++] = environ[i];
     }
     child_env[child_env_count++] = term_assignment;
     child_env[child_env_count++] = color_assignment;
 
     struct winsize ws = {.ws_row = (unsigned short)rows, .ws_col = (unsigned short)cols};
-    pid_t pid = forkpty(&t->master_fd, NULL, NULL, &ws);
+    pid_t pid         = forkpty(&t->master_fd, NULL, NULL, &ws);
     if (pid < 0) {
-        free(child_env); free(color_assignment); free(term_assignment);
-        close(t->selfpipe[0]); close(t->selfpipe[1]);
+        free(child_env);
+        free(color_assignment);
+        free(term_assignment);
+        close(t->selfpipe[0]);
+        close(t->selfpipe[1]);
         pthread_mutex_destroy(&t->lock);
-        free(t->snap_cells); term_screen_destroy(t->screen); free(t);
+        free(t->snap_cells);
+        term_screen_destroy(t->screen);
+        free(t);
         return nw_err(NW_ERR_IO, "forkpty");
     }
 
@@ -246,14 +274,16 @@ nw_result term_spawn(const term_spawn_opts *opts, terminal **out) {
                 /* nothing to do; stderr goes to the PTY, which no one reads */
             }
         }
-        nw_child_close_fds();   /* the pty is 0-2 already */
+        nw_child_close_fds(); /* the pty is 0-2 already */
         char *const argv[] = {(char *)sh, (char *)"-c", (char *)opts->cmd, NULL};
         execve(sh, argv, child_env);
         _exit(127); /* exec failed */
     }
 
     /* parent */
-    free(child_env); free(color_assignment); free(term_assignment);
+    free(child_env);
+    free(color_assignment);
+    free(term_assignment);
     t->child = pid;
     /* forkpty's master isn't close-on-exec; the next child must not get it */
     fcntl(t->master_fd, F_SETFD, FD_CLOEXEC);
@@ -266,11 +296,15 @@ nw_result term_spawn(const term_spawn_opts *opts, terminal **out) {
         atomic_store(&t->stop, true);
         killpg(t->child, SIGKILL);
         kill(t->child, SIGKILL);
-        while (waitpid(t->child, NULL, 0) < 0 && errno == EINTR) {}
+        while (waitpid(t->child, NULL, 0) < 0 && errno == EINTR) {
+        }
         close(t->master_fd);
-        close(t->selfpipe[0]); close(t->selfpipe[1]);
+        close(t->selfpipe[0]);
+        close(t->selfpipe[1]);
         pthread_mutex_destroy(&t->lock);
-        free(t->snap_cells); term_screen_destroy(t->screen); free(t);
+        free(t->snap_cells);
+        term_screen_destroy(t->screen);
+        free(t);
         return nw_err(NW_ERR_STATE, "pthread_create");
     }
 
@@ -282,7 +316,11 @@ void term_destroy(terminal *t) {
     if (!t) return;
     atomic_store(&t->stop, true);
     /* wake the reader out of select() */
-    if (t->selfpipe[1] >= 0) { char b = 1; ssize_t w = write(t->selfpipe[1], &b, 1); (void)w; }
+    if (t->selfpipe[1] >= 0) {
+        char b    = 1;
+        ssize_t w = write(t->selfpipe[1], &b, 1);
+        (void)w;
+    }
     pthread_join(t->reader, NULL);
 
     /* terminate the child if still alive.
@@ -300,11 +338,14 @@ void term_destroy(terminal *t) {
      * SIGKILL for anything that ignored it. */
     if (!atomic_load(&t->child_exited) && t->child > 0) {
         killpg(t->child, SIGHUP);
-        kill(t->child, SIGHUP);   /* belt-and-suspenders if it's not a pgrp leader */
-        int status = 0;
+        kill(t->child, SIGHUP); /* belt-and-suspenders if it's not a pgrp leader */
+        int status  = 0;
         bool reaped = false;
         for (int i = 0; i < 50; i++) {
-            if (waitpid(t->child, &status, WNOHANG) == t->child) { reaped = true; break; }
+            if (waitpid(t->child, &status, WNOHANG) == t->child) {
+                reaped = true;
+                break;
+            }
             usleep(2000);
         }
         if (!reaped) {
@@ -338,14 +379,14 @@ nw_result term_resize(terminal *t, int cols, int rows) {
     }
     free(t->snap_cells);
     t->snap_cells = ns;
-    t->cols = term_screen_cols(t->screen);
-    t->rows = term_screen_rows(t->screen);
-    cols = t->cols;
-    rows = t->rows;
+    t->cols       = term_screen_cols(t->screen);
+    t->rows       = term_screen_rows(t->screen);
+    cols          = t->cols;
+    rows          = t->rows;
     pthread_mutex_unlock(&t->lock);
 
     struct winsize ws = {.ws_row = (unsigned short)rows, .ws_col = (unsigned short)cols};
-    ioctl(t->master_fd, TIOCSWINSZ, &ws);   /* child receives SIGWINCH */
+    ioctl(t->master_fd, TIOCSWINSZ, &ws); /* child receives SIGWINCH */
     atomic_fetch_add(&t->dirty_epoch, 1);
     return nw_ok();
 }
@@ -360,13 +401,21 @@ nw_result term_write(terminal *t, const void *bytes, size_t len) {
     if (atomic_load(&t->child_exited)) return nw_err(NW_ERR_STATE, "term_write: child gone");
 
     const uint8_t *p = bytes;
-    size_t off = 0;
+    size_t off       = 0;
     /* The master fd is non-blocking; retry short/EAGAIN writes briefly. TUIs
      * consume input promptly, so a full pipe here is transient. */
-    for (int attempts = 0; off < len && attempts < 1000; ) {
+    for (int attempts = 0; off < len && attempts < 1000;) {
         ssize_t w = write(t->master_fd, p + off, len - off);
-        if (w > 0) { off += (size_t)w; attempts = 0; continue; }
-        if (w < 0 && (errno == EAGAIN || errno == EINTR)) { attempts++; usleep(200); continue; }
+        if (w > 0) {
+            off += (size_t)w;
+            attempts = 0;
+            continue;
+        }
+        if (w < 0 && (errno == EAGAIN || errno == EINTR)) {
+            attempts++;
+            usleep(200);
+            continue;
+        }
         return nw_err(NW_ERR_IO, "term_write: write failed");
     }
     return off == len ? nw_ok() : nw_err(NW_ERR_IO, "term_write: short write");
@@ -375,14 +424,15 @@ nw_result term_write(terminal *t, const void *bytes, size_t len) {
 bool term_mouse(terminal *t, int cell_x, int cell_y, int button, bool pressed, bool motion) {
     if (!t || t->master_fd < 0) return false;
 
-    int proto = 0; bool sgr = false;
+    int proto = 0;
+    bool sgr  = false;
     pthread_mutex_lock(&t->lock);
     term_screen_mouse_mode(t->screen, &proto, &sgr);
     int cols = t->cols, rows = t->rows;
     pthread_mutex_unlock(&t->lock);
 
-    if (proto == 0) return false;               /* app doesn't want mouse */
-    if (motion && proto < 1002) return false;   /* click-only: ignore motion */
+    if (proto == 0) return false;             /* app doesn't want mouse */
+    if (motion && proto < 1002) return false; /* click-only: ignore motion */
 
     /* clamp to grid */
     if (cell_x < 0) cell_x = 0;
@@ -397,7 +447,7 @@ bool term_mouse(terminal *t, int cell_x, int cell_y, int button, bool pressed, b
     if (motion) cb |= 0x20;
 
     char seq[32];
-    int  n;
+    int n;
     if (sgr) {
         /* CSI < b ; x ; y M   (press/motion)   or   ... m  (release) */
         char final = pressed ? 'M' : 'm';
@@ -408,12 +458,12 @@ bool term_mouse(terminal *t, int cell_x, int cell_y, int button, bool pressed, b
          * NOTE the parentheses: `cb & ~0x03 | 0x03` parses as
          * `cb & (~0x03 | 0x03)` == `cb & ~0` == cb, so releases were being
          * reported as presses. */
-        int b = pressed ? cb : ((cb & ~0x03) | 0x03);
+        int b  = pressed ? cb : ((cb & ~0x03) | 0x03);
         int cx = cell_x + 1, cy = cell_y + 1;
         if (cx > 223) cx = 223;
         if (cy > 223) cy = 223;
-        n = snprintf(seq, sizeof(seq), "\x1b[M%c%c%c",
-                     (char)(b + 32), (char)(cx + 32), (char)(cy + 32));
+        n = snprintf(seq, sizeof(seq), "\x1b[M%c%c%c", (char)(b + 32), (char)(cx + 32),
+                     (char)(cy + 32));
     }
     if (n <= 0) return false;
     return nw_is_ok(term_write(t, seq, (size_t)n));
@@ -442,13 +492,13 @@ const term_frame *term_snapshot(terminal *t) {
     bool cvis = term_screen_cursor_visible(t->screen);
     pthread_mutex_unlock(&t->lock);
 
-    t->frame.cols = cols;
-    t->frame.rows = rows;
-    t->frame.cells = t->snap_cells;
-    t->frame.cursor_x = cx;
-    t->frame.cursor_y = cy;
+    t->frame.cols           = cols;
+    t->frame.rows           = rows;
+    t->frame.cells          = t->snap_cells;
+    t->frame.cursor_x       = cx;
+    t->frame.cursor_y       = cy;
     t->frame.cursor_visible = cvis;
-    t->frame.epoch = de;
+    t->frame.epoch          = de;
     return &t->frame;
 }
 

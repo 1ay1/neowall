@@ -20,14 +20,14 @@ struct preload_thread_args {
 
 static void *preload_thread_func(void *arg) {
     struct preload_thread_args *args = (struct preload_thread_args *)arg;
-    struct output_state *output = args->output;
+    struct output_state *output      = args->output;
 
     /* Cooperative cancellation only — libpng/libjpeg/etc. are NOT async-cancel-safe.
      * Caller signals shutdown via output->preload_should_stop. */
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 
-    log_debug("Background thread: decoding image %s (%dx%d, mode=%d)",
-              args->path, args->width, args->height, args->mode);
+    log_debug("Background thread: decoding image %s (%dx%d, mode=%d)", args->path, args->width,
+              args->height, args->mode);
 
     /* Bail early if caller already asked us to stop. */
     if (atomic_load(&output->preload_should_stop)) {
@@ -37,7 +37,8 @@ static void *preload_thread_func(void *arg) {
     }
 
     /* Decode image in background (CPU-bound, no GL context needed) */
-    struct image_data *decoded_image = image_load(args->path, args->width, args->height, args->mode);
+    struct image_data *decoded_image =
+        image_load(args->path, args->width, args->height, args->mode);
 
     if (!decoded_image) {
         log_error("Background thread: failed to decode image: %s", args->path);
@@ -56,8 +57,8 @@ static void *preload_thread_func(void *arg) {
         return NULL;
     }
 
-    log_debug("Background thread: decoded image %s (%ux%u) - ready for GPU upload",
-             args->path, decoded_image->width, decoded_image->height);
+    log_debug("Background thread: decoded image %s (%ux%u) - ready for GPU upload", args->path,
+              decoded_image->width, decoded_image->height);
 
     /* Hand off decoded image to main thread for GPU upload */
     pthread_mutex_lock(&output->preload_mutex);
@@ -68,10 +69,10 @@ static void *preload_thread_func(void *arg) {
     }
 
     output->preload_decoded_image = decoded_image;
-    output->preload_generation = args->generation;
-    output->preload_width = args->width;
-    output->preload_height = args->height;
-    output->preload_mode = args->mode;
+    output->preload_generation    = args->generation;
+    output->preload_width         = args->width;
+    output->preload_height        = args->height;
+    output->preload_mode          = args->mode;
     snprintf(output->preload_path, sizeof(output->preload_path), "%s", args->path);
 
     pthread_mutex_unlock(&output->preload_mutex);
@@ -138,9 +139,9 @@ void output_preload_next_wallpaper(struct output_state *output) {
 
     args->output = output;
     snprintf(args->path, sizeof(args->path), "%s", next_path);
-    args->width = output->width;
-    args->height = output->height;
-    args->mode = output->config->mode;
+    args->width      = output->width;
+    args->height     = output->height;
+    args->mode       = output->config->mode;
     args->generation = atomic_load(&output->preprocessing_generation);
 
     pthread_mutex_unlock(&output->state->state_mutex);
@@ -184,7 +185,9 @@ GLuint output_upload_preload_texture(struct output_state *output) {
 
     /* Make EGL context current */
     if (!output->compositor_surface ||
-        !egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
+        !egl_make_surface_current(output->state->egl_display,
+                                  output->compositor_surface->egl_surface,
+                                  output->state->egl_context)) {
         log_error("Failed to make EGL context current for preload upload");
         return 0;
     }
@@ -204,13 +207,13 @@ GLuint output_upload_preload_texture(struct output_state *output) {
         }
 
         /* Store uploaded texture */
-        output->preload_texture = new_texture;
-        output->preload_image = output->preload_decoded_image;
+        output->preload_texture       = new_texture;
+        output->preload_image         = output->preload_decoded_image;
         output->preload_decoded_image = NULL;
         atomic_store(&output->preload_ready, true);
 
-        log_info("GPU upload complete: %s (texture=%u) - ZERO-STALL ready!",
-                 output->preload_path, new_texture);
+        log_info("GPU upload complete: %s (texture=%u) - ZERO-STALL ready!", output->preload_path,
+                 new_texture);
     } else {
         log_error("Failed to create preload texture from decoded image");
         image_free(output->preload_decoded_image);
@@ -219,5 +222,3 @@ GLuint output_upload_preload_texture(struct output_state *output) {
 
     return new_texture;
 }
-
-

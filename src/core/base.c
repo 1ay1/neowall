@@ -17,7 +17,9 @@ struct nw_arena_block {
 
 #define NW_ARENA_MIN_BLOCK (16u * 1024u)
 
-void nw_arena_init(nw_arena *a) { *a = (nw_arena){NULL, NW_ARENA_MIN_BLOCK}; }
+void nw_arena_init(nw_arena *a) {
+    *a = (nw_arena){NULL, NW_ARENA_MIN_BLOCK};
+}
 
 void nw_arena_free(nw_arena *a) {
     nw_arena_block *b = a->head;
@@ -44,7 +46,7 @@ void *nw_arena_alloc(nw_arena *a, size_t size) {
         if (!b) return NULL;
         b->next = a->head;
         b->used = 0;
-        b->cap = cap;
+        b->cap  = cap;
         a->head = b;
     }
     void *p = (char *)b->data + b->used;
@@ -110,7 +112,7 @@ static bool str_reserve(nw_str *s, size_t extra) {
         return false;
     }
     s->data = p;
-    s->cap = cap;
+    s->cap  = cap;
     return true;
 }
 
@@ -122,7 +124,9 @@ bool nw_str_append_n(nw_str *s, const char *text, size_t n) {
     return true;
 }
 
-bool nw_str_append(nw_str *s, const char *text) { return nw_str_append_n(s, text, strlen(text)); }
+bool nw_str_append(nw_str *s, const char *text) {
+    return nw_str_append_n(s, text, strlen(text));
+}
 
 bool nw_str_printf(nw_str *s, const char *fmt, ...) {
     va_list ap, ap2;
@@ -143,7 +147,7 @@ bool nw_str_printf(nw_str *s, const char *fmt, ...) {
 
 char *nw_str_take(nw_str *s) {
     char *p = s->data;
-    *s = (nw_str){0};
+    *s      = (nw_str){0};
     return p;
 }
 
@@ -160,6 +164,6 @@ bool nw_list_grow_(void **data, size_t *cap, size_t need, size_t elem) {
     void *p = realloc(*data, bytes);
     if (!p) return false;
     *data = p;
-    *cap = n;
+    *cap  = n;
     return true;
 }

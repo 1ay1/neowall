@@ -13,7 +13,7 @@
 
 /* Number of consecutive slow frames before marking shader as problematic */
 #define GPU_TIMEOUT_FRAME_THRESHOLD 3
-#include "neowall/image/image.h"    /* Only for legacy wrapper functions */
+#include "neowall/image/image.h" /* Only for legacy wrapper functions */
 #include "neowall/core/constants.h"
 #include "neowall/egl/egl_core.h"
 #include "transitions/transitions.h"
@@ -51,9 +51,9 @@ static bool render_frame_transition(struct output_state *output, float progress)
  * The per-frame path hits make-current up to 3x per output (render_frame ->
  * render_frame_shader -> swap phase); this collapses the redundant ones. */
 static bool ensure_egl_current(struct output_state *output) {
-    EGLDisplay dpy = output->state->egl_display;
+    EGLDisplay dpy  = output->state->egl_display;
     EGLSurface surf = output->compositor_surface->egl_surface;
-    EGLContext ctx = output->state->egl_context;
+    EGLContext ctx  = output->state->egl_context;
 
     if (egl_is_current(dpy, surf, ctx)) return true;
     return egl_make_surface_current(dpy, surf, ctx);
@@ -62,47 +62,59 @@ static bool ensure_egl_current(struct output_state *output) {
 /* Note: Each transition manages its own shader sources in src/output/transitions/ */
 
 /* Simple color shader for overlay effects */
-static const char *color_vertex_shader =
-    "#version 330 core\n"
-    "in vec2 position;\n"
-    "void main() {\n"
-    "    gl_Position = vec4(position, 0.0, 1.0);\n"
-    "}\n";
+static const char *color_vertex_shader = "#version 330 core\n"
+                                         "in vec2 position;\n"
+                                         "void main() {\n"
+                                         "    gl_Position = vec4(position, 0.0, 1.0);\n"
+                                         "}\n";
 
-static const char *color_fragment_shader =
-    "#version 330 core\n"
-    "out vec4 fragColor;\n"
-    "uniform vec4 color;\n"
-    "void main() {\n"
-    "    fragColor = color;\n"
-    "}\n";
+static const char *color_fragment_shader = "#version 330 core\n"
+                                           "out vec4 fragColor;\n"
+                                           "uniform vec4 color;\n"
+                                           "void main() {\n"
+                                           "    fragColor = color;\n"
+                                           "}\n";
 
 /* GL objects every output shares (there's one context). Made on first use,
  * released by render_release_shared() before the context goes. */
 static struct {
-    GLuint overlay_prog;          /* the FPS text */
+    GLuint overlay_prog; /* the FPS text */
     GLint overlay_pos, overlay_color;
     GLuint overlay_vao, overlay_vbo;
-    GLuint fade_prog, fade_vao;   /* the crossfade between two shaders */
+    GLuint fade_prog, fade_vao; /* the crossfade between two shaders */
 } g_gl = {.overlay_pos = -1, .overlay_color = -1};
 
 /* Simple 5x7 bitmap font for FPS display (digits 0-9, dot, space, and 'FPS') */
 static const uint8_t font_5x7[][7] = {
     /* 0 */ {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E},
-    /* 1 */ {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E},
-    /* 2 */ {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F},
-    /* 3 */ {0x0E, 0x11, 0x01, 0x0E, 0x01, 0x11, 0x0E},
-    /* 4 */ {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02},
-    /* 5 */ {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E},
-    /* 6 */ {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E},
-    /* 7 */ {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08},
-    /* 8 */ {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E},
-    /* 9 */ {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C},
-    /* . */ {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C},
-    /* space */ {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-    /* F */ {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10},
-    /* P */ {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10},
-    /* S */ {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E},
+    /* 1 */
+    {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E},
+    /* 2 */
+    {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F},
+    /* 3 */
+    {0x0E, 0x11, 0x01, 0x0E, 0x01, 0x11, 0x0E},
+    /* 4 */
+    {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02},
+    /* 5 */
+    {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E},
+    /* 6 */
+    {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E},
+    /* 7 */
+    {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08},
+    /* 8 */
+    {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E},
+    /* 9 */
+    {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C},
+    /* . */
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C},
+    /* space */
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    /* F */
+    {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10},
+    /* P */
+    {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10},
+    /* S */
+    {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E},
 };
 
 /* The FPS overlay: every lit pixel of the 5x7 glyphs becomes two triangles
@@ -146,7 +158,7 @@ static void render_fps_watermark(struct output_state *output) {
     if (output->fps_current <= 0.0f || !g_gl.overlay_prog) return;
 
     if (!g_gl.overlay_vao) {
-        g_gl.overlay_pos = glGetAttribLocation(g_gl.overlay_prog, "position");
+        g_gl.overlay_pos   = glGetAttribLocation(g_gl.overlay_prog, "position");
         g_gl.overlay_color = glGetUniformLocation(g_gl.overlay_prog, "color");
         if (g_gl.overlay_pos < 0 || g_gl.overlay_color < 0) return;
         glGenVertexArrays(1, &g_gl.overlay_vao);
@@ -168,13 +180,14 @@ static void render_fps_watermark(struct output_state *output) {
     const float cw = 12.0f, ch = 18.0f;
     float x0 = (float)output->width - (float)len * cw - 10.0f;
     float y0 = (float)output->height - ch - 10.0f;
-    int n = 0;
+    int n    = 0;
     for (int pass = 0; pass < 2; pass++) {
         float off = pass == 0 ? 1.0f : 0.0f;
         for (int i = 0; i < len; i++) {
             int g = glyph_index(text[i]);
-            if (g >= 0) n += glyph_quads(verts + n * 2, g, x0 + (float)i * cw + off, y0 + off,
-                                         cw, ch, output->width, output->height);
+            if (g >= 0)
+                n += glyph_quads(verts + n * 2, g, x0 + (float)i * cw + off, y0 + off, cw, ch,
+                                 output->width, output->height);
         }
     }
     int half = n / 2;
@@ -189,7 +202,8 @@ static void render_fps_watermark(struct output_state *output) {
     glUseProgram(g_gl.overlay_prog);
     glBindVertexArray(g_gl.overlay_vao);
     glBindBuffer(GL_ARRAY_BUFFER, g_gl.overlay_vbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size_t)n * 2 * sizeof(float)), verts, GL_STREAM_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size_t)n * 2 * sizeof(float)), verts,
+                 GL_STREAM_DRAW);
 
     glUniform4f(g_gl.overlay_color, 0.0f, 0.0f, 0.0f, 1.0f);
     glDrawArrays(GL_TRIANGLES, 0, half);
@@ -203,11 +217,23 @@ static void render_fps_watermark(struct output_state *output) {
 
 /* Fullscreen quad vertices (position + texcoord) for image rendering */
 static const float quad_vertices[] = {
-    /* positions */  /* texcoords */
-    -1.0f,  1.0f,    0.0f, 0.0f,  /* top-left */
-     1.0f,  1.0f,    1.0f, 0.0f,  /* top-right */
-    -1.0f, -1.0f,    0.0f, 1.0f,  /* bottom-left */
-     1.0f, -1.0f,    1.0f, 1.0f   /* bottom-right */
+    /* positions */ /* texcoords */
+    -1.0f,
+    1.0f,
+    0.0f,
+    0.0f, /* top-left */
+    1.0f,
+    1.0f,
+    1.0f,
+    0.0f, /* top-right */
+    -1.0f,
+    -1.0f,
+    0.0f,
+    1.0f, /* bottom-left */
+    1.0f,
+    -1.0f,
+    1.0f,
+    1.0f /* bottom-right */
 };
 
 
@@ -215,19 +241,19 @@ static const float quad_vertices[] = {
 
 /* Helper: Cache uniform locations for a program */
 static inline void cache_program_uniforms(struct output_state *output) {
-    output->program_uniforms.position = glGetAttribLocation(output->program, "position");
-    output->program_uniforms.texcoord = glGetAttribLocation(output->program, "texcoord");
+    output->program_uniforms.position    = glGetAttribLocation(output->program, "position");
+    output->program_uniforms.texcoord    = glGetAttribLocation(output->program, "texcoord");
     output->program_uniforms.tex_sampler = glGetUniformLocation(output->program, "texture0");
-    output->program_uniforms.alpha = glGetUniformLocation(output->program, "alpha");
+    output->program_uniforms.alpha       = glGetUniformLocation(output->program, "alpha");
 }
 
 /* Helper: Cache uniform locations for transition shaders */
 static inline void cache_transition_uniforms(GLuint program, struct output_state *output) {
-    output->transition_uniforms.position = glGetAttribLocation(program, "position");
-    output->transition_uniforms.texcoord = glGetAttribLocation(program, "texcoord");
-    output->transition_uniforms.tex0 = glGetUniformLocation(program, "texture0");
-    output->transition_uniforms.tex1 = glGetUniformLocation(program, "texture1");
-    output->transition_uniforms.progress = glGetUniformLocation(program, "progress");
+    output->transition_uniforms.position   = glGetAttribLocation(program, "position");
+    output->transition_uniforms.texcoord   = glGetAttribLocation(program, "texcoord");
+    output->transition_uniforms.tex0       = glGetUniformLocation(program, "texture0");
+    output->transition_uniforms.tex1       = glGetUniformLocation(program, "texture1");
+    output->transition_uniforms.progress   = glGetUniformLocation(program, "progress");
     output->transition_uniforms.resolution = glGetUniformLocation(program, "resolution");
 }
 
@@ -268,21 +294,22 @@ bool render_init_output(struct output_state *output) {
     /* Context should already be current when this is called from egl.c */
 
     /* Initialize GL state cache */
-    output->gl_state.bound_texture = 0;
+    output->gl_state.bound_texture  = 0;
     output->gl_state.active_program = 0;
-    output->gl_state.blend_enabled = false;
+    output->gl_state.blend_enabled  = false;
 
     /* Initialize shader uniform cache to -2 (uninitialized) */
-    output->shader_uniforms.position = -2;
-    output->shader_uniforms.texcoord = -2;
-    output->shader_uniforms.tex_sampler = -2;
+    output->shader_uniforms.position     = -2;
+    output->shader_uniforms.texcoord     = -2;
+    output->shader_uniforms.tex_sampler  = -2;
     output->shader_uniforms.u_resolution = -2;
-    output->shader_uniforms.u_time = -2;
-    output->shader_uniforms.u_speed = -2;
+    output->shader_uniforms.u_time       = -2;
+    output->shader_uniforms.u_speed      = -2;
 
     /* Create simple color shader for overlays (once, shared across outputs) */
     if (g_gl.overlay_prog == 0) {
-        if (!shader_create_program_from_sources(color_vertex_shader, color_fragment_shader, &g_gl.overlay_prog)) {
+        if (!shader_create_program_from_sources(color_vertex_shader, color_fragment_shader,
+                                                &g_gl.overlay_prog)) {
             log_error("Failed to create color overlay shader program");
             return false;
         }
@@ -352,7 +379,7 @@ void render_cleanup_output(struct output_state *output) {
         output->vao = 0;
     }
     output->clock_fade_rebased = false;
-    output->clock_fade_start = 0;
+    output->clock_fade_start   = 0;
     if (output->clock_fade_tex) {
         glDeleteTextures(1, &output->clock_fade_tex);
         output->clock_fade_tex = 0;
@@ -413,10 +440,11 @@ void render_cleanup_output(struct output_state *output) {
  * @param channels Number of channels (3 for RGB, 4 for RGBA)
  * @return OpenGL texture ID, or 0 on failure
  */
-GLuint render_create_texture_from_pixels(const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t channels) {
+GLuint render_create_texture_from_pixels(const uint8_t *pixels, uint32_t width, uint32_t height,
+                                         uint32_t channels) {
     if (!pixels || width == 0 || height == 0 || (channels != 3 && channels != 4)) {
         log_error("Invalid parameters for texture creation: pixels=%p, %ux%u, %u channels",
-                 (void*)pixels, width, height, channels);
+                  (void *)pixels, width, height, channels);
         return 0;
     }
 
@@ -434,8 +462,7 @@ GLuint render_create_texture_from_pixels(const uint8_t *pixels, uint32_t width, 
 
     /* Upload texture data */
     GLenum format = (channels == 4) ? GL_RGBA : GL_RGB;
-    glTexImage2D(GL_TEXTURE_2D, 0, format, width, height,
-                 0, format, GL_UNSIGNED_BYTE, pixels);
+    glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, pixels);
 
     glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -447,8 +474,8 @@ GLuint render_create_texture_from_pixels(const uint8_t *pixels, uint32_t width, 
         return 0;
     }
 
-    log_debug("Created texture %u from pixels (%ux%u, %u channels)",
-              texture, width, height, channels);
+    log_debug("Created texture %u from pixels (%ux%u, %u channels)", texture, width, height,
+              channels);
 
     return texture;
 }
@@ -466,15 +493,16 @@ GLuint render_create_texture_from_pixels(const uint8_t *pixels, uint32_t width, 
  * @param channels Number of channels (3 for RGB, 4 for RGBA)
  * @return OpenGL texture ID, or 0 on failure
  */
-GLuint render_create_texture_from_pixels_flipped(const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t channels) {
+GLuint render_create_texture_from_pixels_flipped(const uint8_t *pixels, uint32_t width,
+                                                 uint32_t height, uint32_t channels) {
     if (!pixels || width == 0 || height == 0 || (channels != 3 && channels != 4)) {
         log_error("Invalid parameters for flipped texture creation");
         return 0;
     }
 
     /* Allocate buffer for flipped image */
-    size_t row_size = width * channels;
-    size_t total_size = row_size * height;
+    size_t row_size         = width * channels;
+    size_t total_size       = row_size * height;
     uint8_t *flipped_pixels = malloc(total_size);
     if (!flipped_pixels) {
         log_error("Failed to allocate memory for flipped texture");
@@ -484,7 +512,7 @@ GLuint render_create_texture_from_pixels_flipped(const uint8_t *pixels, uint32_t
     /* Flip image vertically */
     for (uint32_t y = 0; y < height; y++) {
         const uint8_t *src_row = pixels + (y * row_size);
-        uint8_t *dst_row = flipped_pixels + ((height - 1 - y) * row_size);
+        uint8_t *dst_row       = flipped_pixels + ((height - 1 - y) * row_size);
         memcpy(dst_row, src_row, row_size);
     }
 
@@ -514,9 +542,8 @@ GLuint render_create_texture(struct image_data *img) {
     }
 
     /* Create texture using new pixel-based API */
-    GLuint texture = render_create_texture_from_pixels(
-        img->pixels, img->width, img->height, img->channels
-    );
+    GLuint texture =
+        render_create_texture_from_pixels(img->pixels, img->width, img->height, img->channels);
 
     if (texture) {
         /* Free pixel data after successful GPU upload - saves massive amounts of RAM!
@@ -545,9 +572,8 @@ GLuint render_create_texture_flipped(struct image_data *img) {
     }
 
     /* Create texture using new pixel-based flipped API */
-    GLuint texture = render_create_texture_from_pixels_flipped(
-        img->pixels, img->width, img->height, img->channels
-    );
+    GLuint texture = render_create_texture_from_pixels_flipped(img->pixels, img->width, img->height,
+                                                               img->channels);
 
     if (texture) {
         /* Free pixel data after successful GPU upload */
@@ -571,10 +597,13 @@ static GLuint channel_texture(const char *path, int *w, int *h) {
         const char *name;
         GLuint (*make)(int, int);
     } builtin[] = {
-        {TEXTURE_NAME_RGBA_NOISE, texture_create_rgba_noise}, {"default", texture_create_rgba_noise},
-        {TEXTURE_NAME_GRAY_NOISE, texture_create_gray_noise}, {TEXTURE_NAME_BLUE_NOISE, texture_create_blue_noise},
-        {TEXTURE_NAME_WOOD, texture_create_wood},             {TEXTURE_NAME_ABSTRACT, texture_create_abstract},
-        {TEXTURE_NAME_FONT, texture_create_font_atlas},
+        {TEXTURE_NAME_RGBA_NOISE, texture_create_rgba_noise},
+        {"default",               texture_create_rgba_noise},
+        {TEXTURE_NAME_GRAY_NOISE, texture_create_gray_noise},
+        {TEXTURE_NAME_BLUE_NOISE, texture_create_blue_noise},
+        {TEXTURE_NAME_WOOD,       texture_create_wood      },
+        {TEXTURE_NAME_ABSTRACT,   texture_create_abstract  },
+        {TEXTURE_NAME_FONT,       texture_create_font_atlas},
     };
     for (size_t k = 0; k < sizeof(builtin) / sizeof(builtin[0]); k++) {
         if (!strcmp(path, builtin[k].name)) {
@@ -586,8 +615,8 @@ static GLuint channel_texture(const char *path, int *w, int *h) {
     if (!img) return 0;
     /* flipped: images are top-down, GL textures bottom-up */
     GLuint texture = render_create_texture_flipped(img);
-    *w = (int)img->width;
-    *h = (int)img->height;
+    *w             = (int)img->width;
+    *h             = (int)img->height;
     image_free(img);
     return texture;
 }
@@ -610,9 +639,11 @@ bool render_load_channel_textures(struct output_state *output, struct wallpaper_
     for (size_t i = 0; i < config->channel_count && i < 4; i++) {
         const char *path = config->channel_paths[i];
         if (!path || !path[0] || !strcmp(path, "_")) continue;
-        output->channel_tex[i] = channel_texture(path, &output->channel_w[i], &output->channel_h[i]);
+        output->channel_tex[i] =
+            channel_texture(path, &output->channel_w[i], &output->channel_h[i]);
         if (output->channel_tex[i]) {
-            log_info("iChannel%zu: %s (%dx%d)", i, path, output->channel_w[i], output->channel_h[i]);
+            log_info("iChannel%zu: %s (%dx%d)", i, path, output->channel_w[i],
+                     output->channel_h[i]);
         } else {
             log_error("iChannel%zu: can't load %s", i, path);
         }
@@ -631,7 +662,8 @@ bool render_load_channel_textures(struct output_state *output, struct wallpaper_
  * @param image_path Path to the image file
  * @return true on success, false on failure
  */
-bool render_update_channel_texture(struct output_state *output, size_t channel_index, const char *image_path) {
+bool render_update_channel_texture(struct output_state *output, size_t channel_index,
+                                   const char *image_path) {
     if (!output || !image_path) {
         log_error("Invalid parameters for render_update_channel_texture");
         return false;
@@ -643,7 +675,10 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
     }
 
     /* CRITICAL: Ensure EGL context is current before GL operations */
-    if (!output->compositor_surface || !egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
+    if (!output->compositor_surface ||
+        !egl_make_surface_current(output->state->egl_display,
+                                  output->compositor_surface->egl_surface,
+                                  output->state->egl_context)) {
         log_error("Failed to make EGL context current for texture update");
         return false;
     }
@@ -668,11 +703,11 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
         glDeleteTextures(1, &output->channel_tex[channel_index]);
     }
     output->channel_tex[channel_index] = texture;
-    output->channel_w[channel_index] = (int)img->width;
-    output->channel_h[channel_index] = (int)img->height;
+    output->channel_w[channel_index]   = (int)img->width;
+    output->channel_h[channel_index]   = (int)img->height;
 
-    log_info("Updated iChannel%zu with image: %s (%ux%u) -> texture ID %u",
-             channel_index, image_path, img->width, img->height, texture);
+    log_info("Updated iChannel%zu with image: %s (%ux%u) -> texture ID %u", channel_index,
+             image_path, img->width, img->height, texture);
 
     image_free(img);
 
@@ -683,12 +718,10 @@ bool render_update_channel_texture(struct output_state *output, size_t channel_i
 }
 
 
-
 /* Calculate vertex coordinates based on display mode for a specific image
  * This function is used by transition modules to properly size images during transitions */
-void calculate_vertex_coords_for_image(struct output_state *output,
-                                        struct image_data *image,
-                                        float vertices[16]) {
+void calculate_vertex_coords_for_image(struct output_state *output, struct image_data *image,
+                                       float vertices[16]) {
     /* Default: fullscreen quad */
     memcpy(vertices, quad_vertices, sizeof(quad_vertices));
 
@@ -714,7 +747,6 @@ void calculate_vertex_coords_for_image(struct output_state *output,
 static void calculate_vertex_coords(struct output_state *output, float vertices[16]) {
     calculate_vertex_coords_for_image(output, output->current_image, vertices);
 }
-
 
 
 /* Render shader wallpaper frame using multipass system
@@ -806,30 +838,34 @@ void render_snapshot_for_swap(struct output_state *output) {
     GLuint fbo = 0;
     glGenFramebuffers(1, &fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, output->clock_fade_tex, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           output->clock_fade_tex, 0);
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
         glViewport(0, 0, w, h);
-        wallshader_frame f = {.width = w, .height = h, .time = output->last_shader_time,
+        wallshader_frame f = {.width  = w,
+                              .height = h,
+                              .time   = output->last_shader_time,
                               .span_w = output->spanned ? output->span.virt_w : 0,
                               .span_h = output->spanned ? output->span.virt_h : 0,
                               .span_x = output->spanned ? output->span.off_x : 0,
                               .span_y = output->spanned ? output->span.off_y : 0};
         for (int c = 0; c < 4; c++) {
-            f.channels[c] = output->channel_tex[c];
+            f.channels[c]  = output->channel_tex[c];
             f.channel_w[c] = output->channel_w[c];
             f.channel_h[c] = output->channel_h[c];
         }
         wallshader_draw(output->shader, &f);
         /* the new shader's first frame starts the fade */
         output->clock_fade_rebased = false;
-        output->clock_fade_start = 0;
-        output->swap_fade_pending = true;
+        output->clock_fade_start   = 0;
+        output->swap_fade_pending  = true;
     } else {
         clock_fade_release(output);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glDeleteFramebuffers(1, &fbo);
-    while (glGetError() != GL_NO_ERROR) {}
+    while (glGetError() != GL_NO_ERROR) {
+    }
 }
 
 bool render_frame_shader(struct output_state *output) {
@@ -862,8 +898,8 @@ bool render_frame_shader(struct output_state *output) {
         return false;
     }
 
-    int width = output->width;
-    int height = output->height;
+    int width         = output->width;
+    int height        = output->height;
     double present_at = 0;
 
     /* Calculate shader time at MICROSECOND precision. shader_start_time is
@@ -874,31 +910,27 @@ bool render_frame_shader(struct output_state *output) {
      * halves of one scene that started animating even a frame apart are visibly
      * out of phase across the bezel. */
     uint64_t epoch_ms = (output->spanned && output->span_start_time > 0)
-        ? output->span_start_time
-        : output->shader_start_time;
+                            ? output->span_start_time
+                            : output->shader_start_time;
 
     uint64_t current_time_us = get_time_us();
     /* Stamp the frame with the vblank it will be shown at, when the
      * compositor tells us the grid (Wayland presentation-time). Consecutive
      * frames then step by exactly one refresh, whatever the draw start
      * jitter. Without feedback (X11, no protocol) fall back to now. */
-    output->frame_target_ns = nw_frame_clock_target(&output->frame_clock,
-                                                    current_time_us * 1000ull,
+    output->frame_target_ns = nw_frame_clock_target(&output->frame_clock, current_time_us * 1000ull,
                                                     &output->frame_latency_used);
     if (output->frame_target_ns) {
         current_time_us = output->frame_target_ns / 1000ull;
-        present_at = (double)output->frame_target_ns / 1e9;
+        present_at      = (double)output->frame_target_ns / 1e9;
     }
-    uint64_t start_time_us = epoch_ms > 0
-        ? epoch_ms * 1000ull
-        : current_time_us;
+    uint64_t start_time_us = epoch_ms > 0 ? epoch_ms * 1000ull : current_time_us;
     /* Guard against start_time being (transiently) in the future — subtracting
      * unsigned would wrap to an enormous elapsed value. Can happen around a
      * shader-pause resume that races a shader reload; clamp to 0 instead. */
-    double current_time = current_time_us > start_time_us
-        ? (double)(current_time_us - start_time_us) / 1e6
-        : 0.0;
-    
+    double current_time =
+        current_time_us > start_time_us ? (double)(current_time_us - start_time_us) / 1e6 : 0.0;
+
     /* Apply shader speed multiplier */
     float shader_speed = output->config->shader_speed > 0.0f ? output->config->shader_speed : 1.0f;
     current_time *= shader_speed;
@@ -932,9 +964,9 @@ bool render_frame_shader(struct output_state *output) {
     shader_clock_state clock_st = {
         .elapsed_seconds = current_time,
         .hidden_since_ms = output->shader_hidden_since,
-        .occluded_now = atomic_load_explicit(&output->occluded, memory_order_acquire),
-        .paused_now = output->shader_paused_at > 0,
-        .spanned = output->spanned,
+        .occluded_now    = atomic_load_explicit(&output->occluded, memory_order_acquire),
+        .paused_now      = output->shader_paused_at > 0,
+        .spanned         = output->spanned,
     };
     bool did_rebase = false;
 
@@ -946,8 +978,8 @@ bool render_frame_shader(struct output_state *output) {
          * retested on every frame for the rest of the process's life. */
         if (!shader_clock_defers_to_group(&clock_st)) {
             output->shader_start_time = get_time_ms();
-            current_time = 0.0;
-            did_rebase = true;
+            current_time              = 0.0;
+            did_rebase                = true;
             log_debug("Rebased shader clock for output %s (float32 precision guard)",
                       output_get_identifier(output));
         }
@@ -956,10 +988,10 @@ bool render_frame_shader(struct output_state *output) {
         /* Last frame on the old clock was captured; switch now. The old
          * frame fades out on top of the new clock. */
         output->clock_fade_rebased = false;
-        output->shader_start_time = get_time_ms();
-        output->clock_fade_start = output->shader_start_time;
-        current_time = 0.0;
-        did_rebase = true;
+        output->shader_start_time  = get_time_ms();
+        output->clock_fade_start   = output->shader_start_time;
+        current_time               = 0.0;
+        did_rebase                 = true;
         log_info("Reset shader clock on %s behind a cross-fade (float32 precision)",
                  output_get_identifier(output));
     }
@@ -979,16 +1011,14 @@ bool render_frame_shader(struct output_state *output) {
         const char *id = output_get_identifier(output);
         if (clock_ev == SHADER_CLOCK_JUMP_REBASE) {
             log_debug("shader clock %s on %s: iTime %.3f -> %.3f",
-                      shader_clock_event_name(clock_ev), id,
-                      prev_time, current_time);
+                      shader_clock_event_name(clock_ev), id, prev_time, current_time);
         } else {
             log_warn("shader clock JUMPED BACKWARD on %s (%s): iTime %.3f -> %.3f, "
                      "epoch=%llu ms, occluded=%d paused=%d spanned=%d "
                      "hidden_since=%llu frames=%llu total_jumps=%llu",
                      id, shader_clock_event_name(clock_ev), prev_time, current_time,
-                     (unsigned long long)epoch_ms,
-                     (int)clock_st.occluded_now, (int)clock_st.paused_now,
-                     (int)clock_st.spanned,
+                     (unsigned long long)epoch_ms, (int)clock_st.occluded_now,
+                     (int)clock_st.paused_now, (int)clock_st.spanned,
                      (unsigned long long)clock_st.hidden_since_ms,
                      (unsigned long long)output->clock_tracker.frames,
                      (unsigned long long)output->clock_tracker.jumps);
@@ -1008,19 +1038,21 @@ bool render_frame_shader(struct output_state *output) {
      * are required to treat as an empty desktop rather than an error. */
     float rects[NW_SHADER_MAX_WINDOWS * 4];
     float focused[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    int nwin = 0;
+    int nwin         = 0;
 #ifdef HAVE_WAYLAND_BACKEND
     {
         nw_window_rect wins[NW_SHADER_MAX_WINDOWS];
         nwin = hyprland_output_windows(output, wins, NW_SHADER_MAX_WINDOWS);
         for (int i = 0; i < nwin; i++) {
-            rects[i*4 + 0] = wins[i].x;
-            rects[i*4 + 1] = wins[i].y;
-            rects[i*4 + 2] = wins[i].w;
-            rects[i*4 + 3] = wins[i].h;
+            rects[i * 4 + 0] = wins[i].x;
+            rects[i * 4 + 1] = wins[i].y;
+            rects[i * 4 + 2] = wins[i].w;
+            rects[i * 4 + 3] = wins[i].h;
             if (wins[i].focused) {
-                focused[0] = wins[i].x; focused[1] = wins[i].y;
-                focused[2] = wins[i].w; focused[3] = wins[i].h;
+                focused[0] = wins[i].x;
+                focused[1] = wins[i].y;
+                focused[2] = wins[i].w;
+                focused[3] = wins[i].h;
             }
         }
     }
@@ -1029,21 +1061,21 @@ bool render_frame_shader(struct output_state *output) {
     /* A spanned output draws its slice of the scene the span group shares;
      * every other output passes 0x0, which leaves sizing alone. */
     wallshader_frame frame = {
-        .width = width,
-        .height = height,
-        .time = current_time,
-        .present_at = present_at,
-        .mouse = {mouse_x, mouse_y},
-        .span_w = output->spanned ? output->span.virt_w : 0,
-        .span_h = output->spanned ? output->span.virt_h : 0,
-        .span_x = output->spanned ? output->span.off_x : 0,
-        .span_y = output->spanned ? output->span.off_y : 0,
-        .windows = rects,
+        .width        = width,
+        .height       = height,
+        .time         = current_time,
+        .present_at   = present_at,
+        .mouse        = {mouse_x, mouse_y},
+        .span_w       = output->spanned ? output->span.virt_w : 0,
+        .span_h       = output->spanned ? output->span.virt_h : 0,
+        .span_x       = output->spanned ? output->span.off_x : 0,
+        .span_y       = output->spanned ? output->span.off_y : 0,
+        .windows      = rects,
         .window_count = nwin,
-        .focused = focused,
+        .focused      = focused,
     };
     for (int c = 0; c < 4; c++) {
-        frame.channels[c] = output->channel_tex[c];
+        frame.channels[c]  = output->channel_tex[c];
         frame.channel_w[c] = output->channel_w[c];
         frame.channel_h[c] = output->channel_h[c];
     }
@@ -1077,8 +1109,8 @@ bool render_frame_shader(struct output_state *output) {
     static int frame_count = 0;
     frame_count++;
     if (frame_count % 600 == 0) {
-        log_debug("Shader render frame %d (time=%.2f, passes=%d)",
-                 frame_count, (float)current_time, wallshader_pass_count(output->shader));
+        log_debug("Shader render frame %d (time=%.2f, passes=%d)", frame_count, (float)current_time,
+                  wallshader_pass_count(output->shader));
     }
 
     /* Check for errors */
@@ -1162,15 +1194,16 @@ bool render_frame(struct output_state *output) {
         if (output->shader == NULL) {
             /* Track reload attempts to prevent infinite spam */
             static uint64_t last_reload_attempt_time = 0;
-            static int consecutive_failures = 0;
-            uint64_t current_time = get_time_ms();
+            static int consecutive_failures          = 0;
+            uint64_t current_time                    = get_time_ms();
 
             /* Only attempt reload once per second max, and give up after 3 failures */
             if (current_time - last_reload_attempt_time >= 1000 && consecutive_failures < 3) {
                 log_error("Config type is SHADER but shader program not loaded for output %s",
-                         output->model[0] ? output->model : "unknown");
-                log_error("This may happen after config reload. Attempting to reload shader (attempt %d/3)...",
-                         consecutive_failures + 1);
+                          output->model[0] ? output->model : "unknown");
+                log_error(
+                    "This may happen after config reload. Attempting to reload shader (attempt %d/3)...",
+                    consecutive_failures + 1);
 
                 last_reload_attempt_time = current_time;
 
@@ -1179,34 +1212,48 @@ bool render_frame(struct output_state *output) {
                     output_set_shader(output, output->config->shader_path);
                     if (output->shader == NULL) {
                         consecutive_failures++;
-                        log_error("Failed to reload shader (attempt %d/3), skipping frame", consecutive_failures);
+                        log_error("Failed to reload shader (attempt %d/3), skipping frame",
+                                  consecutive_failures);
 
                         if (consecutive_failures >= 3) {
-                            log_error("╔═══════════════════════════════════════════════════════════════╗");
-                            log_error("║ CRITICAL: Shader failed to load after 3 attempts             ║");
-                            log_error("╠═══════════════════════════════════════════════════════════════╣");
-                            log_error("║ Config has bad shader path: '%s'", output->config->shader_path);
-                            log_error("║                                                               ║");
-                            log_error("║ FIX YOUR CONFIG:                                              ║");
-                            log_error("║   1. Edit: ~/.config/neowall/config.vibe                      ║");
-                            log_error("║   2. Fix shader path (check spelling, file exists)            ║");
-                            log_error("║   3. Restart daemon: neowall kill && neowall                  ║");
-                            log_error("║                                                               ║");
-                            log_error("║ Program will continue running with blank screen               ║");
-                            log_error("║ until you fix config and restart.                             ║");
-                            log_error("╚═══════════════════════════════════════════════════════════════╝");
+                            log_error(
+                                "╔═══════════════════════════════════════════════════════════════╗");
+                            log_error(
+                                "║ CRITICAL: Shader failed to load after 3 attempts             ║");
+                            log_error(
+                                "╠═══════════════════════════════════════════════════════════════╣");
+                            log_error("║ Config has bad shader path: '%s'",
+                                      output->config->shader_path);
+                            log_error(
+                                "║                                                               ║");
+                            log_error(
+                                "║ FIX YOUR CONFIG:                                              ║");
+                            log_error(
+                                "║   1. Edit: ~/.config/neowall/config.vibe                      ║");
+                            log_error(
+                                "║   2. Fix shader path (check spelling, file exists)            ║");
+                            log_error(
+                                "║   3. Restart daemon: neowall kill && neowall                  ║");
+                            log_error(
+                                "║                                                               ║");
+                            log_error(
+                                "║ Program will continue running with blank screen               ║");
+                            log_error(
+                                "║ until you fix config and restart.                             ║");
+                            log_error(
+                                "╚═══════════════════════════════════════════════════════════════╝");
                             output->shader_load_failed = true; /* Mark as permanently failed */
                         }
                         return false;
                     } else {
                         /* Success! Reset failure counter and clear failed flag */
-                        consecutive_failures = 0;
+                        consecutive_failures       = 0;
                         output->shader_load_failed = false;
                         log_info("Shader successfully reloaded after failure");
                     }
                 } else {
                     log_error("No shader path configured, skipping frame");
-                    consecutive_failures = 3; /* Don't retry if no path */
+                    consecutive_failures       = 3;    /* Don't retry if no path */
                     output->shader_load_failed = true; /* Mark as permanently failed */
                     return false;
                 }
@@ -1228,13 +1275,11 @@ bool render_frame(struct output_state *output) {
     }
 
     /* Check if we're in a transition */
-    if (output->transition_start_time > 0 &&
-        output->config->transition != TRANSITION_NONE &&
+    if (output->transition_start_time > 0 && output->config->transition != TRANSITION_NONE &&
         output->next_image && output->next_texture) {
         log_debug("Using transition render: start_time=%llu, progress=%.2f, type=%d",
-                 (unsigned long long)output->transition_start_time,
-                 output->transition_progress,
-                 output->config->transition);
+                  (unsigned long long)output->transition_start_time, output->transition_progress,
+                  output->config->transition);
         /* Use transition rendering */
         return render_frame_transition(output, output->transition_progress);
     }
@@ -1268,12 +1313,11 @@ bool render_frame(struct output_state *output) {
     glBufferData(GL_ARRAY_BUFFER, sizeof(mode_vertices), mode_vertices, GL_DYNAMIC_DRAW);
 
     /* Set up vertex attributes */
-    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE,
-                         4 * sizeof(float), (void*)0);
+    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
     glEnableVertexAttribArray(pos_attrib);
 
-    glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE,
-                         4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glVertexAttribPointer(tex_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          (void *)(2 * sizeof(float)));
     glEnableVertexAttribArray(tex_attrib);
 
     /* Bind texture with state tracking */
@@ -1351,21 +1395,20 @@ bool render_frame(struct output_state *output) {
  * Dispatches to modular transition implementations */
 bool render_frame_transition(struct output_state *output, float progress) {
     if (!output || !output->current_image || !output->next_image) {
-        log_debug("Transition fallback: output=%p, current_image=%p, next_image=%p",
-                 (void*)output,
-                 output ? (void*)output->current_image : NULL,
-                 output ? (void*)output->next_image : NULL);
+        log_debug("Transition fallback: output=%p, current_image=%p, next_image=%p", (void *)output,
+                  output ? (void *)output->current_image : NULL,
+                  output ? (void *)output->next_image : NULL);
         return render_frame(output);
     }
 
     if (output->texture == 0 || output->next_texture == 0) {
-        log_debug("Transition fallback: texture=%u, next_texture=%u",
-                 output->texture, output->next_texture);
+        log_debug("Transition fallback: texture=%u, next_texture=%u", output->texture,
+                  output->next_texture);
         return render_frame(output);
     }
 
     log_debug("Calling transition_render: type=%d, progress=%.2f, duration=%.2fs",
-             output->config->transition, progress, output->config->transition_duration);
+              output->config->transition, progress, output->config->transition_duration);
 
     /* Dispatch to modular transition renderer */
     bool result = transition_render(output, output->config->transition, progress);

@@ -25,21 +25,37 @@
 static void palette_rgb(uint8_t idx, uint8_t *r, uint8_t *g, uint8_t *b) {
     /* 0..15: standard + bright ANSI */
     static const uint8_t base16[16][3] = {
-        {  0,  0,  0}, {205,  0,  0}, {  0,205,  0}, {205,205,  0},
-        {  0,  0,238}, {205,  0,205}, {  0,205,205}, {229,229,229},
-        {127,127,127}, {255,  0,  0}, {  0,255,  0}, {255,255,  0},
-        { 92, 92,255}, {255,  0,255}, {  0,255,255}, {255,255,255},
+        {0,   0,   0  },
+        {205, 0,   0  },
+        {0,   205, 0  },
+        {205, 205, 0  },
+        {0,   0,   238},
+        {205, 0,   205},
+        {0,   205, 205},
+        {229, 229, 229},
+        {127, 127, 127},
+        {255, 0,   0  },
+        {0,   255, 0  },
+        {255, 255, 0  },
+        {92,  92,  255},
+        {255, 0,   255},
+        {0,   255, 255},
+        {255, 255, 255},
     };
     if (idx < 16) {
-        *r = base16[idx][0]; *g = base16[idx][1]; *b = base16[idx][2];
+        *r = base16[idx][0];
+        *g = base16[idx][1];
+        *b = base16[idx][2];
         return;
     }
     if (idx < 232) {
         /* 6x6x6 colour cube: index = 16 + 36r + 6g + b, each 0..5 */
-        int c = idx - 16;
+        int c  = idx - 16;
         int ri = c / 36, gi = (c / 6) % 6, bi = c % 6;
         static const uint8_t steps[6] = {0, 95, 135, 175, 215, 255};
-        *r = steps[ri]; *g = steps[gi]; *b = steps[bi];
+        *r                            = steps[ri];
+        *g                            = steps[gi];
+        *b                            = steps[bi];
         return;
     }
     /* 232..255: 24-step greyscale ramp */
@@ -49,52 +65,60 @@ static void palette_rgb(uint8_t idx, uint8_t *r, uint8_t *g, uint8_t *b) {
 
 /* Default fg/bg when a cell says TERM_COLOR_DEFAULT. */
 static const uint8_t kDefaultFg[3] = {200, 200, 200};
-static const uint8_t kDefaultBg[3] = {  0,   0,   0};
+static const uint8_t kDefaultBg[3] = {0, 0, 0};
 
-static void resolve_color(const term_color *c, const uint8_t def[3],
-                          uint8_t *r, uint8_t *g, uint8_t *b) {
+static void resolve_color(const term_color *c, const uint8_t def[3], uint8_t *r, uint8_t *g,
+                          uint8_t *b) {
     switch (c->kind) {
-        case TERM_COLOR_RGB:     *r = c->r; *g = c->g; *b = c->b; break;
-        case TERM_COLOR_INDEXED: palette_rgb(c->idx, r, g, b); break;
-        case TERM_COLOR_DEFAULT:
-        default:                 *r = def[0]; *g = def[1]; *b = def[2]; break;
+    case TERM_COLOR_RGB:
+        *r = c->r;
+        *g = c->g;
+        *b = c->b;
+        break;
+    case TERM_COLOR_INDEXED: palette_rgb(c->idx, r, g, b); break;
+    case TERM_COLOR_DEFAULT:
+    default:
+        *r = def[0];
+        *g = def[1];
+        *b = def[2];
+        break;
     }
 }
 
 /* ------------------------------------------------------------------------ */
 
 struct term_render {
-    terminal    *term;
+    terminal *term;
     glyph_atlas *atlas;
-    int          cols, rows;
-    int          cell_w, cell_h;
-    int          ss;          /* atlas supersample factor (glyph px = cell*ss) */
-    uint32_t    *cells;       /* cols*rows*4 uint32 */
-    uint32_t    *prev_cells;  /* previous frame's packed cells, for row diffing */
-    uint32_t    *change_ms;   /* cols*rows: ms-since-start each cell last changed */
-    double       start_secs;  /* mono baseline so change_ms fits in 32 bits */
-    int          dirty_y0;    /* [dirty_y0, dirty_y1) rows changed this update */
-    int          dirty_y1;    /* dirty_y1<=dirty_y0 means nothing changed */
-    uint64_t     last_epoch;
-    double       last_change_secs; /* mono time the grid last actually changed */
-    int          last_cursor_x, last_cursor_y; /* cursor pos at last change */
-    double       last_cursor_move_secs; /* mono time the cursor last moved */
-    bool         have_frame;  /* cells populated at least once */
-    bool         have_frame_once; /* prev_cells valid for per-cell change stamps */
-    int          cursor_x, cursor_y;
-    bool         cursor_vis;
+    int cols, rows;
+    int cell_w, cell_h;
+    int ss;               /* atlas supersample factor (glyph px = cell*ss) */
+    uint32_t *cells;      /* cols*rows*4 uint32 */
+    uint32_t *prev_cells; /* previous frame's packed cells, for row diffing */
+    uint32_t *change_ms;  /* cols*rows: ms-since-start each cell last changed */
+    double start_secs;    /* mono baseline so change_ms fits in 32 bits */
+    int dirty_y0;         /* [dirty_y0, dirty_y1) rows changed this update */
+    int dirty_y1;         /* dirty_y1<=dirty_y0 means nothing changed */
+    uint64_t last_epoch;
+    double last_change_secs;          /* mono time the grid last actually changed */
+    int last_cursor_x, last_cursor_y; /* cursor pos at last change */
+    double last_cursor_move_secs;     /* mono time the cursor last moved */
+    bool have_frame;                  /* cells populated at least once */
+    bool have_frame_once;             /* prev_cells valid for per-cell change stamps */
+    int cursor_x, cursor_y;
+    bool cursor_vis;
 
     /* respawn-on-exit: keep enough to relaunch the child if it dies. */
-    char        *cmd;
-    char        *cwd;
-    char        *term_env;
-    void       (*on_output)(void *ctx);
-    void        *on_output_ctx;
-    double       exit_at;     /* monotonic secs when the child was seen exited (0 = alive) */
-    int          restart_count;
+    char *cmd;
+    char *cwd;
+    char *term_env;
+    void (*on_output)(void *ctx);
+    void *on_output_ctx;
+    double exit_at; /* monotonic secs when the child was seen exited (0 = alive) */
+    int restart_count;
 
-    uint8_t      def_fg[3];   /* default fg (config override or built-in) */
-    uint8_t      def_bg[3];   /* default bg */
+    uint8_t def_fg[3]; /* default fg (config override or built-in) */
+    uint8_t def_bg[3]; /* default bg */
 };
 
 static double mono_secs(void) {
@@ -104,28 +128,30 @@ static double mono_secs(void) {
 }
 
 static bool alloc_cells(term_render *tr) {
-    size_t n = (size_t)tr->cols * (size_t)tr->rows * 4;
+    size_t n  = (size_t)tr->cols * (size_t)tr->rows * 4;
     size_t nc = (size_t)tr->cols * (size_t)tr->rows;
     /* Allocate into locals and commit only on FULL success: a partial failure
      * used to leave tr with a NULL prev_cells/change_ms that the very next
      * term_render_update() would dereference. */
     uint32_t *cells = calloc(n, sizeof(uint32_t));
-    uint32_t *prev = calloc(n, sizeof(uint32_t));
-    uint32_t *chg = calloc(nc, sizeof(uint32_t));
+    uint32_t *prev  = calloc(n, sizeof(uint32_t));
+    uint32_t *chg   = calloc(nc, sizeof(uint32_t));
     if (!cells || !prev || !chg) {
-        free(cells); free(prev); free(chg);
-        return false;   /* old grids survive untouched */
+        free(cells);
+        free(prev);
+        free(chg);
+        return false; /* old grids survive untouched */
     }
     free(tr->cells);
     free(tr->prev_cells);
     free(tr->change_ms);
-    tr->cells = cells;
+    tr->cells      = cells;
     tr->prev_cells = prev;
-    tr->change_ms = chg;
+    tr->change_ms  = chg;
     /* Force a full upload on the first frame after (re)alloc: prev is all-zero
      * but the shader's texture is undefined, so the diff must not skip rows. */
-    tr->dirty_y0 = 0;
-    tr->dirty_y1 = tr->rows;
+    tr->dirty_y0        = 0;
+    tr->dirty_y1        = tr->rows;
     tr->have_frame_once = false;
     return true;
 }
@@ -159,15 +185,15 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
      * screen pixels, so a higher oversample visibly smooths diagonal strokes
      * (/ A curves) and thin box lines. Cost is ~1.8x the coverage-atlas memory
      * and glyph raster time — cheap and one-time (atlas is cached). */
-    tr->ss = 4;
+    tr->ss         = 4;
     tr->start_secs = mono_secs();
-    int atlas_cw = tr->cell_w * tr->ss;
-    int atlas_ch = tr->cell_h * tr->ss;
+    int atlas_cw   = tr->cell_w * tr->ss;
+    int atlas_ch   = tr->cell_h * tr->ss;
 
     /* Load font: explicit in-memory buffer, else a path, else system search. */
     const uint8_t *font_data = opts->font_data;
-    size_t         font_len  = opts->font_len;
-    uint8_t       *file_buf  = NULL;
+    size_t font_len          = opts->font_len;
+    uint8_t *file_buf        = NULL;
     if (!font_data && opts->font_path && opts->font_path[0]) {
         FILE *f = fopen(opts->font_path, "rb");
         if (f) {
@@ -188,9 +214,8 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
         }
     }
 
-    tr->atlas = glyph_atlas_create_ex(font_data, font_len,
-                                      opts->font_bold_path, opts->font_italic_path,
-                                      atlas_cw, atlas_ch);
+    tr->atlas = glyph_atlas_create_ex(font_data, font_len, opts->font_bold_path,
+                                      opts->font_italic_path, atlas_cw, atlas_ch);
     free(file_buf); /* atlas copies what it needs; system-font path owns its own */
     if (!tr->atlas) {
         if (err_out) *err_out = nw_err(NW_ERR_IO, "term_render: no usable font");
@@ -206,14 +231,18 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
     }
 
     term_spawn_opts so = {
-        .cmd = opts->cmd, .cols = tr->cols, .rows = tr->rows,
-        .scrollback = 0, .term_env = opts->term_env,
-        .cwd = opts->cwd,
-        .on_output = opts->on_output, .on_output_ctx = opts->on_output_ctx,
+        .cmd           = opts->cmd,
+        .cols          = tr->cols,
+        .rows          = tr->rows,
+        .scrollback    = 0,
+        .term_env      = opts->term_env,
+        .cwd           = opts->cwd,
+        .on_output     = opts->on_output,
+        .on_output_ctx = opts->on_output_ctx,
     };
-    tr->on_output = opts->on_output;
+    tr->on_output     = opts->on_output;
     tr->on_output_ctx = opts->on_output_ctx;
-    nw_result r = term_spawn(&so, &tr->term);
+    nw_result r       = term_spawn(&so, &tr->term);
     if (nw_is_err(r)) {
         if (err_out) *err_out = r;
         glyph_atlas_destroy(tr->atlas);
@@ -235,14 +264,18 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
         tr->def_fg[1] = (uint8_t)((opts->default_fg >> 8) & 0xFF);
         tr->def_fg[2] = (uint8_t)(opts->default_fg & 0xFF);
     } else {
-        tr->def_fg[0] = kDefaultFg[0]; tr->def_fg[1] = kDefaultFg[1]; tr->def_fg[2] = kDefaultFg[2];
+        tr->def_fg[0] = kDefaultFg[0];
+        tr->def_fg[1] = kDefaultFg[1];
+        tr->def_fg[2] = kDefaultFg[2];
     }
     if (opts->default_bg >= 0) {
         tr->def_bg[0] = (uint8_t)((opts->default_bg >> 16) & 0xFF);
         tr->def_bg[1] = (uint8_t)((opts->default_bg >> 8) & 0xFF);
         tr->def_bg[2] = (uint8_t)(opts->default_bg & 0xFF);
     } else {
-        tr->def_bg[0] = kDefaultBg[0]; tr->def_bg[1] = kDefaultBg[1]; tr->def_bg[2] = kDefaultBg[2];
+        tr->def_bg[0] = kDefaultBg[0];
+        tr->def_bg[1] = kDefaultBg[1];
+        tr->def_bg[2] = kDefaultBg[2];
     }
 
     if (err_out) *err_out = nw_ok();
@@ -251,7 +284,7 @@ term_render *term_render_create(const term_render_opts *opts, nw_result *err_out
 
 void term_render_destroy(term_render *tr) {
     if (!tr) return;
-    if (tr->term)  term_destroy(tr->term);
+    if (tr->term) term_destroy(tr->term);
     if (tr->atlas) glyph_atlas_destroy(tr->atlas);
     free(tr->cmd);
     free(tr->cwd);
@@ -268,18 +301,29 @@ void term_render_destroy(term_render *tr) {
  * doesn't spin. Returns true if a fresh child is running. */
 static bool term_render_respawn(term_render *tr) {
     if (!tr || !tr->cmd) return false;
-    if (tr->term) { term_destroy(tr->term); tr->term = NULL; }
+    if (tr->term) {
+        term_destroy(tr->term);
+        tr->term = NULL;
+    }
 
     term_spawn_opts so = {
-        .cmd = tr->cmd, .cols = tr->cols, .rows = tr->rows,
-        .scrollback = 0, .term_env = tr->term_env, .cwd = tr->cwd,
-        .on_output = tr->on_output, .on_output_ctx = tr->on_output_ctx,
+        .cmd           = tr->cmd,
+        .cols          = tr->cols,
+        .rows          = tr->rows,
+        .scrollback    = 0,
+        .term_env      = tr->term_env,
+        .cwd           = tr->cwd,
+        .on_output     = tr->on_output,
+        .on_output_ctx = tr->on_output_ctx,
     };
     nw_result r = term_spawn(&so, &tr->term);
-    if (nw_is_err(r)) { tr->term = NULL; return false; }
+    if (nw_is_err(r)) {
+        tr->term = NULL;
+        return false;
+    }
     tr->have_frame = false;
     tr->last_epoch = 0;
-    tr->exit_at = 0.0;
+    tr->exit_at    = 0.0;
     tr->restart_count++;
     return true;
 }
@@ -294,27 +338,26 @@ bool term_render_update(term_render *tr) {
     if (tr->term && term_child_exited(tr->term, NULL)) {
         double now = mono_secs();
         if (tr->exit_at == 0.0) tr->exit_at = now;
-        double backoff = tr->restart_count < 3 ? 0.5
-                       : tr->restart_count < 8 ? 2.0 : 5.0;
+        double backoff = tr->restart_count < 3 ? 0.5 : tr->restart_count < 8 ? 2.0 : 5.0;
         if (now - tr->exit_at >= backoff) {
             term_render_respawn(tr);
         }
-        return false;   /* nothing new to upload while dead/restarting */
+        return false; /* nothing new to upload while dead/restarting */
     }
 
     const term_frame *f = term_snapshot(tr->term);
     if (!f) return false;
 
-    tr->cursor_x = f->cursor_x;
-    tr->cursor_y = f->cursor_y;
+    tr->cursor_x   = f->cursor_x;
+    tr->cursor_y   = f->cursor_y;
     tr->cursor_vis = f->cursor_visible;
 
     /* Cursor motion is its own animation trigger (physical slide/overshoot in
      * the shader): remember when the cursor cell last moved so the idle gate
      * keeps painting through the slide even if no glyph cell changed. */
     if (f->cursor_x != tr->last_cursor_x || f->cursor_y != tr->last_cursor_y) {
-        tr->last_cursor_x = f->cursor_x;
-        tr->last_cursor_y = f->cursor_y;
+        tr->last_cursor_x         = f->cursor_x;
+        tr->last_cursor_y         = f->cursor_y;
         tr->last_cursor_move_secs = mono_secs();
     }
 
@@ -333,12 +376,12 @@ bool term_render_update(term_render *tr) {
     tr->have_frame = true;
 
     const term_cell *src = f->cells;
-    uint32_t *dst = tr->cells;
-    int n = tr->cols * tr->rows;
-    uint32_t now_ms = (uint32_t)((mono_secs() - tr->start_secs) * 1000.0);
+    uint32_t *dst        = tr->cells;
+    int n                = tr->cols * tr->rows;
+    uint32_t now_ms      = (uint32_t)((mono_secs() - tr->start_secs) * 1000.0);
     for (int i = 0; i < n; i++) {
         const term_cell *c = &src[i];
-        uint32_t *o = &dst[i * 4];
+        uint32_t *o        = &dst[i * 4];
 
         /* wide-char right half: draw nothing, inherit bg only. */
         bool tail = (c->attr & TERM_ATTR_WIDE_TAIL) != 0;
@@ -350,24 +393,31 @@ bool term_render_update(term_render *tr) {
         /* reverse video: swap fg/bg */
         if (c->attr & TERM_ATTR_REVERSE) {
             uint8_t tr_ = fr, tg = fg, tb = fb;
-            fr = br; fg = bg; fb = bb;
-            br = tr_; bg = tg; bb = tb;
+            fr = br;
+            fg = bg;
+            fb = bb;
+            br = tr_;
+            bg = tg;
+            bb = tb;
         }
 
         bool has_glyph = false;
-        bool is_color = false;
+        bool is_color  = false;
         uint16_t ax = 0, ay = 0, gw = 0, gh = 0;
         int16_t ox = 0, oy = 0;
-        if (!tail && c->cp != 0 && c->cp != ' ' &&
-            !(c->attr & TERM_ATTR_INVISIBLE)) {
-            bool bold   = (c->attr & TERM_ATTR_BOLD) != 0;
-            bool italic = (c->attr & TERM_ATTR_ITALIC) != 0;
+        if (!tail && c->cp != 0 && c->cp != ' ' && !(c->attr & TERM_ATTR_INVISIBLE)) {
+            bool bold           = (c->attr & TERM_ATTR_BOLD) != 0;
+            bool italic         = (c->attr & TERM_ATTR_ITALIC) != 0;
             const glyph_slot *s = glyph_atlas_get_styled(tr->atlas, c->cp, bold, italic);
             if (s && s->valid && s->w > 0 && s->h > 0) {
                 has_glyph = true;
-                is_color = s->color;
-                ax = s->x; ay = s->y; gw = s->w; gh = s->h;
-                ox = s->off_x; oy = s->off_y;
+                is_color  = s->color;
+                ax        = s->x;
+                ay        = s->y;
+                gw        = s->w;
+                gh        = s->h;
+                ox        = s->off_x;
+                oy        = s->off_y;
             }
         } else if (tail && i > 0 && !(c->attr & TERM_ATTR_INVISIBLE)) {
             /* Wide-glyph continuation: draw the RIGHT half of the head cell's
@@ -377,25 +427,28 @@ bool term_render_update(term_render *tr) {
              * this cell samples the glyph's second half. */
             const term_cell *head = &src[i - 1];
             if (head->cp != 0 && !(head->attr & TERM_ATTR_INVISIBLE)) {
-                bool bold   = (head->attr & TERM_ATTR_BOLD) != 0;
-                bool italic = (head->attr & TERM_ATTR_ITALIC) != 0;
+                bool bold           = (head->attr & TERM_ATTR_BOLD) != 0;
+                bool italic         = (head->attr & TERM_ATTR_ITALIC) != 0;
                 const glyph_slot *s = glyph_atlas_get_styled(tr->atlas, head->cp, bold, italic);
-                int cw_ss = tr->cell_w * tr->ss;
+                int cw_ss           = tr->cell_w * tr->ss;
                 /* Color emoji always span two cells (drawn into a 2-cell box),
                  * so the tail half is drawn unconditionally; monochrome glyphs
                  * only overflow into the tail when actually wider than a cell. */
                 bool overflows = s && s->valid && (s->color || s->w > cw_ss);
                 if (overflows) {
                     has_glyph = true;
-                    is_color = s->color;
-                    ax = s->x; ay = s->y; gw = s->w; gh = s->h;
-                    ox = (int16_t)(s->off_x - cw_ss);
-                    oy = s->off_y;
+                    is_color  = s->color;
+                    ax        = s->x;
+                    ay        = s->y;
+                    gw        = s->w;
+                    gh        = s->h;
+                    ox        = (int16_t)(s->off_x - cw_ss);
+                    oy        = s->off_y;
                 }
             }
         }
 
-        uint8_t attr8 = (uint8_t)(c->attr & 0xFF);
+        uint8_t attr8   = (uint8_t)(c->attr & 0xFF);
         uint32_t rflags = TERM_PACK_R(ax, ay, has_glyph);
         if (is_color) rflags |= TERM_FLAG_COLOR;
         o[0] = rflags;
@@ -426,7 +479,7 @@ bool term_render_update(term_render *tr) {
      * cols*rows*16 bytes down to just the touched band. memcmp over a row is
      * cheap and vectorised; the win is the smaller glTexSubImage2D. */
     {
-        size_t roww = (size_t)tr->cols * 4;   /* uint32s per row */
+        size_t roww = (size_t)tr->cols * 4; /* uint32s per row */
         int y0 = tr->rows, y1 = 0;
         for (int y = 0; y < tr->rows; y++) {
             const uint32_t *cur = tr->cells + (size_t)y * roww;
@@ -447,15 +500,26 @@ bool term_render_update(term_render *tr) {
     return true;
 }
 
-const uint32_t *term_render_cells(const term_render *tr) { return tr ? tr->cells : NULL; }
-int term_render_cols(const term_render *tr) { return tr ? tr->cols : 0; }
-int term_render_rows(const term_render *tr) { return tr ? tr->rows : 0; }
+const uint32_t *term_render_cells(const term_render *tr) {
+    return tr ? tr->cells : NULL;
+}
+int term_render_cols(const term_render *tr) {
+    return tr ? tr->cols : 0;
+}
+int term_render_rows(const term_render *tr) {
+    return tr ? tr->rows : 0;
+}
 
 /* Rows [y0,y1) that changed in the last term_render_update() that returned
  * true. Lets the uploader push only the touched band of the cell texture. */
 void term_render_cells_dirty_rows(const term_render *tr, int *y0, int *y1) {
-    if (tr) { if (y0) *y0 = tr->dirty_y0; if (y1) *y1 = tr->dirty_y1; }
-    else    { if (y0) *y0 = 0; if (y1) *y1 = 0; }
+    if (tr) {
+        if (y0) *y0 = tr->dirty_y0;
+        if (y1) *y1 = tr->dirty_y1;
+    } else {
+        if (y0) *y0 = 0;
+        if (y1) *y1 = 0;
+    }
 }
 
 const uint32_t *term_render_change_ms(const term_render *tr) {
@@ -468,20 +532,32 @@ uint32_t term_render_now_ms(const term_render *tr) {
 const uint8_t *term_render_atlas(const term_render *tr) {
     return tr ? glyph_atlas_bitmap(tr->atlas) : NULL;
 }
-int term_render_atlas_w(const term_render *tr) { return tr ? glyph_atlas_width(tr->atlas) : 0; }
-int term_render_atlas_h(const term_render *tr) { return tr ? glyph_atlas_height(tr->atlas) : 0; }
+int term_render_atlas_w(const term_render *tr) {
+    return tr ? glyph_atlas_width(tr->atlas) : 0;
+}
+int term_render_atlas_h(const term_render *tr) {
+    return tr ? glyph_atlas_height(tr->atlas) : 0;
+}
 /* The glyph-pixel cell size the shader needs: nwTerm maps each cell's 0..1
  * fraction into atlas-pixel space, and the atlas is supersampled, so this is
  * the SS-scaled size. (Pixel->cell hit-testing uses tr->cell_w directly and
  * stays at the on-screen size.) */
-int term_render_cell_w(const term_render *tr) { return tr ? tr->cell_w * tr->ss : 0; }
-int term_render_cell_h(const term_render *tr) { return tr ? tr->cell_h * tr->ss : 0; }
+int term_render_cell_w(const term_render *tr) {
+    return tr ? tr->cell_w * tr->ss : 0;
+}
+int term_render_cell_h(const term_render *tr) {
+    return tr ? tr->cell_h * tr->ss : 0;
+}
 bool term_render_atlas_dirty(const term_render *tr) {
     return tr ? glyph_atlas_dirty(tr->atlas) : false;
 }
 void term_render_atlas_dirty_rows(const term_render *tr, int *y0, int *y1) {
-    if (tr) glyph_atlas_dirty_rows(tr->atlas, y0, y1);
-    else { if (y0) *y0 = 0; if (y1) *y1 = 0; }
+    if (tr)
+        glyph_atlas_dirty_rows(tr->atlas, y0, y1);
+    else {
+        if (y0) *y0 = 0;
+        if (y1) *y1 = 0;
+    }
 }
 void term_render_clear_atlas_dirty(term_render *tr) {
     if (tr) glyph_atlas_clear_dirty(tr->atlas);
@@ -494,8 +570,12 @@ bool term_render_color_atlas_dirty(const term_render *tr) {
     return tr ? glyph_atlas_color_dirty(tr->atlas) : false;
 }
 void term_render_color_atlas_dirty_rows(const term_render *tr, int *y0, int *y1) {
-    if (tr) glyph_atlas_color_dirty_rows(tr->atlas, y0, y1);
-    else { if (y0) *y0 = 0; if (y1) *y1 = 0; }
+    if (tr)
+        glyph_atlas_color_dirty_rows(tr->atlas, y0, y1);
+    else {
+        if (y0) *y0 = 0;
+        if (y1) *y1 = 0;
+    }
 }
 void term_render_clear_color_atlas_dirty(term_render *tr) {
     if (tr) glyph_atlas_clear_color_dirty(tr->atlas);
@@ -530,17 +610,13 @@ bool term_render_animating(const term_render *tr, unsigned fx_settle_ms) {
      * This is the lock-free wake path — it fires the frame BEFORE update()
      * consumes the epoch, so an idle-gated terminal never sleeps through fresh
      * bytes. */
-    if (tr->term && term_dirty_epoch(tr->term) != tr->last_epoch)
-        return true;
+    if (tr->term && term_dirty_epoch(tr->term) != tr->last_epoch) return true;
 
-    double now = mono_secs();
+    double now    = mono_secs();
     double window = (double)fx_settle_ms / 1000.0;
     if (window < 0.05) window = 0.05;
-    if (tr->last_change_secs > 0.0 && now - tr->last_change_secs < window)
-        return true;
-    if (tr->last_cursor_move_secs > 0.0 &&
-        now - tr->last_cursor_move_secs < window)
-        return true;
+    if (tr->last_change_secs > 0.0 && now - tr->last_change_secs < window) return true;
+    if (tr->last_cursor_move_secs > 0.0 && now - tr->last_cursor_move_secs < window) return true;
     return false;
 }
 
@@ -561,8 +637,7 @@ bool term_render_child_exited(const term_render *tr) {
     return tr ? term_child_exited(tr->term, NULL) : true;
 }
 
-bool term_render_mouse(term_render *tr, int px, int py,
-                       int button, bool pressed, bool motion) {
+bool term_render_mouse(term_render *tr, int px, int py, int button, bool pressed, bool motion) {
     if (!tr || !tr->term) return false;
     int cw = tr->cell_w > 0 ? tr->cell_w : 9;
     int ch = tr->cell_h > 0 ? tr->cell_h : 18;

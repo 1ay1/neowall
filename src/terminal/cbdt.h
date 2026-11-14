@@ -26,7 +26,7 @@ typedef struct cbdt_font cbdt_font;
  * must outlive the returned handle). Returns NULL if the font has no usable
  * color-bitmap table (CBDT/CBLC or sbix) or is malformed. */
 cbdt_font *cbdt_open(const uint8_t *data, size_t len);
-void       cbdt_close(cbdt_font *f);
+void cbdt_close(cbdt_font *f);
 
 /* True if `cp` has a color glyph in this font. */
 bool cbdt_has(const cbdt_font *f, uint32_t cp);

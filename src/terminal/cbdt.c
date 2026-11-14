@@ -24,13 +24,20 @@
 #define STBI_NO_JPEG
 /* Emoji strikes are ~128-512 px; refuse anything absurd before allocating. */
 #define STBI_MAX_DIMENSIONS 2048
-#include <stb_image.h>   /* src/terminal/vendor, or -Dsystem_stb */
+#include <stb_image.h> /* src/terminal/vendor, or -Dsystem_stb */
 
 /* ---- big-endian readers over a bounds-checked window ---- */
-typedef struct { const uint8_t *p; size_t len; } buf;
+typedef struct {
+    const uint8_t *p;
+    size_t len;
+} buf;
 
-static inline uint8_t  rd8 (const uint8_t *p) { return p[0]; }
-static inline uint16_t rd16(const uint8_t *p) { return (uint16_t)((p[0] << 8) | p[1]); }
+static inline uint8_t rd8(const uint8_t *p) {
+    return p[0];
+}
+static inline uint16_t rd16(const uint8_t *p) {
+    return (uint16_t)((p[0] << 8) | p[1]);
+}
 static inline uint32_t rd32(const uint8_t *p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
 }
@@ -41,32 +48,34 @@ static inline bool in_range(const buf *b, size_t off, size_t n) {
 
 /* ---- cmap: codepoint -> glyph id (formats 12, 4, 6) -------------------- */
 typedef struct {
-    const uint8_t *sub;   /* start of the chosen cmap subtable */
-    size_t         sublen;
-    uint16_t       format;
+    const uint8_t *sub; /* start of the chosen cmap subtable */
+    size_t sublen;
+    uint16_t format;
 } cmap_t;
 
 struct cbdt_font {
-    buf       file;
-    cmap_t    cmap;
+    buf file;
+    cmap_t cmap;
     /* CBLC/CBDT */
-    const uint8_t *cblc; size_t cblc_len;
-    const uint8_t *cbdt; size_t cbdt_len;
+    const uint8_t *cblc;
+    size_t cblc_len;
+    const uint8_t *cbdt;
+    size_t cbdt_len;
     /* sbix */
-    const uint8_t *sbix; size_t sbix_len;
-    uint16_t       num_glyphs;
-    int            ppem;
+    const uint8_t *sbix;
+    size_t sbix_len;
+    uint16_t num_glyphs;
+    int ppem;
 };
 
 /* Find a table by 4-char tag in the sfnt directory. */
-static bool find_table(const buf *file, const char *tag,
-                       const uint8_t **out, size_t *out_len) {
+static bool find_table(const buf *file, const char *tag, const uint8_t **out, size_t *out_len) {
     if (file->len < 12) return false;
     uint32_t sfnt = rd32(file->p);
     /* 0x00010000 = TrueType, 'OTTO' = CFF, 'ttcf' = collection (unsupported here) */
     if (sfnt == 0x74746366u) return false; /* 'ttcf': collections not handled */
     uint16_t num = rd16(file->p + 4);
-    size_t dir = 12;
+    size_t dir   = 12;
     for (uint16_t i = 0; i < num; i++) {
         size_t rec = dir + (size_t)i * 16;
         if (!in_range(file, rec, 16)) return false;
@@ -74,7 +83,7 @@ static bool find_table(const buf *file, const char *tag,
         if (memcmp(r, tag, 4) == 0) {
             uint32_t off = rd32(r + 8), len = rd32(r + 12);
             if (!in_range(file, off, len)) return false;
-            *out = file->p + off;
+            *out     = file->p + off;
             *out_len = len;
             return true;
         }
@@ -84,32 +93,42 @@ static bool find_table(const buf *file, const char *tag,
 
 /* Pick the best Unicode cmap subtable (prefer format 12 full-repertoire). */
 static bool load_cmap(cbdt_font *f) {
-    const uint8_t *cmap; size_t clen;
+    const uint8_t *cmap;
+    size_t clen;
     if (!find_table(&f->file, "cmap", &cmap, &clen)) return false;
     if (clen < 4) return false;
-    uint16_t ntab = rd16(cmap + 2);
-    const uint8_t *best = NULL; int best_score = -1;
+    uint16_t ntab       = rd16(cmap + 2);
+    const uint8_t *best = NULL;
+    int best_score      = -1;
     for (uint16_t i = 0; i < ntab; i++) {
         size_t rec = 4 + (size_t)i * 8;
         if (rec + 8 > clen) break;
         uint16_t pid = rd16(cmap + rec);
         uint16_t eid = rd16(cmap + rec + 2);
         uint32_t off = rd32(cmap + rec + 4);
-        if (off > clen || clen - off < 2) continue;   /* no uint32 wrap on a huge off */
+        if (off > clen || clen - off < 2) continue; /* no uint32 wrap on a huge off */
         uint16_t fmt = rd16(cmap + off);
-        int score = -1;
+        int score    = -1;
         /* Prefer Unicode full (pid3/eid10 or pid0/eid4+), format 12. */
         bool unicode = (pid == 0) || (pid == 3 && (eid == 1 || eid == 10));
         if (!unicode) continue;
-        if (fmt == 12) score = 3;
-        else if (fmt == 4) score = 2;
-        else if (fmt == 6) score = 1;
-        else continue;
-        if (pid == 3 && eid == 10) score += 4;  /* full repertoire beats BMP */
-        if (score > best_score) { best_score = score; best = cmap + off; f->cmap.sublen = clen - off; }
+        if (fmt == 12)
+            score = 3;
+        else if (fmt == 4)
+            score = 2;
+        else if (fmt == 6)
+            score = 1;
+        else
+            continue;
+        if (pid == 3 && eid == 10) score += 4; /* full repertoire beats BMP */
+        if (score > best_score) {
+            best_score     = score;
+            best           = cmap + off;
+            f->cmap.sublen = clen - off;
+        }
     }
     if (!best) return false;
-    f->cmap.sub = best;
+    f->cmap.sub    = best;
     f->cmap.format = rd16(best);
     return true;
 }
@@ -118,11 +137,17 @@ static bool load_cmap(cbdt_font *f) {
  * read yields 0 and sets *bad, so a malformed font fails the lookup instead of
  * reading past the subtable. */
 static uint16_t sub16(const cmap_t *c, size_t off, bool *bad) {
-    if (off > c->sublen || c->sublen - off < 2) { *bad = true; return 0; }
+    if (off > c->sublen || c->sublen - off < 2) {
+        *bad = true;
+        return 0;
+    }
     return rd16(c->sub + off);
 }
 static uint32_t sub32(const cmap_t *c, size_t off, bool *bad) {
-    if (off > c->sublen || c->sublen - off < 4) { *bad = true; return 0; }
+    if (off > c->sublen || c->sublen - off < 4) {
+        *bad = true;
+        return 0;
+    }
     return rd32(c->sub + off);
 }
 
@@ -135,12 +160,15 @@ static uint32_t cmap_lookup(const cmap_t *c, uint32_t cp) {
         uint32_t lo = 0, hi = ngroups;
         while (lo < hi) {
             uint32_t mid = lo + ((hi - lo) >> 1);
-            size_t g = 16 + (size_t)mid * 12;
+            size_t g     = 16 + (size_t)mid * 12;
             uint32_t sc = sub32(c, g, &bad), ec = sub32(c, g + 4, &bad);
             if (bad) return 0;
-            if (cp < sc) hi = mid;
-            else if (cp > ec) lo = mid + 1;
-            else return sub32(c, g + 8, &bad) + (cp - sc);
+            if (cp < sc)
+                hi = mid;
+            else if (cp > ec)
+                lo = mid + 1;
+            else
+                return sub32(c, g + 8, &bad) + (cp - sc);
         }
         return 0;
     } else if (c->format == 4) {
@@ -154,8 +182,8 @@ static uint32_t cmap_lookup(const cmap_t *c, uint32_t cp) {
             if (bad) return 0;
             if (cp > end) continue;
             uint16_t start = sub16(c, startc + i * 2, &bad);
-            int16_t delta = (int16_t)sub16(c, iddelta + i * 2, &bad);
-            uint16_t ro = sub16(c, idrange + i * 2, &bad);
+            int16_t delta  = (int16_t)sub16(c, iddelta + i * 2, &bad);
+            uint16_t ro    = sub16(c, idrange + i * 2, &bad);
             if (bad || cp < start) return 0;
             if (ro == 0) return (uint16_t)(cp + delta);
             uint16_t g = sub16(c, idrange + i * 2 + ro + (size_t)(cp - start) * 2, &bad);
@@ -175,21 +203,20 @@ static uint32_t cmap_lookup(const cmap_t *c, uint32_t cp) {
 
 /* ---- CBLC: glyph id -> (CBDT offset, length, image format) ------------- */
 /* Returns true and fills *img_off (into CBDT), *img_len, *img_fmt. */
-static bool cblc_locate(const cbdt_font *f, uint32_t gid,
-                        uint32_t *img_off, uint32_t *img_len, uint16_t *img_fmt,
-                        uint8_t *ppem_out) {
+static bool cblc_locate(const cbdt_font *f, uint32_t gid, uint32_t *img_off, uint32_t *img_len,
+                        uint16_t *img_fmt, uint8_t *ppem_out) {
     const uint8_t *t = f->cblc;
-    size_t tlen = f->cblc_len;
+    size_t tlen      = f->cblc_len;
     if (tlen < 8) return false;
     uint32_t numSizes = rd32(t + 4);
     for (uint32_t si = 0; si < numSizes; si++) {
-        size_t st = 8 + (size_t)si * 48;       /* bitmapSizeTable = 48 bytes */
+        size_t st = 8 + (size_t)si * 48; /* bitmapSizeTable = 48 bytes */
         if (st + 48 > tlen) break;
-        uint32_t idxArrayOff = rd32(t + st + 0);   /* indexSubTableArrayOffset (rel to CBLC) */
+        uint32_t idxArrayOff = rd32(t + st + 0); /* indexSubTableArrayOffset (rel to CBLC) */
         uint32_t numIdxSub   = rd32(t + st + 8);
         uint16_t startGID    = rd16(t + st + 40);
         uint16_t endGID      = rd16(t + st + 42);
-        uint8_t  ppemx       = t[st + 44];
+        uint8_t ppemx        = t[st + 44];
         if (gid < startGID || gid > endGID) continue;
         /* walk indexSubTableArray records: {firstGlyph, lastGlyph, additionalOffset} */
         for (uint32_t k = 0; k < numIdxSub; k++) {
@@ -199,12 +226,12 @@ static bool cblc_locate(const cbdt_font *f, uint32_t gid,
             uint16_t last  = rd16(t + ar + 2);
             uint32_t addl  = rd32(t + ar + 4);
             if (gid < first || gid > last) continue;
-            size_t ist = idxArrayOff + addl;       /* indexSubTable (rel to CBLC) */
+            size_t ist = idxArrayOff + addl; /* indexSubTable (rel to CBLC) */
             if (ist + 8 > tlen) return false;
-            uint16_t idxFormat = rd16(t + ist);
-            uint16_t imgFormat = rd16(t + ist + 2);
-            uint32_t imageDataOff = rd32(t + ist + 4);  /* into CBDT */
-            uint32_t gi = gid - first;
+            uint16_t idxFormat    = rd16(t + ist);
+            uint16_t imgFormat    = rd16(t + ist + 2);
+            uint32_t imageDataOff = rd32(t + ist + 4); /* into CBDT */
+            uint32_t gi           = gid - first;
             if (idxFormat == 1) {
                 /* uint32 offsets[last-first+2] follow */
                 size_t oo = ist + 8 + (size_t)gi * 4;
@@ -219,7 +246,7 @@ static bool cblc_locate(const cbdt_font *f, uint32_t gid,
                 /* constant-size images: imageSize(u32), bigMetrics(8) */
                 if (ist + 12 > tlen) return false;
                 uint32_t imageSize = rd32(t + ist + 8);
-                uint64_t off = (uint64_t)imageDataOff + (uint64_t)gi * imageSize;
+                uint64_t off       = (uint64_t)imageDataOff + (uint64_t)gi * imageSize;
                 if (off > UINT32_MAX) return false;
                 *img_off = (uint32_t)off;
                 *img_len = imageSize;
@@ -241,7 +268,7 @@ static bool cblc_locate(const cbdt_font *f, uint32_t gid,
                 uint32_t ndat = rd32(t + ist + 8);
                 for (uint32_t g = 0; g < ndat; g++) {
                     size_t pr = ist + 12 + (size_t)g * 4;
-                    if (pr + 8 > tlen) return false;   /* need this pair + next offset */
+                    if (pr + 8 > tlen) return false; /* need this pair + next offset */
                     uint16_t gid_e = rd16(t + pr);
                     if (gid_e == gid) {
                         uint16_t o0 = rd16(t + pr + 2);
@@ -273,23 +300,27 @@ static bool cbdt_png_window(const cbdt_font *f, uint32_t img_off, uint32_t img_l
     if ((uint64_t)img_off + img_len > f->cbdt_len) return false;
     const uint8_t *d = f->cbdt + img_off;
     size_t hdr;
-    if (img_fmt == 17) hdr = 5;        /* smallGlyphMetrics(5) */
-    else if (img_fmt == 18) hdr = 8;   /* bigGlyphMetrics(8) */
-    else if (img_fmt == 19) hdr = 0;   /* metrics carried in CBLC */
-    else return false;
+    if (img_fmt == 17)
+        hdr = 5; /* smallGlyphMetrics(5) */
+    else if (img_fmt == 18)
+        hdr = 8; /* bigGlyphMetrics(8) */
+    else if (img_fmt == 19)
+        hdr = 0; /* metrics carried in CBLC */
+    else
+        return false;
     if (hdr + 4 > img_len) return false;
     uint32_t dlen = rd32(d + hdr);
     if ((uint64_t)hdr + 4 + dlen > img_len) return false;
-    *png = d + hdr + 4;
+    *png     = d + hdr + 4;
     *png_len = dlen;
     return true;
 }
 
 /* ---- sbix (Apple color bitmaps): glyph id -> PNG ----------------------- */
-static bool sbix_png_window(const cbdt_font *f, uint32_t gid,
-                            const uint8_t **png, uint32_t *png_len) {
+static bool sbix_png_window(const cbdt_font *f, uint32_t gid, const uint8_t **png,
+                            uint32_t *png_len) {
     const uint8_t *t = f->sbix;
-    size_t tlen = f->sbix_len;
+    size_t tlen      = f->sbix_len;
     if (tlen < 8) return false;
     uint32_t numStrikes = rd32(t + 4);
     /* choose the largest strike (last-ish with biggest ppem) */
@@ -300,19 +331,22 @@ static bool sbix_png_window(const cbdt_font *f, uint32_t gid,
         uint32_t strikeOff = rd32(t + so);
         if ((size_t)strikeOff + 4 > tlen) continue;
         uint16_t ppem = rd16(t + strikeOff);
-        if (ppem >= bestPpem) { bestPpem = ppem; bestOff = strikeOff; }
+        if (ppem >= bestPpem) {
+            bestPpem = ppem;
+            bestOff  = strikeOff;
+        }
     }
     if (!bestOff) return false;
     /* glyphDataOffsets: uint32[numGlyphs+1] after ppem(2)+resolution(2) */
     size_t base = bestOff + 4;
-    size_t oo = base + (size_t)gid * 4;
+    size_t oo   = base + (size_t)gid * 4;
     if (oo + 8 > tlen) return false;
     uint32_t o0 = rd32(t + oo), o1 = rd32(t + oo + 4);
-    if (o1 <= o0 || o1 - o0 < 8) return false;   /* record header is 8 bytes */
+    if (o1 <= o0 || o1 - o0 < 8) return false; /* record header is 8 bytes */
     size_t rec = bestOff + (size_t)o0;
     /* glyph record: originOffsetX(2) originOffsetY(2) graphicType(4) then data */
     if (rec + 8 > tlen || (o1 - o0) > tlen - rec) return false;
-    *png = t + rec + 8;
+    *png     = t + rec + 8;
     *png_len = (o1 - o0) - 8;
     return true;
 }
@@ -322,19 +356,26 @@ cbdt_font *cbdt_open(const uint8_t *data, size_t len) {
     if (!data || len < 12) return NULL;
     cbdt_font *f = calloc(1, sizeof(*f));
     if (!f) return NULL;
-    f->file.p = data; f->file.len = len;
+    f->file.p   = data;
+    f->file.len = len;
 
-    if (!load_cmap(f)) { free(f); return NULL; }
+    if (!load_cmap(f)) {
+        free(f);
+        return NULL;
+    }
 
     size_t l;
     bool has_cbdt = find_table(&f->file, "CBLC", &f->cblc, &f->cblc_len) &&
                     find_table(&f->file, "CBDT", &f->cbdt, &f->cbdt_len);
     bool has_sbix = find_table(&f->file, "sbix", &f->sbix, &f->sbix_len);
-    if (!has_cbdt && !has_sbix) { free(f); return NULL; }
+    if (!has_cbdt && !has_sbix) {
+        free(f);
+        return NULL;
+    }
 
-    const uint8_t *maxp; size_t maxlen;
-    if (find_table(&f->file, "maxp", &maxp, &maxlen) && maxlen >= 6)
-        f->num_glyphs = rd16(maxp + 4);
+    const uint8_t *maxp;
+    size_t maxlen;
+    if (find_table(&f->file, "maxp", &maxp, &maxlen) && maxlen >= 6) f->num_glyphs = rd16(maxp + 4);
 
     /* record native strike ppem for scale planning */
     f->ppem = 128; /* NotoColorEmoji default; refined below if CBLC present */
@@ -349,18 +390,23 @@ cbdt_font *cbdt_open(const uint8_t *data, size_t len) {
     return f;
 }
 
-void cbdt_close(cbdt_font *f) { free(f); }
+void cbdt_close(cbdt_font *f) {
+    free(f);
+}
 
 bool cbdt_has(const cbdt_font *f, uint32_t cp) {
     if (!f) return false;
     uint32_t gid = cmap_lookup(&f->cmap, cp);
     if (gid == 0) return false;
     if (f->cbdt) {
-        uint32_t io, il; uint16_t fmt; uint8_t pp;
+        uint32_t io, il;
+        uint16_t fmt;
+        uint8_t pp;
         if (cblc_locate(f, gid, &io, &il, &fmt, &pp)) return true;
     }
     if (f->sbix) {
-        const uint8_t *png; uint32_t pl;
+        const uint8_t *png;
+        uint32_t pl;
         if (sbix_png_window(f, gid, &png, &pl)) return true;
     }
     return false;
@@ -371,16 +417,18 @@ uint8_t *cbdt_render(const cbdt_font *f, uint32_t cp, int *out_w, int *out_h) {
     uint32_t gid = cmap_lookup(&f->cmap, cp);
     if (gid == 0) return NULL;
 
-    const uint8_t *png = NULL; uint32_t png_len = 0;
+    const uint8_t *png = NULL;
+    uint32_t png_len   = 0;
     if (f->cbdt) {
-        uint32_t io, il; uint16_t fmt; uint8_t pp;
+        uint32_t io, il;
+        uint16_t fmt;
+        uint8_t pp;
         if (cblc_locate(f, gid, &io, &il, &fmt, &pp)) {
             if (fmt == 17 || fmt == 18 || fmt == 19)
                 cbdt_png_window(f, io, il, fmt, &png, &png_len);
         }
     }
-    if (!png && f->sbix)
-        sbix_png_window(f, gid, &png, &png_len);
+    if (!png && f->sbix) sbix_png_window(f, gid, &png, &png_len);
     if (!png || png_len < 8) return NULL;
 
     int w = 0, h = 0, ch = 0;
@@ -389,5 +437,5 @@ uint8_t *cbdt_render(const cbdt_font *f, uint32_t cp, int *out_w, int *out_h) {
     if (!rgba) return NULL;
     if (out_w) *out_w = w;
     if (out_h) *out_h = h;
-    return rgba;   /* caller frees with free() (stbi uses malloc by default) */
+    return rgba; /* caller frees with free() (stbi uses malloc by default) */
 }

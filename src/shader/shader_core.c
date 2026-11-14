@@ -20,7 +20,7 @@ bool neowall_find_data(const char *rel, char *out, size_t size);
 
 static GLuint compile_shader(GLenum type, const char *source) {
     const char *type_str = (type == GL_VERTEX_SHADER) ? "vertex" : "fragment";
-    GLuint shader = glCreateShader(type);
+    GLuint shader        = glCreateShader(type);
     if (shader == 0) {
         log_error("Failed to create %s shader", type_str);
         return 0;
@@ -39,9 +39,8 @@ static GLuint compile_shader(GLenum type, const char *source) {
     return shader;
 }
 
-bool shader_create_program_from_sources(const char *vertex_src,
-                                         const char *fragment_src,
-                                         GLuint *program) {
+bool shader_create_program_from_sources(const char *vertex_src, const char *fragment_src,
+                                        GLuint *program) {
     if (!program) return false;
     GLuint vs = compile_shader(GL_VERTEX_SHADER, vertex_src);
     if (!vs) return false;
@@ -86,7 +85,7 @@ bool shader_resolve_path(const char *shader_name, char *resolved_path, size_t re
         return true;
     }
 
-    const char *home = getenv("HOME");
+    const char *home            = getenv("HOME");
     const char *xdg_config_home = getenv("XDG_CONFIG_HOME");
     char cand[NW_PATH_MAX];
     int n = -1;

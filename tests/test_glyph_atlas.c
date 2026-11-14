@@ -18,8 +18,8 @@ static long ink_of(glyph_atlas *a, uint32_t cp) {
     const glyph_slot *s = glyph_atlas_get(a, cp);
     if (!s->valid) return -1;
     const uint8_t *bm = glyph_atlas_bitmap(a);
-    int W = glyph_atlas_width(a);
-    long sum = 0;
+    int W             = glyph_atlas_width(a);
+    long sum          = 0;
     for (int y = 0; y < s->h; y++)
         for (int x = 0; x < s->w; x++)
             sum += bm[(size_t)(s->y + y) * W + (s->x + x)];
@@ -38,7 +38,7 @@ int main(void) {
     glyph_atlas *a = glyph_atlas_create(NULL, 0, 10, 20);
     if (!a) {
         printf("glyph_atlas: no system monospace font found — SKIP\n");
-        return 77;   /* meson treats 77 as skip */
+        return 77; /* meson treats 77 as skip */
     }
 
     /* letters */
@@ -58,12 +58,18 @@ int main(void) {
     /* space is valid but has no ink — must not be reported as a failure and
      * must be a valid slot (so the renderer advances the cursor). */
     const glyph_slot *sp = glyph_atlas_get(a, ' ');
-    if (!sp->valid) { printf("  FAIL: space slot invalid\n"); g_fails++; }
+    if (!sp->valid) {
+        printf("  FAIL: space slot invalid\n");
+        g_fails++;
+    }
 
     /* caching: second lookup returns the same placement */
     const glyph_slot *a1 = glyph_atlas_get(a, 'A');
     const glyph_slot *a2 = glyph_atlas_get(a, 'A');
-    if (a1->x != a2->x || a1->y != a2->y) { printf("  FAIL: 'A' not cached stably\n"); g_fails++; }
+    if (a1->x != a2->x || a1->y != a2->y) {
+        printf("  FAIL: 'A' not cached stably\n");
+        g_fails++;
+    }
 
     glyph_atlas_destroy(a);
     printf("glyph_atlas: %s\n", g_fails ? "FAILURES" : "all checks passed");

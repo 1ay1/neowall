@@ -27,8 +27,7 @@ bool x11_rect_is_covered(x11_rect_t target, const x11_rect_t *covers, int count)
  * Writes the local x/y when the pointer is inside the output rect and returns
  * true; writes (-1,-1) and returns false when the pointer is elsewhere. The
  * -1 sentinel is what render.c maps to "center of this output". */
-bool x11_mouse_to_output(x11_rect_t output, int root_x, int root_y,
-                         int *out_x, int *out_y);
+bool x11_mouse_to_output(x11_rect_t output, int root_x, int root_y, int *out_x, int *out_y);
 
 /* True if two rects describe the same placement (origin + size). Used by the
  * hotplug reconcile to tell whether an existing output still matches a freshly

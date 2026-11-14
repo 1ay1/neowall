@@ -26,15 +26,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (!buf) return 0;
     memcpy(buf, data, size);
     buf[size] = buf[size + 1] = '\0';
-    size_t split = strlen(buf);
-    const char *manifest = split < size ? buf + split + 1 : NULL;
+    size_t split              = strlen(buf);
+    const char *manifest      = split < size ? buf + split + 1 : NULL;
 
     nw_shader_source *src = NULL;
     if (nw_is_ok(nw_shader_source_parse(buf, NULL, manifest, &src))) {
         for (size_t i = 0; i < src->passes.len; i++) {
-            char *text = NULL;
+            char *text      = NULL;
             nw_src_loc *map = NULL;
-            size_t n = 0;
+            size_t n        = 0;
             if (nw_is_ok(nw_shader_assemble(src, (int)i, &text, &map, &n))) {
                 free(text);
                 free(map);

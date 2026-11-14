@@ -32,8 +32,8 @@
 /* `neowall new <name> [--template=scene|flat|reactive] [--force] [--list]` */
 int cmd_new(int argc, char *argv[]) {
     const char *shader_name = NULL;
-    const char *tmpl = NULL;
-    bool force = false;
+    const char *tmpl        = NULL;
+    bool force              = false;
 
     for (int i = 2; i < argc; i++) {
         if (strncmp(argv[i], "--template=", 11) == 0) {
@@ -74,7 +74,7 @@ static bool write_new_file(const char *path, const char *text, bool force) {
         return false;
     }
     bool ok = fputs(text, f) >= 0;
-    ok = fclose(f) == 0 && ok;
+    ok      = fclose(f) == 0 && ok;
     if (!ok) fprintf(stderr, "can't write %s: %s\n", path, strerror(errno));
     return ok;
 }
@@ -86,17 +86,22 @@ int cmd_import(int argc, char *argv[]) {
     const char *in = NULL, *name = NULL;
     bool force = false;
     for (int i = 2; i < argc; i++) {
-        if (!strcmp(argv[i], "--force") || !strcmp(argv[i], "-f")) force = true;
+        if (!strcmp(argv[i], "--force") || !strcmp(argv[i], "-f"))
+            force = true;
         else if (argv[i][0] == '-' && argv[i][1]) {
             fprintf(stderr, "Unknown option for 'import': %s\n", argv[i]);
             return EXIT_FAILURE;
-        } else if (!in) in = argv[i];
-        else if (!name) name = argv[i];
+        } else if (!in)
+            in = argv[i];
+        else if (!name)
+            name = argv[i];
     }
     if (!in) {
-        fprintf(stderr, "Usage: %s import <shadertoy-export.json> [name] [--force]\n"
-                        "  Export from shadertoy.com (the shader page's Export button, or the API's\n"
-                        "  /api/v1/shaders/<id>) and import it as a neowall shader.\n", argv[0]);
+        fprintf(stderr,
+                "Usage: %s import <shadertoy-export.json> [name] [--force]\n"
+                "  Export from shadertoy.com (the shader page's Export button, or the API's\n"
+                "  /api/v1/shaders/<id>) and import it as a neowall shader.\n",
+                argv[0]);
         return EXIT_FAILURE;
     }
     FILE *f = !strcmp(in, "-") ? stdin : fopen(in, "rb");
@@ -107,7 +112,8 @@ int cmd_import(int argc, char *argv[]) {
     nw_str json = {0};
     char buf[65536];
     size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), f)) > 0 && json.len < (64u << 20)) nw_str_append_n(&json, buf, n);
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0 && json.len < (64u << 20))
+        nw_str_append_n(&json, buf, n);
     if (f != stdin) fclose(f);
 
     nw_import im = {0};
@@ -120,16 +126,19 @@ int cmd_import(int argc, char *argv[]) {
     }
 
     /* the file name: given, else the title as a slug, else the input's stem */
-    char stem[128] = "";
+    char stem[128]   = "";
     const char *from = name ? name : im.name;
     for (size_t i = 0, k = 0; from && from[i] && k < sizeof(stem) - 1; i++) {
         unsigned char c = (unsigned char)from[i];
-        if (isalnum(c)) stem[k++] = (char)tolower(c);
-        else if (k && stem[k - 1] != '_') stem[k++] = '_';
+        if (isalnum(c))
+            stem[k++] = (char)tolower(c);
+        else if (k && stem[k - 1] != '_')
+            stem[k++] = '_';
         stem[k] = '\0';
     }
     size_t sl = strlen(stem);
-    while (sl && stem[sl - 1] == '_') stem[--sl] = '\0';
+    while (sl && stem[sl - 1] == '_')
+        stem[--sl] = '\0';
     if (!sl) snprintf(stem, sizeof(stem), "imported");
 
     char dir[4096], glsl[4352], man[4352];
@@ -177,10 +186,10 @@ int cmd_docs(int argc, char *argv[]) {
     const char *chunks[32];
     size_t nc = nw_shader_preamble_chunks(chunks, 32);
     static shader_doc_entry entries[1024];
-    size_t n = shader_docs_collect(chunks, nc, entries, 1024);
+    size_t n      = shader_docs_collect(chunks, nc, entries, 1024);
     const char *q = argc >= 3 ? argv[2] : NULL;
-    bool color = isatty(STDOUT_FILENO) && !getenv("NO_COLOR");
-    size_t shown = shader_docs_print(stdout, entries, n, q, color);
+    bool color    = isatty(STDOUT_FILENO) && !getenv("NO_COLOR");
+    size_t shown  = shader_docs_print(stdout, entries, n, q, color);
     if (!shown) {
         fprintf(stderr, "Nothing matches '%s'. Try `%s docs` for everything.\n", q, argv[0]);
         return EXIT_FAILURE;

@@ -7,7 +7,7 @@
 /* Until a frame's latency has been measured, assume it shows on the next
  * vblank after the nearest one. */
 #define NW_FRAME_CLOCK_SEED_LATENCY 1
-#define NW_FRAME_CLOCK_MAX_LATENCY 6
+#define NW_FRAME_CLOCK_MAX_LATENCY  6
 
 void nw_frame_clock_init(nw_frame_clock *fc) {
     memset(fc, 0, sizeof(*fc));
@@ -17,7 +17,7 @@ void nw_frame_clock_init(nw_frame_clock *fc) {
 void nw_frame_clock_reset(nw_frame_clock *fc) {
     uint64_t last = fc->last_target;
     nw_frame_clock_init(fc);
-    fc->last_target = last;   /* stay monotonic across the reset */
+    fc->last_target = last; /* stay monotonic across the reset */
 }
 
 /* Nearest whole number of refreshes in a signed ns span. */
@@ -30,8 +30,8 @@ uint64_t nw_frame_clock_target(nw_frame_clock *fc, uint64_t now_ns, int *latency
     if (!fc->grid_ns || !fc->refresh_ns) return 0;
 
     const int64_t r = (int64_t)fc->refresh_ns;
-    int64_t k = round_div((int64_t)(now_ns - fc->grid_ns), r);
-    uint64_t ideal = fc->grid_ns + (uint64_t)((k + fc->latency) * r);
+    int64_t k       = round_div((int64_t)(now_ns - fc->grid_ns), r);
+    uint64_t ideal  = fc->grid_ns + (uint64_t)((k + fc->latency) * r);
 
     /* Chain off the previous stamp in whole refreshes, so steps are exactly
      * N refreshes even when the measured grid wobbles. Resync to the grid
@@ -39,11 +39,13 @@ uint64_t nw_frame_clock_target(nw_frame_clock *fc, uint64_t now_ns, int *latency
     uint64_t target = ideal;
     if (fc->last_target) {
         int64_t n = round_div((int64_t)(ideal - fc->last_target), r);
-        if (n < 1) n = 1;   /* always move forward */
+        if (n < 1) n = 1; /* always move forward */
         uint64_t chained = fc->last_target + (uint64_t)(n * r);
-        int64_t drift = (int64_t)(ideal - chained);
-        if (drift <= r / 8 && drift >= -r / 8) target = chained;
-        else if (ideal <= fc->last_target) target = chained;
+        int64_t drift    = (int64_t)(ideal - chained);
+        if (drift <= r / 8 && drift >= -r / 8)
+            target = chained;
+        else if (ideal <= fc->last_target)
+            target = chained;
     }
     fc->last_target = target;
     return target;
@@ -54,9 +56,10 @@ static int vote_mode(const nw_frame_clock *fc) {
     int best = fc->latency, best_n = 0;
     for (int i = 0; i < fc->nvotes; i++) {
         int n = 0;
-        for (int j = 0; j < fc->nvotes; j++) n += fc->votes[j] == fc->votes[i];
+        for (int j = 0; j < fc->nvotes; j++)
+            n += fc->votes[j] == fc->votes[i];
         if (n > best_n || (n == best_n && fc->votes[i] == fc->latency)) {
-            best = fc->votes[i];
+            best   = fc->votes[i];
             best_n = n;
         }
     }
@@ -75,10 +78,12 @@ void nw_frame_clock_presented(nw_frame_clock *fc, uint64_t target_ns, int latenc
      * long gap), where the old grid is simply wrong. */
     if (fc->grid_ns && fc->refresh_ns) {
         const int64_t r = (int64_t)fc->refresh_ns;
-        int64_t d = (int64_t)(present_ns - fc->grid_ns);
-        int64_t err = d - round_div(d, r) * r;          /* -r/2 .. r/2 */
-        if (err > r / 4 || err < -r / 4) fc->grid_ns = present_ns;
-        else fc->grid_ns = present_ns - (uint64_t)(err - err / 8);
+        int64_t d       = (int64_t)(present_ns - fc->grid_ns);
+        int64_t err     = d - round_div(d, r) * r; /* -r/2 .. r/2 */
+        if (err > r / 4 || err < -r / 4)
+            fc->grid_ns = present_ns;
+        else
+            fc->grid_ns = present_ns - (uint64_t)(err - err / 8);
     } else {
         fc->grid_ns = present_ns;
     }
@@ -93,7 +98,7 @@ void nw_frame_clock_presented(nw_frame_clock *fc, uint64_t target_ns, int latenc
     if (lat > NW_FRAME_CLOCK_MAX_LATENCY) lat = NW_FRAME_CLOCK_MAX_LATENCY;
 
     fc->votes[fc->vote_pos] = (int)lat;
-    fc->vote_pos = (fc->vote_pos + 1) % NW_FRAME_CLOCK_VOTES;
+    fc->vote_pos            = (fc->vote_pos + 1) % NW_FRAME_CLOCK_VOTES;
     if (fc->nvotes < NW_FRAME_CLOCK_VOTES) fc->nvotes++;
     fc->latency = vote_mode(fc);
 }

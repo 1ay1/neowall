@@ -39,7 +39,7 @@ static bool has_ext(const char *list, const char *name) {
     size_t n = strlen(name);
     for (const char *p = list; (p = strstr(p, name)) != NULL; p += n) {
         bool start = p == list || p[-1] == ' ';
-        bool end = p[n] == ' ' || p[n] == '\0';
+        bool end   = p[n] == ' ' || p[n] == '\0';
         if (start && end) return true;
     }
     return false;
@@ -48,31 +48,39 @@ static bool has_ext(const char *list, const char *name) {
 bool gpu_health_context_attribs(EGLDisplay dpy, EGLint *a, int cap) {
     int i = 0;
     if (cap < 11) return false;
-    a[i++] = EGL_CONTEXT_MAJOR_VERSION; a[i++] = 3;
-    a[i++] = EGL_CONTEXT_MINOR_VERSION; a[i++] = 3;
-    a[i++] = EGL_CONTEXT_OPENGL_PROFILE_MASK; a[i++] = EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT;
+    a[i++] = EGL_CONTEXT_MAJOR_VERSION;
+    a[i++] = 3;
+    a[i++] = EGL_CONTEXT_MINOR_VERSION;
+    a[i++] = 3;
+    a[i++] = EGL_CONTEXT_OPENGL_PROFILE_MASK;
+    a[i++] = EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT;
 
     /* EGL 1.5 core and EGL_KHR_create_context both spell robustness the same. */
     EGLint major = 0, minor = 0;
     const char *ver = eglQueryString(dpy, EGL_VERSION);
     if (ver) {
-        major = atoi(ver);
+        major           = atoi(ver);
         const char *dot = strchr(ver, '.');
         if (dot) minor = atoi(dot + 1);
     }
     bool robust = (major > 1 || (major == 1 && minor >= 5)) ||
                   has_ext(eglQueryString(dpy, EGL_EXTENSIONS), "EGL_KHR_create_context");
     if (robust) {
-        a[i++] = EGL_CONTEXT_OPENGL_ROBUST_ACCESS; a[i++] = EGL_TRUE;
-        a[i++] = EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY; a[i++] = EGL_LOSE_CONTEXT_ON_RESET;
+        a[i++] = EGL_CONTEXT_OPENGL_ROBUST_ACCESS;
+        a[i++] = EGL_TRUE;
+        a[i++] = EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY;
+        a[i++] = EGL_LOSE_CONTEXT_ON_RESET;
     }
     a[i] = EGL_NONE;
     return robust;
 }
 
-static void debug_message(GLenum source, GLenum type, GLuint id, GLenum severity,
-                          GLsizei len, const GLchar *msg, const void *user) {
-    (void)source; (void)id; (void)len; (void)user;
+static void debug_message(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei len,
+                          const GLchar *msg, const void *user) {
+    (void)source;
+    (void)id;
+    (void)len;
+    (void)user;
     /* 0x9146 HIGH, 0x9147 MEDIUM, 0x9148 LOW, 0x826B NOTIFICATION */
     if (severity == 0x826B) return;
     if (type == 0x824C /* ERROR */ || severity == 0x9146) {
@@ -83,9 +91,13 @@ static void debug_message(GLenum source, GLenum type, GLuint id, GLenum severity
 }
 
 void gpu_health_init(bool robust, bool verbose) {
-    g_lost = false;
+    g_lost         = false;
     g_reset_status = NULL;
-    union { void (*fn)(void); reset_status_fn rs; debug_cb_set_fn dbg; } u;
+    union {
+        void (*fn)(void);
+        reset_status_fn rs;
+        debug_cb_set_fn dbg;
+    } u;
 
     if (robust) {
         u.fn = eglGetProcAddress("glGetGraphicsResetStatus");
@@ -118,8 +130,9 @@ bool gpu_health_lost(void) {
     if (!gpu_health_status_is_lost(s)) return false;
     g_lost = true;
     log_error("GPU reset detected (%s); the GL context is gone",
-              s == GL_GUILTY_CONTEXT_RESET ? "caused by neowall" :
-              s == GL_INNOCENT_CONTEXT_RESET ? "caused by another program" : "cause unknown");
+              s == GL_GUILTY_CONTEXT_RESET     ? "caused by neowall"
+              : s == GL_INNOCENT_CONTEXT_RESET ? "caused by another program"
+                                               : "cause unknown");
     return true;
 }
 

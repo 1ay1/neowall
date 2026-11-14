@@ -40,14 +40,14 @@ typedef struct {
     struct wl_keyboard *keyboard;
     bool initialized;
     bool occlusion_active;
-    bool has_pointer_cap;   /* seat advertised WL_SEAT_CAPABILITY_POINTER */
+    bool has_pointer_cap; /* seat advertised WL_SEAT_CAPABILITY_POINTER */
 
     /* Pointer tracking for terminal-wallpaper input forwarding. The pointer
      * `enter` binds these to the output under the cursor; motion updates the
      * surface-local pixel position; button/axis forward mouse reports. */
-    struct output_state *ptr_output;  /* ref-held output currently under pointer */
-    int  ptr_x, ptr_y;                /* buffer-pixel position */
-    uint8_t ptr_buttons;              /* terminal buttons 0..2 currently held */
+    struct output_state *ptr_output; /* ref-held output currently under pointer */
+    int ptr_x, ptr_y;                /* buffer-pixel position */
+    uint8_t ptr_buttons;             /* terminal buttons 0..2 currently held */
 
     /* Keyboard focus + xkb state for terminal-wallpaper typing. kbd_output is
      * the terminal surface that currently holds keyboard focus (via ON_DEMAND
@@ -55,8 +55,8 @@ typedef struct {
     struct output_state *kbd_output;
 #ifdef NEOWALL_HAVE_XKB
     struct xkb_context *xkb_ctx;
-    struct xkb_keymap  *xkb_keymap;
-    struct xkb_state   *xkb_state;
+    struct xkb_keymap *xkb_keymap;
+    struct xkb_state *xkb_state;
 #endif
 } wlr_backend_data_t;
 

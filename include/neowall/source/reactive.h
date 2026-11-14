@@ -32,10 +32,11 @@
  * value into the render path so the shader sees a consistent set each frame. */
 typedef struct {
     /* --- load (0..1, smoothed) --- */
-    float cpu;          /* total CPU utilisation */
-    float cpu_per[REACTIVE_MAX_CPU_CORES]; /* up to REACTIVE_MAX_CPU_CORES per-core utilisations (0 if absent) */
-    int   cpu_cores;    /* number of valid entries in cpu_per */
-    float cpu_max;      /* hottest single core 0..1 (spots one pegged thread) */
+    float cpu;                             /* total CPU utilisation */
+    float cpu_per[REACTIVE_MAX_CPU_CORES]; /* up to REACTIVE_MAX_CPU_CORES per-core utilisations (0
+                                              if absent) */
+    int cpu_cores;                         /* number of valid entries in cpu_per */
+    float cpu_max;                         /* hottest single core 0..1 (spots one pegged thread) */
     float cpu_spread;   /* core-load imbalance 0..1 (0 even, 1 one core pegged) */
     float ram;          /* used / total physical memory */
     float ram_gb;       /* used physical memory in GiB (absolute) */
@@ -51,31 +52,31 @@ typedef struct {
     float load_raw;     /* raw 1-min load average (not normalised) */
 
     /* --- thermals + GPU (best-effort; 0 if unavailable) --- */
-    float cpu_temp;     /* CPU package temp, normalised 0..1 over 30..95 C */
-    float cpu_temp_c;   /* CPU package temp in degrees C (0 if unknown) */
-    float gpu;          /* GPU utilisation 0..1 (amdgpu/nvidia/i915 best-effort) */
-    float gpu_temp;     /* GPU temp normalised 0..1 over 30..95 C */
-    float gpu_temp_c;   /* GPU temp in degrees C (0 if unknown) */
+    float cpu_temp;   /* CPU package temp, normalised 0..1 over 30..95 C */
+    float cpu_temp_c; /* CPU package temp in degrees C (0 if unknown) */
+    float gpu;        /* GPU utilisation 0..1 (amdgpu/nvidia/i915 best-effort) */
+    float gpu_temp;   /* GPU temp normalised 0..1 over 30..95 C */
+    float gpu_temp_c; /* GPU temp in degrees C (0 if unknown) */
     /* NVIDIA proprietary (via nvidia-smi worker; 0 if unavailable) */
-    float nv_gpu;       /* NVIDIA GPU utilisation 0..1 */
-    float nv_vram;      /* NVIDIA VRAM used / total 0..1 */
-    float nv_temp_c;    /* NVIDIA GPU temp in degrees C */
-    float nv_power;     /* NVIDIA board power draw / limit 0..1 */
-    bool  nv_active;    /* true if nvidia-smi is producing data */
+    float nv_gpu;    /* NVIDIA GPU utilisation 0..1 */
+    float nv_vram;   /* NVIDIA VRAM used / total 0..1 */
+    float nv_temp_c; /* NVIDIA GPU temp in degrees C */
+    float nv_power;  /* NVIDIA board power draw / limit 0..1 */
+    bool nv_active;  /* true if nvidia-smi is producing data */
 
     /* --- fused / derived shaping signals (0..1) --- */
-    float thermal;      /* hottest of CPU/GPU normalised 0..1 (30..95 C) */
-    float activity;     /* overall machine busyness (cpu/io/net fused) */
-    float pulse;        /* stress heartbeat: rhythmic beat scaled by load */
+    float thermal;  /* hottest of CPU/GPU normalised 0..1 (30..95 C) */
+    float activity; /* overall machine busyness (cpu/io/net fused) */
+    float pulse;    /* stress heartbeat: rhythmic beat scaled by load */
 
     /* --- uptime + processes --- */
     float uptime_hours; /* system uptime in hours */
     float procs;        /* running/total process activity proxy 0..1 */
-    int   proc_count;   /* total process/thread count (capped) */
+    int proc_count;     /* total process/thread count (capped) */
 
     /* --- power --- */
-    float battery;      /* charge fraction 0..1 (1 if no battery present) */
-    bool  charging;     /* true if AC online / charging */
+    float battery; /* charge fraction 0..1 (1 if no battery present) */
+    bool charging; /* true if AC online / charging */
 
     /* --- time --- */
     float time_of_day;  /* 0..1 across the local day (0 = midnight) */
@@ -87,12 +88,12 @@ typedef struct {
     float mouse_energy; /* recent mouse motion speed */
 
     /* --- audio --- */
-    bool  audio_active;            /* true if a capture source is producing data */
-    float audio_level;             /* overall RMS loudness 0..1 (smoothed) */
-    float audio_bass;              /* low band energy 0..1 */
-    float audio_mid;               /* mid band energy 0..1 */
-    float audio_treble;            /* high band energy 0..1 */
-    float audio_beat;              /* 0..1 beat pulse, spikes on onset, decays */
+    bool audio_active;  /* true if a capture source is producing data */
+    float audio_level;  /* overall RMS loudness 0..1 (smoothed) */
+    float audio_bass;   /* low band energy 0..1 */
+    float audio_mid;    /* mid band energy 0..1 */
+    float audio_treble; /* high band energy 0..1 */
+    float audio_beat;   /* 0..1 beat pulse, spikes on onset, decays */
     /* Spectrum + waveform, each REACTIVE_AUDIO_BINS samples in 0..1.
      * Uploaded as the two rows of the audio iChannel texture. */
     float audio_spectrum[REACTIVE_AUDIO_BINS];

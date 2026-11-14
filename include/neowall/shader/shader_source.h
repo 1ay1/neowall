@@ -27,9 +27,9 @@ typedef enum {
     NW_IN_KEYBOARD, /* 256x3 key state (Shadertoy layout) */
     NW_IN_IMAGE,    /* a texture file */
     NW_IN_BLUE_NOISE,
-    NW_IN_CUBE,     /* a cube pass's output (Shadertoy "Cubemap A"): a samplerCube */
-    NW_IN_SKY,      /* a built-in sky cube, for shaders that sample one of
-                     * Shadertoy's cube maps (Uffizi, Forest, ...) we can't ship */
+    NW_IN_CUBE, /* a cube pass's output (Shadertoy "Cubemap A"): a samplerCube */
+    NW_IN_SKY,  /* a built-in sky cube, for shaders that sample one of
+                 * Shadertoy's cube maps (Uffizi, Forest, ...) we can't ship */
 } nw_input_kind;
 
 typedef struct {
@@ -47,16 +47,16 @@ typedef enum { NW_WRAP_CLAMP, NW_WRAP_REPEAT, NW_WRAP_MIRROR } nw_wrap;
 #define NW_CHANNELS 4
 
 typedef struct {
-    const char *name;        /* "Image", "Buffer A", or a manifest name */
-    const char *body;        /* this pass's GLSL, includes expanded */
-    int first_line;          /* body line 1 = this line in `file` */
+    const char *name; /* "Image", "Buffer A", or a manifest name */
+    const char *body; /* this pass's GLSL, includes expanded */
+    int first_line;   /* body line 1 = this line in `file` */
     const char *file;
-    bool is_image;           /* the pass that reaches the screen */
-    bool is_cube;            /* mainCubemap: renders the six faces of a cube */
+    bool is_image; /* the pass that reaches the screen */
+    bool is_cube;  /* mainCubemap: renders the six faces of a cube */
     nw_input ch[NW_CHANNELS];
     nw_format format;
-    double scale;            /* of the output size; ignored when fixed */
-    int fixed_w, fixed_h;    /* 0 = follow the output */
+    double scale;         /* of the output size; ignored when fixed */
+    int fixed_w, fixed_h; /* 0 = follow the output */
     nw_filter filter;
     nw_wrap wrap;
 } nw_pass_src;
@@ -64,16 +64,16 @@ typedef struct {
 /* A `// @param` tweakable. Declared by the engine; live-settable. */
 typedef struct {
     const char *name;
-    const char *type;        /* "float" "vec2" "vec3" "vec4" "int" "bool" */
+    const char *type; /* "float" "vec2" "vec3" "vec4" "int" "bool" */
     float def[4];
-    float min, max, step;    /* 0,0,0 = unbounded */
+    float min, max, step; /* 0,0,0 = unbounded */
     const char *help;
 } nw_param;
 
 /* A manifest `uniforms { uWind cpu }` binding to a live source. */
 typedef struct {
     const char *name;
-    const char *source;      /* source spec text, e.g. "cpu", "0.8", "exec(...)" */
+    const char *source; /* source spec text, e.g. "cpu", "0.8", "exec(...)" */
 } nw_uniform_bind;
 
 /* One line of generated GLSL -> where the author wrote it. */
@@ -83,19 +83,19 @@ typedef struct {
 } nw_src_loc;
 
 typedef struct nw_shader_source {
-    const char *path;            /* the .glsl */
-    const char *common;          /* shared by every pass, may be NULL */
+    const char *path;   /* the .glsl */
+    const char *common; /* shared by every pass, may be NULL */
     int common_first_line;
     const char *common_file;
-    NW_LIST(nw_pass_src) passes;  /* in execution order (sorted) */
+    NW_LIST(nw_pass_src) passes; /* in execution order (sorted) */
     int image_pass;
     NW_LIST(nw_param) params;
     NW_LIST(nw_uniform_bind) binds;
-    nw_strs includes;            /* every .glsl read; [0] = the shader */
-    const char *manifest;        /* the .neowall read, or NULL */
-    const char *state_pass;      /* manifest `state <pass>`, or NULL */
-    bool explicit_bindings;      /* a manifest set channels; no guessing */
-    bool animated;               /* uses time/mouse/audio/feedback */
+    nw_strs includes;       /* every .glsl read; [0] = the shader */
+    const char *manifest;   /* the .neowall read, or NULL */
+    const char *state_pass; /* manifest `state <pass>`, or NULL */
+    bool explicit_bindings; /* a manifest set channels; no guessing */
+    bool animated;          /* uses time/mouse/audio/feedback */
     nw_arena arena_;
 } nw_shader_source;
 

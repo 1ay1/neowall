@@ -19,11 +19,11 @@
 
 /**
  * Transition Registry
- * 
+ *
  * Central registry for all transition effects. New transitions can be added
  * simply by implementing the transition_render_func signature and registering
  * it in the transitions array.
- * 
+ *
  * This modular architecture makes it easy to:
  * - Add new transitions without modifying core render code
  * - Maintain transitions in separate, focused files
@@ -32,28 +32,28 @@
  */
 
 static const struct transition transitions[] = {
-    { TRANSITION_FADE,        "fade",        transition_fade_render },
-    { TRANSITION_SLIDE_LEFT,  "slide_left",  transition_slide_left_render },
-    { TRANSITION_SLIDE_RIGHT, "slide_right", transition_slide_right_render },
-    { TRANSITION_GLITCH,      "glitch",      transition_glitch_render },
-    { TRANSITION_PIXELATE,    "pixelate",    transition_pixelate_render },
+    {TRANSITION_FADE,        "fade",        transition_fade_render       },
+    {TRANSITION_SLIDE_LEFT,  "slide_left",  transition_slide_left_render },
+    {TRANSITION_SLIDE_RIGHT, "slide_right", transition_slide_right_render},
+    {TRANSITION_GLITCH,      "glitch",      transition_glitch_render     },
+    {TRANSITION_PIXELATE,    "pixelate",    transition_pixelate_render   },
 };
 
 static const size_t transition_count = sizeof(transitions) / sizeof(transitions[0]);
 
 /**
  * Initialize transitions system
- * 
+ *
  * Currently no initialization needed, but provides hook for future
  * enhancements like dynamic registration or shader precompilation.
  */
 
 /**
  * Render a transition effect
- * 
+ *
  * Dispatches to the appropriate transition renderer based on type.
  * If the transition type is not found, returns false.
- * 
+ *
  * @param output Output state containing images and textures
  * @param type Type of transition to render
  * @param progress Transition progress (0.0 to 1.0)
@@ -68,8 +68,7 @@ bool transition_render(struct output_state *output, enum transition_type type, f
     /* Find and execute the transition renderer */
     for (size_t i = 0; i < transition_count; i++) {
         if (transitions[i].type == type) {
-            log_debug("Rendering transition: %s (progress=%.2f)", 
-                     transitions[i].name, progress);
+            log_debug("Rendering transition: %s (progress=%.2f)", transitions[i].name, progress);
             return transitions[i].render(output, progress);
         }
     }
@@ -83,10 +82,22 @@ bool transition_render(struct output_state *output, enum transition_type type, f
  * ============================================================================ */
 
 static void setup_fullscreen_quad(float vertices[16]) {
-    vertices[0]  = -1.0f; vertices[1]  =  1.0f; vertices[2]  = 0.0f; vertices[3]  = 0.0f;
-    vertices[4]  =  1.0f; vertices[5]  =  1.0f; vertices[6]  = 1.0f; vertices[7]  = 0.0f;
-    vertices[8]  = -1.0f; vertices[9]  = -1.0f; vertices[10] = 0.0f; vertices[11] = 1.0f;
-    vertices[12] =  1.0f; vertices[13] = -1.0f; vertices[14] = 1.0f; vertices[15] = 1.0f;
+    vertices[0]  = -1.0f;
+    vertices[1]  = 1.0f;
+    vertices[2]  = 0.0f;
+    vertices[3]  = 0.0f;
+    vertices[4]  = 1.0f;
+    vertices[5]  = 1.0f;
+    vertices[6]  = 1.0f;
+    vertices[7]  = 0.0f;
+    vertices[8]  = -1.0f;
+    vertices[9]  = -1.0f;
+    vertices[10] = 0.0f;
+    vertices[11] = 1.0f;
+    vertices[12] = 1.0f;
+    vertices[13] = -1.0f;
+    vertices[14] = 1.0f;
+    vertices[15] = 1.0f;
 }
 
 static void bind_texture(GLuint texture, GLenum texture_unit) {
@@ -111,11 +122,12 @@ bool transition_begin(transition_context_t *ctx, struct output_state *output, GL
     }
 
     memset(ctx, 0, sizeof(transition_context_t));
-    ctx->output = output;
+    ctx->output  = output;
     ctx->program = program;
 
     /* Clear previous GL errors */
-    while (glGetError() != GL_NO_ERROR);
+    while (glGetError() != GL_NO_ERROR)
+        ;
 
     /* Bind VAO - required for OpenGL 3.3 Core Profile */
     glBindVertexArray(output->vao);
@@ -135,13 +147,13 @@ bool transition_begin(transition_context_t *ctx, struct output_state *output, GL
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     output->gl_state.blend_enabled = true;
-    ctx->blend_enabled = true;
+    ctx->blend_enabled             = true;
 
     return true;
 }
 
-bool transition_draw_textured_quad(transition_context_t *ctx, GLuint texture,
-                                    float alpha, const float *custom_vertices) {
+bool transition_draw_textured_quad(transition_context_t *ctx, GLuint texture, float alpha,
+                                   const float *custom_vertices) {
     if (!ctx || !ctx->output || ctx->error_occurred) {
         return false;
     }
@@ -152,13 +164,12 @@ bool transition_draw_textured_quad(transition_context_t *ctx, GLuint texture,
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 16, verts, GL_DYNAMIC_DRAW);
 
     if (ctx->pos_attrib >= 0) {
-        glVertexAttribPointer(ctx->pos_attrib, 2, GL_FLOAT, GL_FALSE,
-                             4 * sizeof(float), (void*)0);
+        glVertexAttribPointer(ctx->pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
         glEnableVertexAttribArray(ctx->pos_attrib);
     }
     if (ctx->tex_attrib >= 0) {
-        glVertexAttribPointer(ctx->tex_attrib, 2, GL_FLOAT, GL_FALSE,
-                             4 * sizeof(float), (void*)(2 * sizeof(float)));
+        glVertexAttribPointer(ctx->tex_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                              (void *)(2 * sizeof(float)));
         glEnableVertexAttribArray(ctx->tex_attrib);
     }
 
@@ -186,10 +197,8 @@ bool transition_draw_textured_quad(transition_context_t *ctx, GLuint texture,
     return true;
 }
 
-bool transition_draw_blended_textures(transition_context_t *ctx,
-                                       GLuint texture0, GLuint texture1,
-                                       float progress, float time,
-                                       const float *resolution) {
+bool transition_draw_blended_textures(transition_context_t *ctx, GLuint texture0, GLuint texture1,
+                                      float progress, float time, const float *resolution) {
     if (!ctx || !ctx->output || ctx->error_occurred) {
         return false;
     }
@@ -198,13 +207,12 @@ bool transition_draw_blended_textures(transition_context_t *ctx,
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 16, ctx->vertices, GL_DYNAMIC_DRAW);
 
     if (ctx->pos_attrib >= 0) {
-        glVertexAttribPointer(ctx->pos_attrib, 2, GL_FLOAT, GL_FALSE,
-                             4 * sizeof(float), (void*)0);
+        glVertexAttribPointer(ctx->pos_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
         glEnableVertexAttribArray(ctx->pos_attrib);
     }
     if (ctx->tex_attrib >= 0) {
-        glVertexAttribPointer(ctx->tex_attrib, 2, GL_FLOAT, GL_FALSE,
-                             4 * sizeof(float), (void*)(2 * sizeof(float)));
+        glVertexAttribPointer(ctx->tex_attrib, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                              (void *)(2 * sizeof(float)));
         glEnableVertexAttribArray(ctx->tex_attrib);
     }
 
@@ -262,9 +270,9 @@ void transition_end(transition_context_t *ctx) {
      * still establish all required bindings explicitly. Both texture units
      * are unbound above, and GL_TEXTURE0 is active on return. */
     if (ctx->output) {
-        ctx->output->gl_state.bound_texture = 0;
+        ctx->output->gl_state.bound_texture  = 0;
         ctx->output->gl_state.active_program = 0;
-        ctx->output->gl_state.blend_enabled = false;
+        ctx->output->gl_state.blend_enabled  = false;
     }
 
     GLenum error = glGetError();

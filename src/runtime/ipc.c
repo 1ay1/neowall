@@ -1,6 +1,6 @@
 /* The control socket. See include/neowall/runtime/ipc.h. */
 
-#define _GNU_SOURCE   /* accept4, MSG_NOSIGNAL */
+#define _GNU_SOURCE /* accept4, MSG_NOSIGNAL */
 
 #include "neowall/runtime/ipc.h"
 
@@ -22,24 +22,30 @@
 /* A connection that hasn't sent a whole line in this long is dropped, so a
  * stuck or hostile client can't hold a slot forever. */
 #define IPC_CLIENT_TIMEOUT_MS 2000
-#define IPC_MAX_CONNS 32
+#define IPC_MAX_CONNS         32
 
 static bool fill_addr(struct sockaddr_un *a, const char *path) {
     memset(a, 0, sizeof(*a));
     a->sun_family = AF_UNIX;
-    size_t n = strlen(path);
+    size_t n      = strlen(path);
     if (n == 0 || n >= sizeof(a->sun_path)) return false;
     memcpy(a->sun_path, path, n + 1);
     return true;
 }
 
-static int64_t now_ms(void) { return rt_now_ns() / 1000000; }
+static int64_t now_ms(void) {
+    return rt_now_ns() / 1000000;
+}
 
 /* Write all of buf, giving up at `deadline`. */
 static bool write_all(int fd, const char *buf, size_t len, int64_t deadline) {
     while (len) {
         ssize_t w = send(fd, buf, len, MSG_NOSIGNAL);
-        if (w > 0) { buf += w; len -= (size_t)w; continue; }
+        if (w > 0) {
+            buf += w;
+            len -= (size_t)w;
+            continue;
+        }
         if (w < 0 && errno == EINTR) continue;
         if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
             int64_t left = deadline - now_ms();
@@ -55,8 +61,8 @@ static bool write_all(int fd, const char *buf, size_t len, int64_t deadline) {
 
 /* ── client ───────────────────────────────────────────────────────────── */
 
-nw_ipc_status nw_ipc_request(const char *path, const char *verb, const char *arg,
-                             char *reply, size_t reply_size, int timeout_ms) {
+nw_ipc_status nw_ipc_request(const char *path, const char *verb, const char *arg, char *reply,
+                             size_t reply_size, int timeout_ms) {
     if (reply && reply_size) reply[0] = '\0';
     struct sockaddr_un addr;
     if (!path || !fill_addr(&addr, path)) return NW_IPC_NO_DAEMON;
@@ -101,9 +107,15 @@ nw_ipc_status nw_ipc_request(const char *path, const char *verb, const char *arg
         if (errno == EINTR) continue;
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             int64_t left = deadline - now_ms();
-            if (left <= 0) { close(fd); return NW_IPC_FAILED; }
+            if (left <= 0) {
+                close(fd);
+                return NW_IPC_FAILED;
+            }
             struct pollfd p = {.fd = fd, .events = POLLIN};
-            if (poll(&p, 1, (int)left) <= 0) { close(fd); return NW_IPC_FAILED; }
+            if (poll(&p, 1, (int)left) <= 0) {
+                close(fd);
+                return NW_IPC_FAILED;
+            }
             continue;
         }
         close(fd);
@@ -115,7 +127,7 @@ nw_ipc_status nw_ipc_request(const char *path, const char *verb, const char *arg
     if (!nl) return NW_IPC_FAILED;
     *nl = '\0';
 
-    bool ok = strncmp(buf, "ok", 2) == 0 && (buf[2] == '\0' || buf[2] == ' ');
+    bool ok  = strncmp(buf, "ok", 2) == 0 && (buf[2] == '\0' || buf[2] == ' ');
     bool err = strncmp(buf, "err", 3) == 0 && (buf[3] == '\0' || buf[3] == ' ');
     if (!ok && !err) return NW_IPC_FAILED;
     const char *text = buf + (ok ? 2 : 3);
@@ -127,13 +139,13 @@ nw_ipc_status nw_ipc_request(const char *path, const char *verb, const char *arg
 /* ── server ───────────────────────────────────────────────────────────── */
 
 typedef struct {
-    uint32_t id;           /* 0 = free; stable for the reply */
+    uint32_t id; /* 0 = free; stable for the reply */
     int fd;
     uint32_t watch;
     int64_t started_ms;
     char buf[NW_IPC_MAX_LINE];
     size_t len;
-    bool requested;        /* a request went to the program; reply pending */
+    bool requested; /* a request went to the program; reply pending */
 } ipc_conn;
 
 struct nw_ipc_server {
@@ -166,8 +178,8 @@ static void conn_reply(nw_ipc_server *s, ipc_conn *c, bool ok, const char *text)
     int n = text && text[0] ? snprintf(line, sizeof(line), "%s %s\n", ok ? "ok" : "err", text)
                             : snprintf(line, sizeof(line), "%s\n", ok ? "ok" : "err");
     if (n > 0) {
-        if ((size_t)n >= sizeof(line)) {   /* truncated: keep the newline */
-            n = (int)sizeof(line) - 1;
+        if ((size_t)n >= sizeof(line)) { /* truncated: keep the newline */
+            n           = (int)sizeof(line) - 1;
             line[n - 1] = '\n';
         }
         (void)write_all(c->fd, line, (size_t)n, now_ms() + 200);
@@ -179,9 +191,9 @@ static void conn_reply(nw_ipc_server *s, ipc_conn *c, bool ok, const char *text)
  * well-formed. */
 static bool parse(ipc_conn *c, nw_ipc_request_t *req) {
     char *nl = memchr(c->buf, '\n', c->len);
-    *nl = '\0';
+    *nl      = '\0';
     if (nl > c->buf && nl[-1] == '\r') nl[-1] = '\0';
-    char *sp = strchr(c->buf, ' ');
+    char *sp    = strchr(c->buf, ' ');
     size_t vlen = sp ? (size_t)(sp - c->buf) : strlen(c->buf);
     if (vlen == 0 || vlen >= sizeof(req->verb)) return false;
     memcpy(req->verb, c->buf, vlen);
@@ -194,18 +206,24 @@ static bool parse(ipc_conn *c, nw_ipc_request_t *req) {
 static void on_conn(void *ctx, rt_loop *loop, int fd, unsigned ev) {
     (void)loop;
     nw_ipc_server *s = ctx;
-    ipc_conn *c = NULL;
+    ipc_conn *c      = NULL;
     for (int i = 0; i < IPC_MAX_CONNS; i++)
-        if (s->conns[i].id && s->conns[i].fd == fd) { c = &s->conns[i]; break; }
+        if (s->conns[i].id && s->conns[i].fd == fd) {
+            c = &s->conns[i];
+            break;
+        }
     if (!c) return;
 
-    if (c->requested) return;   /* parked until ipc_server_reply */
+    if (c->requested) return; /* parked until ipc_server_reply */
 
     if (ev & RT_READ) {
         ssize_t r = recv(fd, c->buf + c->len, sizeof(c->buf) - 1 - c->len, 0);
         if (r > 0) c->len += (size_t)r;
         if (r == 0 || (r < 0 && errno != EAGAIN && errno != EINTR)) {
-            if (!memchr(c->buf, '\n', c->len)) { conn_close(s, c); return; }
+            if (!memchr(c->buf, '\n', c->len)) {
+                conn_close(s, c);
+                return;
+            }
         }
     } else if (ev & RT_HANGUP) {
         conn_close(s, c);
@@ -219,7 +237,7 @@ static void on_conn(void *ctx, rt_loop *loop, int fd, unsigned ev) {
             return;
         }
         c->requested = true;
-        rt_watch_modify(s->loop, c->watch, 0);   /* reply is pending; stop reading */
+        rt_watch_modify(s->loop, c->watch, 0); /* reply is pending; stop reading */
         s->on_request(s->ctx, s->loop, &req);
         return;
     }
@@ -235,7 +253,7 @@ static void on_listen(void *ctx, rt_loop *loop, int fd, unsigned ev) {
     if (!(ev & RT_READ)) return;
     for (;;) {
         int cfd = accept4(fd, NULL, NULL, SOCK_CLOEXEC | SOCK_NONBLOCK);
-        if (cfd < 0) return;   /* EAGAIN: drained */
+        if (cfd < 0) return; /* EAGAIN: drained */
 
         /* Only the user who owns the daemon may drive it. The socket lives in
          * a 0700 dir, so this is defence in depth, not the only check. */
@@ -248,7 +266,10 @@ static void on_listen(void *ctx, rt_loop *loop, int fd, unsigned ev) {
 
         ipc_conn *c = NULL;
         for (int i = 0; i < IPC_MAX_CONNS; i++) {
-            if (!s->conns[i].id) { c = &s->conns[i]; break; }
+            if (!s->conns[i].id) {
+                c = &s->conns[i];
+                break;
+            }
             /* Reclaim a slot from a client that never finished its line. */
             if (!s->conns[i].requested &&
                 now_ms() - s->conns[i].started_ms > IPC_CLIENT_TIMEOUT_MS) {
@@ -259,22 +280,22 @@ static void on_listen(void *ctx, rt_loop *loop, int fd, unsigned ev) {
         }
         if (!c) {
             const char busy[] = "err daemon busy\n";
-            ssize_t w = send(cfd, busy, sizeof(busy) - 1, MSG_NOSIGNAL);
+            ssize_t w         = send(cfd, busy, sizeof(busy) - 1, MSG_NOSIGNAL);
             (void)w;
             close(cfd);
             continue;
         }
         memset(c, 0, sizeof(*c));
-        c->fd = cfd;
-        c->id = ++s->next_id ? s->next_id : ++s->next_id;   /* never 0 */
+        c->fd         = cfd;
+        c->id         = ++s->next_id ? s->next_id : ++s->next_id; /* never 0 */
         c->started_ms = now_ms();
-        c->watch = rt_watch(loop, cfd, RT_READ, on_conn, s);
+        c->watch      = rt_watch(loop, cfd, RT_READ, on_conn, s);
         if (!c->watch) conn_close(s, c);
     }
 }
 
-nw_ipc_server *ipc_server_start(rt_loop *loop, const char *path,
-                                nw_ipc_on_request on_request, void *ctx) {
+nw_ipc_server *ipc_server_start(rt_loop *loop, const char *path, nw_ipc_on_request on_request,
+                                void *ctx) {
     if (!path) path = "";
     struct sockaddr_un addr;
     if (!fill_addr(&addr, path)) {
@@ -300,8 +321,8 @@ nw_ipc_server *ipc_server_start(rt_loop *loop, const char *path,
         log_error("ipc: socket: %s", strerror(errno));
         return NULL;
     }
-    mode_t old = umask(0177);   /* the socket file is 0600 */
-    int b = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+    mode_t old = umask(0177); /* the socket file is 0600 */
+    int b      = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
     umask(old);
     if (b != 0 || listen(fd, 16) != 0) {
         log_error("ipc: bind %s: %s", path, strerror(errno));
@@ -315,12 +336,13 @@ nw_ipc_server *ipc_server_start(rt_loop *loop, const char *path,
         unlink(path);
         return NULL;
     }
-    s->loop = loop;
+    s->loop      = loop;
     s->listen_fd = fd;
     snprintf(s->path, sizeof(s->path), "%s", path);
     s->on_request = on_request;
-    s->ctx = ctx;
-    for (int i = 0; i < IPC_MAX_CONNS; i++) s->conns[i].fd = -1;
+    s->ctx        = ctx;
+    for (int i = 0; i < IPC_MAX_CONNS; i++)
+        s->conns[i].fd = -1;
     s->listen_watch = rt_watch(loop, fd, RT_READ, on_listen, s);
     if (!s->listen_watch) {
         ipc_server_stop(s);

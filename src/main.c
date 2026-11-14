@@ -52,14 +52,13 @@ static void remove_preview_files(void) {
 }
 
 int main(int argc, char *argv[]) {
-
-    struct neowall_state state = {0};
+    struct neowall_state state    = {0};
     char config_path[NW_PATH_MAX] = {0};
-    bool daemon_mode = true;  /* Default to daemon mode */
-    bool verbose = false;
-    bool clock_shifted = false;   /* --date/--timelapse moved the shader clock */
-    const char *preview_shader = NULL;   /* `preview <shader>`: run this, not the config */
-    bool watch_mode = false;             /* `watch <shader>`: recompile on save */
+    bool daemon_mode              = true; /* Default to daemon mode */
+    bool verbose                  = false;
+    bool clock_shifted            = false; /* --date/--timelapse moved the shader clock */
+    const char *preview_shader    = NULL;  /* `preview <shader>`: run this, not the config */
+    bool watch_mode               = false; /* `watch <shader>`: recompile on save */
     int opt;
 
     if (argc >= 2 && strcmp(argv[1], "new") == 0) return cmd_new(argc, argv);
@@ -77,7 +76,7 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
         preview_shader = argv[2];
-        watch_mode = is_watch;
+        watch_mode     = is_watch;
 
         /* Drop the subcommand and its argument so getopt sees only flags;
          * it scans from index 1, so argv[0] must stay a program name. */
@@ -96,57 +95,49 @@ int main(int argc, char *argv[]) {
         {"version",    no_argument,       0, 'V'},
         {"date",       required_argument, 0, 'D'},
         {"timelapse",  required_argument, 0, 'T'},
-        {0, 0, 0, 0}
+        {0,            0,                 0, 0  }
     };
 
     /* Parse command line arguments */
     while ((opt = getopt_long(argc, argv, "c:fvhV", long_options, NULL)) != -1) {
         switch (opt) {
-            case 'c':
-                snprintf(config_path, sizeof(config_path), "%s", optarg);
-                break;
-            case 'f':
-                daemon_mode = false;  /* Explicit foreground */
-                break;
-            case 'v':
-                /* Verbose mode - enable debug logging */
-                verbose = true;
-                break;
-            case 'D': {
-                /* Shift the shader-visible clock. Lets a day-scale shader be
-                 * inspected at an arbitrary point in its cycle instead of
-                 * waiting for the calendar to get there. */
-                long secs = 0;
-                if (!nw_clock_parse_offset(optarg, &secs)) {
-                    fprintf(stderr, "Invalid --date offset: %s\n", optarg);
-                    fprintf(stderr, "Expected a signed duration like +6d, -2h, 90m or 3600.\n");
-                    return EXIT_FAILURE;
-                }
-                nw_clock_set_offset(secs);
-                clock_shifted = true;
-                break;
-            }
-            case 'T': {
-                /* Compress a span of shader time into a span of real time. */
-                double scale = 1.0;
-                if (!nw_clock_parse_timelapse(optarg, &scale)) {
-                    fprintf(stderr, "Invalid --timelapse spec: %s\n", optarg);
-                    fprintf(stderr, "Expected SPAN/DURATION, e.g. 30d/20s.\n");
-                    return EXIT_FAILURE;
-                }
-                nw_clock_set_scale(scale);
-                clock_shifted = true;
-                break;
-            }
-            case 'h':
-                print_usage(argv[0]);
-                return EXIT_SUCCESS;
-            case 'V':
-                print_version();
-                return EXIT_SUCCESS;
-            default:
-                print_usage(argv[0]);
+        case 'c': snprintf(config_path, sizeof(config_path), "%s", optarg); break;
+        case 'f':
+            daemon_mode = false; /* Explicit foreground */
+            break;
+        case 'v':
+            /* Verbose mode - enable debug logging */
+            verbose = true;
+            break;
+        case 'D': {
+            /* Shift the shader-visible clock. Lets a day-scale shader be
+             * inspected at an arbitrary point in its cycle instead of
+             * waiting for the calendar to get there. */
+            long secs = 0;
+            if (!nw_clock_parse_offset(optarg, &secs)) {
+                fprintf(stderr, "Invalid --date offset: %s\n", optarg);
+                fprintf(stderr, "Expected a signed duration like +6d, -2h, 90m or 3600.\n");
                 return EXIT_FAILURE;
+            }
+            nw_clock_set_offset(secs);
+            clock_shifted = true;
+            break;
+        }
+        case 'T': {
+            /* Compress a span of shader time into a span of real time. */
+            double scale = 1.0;
+            if (!nw_clock_parse_timelapse(optarg, &scale)) {
+                fprintf(stderr, "Invalid --timelapse spec: %s\n", optarg);
+                fprintf(stderr, "Expected SPAN/DURATION, e.g. 30d/20s.\n");
+                return EXIT_FAILURE;
+            }
+            nw_clock_set_scale(scale);
+            clock_shifted = true;
+            break;
+        }
+        case 'h': print_usage(argv[0]); return EXIT_SUCCESS;
+        case 'V': print_version(); return EXIT_SUCCESS;
+        default: print_usage(argv[0]); return EXIT_FAILURE;
         }
     }
 
@@ -160,10 +151,9 @@ int main(int argc, char *argv[]) {
         time_t vnow = nw_clock_now();
         char stamp[64];
         struct tm tmv;
-        if (localtime_r(&vnow, &tmv) &&
-            strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", &tmv)) {
-            log_info("Shader clock: virtual (now=%s, offset=%lds, scale=%.4gx)",
-                     stamp, nw_clock_offset(), nw_clock_scale());
+        if (localtime_r(&vnow, &tmv) && strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", &tmv)) {
+            log_info("Shader clock: virtual (now=%s, offset=%lds, scale=%.4gx)", stamp,
+                     nw_clock_offset(), nw_clock_scale());
         }
         log_info("Shader clock is NOT real time - iDate/iTimeOfDay/iSun are shifted");
     }
@@ -178,7 +168,7 @@ int main(int argc, char *argv[]) {
      * the whole normal load/render path is exercised unchanged. Never touches
      * the user's config. Foreground is implied: a preview you cannot Ctrl-C is
      * not a preview. */
-    char preview_config[NW_PATH_MAX] = {0};
+    char preview_config[NW_PATH_MAX]   = {0};
     char preview_resolved[NW_PATH_MAX] = {0};
     if (preview_shader) {
         /* A path that exists wins (./x.glsl, ../x.glsl). Otherwise look the
@@ -192,9 +182,11 @@ int main(int argc, char *argv[]) {
             shader_resolve_path(preview_shader, found, sizeof(found)))
             ok = realpath(found, resolved) != NULL;
         if (!ok) {
-            fprintf(stderr, "Cannot find shader: %s\n"
-                            "Looked in the current directory and ~/.config/neowall/shaders/\n"
-                            "Make one with: neowall new <name>\n", preview_shader);
+            fprintf(stderr,
+                    "Cannot find shader: %s\n"
+                    "Looked in the current directory and ~/.config/neowall/shaders/\n"
+                    "Make one with: neowall new <name>\n",
+                    preview_shader);
             return EXIT_FAILURE;
         }
         snprintf(preview_resolved, sizeof(preview_resolved), "%s", resolved);
@@ -207,8 +199,8 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "No private directory for the preview config\n");
             return EXIT_FAILURE;
         }
-        snprintf(preview_config, sizeof(preview_config),
-                 "%s/neowall-preview-%d.vibe", runtime_dir, (int)getpid());
+        snprintf(preview_config, sizeof(preview_config), "%s/neowall-preview-%d.vibe", runtime_dir,
+                 (int)getpid());
 
         FILE *pf = fopen(preview_config, "w");
         if (!pf) {
@@ -250,7 +242,7 @@ int main(int argc, char *argv[]) {
      * to start or, worse, delete the running daemon's file on exit and leave
      * `neowall reload/next/kill` unable to find it. */
     pid_t existing_pid = 0;
-    pid_claim claim = preview_shader ? PID_CLAIM_OK : try_take_pid_file(&existing_pid);
+    pid_claim claim    = preview_shader ? PID_CLAIM_OK : try_take_pid_file(&existing_pid);
     if (claim == PID_CLAIM_FAILED) {
         fprintf(stderr, "Error: can't create the PID file %s (see the log above)\n",
                 get_pid_file_path());
@@ -285,8 +277,11 @@ int main(int argc, char *argv[]) {
 
     /* Initialize atomic state flags - MUST use atomic_init before any access */
     atomic_init(&state.running, true);
-    atomic_init(&state.mouse_interaction, true);  /* default: pointer enabled, override from config */
-    atomic_init(&state.term_raw_input, false);    /* default: drop signal/EOF keys so a stray Ctrl-C can't kill the wallpaper app */
+    atomic_init(&state.mouse_interaction,
+                true); /* default: pointer enabled, override from config */
+    atomic_init(
+        &state.term_raw_input,
+        false); /* default: drop signal/EOF keys so a stray Ctrl-C can't kill the wallpaper app */
     /* snprintf guarantees NUL-termination and silences GCC -O2
      * -Wstringop-truncation (config_path and state.config_path are the same
      * size, which is exactly the case the warning targets). */
@@ -306,7 +301,7 @@ int main(int argc, char *argv[]) {
 
     /* Start the shader watcher for `neowall watch`. Failure is non-fatal: the
      * shader still renders, it just will not hot-reload. */
-    state.watch_fd = -1;
+    state.watch_fd      = -1;
     state.watch_path[0] = '\0';
     if (watch_mode && preview_shader) {
         snprintf(state.watch_path, sizeof(state.watch_path), "%s", preview_resolved);

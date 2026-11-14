@@ -38,8 +38,10 @@ static inline void nw_child_close_fds(void) {
     if (max < 0 || max > 1 << 20) max = 1 << 20;
     int misses = 0;
     for (int fd = 3; fd < (int)max && misses < 4096; fd++) {
-        if (close(fd) == 0) misses = 0;
-        else misses++;
+        if (close(fd) == 0)
+            misses = 0;
+        else
+            misses++;
     }
 }
 

@@ -1,7 +1,6 @@
-# clang-format configuration for neowall.
-# Matches the existing house style: 4-space indent, K&R braces, 100-col soft
-# limit, pointers bound to the type. Run `clang-format -i $(git ls-files '*.c' '*.h')`
-# or rely on the pre-commit hook / CI check.
+# clang-format configuration for neowall: 4-space indent, attached braces,
+# 100 columns, pointers bound to the name. Run `scripts/format.sh` (or
+# `ninja -C build format`); CI runs `scripts/format.sh --check`.
 ---
 Language: Cpp
 BasedOnStyle: LLVM
@@ -11,20 +10,22 @@ TabWidth: 4
 UseTab: Never
 ColumnLimit: 100
 
-# Braces on the same line (K&R / Linux-ish), but functions get their own line.
-BreakBeforeBraces: Linux
+# Braces on the same line, functions included.
+BreakBeforeBraces: Attach
 
 # Pointer/reference hug the type: `int *p`, `char **argv`.
 PointerAlignment: Right
 DerivePointerAlignment: false
 
 AllowShortFunctionsOnASingleLine: InlineOnly
-AllowShortIfStatementsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: WithoutElse
 AllowShortLoopsOnASingleLine: false
-AllowShortCaseLabelsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: true
 
 AlignAfterOpenBracket: Align
 AlignConsecutiveMacros: true
+AlignConsecutiveAssignments: Consecutive
+AlignArrayOfStructures: Left
 AlignTrailingComments: true
 
 SpaceAfterCStyleCast: false
@@ -38,3 +39,6 @@ MaxEmptyLinesToKeep: 2
 SortIncludes: false   # include order is meaningful in C (system vs project)
 
 IncludeBlocks: Preserve
+
+# Long messages and embedded GLSL stay greppable.
+BreakStringLiterals: false

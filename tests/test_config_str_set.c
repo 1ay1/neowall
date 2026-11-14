@@ -44,7 +44,7 @@ int main(void) {
         char term_cmd[256];
         snprintf(term_cmd, sizeof(term_cmd), "sh -c 'while :; do date; sleep 1; done'");
 
-        const char *cmd = term_cmd;            /* caller passes the config field */
+        const char *cmd = term_cmd; /* caller passes the config field */
         config_str_set(term_cmd, sizeof(term_cmd), cmd);
 
         check(strcmp(term_cmd, "sh -c 'while :; do date; sleep 1; done'") == 0,
@@ -67,7 +67,7 @@ int main(void) {
     {
         char dst[8];
         static const char long_src[] = "0123456789abcdef";
-        const char *volatile src = long_src;
+        const char *volatile src     = long_src;
         config_str_set(dst, sizeof(dst), src);
         check(strlen(dst) == 7, "overlong source truncates to dst_size-1");
         check(dst[7] == '\0', "truncated result is NUL-terminated");

@@ -32,12 +32,12 @@ struct capture_run {
 
     pthread_t thread;
     atomic_bool stop;
-    int wake[2];                 /* starter writes, reader polls */
-    pthread_mutex_t pid_lock;    /* kill vs reap */
-    pid_t pid;                   /* under pid_lock; -1 when none */
+    int wake[2];              /* starter writes, reader polls */
+    pthread_mutex_t pid_lock; /* kill vs reap */
+    pid_t pid;                /* under pid_lock; -1 when none */
     pthread_mutex_t exit_lock;
-    pthread_cond_t exit_cond;    /* CLOCK_MONOTONIC */
-    bool exited;                 /* under exit_lock */
+    pthread_cond_t exit_cond; /* CLOCK_MONOTONIC */
+    bool exited;              /* under exit_lock */
 };
 
 static void run_unref(capture_run *r) {
@@ -57,15 +57,15 @@ static capture_run *run_new(capture *c) {
         free(r);
         return NULL;
     }
-    fcntl(r->wake[1], F_SETFL, O_NONBLOCK);   /* a wake never blocks */
-    atomic_init(&r->refs, 2);                 /* starter + reader */
+    fcntl(r->wake[1], F_SETFL, O_NONBLOCK); /* a wake never blocks */
+    atomic_init(&r->refs, 2);               /* starter + reader */
     atomic_init(&r->stop, false);
     r->argv = c->argv;
     r->name = c->name;
     r->read = c->read;
-    r->ctx = c->ctx;
+    r->ctx  = c->ctx;
     r->live = &c->live;
-    r->pid = -1;
+    r->pid  = -1;
     pthread_mutex_init(&r->pid_lock, NULL);
     pthread_mutex_init(&r->exit_lock, NULL);
     pthread_condattr_t a;
@@ -81,7 +81,10 @@ static struct timespec mono_in(long ms) {
     clock_gettime(CLOCK_MONOTONIC, &t);
     t.tv_sec += ms / 1000;
     t.tv_nsec += (ms % 1000) * 1000000L;
-    if (t.tv_nsec >= 1000000000L) { t.tv_sec++; t.tv_nsec -= 1000000000L; }
+    if (t.tv_nsec >= 1000000000L) {
+        t.tv_sec++;
+        t.tv_nsec -= 1000000000L;
+    }
     return t;
 }
 
@@ -97,7 +100,7 @@ static int spawn(capture_run *r, pid_t *out) {
     nw_spawn_close_fds(&fa, -1);
     posix_spawnattr_t attr;
     bool have_attr = nw_spawnattr_reset_signals(&attr) == 0;
-    int rc = posix_spawnp(out, r->argv[0], &fa, have_attr ? &attr : NULL, r->argv, environ);
+    int rc         = posix_spawnp(out, r->argv[0], &fa, have_attr ? &attr : NULL, r->argv, environ);
     if (have_attr) posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&fa);
     close(p[1]);
@@ -110,7 +113,10 @@ static int spawn(capture_run *r, pid_t *out) {
 
 bool capture_poll(capture_run *r, int fd) {
     for (;;) {
-        struct pollfd pf[2] = {{.fd = fd, .events = POLLIN}, {.fd = r->wake[0], .events = POLLIN}};
+        struct pollfd pf[2] = {
+            {.fd = fd,         .events = POLLIN},
+            {.fd = r->wake[0], .events = POLLIN}
+        };
         int n = poll(pf, 2, -1);
         if (n < 0 && errno == EINTR) continue;
         if (n < 0 || pf[1].revents || atomic_load(&r->stop)) return false;
@@ -126,12 +132,12 @@ static void *reader(void *arg) {
     capture_run *r = arg;
     signal(SIGPIPE, SIG_IGN);
     pid_t pid = -1;
-    int fd = spawn(r, &pid);
+    int fd    = spawn(r, &pid);
     if (fd < 0) {
         log_info("Reactive: %s unavailable (%s not found)", r->name, r->argv[0]);
     } else {
         pthread_mutex_lock(&r->pid_lock);
-        r->pid = pid;
+        r->pid        = pid;
         bool stopping = atomic_load(&r->stop);
         pthread_mutex_unlock(&r->pid_lock);
         if (!stopping) r->read(r, fd, r->ctx);
@@ -178,13 +184,15 @@ bool capture_stop(capture *c, long stop_ms) {
     c->run = NULL;
     atomic_store(&r->stop, true);
     atomic_store(&c->live, false);
-    char b = 'x';
+    char b    = 'x';
     ssize_t n = write(r->wake[1], &b, 1);
     (void)n;
     kill_child(r);
     struct timespec until = mono_in(stop_ms);
     pthread_mutex_lock(&r->exit_lock);
-    while (!r->exited && pthread_cond_timedwait(&r->exit_cond, &r->exit_lock, &until) != ETIMEDOUT) {}
+    while (!r->exited &&
+           pthread_cond_timedwait(&r->exit_cond, &r->exit_lock, &until) != ETIMEDOUT) {
+    }
     bool done = r->exited;
     pthread_mutex_unlock(&r->exit_lock);
     if (done) {

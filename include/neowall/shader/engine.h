@@ -18,18 +18,18 @@ typedef struct nw_engine nw_engine;
 
 /* Everything a frame depends on, filled in by the app. Plain data. */
 typedef struct {
-    int width, height;          /* the output, pixels */
-    double time;                /* iTime, seconds (already frame-stamped) */
-    double dt;                  /* iTimeDelta */
-    int frame;                  /* iFrame */
-    float mouse[4];             /* iMouse: x, y, click x, click y (Shadertoy sign rules) */
-    float date[4];              /* iDate: year, month, day, seconds of day */
-    float span_offset[2];       /* iSpanOffset */
+    int width, height;    /* the output, pixels */
+    double time;          /* iTime, seconds (already frame-stamped) */
+    double dt;            /* iTimeDelta */
+    int frame;            /* iFrame */
+    float mouse[4];       /* iMouse: x, y, click x, click y (Shadertoy sign rules) */
+    float date[4];        /* iDate: year, month, day, seconds of day */
+    float span_offset[2]; /* iSpanOffset */
     /* the whole span this output is a slice of, or 0x0 when it isn't spanned:
      * buffer passes are sized to it and the image pass reports it as
      * iResolution, so one scene runs across every monitor */
     int span_w, span_h;
-    float fps;                  /* iFrameRate; 0 = derive from dt */
+    float fps; /* iFrameRate; 0 = derive from dt */
     /* name -> value for every other float uniform (reactive, manifest
      * bindings). Looked up by name once per program, cached. */
     const struct nw_uniform_value *uniforms;
@@ -39,7 +39,7 @@ typedef struct {
     size_t uniform2_count;
     /* audio texture rows (spectrum, waveform), 512 each, or NULL */
     const float *audio_spectrum, *audio_waveform;
-    const uint8_t *keyboard;    /* 256x3 bytes (down, pressed, toggled), or NULL */
+    const uint8_t *keyboard; /* 256x3 bytes (down, pressed, toggled), or NULL */
     /* extra samplers by name (the terminal's iTermCells, ...), bound after
      * the four channels */
     const struct nw_texture_value *textures;
@@ -52,15 +52,15 @@ typedef struct {
 
 typedef struct nw_texture_value {
     const char *name;
-    unsigned tex;               /* GL texture name; 0 binds nothing */
+    unsigned tex; /* GL texture name; 0 binds nothing */
 } nw_texture_value;
 
 typedef struct nw_uniform_value {
     const char *name;
-    int count;                  /* 1..4 floats, or N vec4 for arrays */
+    int count; /* 1..4 floats, or N vec4 for arrays */
     const float *v;
     bool is_int;
-    bool float_array;           /* count separate floats (float[N]) */
+    bool float_array; /* count separate floats (float[N]) */
 } nw_uniform_value;
 
 /* Compile every pass (in parallel where the driver can). On failure nothing

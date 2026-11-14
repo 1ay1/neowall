@@ -7,10 +7,12 @@
 #include "version.h"
 
 void print_usage(const char *program_name) {
-    printf("NeoWall v%s - GPU-accelerated wallpapers for Wayland. Take the red pill. 🔴\n\n", NEOWALL_VERSION_STRING);
+    printf("NeoWall v%s - GPU-accelerated wallpapers for Wayland. Take the red pill. 🔴\n\n",
+           NEOWALL_VERSION_STRING);
     printf("Usage: %s [OPTIONS]\n", program_name);
     printf("       %s set <index>   Set wallpaper by index (0-based)\n", program_name);
-    printf("       %s new <name>     Scaffold a new shader you can run immediately\n", program_name);
+    printf("       %s new <name>     Scaffold a new shader you can run immediately\n",
+           program_name);
     printf("                         (--template=scene|flat|reactive, --list)\n");
     printf("       %s import <export.json> [name]\n", program_name);
     printf("                         Turn a Shadertoy export into a neowall shader\n");
@@ -35,7 +37,8 @@ void print_usage(const char *program_name) {
     printf("  kill                  Stop running daemon\n");
 
     const char *name, *desc;
-    for (size_t i = 0; cli_control_command(i, &name, &desc); i++) printf("  %-21s %s\n", name, desc);
+    for (size_t i = 0; cli_control_command(i, &name, &desc); i++)
+        printf("  %-21s %s\n", name, desc);
     /* Shader-animation freeze controls (handled outside the table — RT signals). */
     printf("  %-21s %s\n", "pause-shader", "Freeze the shader animation in place");
     printf("  %-21s %s\n", "resume-shader", "Resume a frozen shader animation");
@@ -51,7 +54,8 @@ void print_usage(const char *program_name) {
     printf("  3. %s/neowall/config.vibe\n", NEOWALL_SYSCONFDIR);
     printf("\n");
     printf("Shaders are looked up in ~/.config/neowall/shaders, then\n");
-    printf("$XDG_DATA_HOME/neowall/shaders, $XDG_DATA_DIRS/neowall/shaders and %s/shaders.\n", NEOWALL_DATADIR);
+    printf("$XDG_DATA_HOME/neowall/shaders, $XDG_DATA_DIRS/neowall/shaders and %s/shaders.\n",
+           NEOWALL_DATADIR);
     printf("\n");
     printf("Example config.vibe:\n");
     printf("  default {\n");

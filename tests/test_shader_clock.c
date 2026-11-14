@@ -22,27 +22,27 @@
 
 #include "neowall/shader/shader_clock.h"
 
-static int checks = 0;
+static int checks   = 0;
 static int failures = 0;
 
-#define CHECK(cond)                                                            \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
-        }                                                                      \
+#define CHECK(cond)                                                                                \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                        \
+        }                                                                                          \
     } while (0)
 
-#define CHECK_MSG(cond, ...)                                                   \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);               \
-            fprintf(stderr, __VA_ARGS__);                                      \
-            fprintf(stderr, "\n");                                             \
-        }                                                                      \
+#define CHECK_MSG(cond, ...)                                                                       \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fprintf(stderr, "\n");                                                                 \
+        }                                                                                          \
     } while (0)
 
 /* Mirrors SHADER_TIME_REBASE_SECONDS; kept local so the test does not depend
@@ -61,9 +61,9 @@ static void test_visible_output_never_rebases(void) {
     shader_clock_state hidden = {
         .elapsed_seconds = 7200.0,
         .hidden_since_ms = 1000,
-        .occluded_now = true,
-        .paused_now = false,
-        .spanned = false,
+        .occluded_now    = true,
+        .paused_now      = false,
+        .spanned         = false,
     };
     CHECK_MSG(shader_clock_should_rebase(&hidden, THRESHOLD),
               "an occluded output past the threshold is the one case where a "
@@ -71,16 +71,16 @@ static void test_visible_output_never_rebases(void) {
 
     /* 2. User restores the window. The un-occlude path clears the marker. */
     shader_clock_state visible = hidden;
-    visible.occluded_now = false;
-    visible.hidden_since_ms = 0;
+    visible.occluded_now       = false;
+    visible.hidden_since_ms    = 0;
     CHECK_MSG(!shader_clock_should_rebase(&visible, THRESHOLD),
               "a visible output must never rebase");
 
     /* 3. The regression itself: marker stale (as if un-occlude forgot to clear
      * it) while the output is plainly visible. This must still refuse. */
     shader_clock_state stale = hidden;
-    stale.occluded_now = false;   /* user is looking at it */
-    stale.hidden_since_ms = 1000; /* but the marker was never cleared */
+    stale.occluded_now       = false; /* user is looking at it */
+    stale.hidden_since_ms    = 1000;  /* but the marker was never cleared */
     CHECK_MSG(!shader_clock_should_rebase(&stale, THRESHOLD),
               "stale hidden marker must not authorise a rebase on a visible "
               "output -- this is the 'jumps back in time' bug");
@@ -94,9 +94,9 @@ static void test_long_uptime_alone_does_not_rebase(void) {
         shader_clock_state st = {
             .elapsed_seconds = days[i],
             .hidden_since_ms = 0,
-            .occluded_now = false,
-            .paused_now = false,
-            .spanned = false,
+            .occluded_now    = false,
+            .paused_now      = false,
+            .spanned         = false,
         };
         CHECK_MSG(!shader_clock_should_rebase(&st, THRESHOLD),
                   "continuously visible output rebased after %.0fs", days[i]);
@@ -111,9 +111,9 @@ static void test_threshold(void) {
     shader_clock_state st = {
         .elapsed_seconds = 0.0,
         .hidden_since_ms = 1000,
-        .occluded_now = true,
-        .paused_now = false,
-        .spanned = false,
+        .occluded_now    = true,
+        .paused_now      = false,
+        .spanned         = false,
     };
 
     /* Below and exactly at the threshold: precision is not yet at risk, so a
@@ -140,9 +140,9 @@ static void test_paused_counts_as_hidden(void) {
     shader_clock_state st = {
         .elapsed_seconds = 7200.0,
         .hidden_since_ms = 1000,
-        .occluded_now = false,
-        .paused_now = true,
-        .spanned = false,
+        .occluded_now    = false,
+        .paused_now      = true,
+        .spanned         = false,
     };
     CHECK(shader_clock_should_rebase(&st, THRESHOLD));
 
@@ -162,9 +162,9 @@ static void test_spanned_defers_to_group(void) {
     shader_clock_state st = {
         .elapsed_seconds = 7200.0,
         .hidden_since_ms = 1000,
-        .occluded_now = true,
-        .paused_now = false,
-        .spanned = true,
+        .occluded_now    = true,
+        .paused_now      = false,
+        .spanned         = true,
     };
 
     /* The window is legal... */
@@ -201,24 +201,24 @@ static void test_full_truth_table(void) {
                 shader_clock_state st = {
                     .elapsed_seconds = THRESHOLD + 1.0,
                     .hidden_since_ms = marker ? 1000 : 0,
-                    .occluded_now = occ != 0,
-                    .paused_now = paused != 0,
-                    .spanned = false,
+                    .occluded_now    = occ != 0,
+                    .paused_now      = paused != 0,
+                    .spanned         = false,
                 };
 
                 bool expected = marker && (occ || paused);
-                bool got = shader_clock_should_rebase(&st, THRESHOLD);
+                bool got      = shader_clock_should_rebase(&st, THRESHOLD);
 
-                CHECK_MSG(got == expected,
-                          "marker=%d occluded=%d paused=%d: expected %s, got %s",
-                          marker, occ, paused,
-                          expected ? "rebase" : "no rebase",
+                CHECK_MSG(got == expected, "marker=%d occluded=%d paused=%d: expected %s, got %s",
+                          marker, occ, paused, expected ? "rebase" : "no rebase",
                           got ? "rebase" : "no rebase");
 
                 /* The invariant, stated directly: never while being watched. */
                 if (!occ && !paused) {
-                    CHECK_MSG(!got, "rebased while output was visible "
-                                    "(marker=%d)", marker);
+                    CHECK_MSG(!got,
+                              "rebased while output was visible "
+                              "(marker=%d)",
+                              marker);
                 }
             }
         }
@@ -306,18 +306,17 @@ static void test_fade_rebase_when_never_hidden(void) {
     shader_clock_state st = {.elapsed_seconds = 900000.0};
     CHECK_MSG(shader_clock_should_fade_rebase(&st, 7200.0),
               "a visible output 10 days in must reset behind a fade");
-    CHECK_MSG(!shader_clock_should_rebase(&st, THRESHOLD),
-              "...and never through the unfaded path");
+    CHECK_MSG(!shader_clock_should_rebase(&st, THRESHOLD), "...and never through the unfaded path");
     st.elapsed_seconds = 7000.0;
     CHECK(!shader_clock_should_fade_rebase(&st, 7200.0));
     st.elapsed_seconds = 900000.0;
-    st.occluded_now = true;
+    st.occluded_now    = true;
     CHECK(!shader_clock_should_fade_rebase(&st, 7200.0));
     st.occluded_now = false;
-    st.paused_now = true;
+    st.paused_now   = true;
     CHECK(!shader_clock_should_fade_rebase(&st, 7200.0));
     st.paused_now = false;
-    st.spanned = true;
+    st.spanned    = true;
     CHECK(!shader_clock_should_fade_rebase(&st, 7200.0));
     CHECK(!shader_clock_should_fade_rebase(NULL, 7200.0));
 }

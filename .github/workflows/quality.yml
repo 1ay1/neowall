@@ -260,12 +260,4 @@ jobs:
       - name: Verify formatting
         run: |
           clang-format --version
-          # Fail if any tracked C source would be reformatted.
-          fail=0
-          for f in $(git ls-files 'src/**/*.c' 'src/**/*.h' 'include/**/*.h' | grep -v protocols); do
-            if ! clang-format --dry-run --Werror "$f" 2>/dev/null; then
-              echo "needs formatting: $f"
-              fail=1
-            fi
-          done
-          exit $fail
+          sh scripts/format.sh --check

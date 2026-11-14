@@ -47,7 +47,7 @@ void nw_clock_set_offset(long seconds);
 void nw_clock_set_scale(double scale);
 
 /* Current offset in seconds and scale, for reporting. */
-long   nw_clock_offset(void);
+long nw_clock_offset(void);
 double nw_clock_scale(void);
 
 /* True when the clock is not simply tracking real time, i.e. a preview or

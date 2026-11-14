@@ -17,7 +17,7 @@
 
 /* What the outputs can do right now. */
 struct output_summary {
-    size_t longest_cycle;   /* largest cycle on any output (0/1 = nothing to cycle) */
+    size_t longest_cycle; /* largest cycle on any output (0/1 = nothing to cycle) */
     bool has_terminal;
 };
 
@@ -39,7 +39,7 @@ static struct output_summary summarize_outputs(struct neowall_state *state) {
 static void set_index(struct app *a, rt_loop *loop, const nw_ipc_request_t *r) {
     char text[NW_IPC_MAX_LINE];
     char *end = NULL;
-    long idx = strtol(r->arg, &end, 10);
+    long idx  = strtol(r->arg, &end, 10);
     if (!r->arg[0] || *end || idx < 0 || idx > 100000) {
         ipc_server_reply(a->host.ipc, r->conn, false, "usage: set <index>");
         return;
@@ -79,13 +79,17 @@ static void set_terminal(struct app *a, rt_loop *loop, const nw_ipc_request_t *r
 }
 
 void app_on_ipc_request(void *ctx, rt_loop *loop, const nw_ipc_request_t *r) {
-    static const struct { const char *verb; uint32_t kind; const char *done; } simple[] = {
+    static const struct {
+        const char *verb;
+        uint32_t kind;
+        const char *done;
+    } simple[] = {
         {"next",          NW_MSG_NEXT,          "skipping to next wallpaper"},
-        {"pause",         NW_MSG_CYCLE_PAUSE,   "cycling paused"},
-        {"resume",        NW_MSG_CYCLE_RESUME,  "cycling resumed"},
-        {"pause-shader",  NW_MSG_SHADER_PAUSE,  "shader animation paused"},
-        {"resume-shader", NW_MSG_SHADER_RESUME, "shader animation resumed"},
-        {"kill",          NW_MSG_QUIT,          "stopping"},
+        {"pause",         NW_MSG_CYCLE_PAUSE,   "cycling paused"            },
+        {"resume",        NW_MSG_CYCLE_RESUME,  "cycling resumed"           },
+        {"pause-shader",  NW_MSG_SHADER_PAUSE,  "shader animation paused"   },
+        {"resume-shader", NW_MSG_SHADER_RESUME, "shader animation resumed"  },
+        {"kill",          NW_MSG_QUIT,          "stopping"                  },
     };
     struct app *a = ctx;
     char text[NW_IPC_MAX_LINE];

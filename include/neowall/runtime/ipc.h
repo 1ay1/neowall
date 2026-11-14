@@ -38,15 +38,15 @@
 
 typedef enum {
     NW_IPC_OK = 0,
-    NW_IPC_ERR,          /* the daemon answered "err ..." */
-    NW_IPC_NO_DAEMON,    /* nothing is listening */
-    NW_IPC_FAILED,       /* the exchange itself broke (timeout, I/O) */
+    NW_IPC_ERR,       /* the daemon answered "err ..." */
+    NW_IPC_NO_DAEMON, /* nothing is listening */
+    NW_IPC_FAILED,    /* the exchange itself broke (timeout, I/O) */
 } nw_ipc_status;
 
 /* Send one request and wait for the reply (bounded by `timeout_ms`). `reply`
  * receives the text after "ok " / "err " (may be empty). */
-nw_ipc_status nw_ipc_request(const char *path, const char *verb, const char *arg,
-                             char *reply, size_t reply_size, int timeout_ms);
+nw_ipc_status nw_ipc_request(const char *path, const char *verb, const char *arg, char *reply,
+                             size_t reply_size, int timeout_ms);
 
 /* ── server (daemon) ──────────────────────────────────────────────────── */
 
@@ -68,8 +68,8 @@ typedef struct nw_ipc_server nw_ipc_server;
 /* Bind the socket and start accepting on `loop`. Refuses to steal the socket
  * from a live daemon (a connect that succeeds means someone is listening); a
  * stale socket file from a crashed daemon is replaced. NULL on failure. */
-nw_ipc_server *ipc_server_start(rt_loop *loop, const char *path,
-                                nw_ipc_on_request on_request, void *ctx);
+nw_ipc_server *ipc_server_start(rt_loop *loop, const char *path, nw_ipc_on_request on_request,
+                                void *ctx);
 
 /* Answer request `conn` and close it. `ok` selects "ok"/"err"; `text` may be
  * NULL. A conn that already went away is ignored. */

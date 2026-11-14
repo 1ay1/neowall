@@ -29,37 +29,53 @@ void app_request_output_redraw(struct output_state *o) {
     if (o) atomic_store(&o->needs_redraw, true);
 }
 int hyprland_output_windows(const struct output_state *o, nw_window_rect *out, int max) {
-    (void)o; (void)out; (void)max;
+    (void)o;
+    (void)out;
+    (void)max;
     return 0;
 }
 
 static int fails, checks;
-#define CHECK(c, ...) do { checks++; if (!(c)) { fails++; \
-    printf("  FAIL line %d: ", __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
+#define CHECK(c, ...)                                                                              \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(c)) {                                                                                \
+            fails++;                                                                               \
+            printf("  FAIL line %d: ", __LINE__);                                                  \
+            printf(__VA_ARGS__);                                                                   \
+            printf("\n");                                                                          \
+        }                                                                                          \
+    } while (0)
 
 enum { W = 80, H = 40 };
 static EGLDisplay g_dpy;
 static EGLConfig g_cfg;
 
 /* ---- a backend whose "windows" are pbuffers ---- */
-static struct compositor_surface *fake_create_surface(void *data, const compositor_surface_config_t *c) {
-    (void)data; (void)c;
+static struct compositor_surface *fake_create_surface(void *data,
+                                                      const compositor_surface_config_t *c) {
+    (void)data;
+    (void)c;
     struct compositor_surface *s = calloc(1, sizeof(*s));
     if (s) s->egl_surface = EGL_NO_SURFACE;
     return s;
 }
-static void fake_destroy_surface(struct compositor_surface *s) { free(s); }
+static void fake_destroy_surface(struct compositor_surface *s) {
+    free(s);
+}
 static bool fake_create_egl_window(struct compositor_surface *s, int32_t w, int32_t h) {
-    s->width = w;
+    s->width  = w;
     s->height = h;
     return true;
 }
-static void fake_destroy_egl_window(struct compositor_surface *s) { (void)s; }
+static void fake_destroy_egl_window(struct compositor_surface *s) {
+    (void)s;
+}
 
 static const compositor_backend_ops_t fake_ops = {
-    .create_surface = fake_create_surface,
-    .destroy_surface = fake_destroy_surface,
-    .create_egl_window = fake_create_egl_window,
+    .create_surface     = fake_create_surface,
+    .destroy_surface    = fake_destroy_surface,
+    .create_egl_window  = fake_create_egl_window,
     .destroy_egl_window = fake_destroy_egl_window,
 };
 static struct compositor_backend fake_backend = {.name = "fake", .ops = &fake_ops};
@@ -67,16 +83,26 @@ static struct compositor_backend fake_backend = {.name = "fake", .ops = &fake_op
 static const char *egl_up(void) {
     setenv("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/share/glvnd/egl_vendor.d/50_mesa.json", 0);
     setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
-    setenv("LP_NUM_THREADS", "0", 0);   /* llvmpipe threads aren't TSan-instrumented */
+    setenv("LP_NUM_THREADS", "0", 0); /* llvmpipe threads aren't TSan-instrumented */
     PFNEGLGETPLATFORMDISPLAYEXTPROC get =
         (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
     if (!get) return "no eglGetPlatformDisplayEXT";
     g_dpy = get(0x31DD /* SURFACELESS_MESA */, EGL_DEFAULT_DISPLAY, NULL);
-    if (g_dpy == EGL_NO_DISPLAY || !eglInitialize(g_dpy, NULL, NULL)) return "no surfaceless display";
+    if (g_dpy == EGL_NO_DISPLAY || !eglInitialize(g_dpy, NULL, NULL))
+        return "no surfaceless display";
     eglBindAPI(EGL_OPENGL_API);
-    const EGLint a[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
-                        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_NONE};
-    EGLint n = 0;
+    const EGLint a[] = {EGL_SURFACE_TYPE,
+                        EGL_PBUFFER_BIT,
+                        EGL_RENDERABLE_TYPE,
+                        EGL_OPENGL_BIT,
+                        EGL_RED_SIZE,
+                        8,
+                        EGL_GREEN_SIZE,
+                        8,
+                        EGL_BLUE_SIZE,
+                        8,
+                        EGL_NONE};
+    EGLint n         = 0;
     if (!eglChooseConfig(g_dpy, a, &g_cfg, 1, &n) || n < 1) return "no pbuffer config";
     return NULL;
 }
@@ -85,19 +111,19 @@ static const char *egl_up(void) {
  * surfaceless display can't do; give the output a pbuffer instead. */
 static bool attach_pbuffer(struct output_state *o) {
     const EGLint pa[] = {EGL_WIDTH, W, EGL_HEIGHT, H, EGL_NONE};
-    EGLSurface s = eglCreatePbufferSurface(g_dpy, g_cfg, pa);
+    EGLSurface s      = eglCreatePbufferSurface(g_dpy, g_cfg, pa);
     if (s == EGL_NO_SURFACE) return false;
     o->compositor_surface->egl_surface = s;
-    o->compositor_surface->width = W;
-    o->compositor_surface->height = H;
+    o->compositor_surface->width       = W;
+    o->compositor_surface->height      = H;
     return egl_make_surface_current(g_dpy, s, o->state->egl_context);
 }
 
 /* A w x h PNG with a left half of `l` and a right half of `r` (0xRRGGBB). */
 static void write_png(const char *path, int w, int h, unsigned l, unsigned r) {
-    FILE *f = fopen(path, "wb");
+    FILE *f       = fopen(path, "wb");
     png_structp p = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    png_infop i = png_create_info_struct(p);
+    png_infop i   = png_create_info_struct(p);
     png_init_io(p, f);
     png_set_IHDR(p, i, (png_uint_32)w, (png_uint_32)h, 8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
                  PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
@@ -105,8 +131,8 @@ static void write_png(const char *path, int w, int h, unsigned l, unsigned r) {
     unsigned char *row = malloc((size_t)w * 3);
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
-            unsigned c = x < w / 2 ? l : r;
-            row[x * 3] = (unsigned char)(c >> 16);
+            unsigned c     = x < w / 2 ? l : r;
+            row[x * 3]     = (unsigned char)(c >> 16);
             row[x * 3 + 1] = (unsigned char)(c >> 8);
             row[x * 3 + 2] = (unsigned char)c;
         }
@@ -155,17 +181,22 @@ int main(void) {
         printf("skip: %s\n", err);
         return 77;
     }
-    const EGLint ca[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 3,
-                         EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT, EGL_NONE};
+    const EGLint ca[] = {EGL_CONTEXT_MAJOR_VERSION,
+                         3,
+                         EGL_CONTEXT_MINOR_VERSION,
+                         3,
+                         EGL_CONTEXT_OPENGL_PROFILE_MASK,
+                         EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+                         EGL_NONE};
 
     struct neowall_state st;
     memset(&st, 0, sizeof(st));
     pthread_rwlock_init(&st.output_list_lock, NULL);
     pthread_mutex_init(&st.state_mutex, NULL);
     pthread_mutex_init(&st.state_file_lock, NULL);
-    st.egl_display = g_dpy;
-    st.egl_config = g_cfg;
-    st.egl_context = eglCreateContext(g_dpy, g_cfg, EGL_NO_CONTEXT, ca);
+    st.egl_display        = g_dpy;
+    st.egl_config         = g_cfg;
+    st.egl_context        = eglCreateContext(g_dpy, g_cfg, EGL_NO_CONTEXT, ca);
     st.compositor_backend = &fake_backend;
     atomic_store(&st.running, true);
     if (st.egl_context == EGL_NO_CONTEXT) {
@@ -190,7 +221,9 @@ int main(void) {
     char cyc2[700];
     snprintf(cyc2, sizeof(cyc2), "%s/cycle/2-white.png", dir);
     write_png(cyc2, 32, 32, 0xffffff, 0xffffff);
-    FILE *f = fopen(bad, "w"); fputs("not a png", f); fclose(f);
+    FILE *f = fopen(bad, "w");
+    fputs("not a png", f);
+    fclose(f);
     f = fopen(shader, "w");
     fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(1.0, 0.5, 0.0, 1.0); }\n", f);
     fclose(f);
@@ -203,31 +236,32 @@ int main(void) {
     snprintf(o->model, sizeof(o->model), "Test");
     o->width = o->pixel_width = o->logical_width = W;
     o->height = o->pixel_height = o->logical_height = H;
-    o->configured = true;
+    o->configured                                   = true;
 
     compositor_surface_config_t sc = compositor_surface_config_default(NULL);
-    o->compositor_surface = compositor_surface_create(&fake_backend, &sc);
+    o->compositor_surface          = compositor_surface_create(&fake_backend, &sc);
     CHECK(o->compositor_surface && attach_pbuffer(o), "surface + pbuffer");
     CHECK(output_init_render(o), "output_init_render");
 
     /* 1. A stretched image: left half red, right half blue. */
     struct wallpaper_config c;
     memset(&c, 0, sizeof(c));
-    c.type = WALLPAPER_IMAGE;
-    c.mode = MODE_STRETCH;
-    c.transition = TRANSITION_NONE;
+    c.type         = WALLPAPER_IMAGE;
+    c.mode         = MODE_STRETCH;
+    c.transition   = TRANSITION_NONE;
     c.shader_speed = 1.0f;
-    c.vsync = true;
+    c.vsync        = true;
     snprintf(c.path, sizeof(c.path), "%s", red_blue);
     CHECK(output_apply_config(o, &c), "apply image config");
     CHECK(draw(o), "render image");
     CHECK(close_rgb(read_rgb(5, H / 2), 0xff0000), "left is red: %06x", read_rgb(5, H / 2));
-    CHECK(close_rgb(read_rgb(W - 5, H / 2), 0x0000ff), "right is blue: %06x", read_rgb(W - 5, H / 2));
+    CHECK(close_rgb(read_rgb(W - 5, H / 2), 0x0000ff), "right is blue: %06x",
+          read_rgb(W - 5, H / 2));
 
     /* 1b. The FPS overlay: green text in the bottom-right corner, drawn in
      * one go, and GL state (blend, program) is as it was afterwards. */
     o->fps_current = 88.8f;
-    c.show_fps = true;
+    c.show_fps     = true;
     CHECK(output_apply_config(o, &c), "apply with show_fps");
     o->fps_current = 88.8f;
     CHECK(draw(o), "render with overlay");
@@ -238,7 +272,7 @@ int main(void) {
     CHECK(green_px > 20, "overlay text is drawn (%d green pixels)", green_px);
     CHECK(!glIsEnabled(GL_BLEND), "overlay leaves blending as it found it");
     CHECK(glGetError() == GL_NO_ERROR, "overlay causes no GL error");
-    c.show_fps = false;
+    c.show_fps     = false;
     o->fps_current = 0.0f;
     CHECK(output_apply_config(o, &c), "apply without show_fps");
 
@@ -257,13 +291,14 @@ int main(void) {
     /* 4. A shader on the same output. */
     struct wallpaper_config s;
     memset(&s, 0, sizeof(s));
-    s.type = WALLPAPER_SHADER;
+    s.type         = WALLPAPER_SHADER;
     s.shader_speed = 1.0f;
-    s.vsync = true;
+    s.vsync        = true;
     snprintf(s.shader_path, sizeof(s.shader_path), "%s", shader);
     CHECK(output_apply_config(o, &s), "apply shader");
     CHECK(draw(o), "render shader");
-    CHECK(close_rgb(read_rgb(W / 2, H / 2), 0xff8000), "shader orange: %06x", read_rgb(W / 2, H / 2));
+    CHECK(close_rgb(read_rgb(W / 2, H / 2), 0xff8000), "shader orange: %06x",
+          read_rgb(W / 2, H / 2));
 
     /* 4b. Something else on the shared context (transitions, the FPS
      *     watermark, another output) leaves blending on between frames. A
@@ -310,10 +345,10 @@ int main(void) {
      *      shader lands the old config is live (here: its speed), and a
      *      shader that doesn't compile leaves both exactly as they were. */
     {
-        float old_speed = o->config->shader_speed;
+        float old_speed            = o->config->shader_speed;
         struct wallpaper_config s2 = s;
-        s2.shader_speed = old_speed + 1.0f;
-        ts = fopen(shader, "w");
+        s2.shader_speed            = old_speed + 1.0f;
+        ts                         = fopen(shader, "w");
         fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(0.0, 1.0, 1.0, 1.0); }\n", ts);
         fclose(ts);
         CHECK(output_apply_config(o, &s2), "apply returns at once");
@@ -327,7 +362,7 @@ int main(void) {
         fputs("void mainImage(out vec4 c, in vec2 p){ c = nope; }\n", ts);
         fclose(ts);
         struct wallpaper_config s3 = s;
-        s3.shader_speed = old_speed + 5.0f;
+        s3.shader_speed            = old_speed + 5.0f;
         CHECK(output_apply_config(o, &s3), "broken shader still stages");
         land(o);
         CHECK(output_reload_failed(o), "the failure is recorded for the reply");
@@ -348,7 +383,8 @@ int main(void) {
         CHECK(draw(o), "first blue frame (starts the fade)");
         o->clock_fade_start = 1;
         CHECK(draw(o), "blue settled");
-        CHECK(close_rgb(read_rgb(W / 2, H / 2), 0x0000ff), "blue back: %06x", read_rgb(W / 2, H / 2));
+        CHECK(close_rgb(read_rgb(W / 2, H / 2), 0x0000ff), "blue back: %06x",
+              read_rgb(W / 2, H / 2));
     }
 
     /* 4d. A background swap: the current shader keeps drawing while the next
@@ -368,7 +404,8 @@ int main(void) {
     CHECK(draw(o), "first frame after the swap (starts the fade)");
     o->clock_fade_start = 1;
     CHECK(draw(o), "draw after the swap");
-    CHECK(close_rgb(read_rgb(W / 2, H / 2), 0x00ff00), "green landed: %06x", read_rgb(W / 2, H / 2));
+    CHECK(close_rgb(read_rgb(W / 2, H / 2), 0x00ff00), "green landed: %06x",
+          read_rgb(W / 2, H / 2));
 
     ts = fopen(shader, "w");
     fputs("void mainImage(out vec4 c, in vec2 p){ c = vec4(nope); }\n", ts);
@@ -385,15 +422,15 @@ int main(void) {
     /* 5. Back to images, from a directory cycle. */
     struct wallpaper_config d;
     memset(&d, 0, sizeof(d));
-    d.type = WALLPAPER_IMAGE;
-    d.mode = MODE_FILL;
-    d.transition = TRANSITION_NONE;
-    d.duration = 60;
+    d.type         = WALLPAPER_IMAGE;
+    d.mode         = MODE_FILL;
+    d.transition   = TRANSITION_NONE;
+    d.duration     = 60;
     d.shader_speed = 1.0f;
     char *paths[2] = {green, cyc2};
-    d.cycle = true;
-    d.cycle_paths = paths;
-    d.cycle_count = 2;
+    d.cycle        = true;
+    d.cycle_paths  = paths;
+    d.cycle_count  = 2;
     snprintf(d.path, sizeof(d.path), "%s", green);
     CHECK(output_apply_config(o, &d), "apply cycle");
     CHECK(draw(o), "render cycle[0]");
@@ -401,21 +438,27 @@ int main(void) {
     output_cycle_wallpaper(o);
     CHECK(draw(o), "render cycle[1]");
     unsigned second = read_rgb(W / 2, H / 2);
-    CHECK(close_rgb(first, 0x00ff00) || close_rgb(first, 0xffffff), "cycle shows a cycle image: %06x", first);
+    CHECK(close_rgb(first, 0x00ff00) || close_rgb(first, 0xffffff),
+          "cycle shows a cycle image: %06x", first);
     CHECK(!close_rgb(first, second), "cycling changes the picture: %06x -> %06x", first, second);
 
     /* 6. Every transition: start a cycle step with it, then draw at the
      *    start, the middle and the end. Solid green -> solid white (or back),
      *    so the ends are the two images and the middle is neither, except
      *    slides, whose middle is half of each. */
-    static const struct { enum transition_type t; const char *name; } trans[] = {
-        {TRANSITION_FADE, "fade"}, {TRANSITION_SLIDE_LEFT, "slide_left"},
-        {TRANSITION_SLIDE_RIGHT, "slide_right"}, {TRANSITION_GLITCH, "glitch"},
-        {TRANSITION_PIXELATE, "pixelate"},
+    static const struct {
+        enum transition_type t;
+        const char *name;
+    } trans[] = {
+        {TRANSITION_FADE,        "fade"       },
+        {TRANSITION_SLIDE_LEFT,  "slide_left" },
+        {TRANSITION_SLIDE_RIGHT, "slide_right"},
+        {TRANSITION_GLITCH,      "glitch"     },
+        {TRANSITION_PIXELATE,    "pixelate"   },
     };
     for (size_t i = 0; i < sizeof(trans) / sizeof(trans[0]); i++) {
-        d.transition = trans[i].t;
-        d.transition_duration = 10.0f;   /* long: we drive progress by hand */
+        d.transition          = trans[i].t;
+        d.transition_duration = 10.0f; /* long: we drive progress by hand */
         CHECK(output_apply_config(o, &d), "apply cycle with %s", trans[i].name);
         CHECK(draw(o), "%s: settle", trans[i].name);
         unsigned from = read_rgb(W / 2, H / 2);
@@ -424,15 +467,17 @@ int main(void) {
 
         o->transition_progress = 0.0f;
         CHECK(draw(o), "%s: draw at 0", trans[i].name);
-        unsigned at0 = read_rgb(W / 2, H / 2);
+        unsigned at0           = read_rgb(W / 2, H / 2);
         o->transition_progress = 0.5f;
         CHECK(draw(o), "%s: draw at 0.5", trans[i].name);
-        unsigned left = read_rgb(2, H / 2), right = read_rgb(W - 3, H / 2), mid = read_rgb(W / 2, H / 2);
+        unsigned left = read_rgb(2, H / 2), right = read_rgb(W - 3, H / 2),
+                 mid           = read_rgb(W / 2, H / 2);
         o->transition_progress = 1.0f;
         CHECK(draw(o), "%s: draw at 1", trans[i].name);
         unsigned at1 = read_rgb(W / 2, H / 2);
 
-        CHECK(close_rgb(at0, from), "%s: starts on the old image (%06x vs %06x)", trans[i].name, at0, from);
+        CHECK(close_rgb(at0, from), "%s: starts on the old image (%06x vs %06x)", trans[i].name,
+              at0, from);
         CHECK(!close_rgb(at1, from), "%s: ends on the new image (%06x)", trans[i].name, at1);
         if (trans[i].t == TRANSITION_SLIDE_LEFT || trans[i].t == TRANSITION_SLIDE_RIGHT) {
             CHECK(!close_rgb(left, right), "%s: halfway shows both images (%06x | %06x)",
@@ -442,7 +487,7 @@ int main(void) {
                   "fade: halfway is a blend (%06x between %06x and %06x)", mid, from, at1);
         }
         CHECK(glGetError() == GL_NO_ERROR, "%s: no GL error", trans[i].name);
-        o->transition_start_time = 0;   /* let the next one start clean */
+        o->transition_start_time = 0; /* let the next one start clean */
     }
 
     output_destroy(o);

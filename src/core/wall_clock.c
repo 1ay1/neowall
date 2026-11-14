@@ -22,7 +22,7 @@ static _Atomic double g_scale = 1.0;
  * jumping once per second, and a wall-clock step (NTP) doesn't jolt it.
  * Written only by nw_clock_set_*, at startup, before any reader thread. */
 static _Atomic int64_t g_anchor_mono_ns = 0;
-static _Atomic double g_anchor_virtual = 0.0;
+static _Atomic double g_anchor_virtual  = 0.0;
 
 static int64_t mono_ns(void) {
     struct timespec ts;
@@ -41,7 +41,8 @@ static double virtual_base(void) {
     double scale = atomic_load_explicit(&g_scale, memory_order_acquire);
     if (scale == 1.0) return real_now_f();
     int64_t since = mono_ns() - atomic_load_explicit(&g_anchor_mono_ns, memory_order_relaxed);
-    return atomic_load_explicit(&g_anchor_virtual, memory_order_relaxed) + (double)since / 1e9 * scale;
+    return atomic_load_explicit(&g_anchor_virtual, memory_order_relaxed) +
+           (double)since / 1e9 * scale;
 }
 
 time_t nw_clock_now(void) {
@@ -50,7 +51,8 @@ time_t nw_clock_now(void) {
         atomic_load_explicit(&g_offset_sec, memory_order_relaxed) == 0) {
         return time(NULL);
     }
-    return (time_t)(virtual_base() + (double)atomic_load_explicit(&g_offset_sec, memory_order_relaxed));
+    return (time_t)(virtual_base() +
+                    (double)atomic_load_explicit(&g_offset_sec, memory_order_relaxed));
 }
 
 double nw_clock_now_f(void) {
@@ -88,12 +90,17 @@ bool nw_clock_is_virtual(void) {
 /* Multiplier for a duration suffix; 0 means "unknown suffix". */
 static long suffix_scale(char c) {
     switch (c) {
-        case 's': case 'S': return 1;
-        case 'm': case 'M': return 60;
-        case 'h': case 'H': return 3600;
-        case 'd': case 'D': return 86400;
-        case 'w': case 'W': return 604800;
-        default:            return 0;
+    case 's':
+    case 'S': return 1;
+    case 'm':
+    case 'M': return 60;
+    case 'h':
+    case 'H': return 3600;
+    case 'd':
+    case 'D': return 86400;
+    case 'w':
+    case 'W': return 604800;
+    default: return 0;
     }
 }
 
@@ -101,19 +108,21 @@ static long suffix_scale(char c) {
 static bool parse_duration(const char *spec, double *out_seconds) {
     if (!spec || !*spec) return false;
 
-    char *end = NULL;
+    char *end    = NULL;
     double value = strtod(spec, &end);
     if (end == spec) return false;
 
-    while (*end && isspace((unsigned char)*end)) end++;
+    while (*end && isspace((unsigned char)*end))
+        end++;
 
     long mult = 1;
     if (*end) {
         mult = suffix_scale(*end);
         if (mult == 0) return false;
         end++;
-        while (*end && isspace((unsigned char)*end)) end++;
-        if (*end) return false;      /* trailing garbage */
+        while (*end && isspace((unsigned char)*end))
+            end++;
+        if (*end) return false; /* trailing garbage */
     }
 
     *out_seconds = value * (double)mult;

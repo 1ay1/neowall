@@ -858,38 +858,34 @@ typedef struct {
 
 static const neowall_stdlib_alias neowall_stdlib_aliases[] = {
     /* audio */
-    {"audioBand",
-     "float audioBand(float lo,float hi){ return nwAudioBand(lo,hi); }\n"},
-    {"spectrum", "float spectrum(float x){ return nwSpectrum(x); }\n"},
-    {"waveform", "float waveform(float x){ return nwWaveform(x); }\n"},
-    {"beat", "float beat(){ return nwBeat(); }\n"},
+    {"audioBand",     "float audioBand(float lo,float hi){ return nwAudioBand(lo,hi); }\n"          },
+    {"spectrum",      "float spectrum(float x){ return nwSpectrum(x); }\n"                          },
+    {"waveform",      "float waveform(float x){ return nwWaveform(x); }\n"                          },
+    {"beat",          "float beat(){ return nwBeat(); }\n"                                          },
 
     /* 2D SDFs + ops */
-    {"sdCircle", "float sdCircle(vec2 p,float r){ return nwSdCircle(p,r); }\n"},
-    {"sdSegment",
-     "float sdSegment(vec2 p,vec2 a,vec2 b){ return nwSdSegment(p,a,b); }\n"},
-    {"sdHex", "float sdHex(vec2 p,float r){ return nwSdHex(p,r); }\n"},
+    {"sdCircle",      "float sdCircle(vec2 p,float r){ return nwSdCircle(p,r); }\n"                 },
+    {"sdSegment",     "float sdSegment(vec2 p,vec2 a,vec2 b){ return nwSdSegment(p,a,b); }\n"       },
+    {"sdHex",         "float sdHex(vec2 p,float r){ return nwSdHex(p,r); }\n"                       },
     {"opSmoothUnion",
-     "float opSmoothUnion(float a,float b,float k){ return nwOpSmoothUnion(a,b,k); }\n"},
-    {"opSmoothSub",
-     "float opSmoothSub(float a,float b,float k){ return nwOpSmoothSub(a,b,k); }\n"},
+     "float opSmoothUnion(float a,float b,float k){ return nwOpSmoothUnion(a,b,k); }\n"             },
+    {"opSmoothSub",   "float opSmoothSub(float a,float b,float k){ return nwOpSmoothSub(a,b,k); }\n"},
 
     /* 3D SDFs */
-    {"sdSphere", "float sdSphere(vec3 p,float r){ return nwSdSphere(p,r); }\n"},
-    {"sdTorus", "float sdTorus(vec3 p,vec2 t){ return nwSdTorus(p,t); }\n"},
+    {"sdSphere",      "float sdSphere(vec3 p,float r){ return nwSdSphere(p,r); }\n"                 },
+    {"sdTorus",       "float sdTorus(vec3 p,vec2 t){ return nwSdTorus(p,t); }\n"                    },
 
     /* sdBox is overloaded; a shader defining either signature takes both. */
-    {"sdBox",
-     "float sdBox(vec2 p,vec2 b){ return nwSdBox(p,b); }\n"
-     "float sdBox(vec3 p,vec3 b){ return nwSdBox(p,b); }\n"},
+    {"sdBox",         "float sdBox(vec2 p,vec2 b){ return nwSdBox(p,b); }\n"
+              "float sdBox(vec3 p,vec3 b){ return nwSdBox(p,b); }\n"                   },
 
     /* reactive shaping */
-    {"pulse", "float pulse(float x){ return nwPulse(x); }\n"},
-    {"dayNight", "float dayNight(){ return nwDayNight(); }\n"},
-    {"timeOfDayTint", "vec3 timeOfDayTint(){ return nwTimeOfDayTint(); }\n"},
+    {"pulse",         "float pulse(float x){ return nwPulse(x); }\n"                                },
+    {"dayNight",      "float dayNight(){ return nwDayNight(); }\n"                                  },
+    {"timeOfDayTint", "vec3 timeOfDayTint(){ return nwTimeOfDayTint(); }\n"                         },
 };
 
-#define NEOWALL_STDLIB_ALIAS_COUNT \
+#define NEOWALL_STDLIB_ALIAS_COUNT                                                                 \
     (sizeof(neowall_stdlib_aliases) / sizeof(neowall_stdlib_aliases[0]))
 
 

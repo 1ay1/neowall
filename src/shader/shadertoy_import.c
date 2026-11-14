@@ -21,9 +21,9 @@ struct jval {
     jtype t;
     bool b;
     double n;
-    char *s;           /* J_STR, NUL-terminated (embedded NULs dropped) */
-    jval *items;       /* J_ARR values / J_OBJ values */
-    char **keys;       /* J_OBJ keys */
+    char *s;     /* J_STR, NUL-terminated (embedded NULs dropped) */
+    jval *items; /* J_ARR values / J_OBJ values */
+    char **keys; /* J_OBJ keys */
     size_t len;
 };
 
@@ -53,11 +53,15 @@ static bool jfail(jparser *j, const char *what) {
 }
 
 static void jws(jparser *j) {
-    while (j->p < j->end && (*j->p == ' ' || *j->p == '\t' || *j->p == '\n' || *j->p == '\r')) j->p++;
+    while (j->p < j->end && (*j->p == ' ' || *j->p == '\t' || *j->p == '\n' || *j->p == '\r'))
+        j->p++;
 }
 
 static int hexval(char c) {
-    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+    return c >= '0' && c <= '9'   ? c - '0'
+           : c >= 'a' && c <= 'f' ? c - 'a' + 10
+           : c >= 'A' && c <= 'F' ? c - 'A' + 10
+                                  : -1;
 }
 
 static bool read_u4(jparser *j, unsigned *out) {
@@ -76,10 +80,13 @@ static bool read_u4(jparser *j, unsigned *out) {
 static void put_utf8(nw_str *s, unsigned cp) {
     char b[4];
     size_t n;
-    if (cp < 0x80) b[0] = (char)cp, n = 1;
-    else if (cp < 0x800) b[0] = (char)(0xC0 | cp >> 6), b[1] = (char)(0x80 | (cp & 0x3F)), n = 2;
+    if (cp < 0x80)
+        b[0] = (char)cp, n = 1;
+    else if (cp < 0x800)
+        b[0] = (char)(0xC0 | cp >> 6), b[1] = (char)(0x80 | (cp & 0x3F)), n = 2;
     else if (cp < 0x10000)
-        b[0] = (char)(0xE0 | cp >> 12), b[1] = (char)(0x80 | ((cp >> 6) & 0x3F)), b[2] = (char)(0x80 | (cp & 0x3F)), n = 3;
+        b[0] = (char)(0xE0 | cp >> 12), b[1] = (char)(0x80 | ((cp >> 6) & 0x3F)),
+        b[2] = (char)(0x80 | (cp & 0x3F)), n = 3;
     else
         b[0] = (char)(0xF0 | cp >> 18), b[1] = (char)(0x80 | ((cp >> 12) & 0x3F)),
         b[2] = (char)(0x80 | ((cp >> 6) & 0x3F)), b[3] = (char)(0x80 | (cp & 0x3F)), n = 4;
@@ -104,7 +111,9 @@ static bool jstring(jparser *j, char **out) {
         c = *j->p++;
         unsigned cp;
         switch (c) {
-        case '"': case '\\': case '/': nw_str_append_n(&s, &c, 1); break;
+        case '"':
+        case '\\':
+        case '/': nw_str_append_n(&s, &c, 1); break;
         case 'b': nw_str_append(&s, "\b"); break;
         case 'f': nw_str_append(&s, "\f"); break;
         case 'n': nw_str_append(&s, "\n"); break;
@@ -119,8 +128,10 @@ static bool jstring(jparser *j, char **out) {
                 unsigned lo;
                 if (j->end - j->p >= 6 && j->p[0] == '\\' && j->p[1] == 'u') {
                     j->p += 2;
-                    if (read_u4(j, &lo) && lo >= 0xDC00 && lo <= 0xDFFF) cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
-                    else cp = 0xFFFD;
+                    if (read_u4(j, &lo) && lo >= 0xDC00 && lo <= 0xDFFF)
+                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                    else
+                        cp = 0xFFFD;
                 } else {
                     cp = 0xFFFD;
                 }
@@ -151,7 +162,7 @@ static bool jvalue(jparser *j, jval *v);
 static bool jpush(jval *v, size_t *cap, char *key, jval item) {
     if (v->len == *cap) {
         size_t nc = *cap ? *cap * 2 : 4;
-        jval *ni = realloc(v->items, nc * sizeof(*ni));
+        jval *ni  = realloc(v->items, nc * sizeof(*ni));
         if (!ni) return false;
         v->items = ni;
         if (v->t == J_OBJ) {
@@ -169,7 +180,7 @@ static bool jpush(jval *v, size_t *cap, char *key, jval item) {
 
 static bool jcontainer(jparser *j, jval *v, bool obj) {
     if (++j->depth > JSON_MAX_DEPTH) return jfail(j, "nested too deep");
-    *v = (jval){.t = obj ? J_OBJ : J_ARR};
+    *v         = (jval){.t = obj ? J_OBJ : J_ARR};
     size_t cap = 0;
     j->p++;
     jws(j);
@@ -227,8 +238,15 @@ static bool jvalue(jparser *j, jval *v) {
         *v = (jval){.t = J_STR};
         return jstring(j, &v->s);
     }
-    static const struct { const char *w; jtype t; bool b; } lits[] = {
-        {"true", J_BOOL, true}, {"false", J_BOOL, false}, {"null", J_NULL, false}};
+    static const struct {
+        const char *w;
+        jtype t;
+        bool b;
+    } lits[] = {
+        {"true",  J_BOOL, true },
+        {"false", J_BOOL, false},
+        {"null",  J_NULL, false}
+    };
     for (size_t i = 0; i < NW_COUNTOF(lits); i++) {
         size_t n = strlen(lits[i].w);
         if ((size_t)(j->end - j->p) >= n && !strncmp(j->p, lits[i].w, n)) {
@@ -274,11 +292,17 @@ static const char *buffer_letter(const jval *in) {
     const char *src = jstr(in, "src");
     if (!src) src = jstr(in, "filepath");
     if (!src) return NULL;
-    static const struct { const char *file, *name; } map[] = {
-        {"buffer00.png", "bufferA"}, {"buffer01.png", "bufferB"}, {"buffer02.png", "bufferC"},
-        {"buffer03.png", "bufferD"}, {"cubemap00.png", "cube"}};
+    static const struct {
+        const char *file, *name;
+    } map[] = {
+        {"buffer00.png",  "bufferA"},
+        {"buffer01.png",  "bufferB"},
+        {"buffer02.png",  "bufferC"},
+        {"buffer03.png",  "bufferD"},
+        {"cubemap00.png", "cube"   }
+    };
     const char *base = strrchr(src, '/');
-    base = base ? base + 1 : src;
+    base             = base ? base + 1 : src;
     for (size_t i = 0; i < NW_COUNTOF(map); i++)
         if (!strcmp(base, map[i].file)) return map[i].name;
     return NULL;
@@ -298,22 +322,27 @@ static const char *input_source(const jval *in, const char *pass, int ch, nw_str
     }
     if (!strcmp(ctype, "keyboard")) return "keyboard";
     if (!strcmp(ctype, "mic") || !strcmp(ctype, "music") || !strcmp(ctype, "musicstream")) {
-        nw_str_printf(notes, "%s iChannel%d: %s input -> the live audio spectrum\n", pass, ch, ctype);
+        nw_str_printf(notes, "%s iChannel%d: %s input -> the live audio spectrum\n", pass, ch,
+                      ctype);
         return "audio";
     }
     if (!strcmp(ctype, "cubemap")) {
-        nw_str_printf(notes, "%s iChannel%d: Shadertoy cube map %s -> the built-in sky\n", pass, ch, src ? src : "");
+        nw_str_printf(notes, "%s iChannel%d: Shadertoy cube map %s -> the built-in sky\n", pass, ch,
+                      src ? src : "");
         return "sky";
     }
     if (!strcmp(ctype, "texture")) {
         /* Shadertoy's textures are theirs, so we can't fetch them */
-        nw_str_printf(notes, "%s iChannel%d: Shadertoy texture %s -> noise (drop an image next to the shader and "
-                             "bind it with ch%d yourfile.png)\n",
-                      pass, ch, src ? src : "", ch);
+        nw_str_printf(
+            notes,
+            "%s iChannel%d: Shadertoy texture %s -> noise (drop an image next to the shader and "
+            "bind it with ch%d yourfile.png)\n",
+            pass, ch, src ? src : "", ch);
         return "noise";
     }
     if (!strcmp(ctype, "volume")) {
-        nw_str_printf(notes, "%s iChannel%d: 3D noise volume isn't supported -> unbound\n", pass, ch);
+        nw_str_printf(notes, "%s iChannel%d: 3D noise volume isn't supported -> unbound\n", pass,
+                      ch);
         return "none";
     }
     nw_str_printf(notes, "%s iChannel%d: %s isn't supported -> unbound\n", pass, ch, ctype);
@@ -321,11 +350,19 @@ static const char *input_source(const jval *in, const char *pass, int ch, nw_str
 }
 
 static const char *manifest_pass_name(const char *name) {
-    static const struct { const char *st, *nw; } map[] = {
-        {"Image", "image"},      {"Buffer A", "bufferA"}, {"Buffer B", "bufferB"},
-        {"Buffer C", "bufferC"}, {"Buffer D", "bufferD"}, {"Buf A", "bufferA"},
-        {"Buf B", "bufferB"},    {"Buf C", "bufferC"},    {"Buf D", "bufferD"},
-        {"Cube A", "cube"},
+    static const struct {
+        const char *st, *nw;
+    } map[] = {
+        {"Image",    "image"  },
+        {"Buffer A", "bufferA"},
+        {"Buffer B", "bufferB"},
+        {"Buffer C", "bufferC"},
+        {"Buffer D", "bufferD"},
+        {"Buf A",    "bufferA"},
+        {"Buf B",    "bufferB"},
+        {"Buf C",    "bufferC"},
+        {"Buf D",    "bufferD"},
+        {"Cube A",   "cube"   },
     };
     for (size_t i = 0; i < NW_COUNTOF(map); i++)
         if (!strcmp(name, map[i].st)) return map[i].nw;
@@ -350,7 +387,8 @@ void nw_import_free(nw_import *im) {
     *im = (nw_import){0};
 }
 
-nw_result nw_shadertoy_import(const char *json, size_t len, nw_import *out, char *err, size_t err_cap) {
+nw_result nw_shadertoy_import(const char *json, size_t len, nw_import *out, char *err,
+                              size_t err_cap) {
     if (err && err_cap) err[0] = '\0';
     jparser j = {.p = json, .end = json + len, .err = err, .err_cap = err_cap};
     jval root = {0};
@@ -373,28 +411,31 @@ nw_result nw_shadertoy_import(const char *json, size_t len, nw_import *out, char
     }
 
     nw_str glsl = {0}, man = {0}, notes = {0};
-    char *title = NULL;
+    char *title      = NULL;
     const jval *info = jget(sh, "info");
     const char *name = jstr(info, "name"), *user = jstr(info, "username"), *id = jstr(info, "id");
     if (name) title = strdup(name);
-    nw_str_printf(&glsl, "// %s%s%s\n", name ? name : "Imported shader", user ? " by " : "", user ? user : "");
+    nw_str_printf(&glsl, "// %s%s%s\n", name ? name : "Imported shader", user ? " by " : "",
+                  user ? user : "");
     if (id) nw_str_printf(&glsl, "// https://www.shadertoy.com/view/%s\n", id);
-    nw_str_append(&glsl, "// Imported with `neowall import`. Check the original license before sharing.\n");
+    nw_str_append(
+        &glsl, "// Imported with `neowall import`. Check the original license before sharing.\n");
 
     /* Common first, then the buffers and the cube in Shadertoy's order, the
      * image last: the parser names passes by the marker above each one */
-    static const char *const order[] = {"Common", "Buffer A", "Buf A", "Buffer B", "Buf B", "Buffer C", "Buf C",
-                                        "Buffer D", "Buf D", "Cube A", "Image"};
-    bool any_binding = false;
+    static const char *const order[] = {"Common", "Buffer A", "Buf A", "Buffer B",
+                                        "Buf B",  "Buffer C", "Buf C", "Buffer D",
+                                        "Buf D",  "Cube A",   "Image"};
+    bool any_binding                 = false;
     for (size_t o = 0; o < NW_COUNTOF(order); o++) {
         for (size_t i = 0; i < passes->len; i++) {
-            const jval *p = &passes->items[i];
+            const jval *p     = &passes->items[i];
             const char *pname = jstr(p, "name");
             const char *ptype = jstr(p, "type");
             /* old exports name passes by type only */
             if ((!pname || !*pname) && ptype) {
-                pname = !strcmp(ptype, "image")    ? "Image"
-                        : !strcmp(ptype, "common") ? "Common"
+                pname = !strcmp(ptype, "image")     ? "Image"
+                        : !strcmp(ptype, "common")  ? "Common"
                         : !strcmp(ptype, "cubemap") ? "Cube A"
                                                     : NULL;
             }
@@ -410,14 +451,14 @@ nw_result nw_shadertoy_import(const char *json, size_t len, nw_import *out, char
             nw_str_printf(&glsl, "\n// %s\n%s\n", marker(mname), code);
 
             const jval *inputs = jget(p, "inputs");
-            nw_str block = {0};
+            nw_str block       = {0};
             for (size_t k = 0; inputs && inputs->t == J_ARR && k < inputs->len; k++) {
-                const jval *in = &inputs->items[k];
+                const jval *in  = &inputs->items[k];
                 const jval *chv = jget(in, "channel");
                 /* range-check the double first: casting a huge one is undefined */
                 double chd = chv && chv->t == J_NUM ? chv->n : (double)k;
                 if (!(chd >= 0 && chd <= 3)) continue;
-                int ch = (int)chd;
+                int ch           = (int)chd;
                 const char *srcn = input_source(in, pname, ch, &notes);
                 if (!srcn) continue;
                 /* a buffer reading itself is `self` */
@@ -448,10 +489,10 @@ nw_result nw_shadertoy_import(const char *json, size_t len, nw_import *out, char
         if (err && err_cap) snprintf(err, err_cap, "the export has no Image pass");
         return nw_err(NW_ERR_PARSE, "shadertoy json");
     }
-    *out = (nw_import){.glsl = nw_str_take(&glsl),
+    *out = (nw_import){.glsl     = nw_str_take(&glsl),
                        .manifest = any_binding ? nw_str_take(&man) : NULL,
-                       .notes = notes.data ? nw_str_take(&notes) : NULL,
-                       .name = title};
+                       .notes    = notes.data ? nw_str_take(&notes) : NULL,
+                       .name     = title};
     nw_str_free(&man);
     return nw_ok();
 }

@@ -24,7 +24,7 @@
  * user-configured path, never untrusted data). */
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
-#include <stb_truetype.h>   /* src/terminal/vendor, or -Dsystem_stb */
+#include <stb_truetype.h> /* src/terminal/vendor, or -Dsystem_stb */
 
 /* Well-known monospace TrueType paths, tried in order when no font is given.
  * DejaVu Sans Mono is first because it has excellent box-drawing + block-
@@ -81,24 +81,36 @@ static const char *const kColorEmojiFontPaths[] = {
 typedef struct {
     stbtt_fontinfo font;
     const uint8_t *data;
-    bool           owns;
-    bool           ready;
-    float          scale;
-    int            ascent_px;
+    bool owns;
+    bool ready;
+    float scale;
+    int ascent_px;
 } face;
 
 static uint8_t *read_file(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
     long sz = ftell(f);
-    if (sz <= 0) { fclose(f); return NULL; }
+    if (sz <= 0) {
+        fclose(f);
+        return NULL;
+    }
     rewind(f);
     uint8_t *buf = malloc((size_t)sz);
-    if (!buf) { fclose(f); return NULL; }
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
     size_t rd = fread(buf, 1, (size_t)sz, f);
     fclose(f);
-    if (rd != (size_t)sz) { free(buf); return NULL; }
+    if (rd != (size_t)sz) {
+        free(buf);
+        return NULL;
+    }
     *out_len = (size_t)sz;
     return buf;
 }
@@ -126,12 +138,12 @@ static char *fontconfig_match(const char *family, bool monospace, bool color) {
 #endif
     FcConfigSubstitute(NULL, pat, FcMatchPattern);
     FcDefaultSubstitute(pat);
-    FcResult result = FcResultNoMatch;
+    FcResult result  = FcResultNoMatch;
     FcPattern *match = FcFontMatch(NULL, pat, &result);
     FcPatternDestroy(pat);
     if (!match) return NULL;
     FcChar8 *file = NULL;
-    char *path = NULL;
+    char *path    = NULL;
     if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file)
         path = strdup((const char *)file);
     FcPatternDestroy(match);
@@ -144,7 +156,7 @@ static char *fontconfig_match(const char *family, bool monospace, bool color) {
 #define ATLAS_H 2048
 
 /* ---- hash map: (codepoint, style) -> slot index ---- */
-#define MAP_CAP 8192   /* power of two; load kept < 0.7 (styled keys triple the set) */
+#define MAP_CAP 8192 /* power of two; load kept < 0.7 (styled keys triple the set) */
 
 /* Style bits folded into the map key so bold/italic variants of the same cp
  * cache separately. Bit 30 = bold, bit 31 = italic (cp is a 21-bit scalar). */
@@ -152,8 +164,8 @@ static char *fontconfig_match(const char *family, bool monospace, bool color) {
 #define STYLE_ITALIC (1u << 31)
 
 typedef struct {
-    uint32_t key;      /* 0 = empty; else cp | style bits */
-    uint32_t slot;     /* index into slots[] */
+    uint32_t key;  /* 0 = empty; else cp | style bits */
+    uint32_t slot; /* index into slots[] */
 } map_entry;
 
 struct glyph_atlas {
@@ -161,36 +173,36 @@ struct glyph_atlas {
     face bold;
     face italic;
     face fallback[MAX_FALLBACK];
-    int  fallback_count;
+    int fallback_count;
 
     /* Color-emoji source (CBDT/CBLC or sbix). NULL if no emoji font present. */
     cbdt_font *emoji;
-    uint8_t   *emoji_data;   /* owned font buffer backing `emoji` */
+    uint8_t *emoji_data; /* owned font buffer backing `emoji` */
 
-    int    cell_w, cell_h;
+    int cell_w, cell_h;
 
-    uint8_t *bitmap;     /* ATLAS_W * ATLAS_H, 8-bit coverage */
-    bool     dirty;
-    int      dirty_y0, dirty_y1;  /* row range touched since last clear (half-open) */
+    uint8_t *bitmap; /* ATLAS_W * ATLAS_H, 8-bit coverage */
+    bool dirty;
+    int dirty_y0, dirty_y1; /* row range touched since last clear (half-open) */
 
     /* Color emoji atlas: RGBA8, straight alpha, own shelf packer + dirty rows. */
-    uint8_t *color_bitmap;               /* ATLAS_W * ATLAS_H * 4 */
-    bool     color_dirty;
-    int      color_dirty_y0, color_dirty_y1;
-    int      cshelf_x, cshelf_y, cshelf_h;
+    uint8_t *color_bitmap; /* ATLAS_W * ATLAS_H * 4 */
+    bool color_dirty;
+    int color_dirty_y0, color_dirty_y1;
+    int cshelf_x, cshelf_y, cshelf_h;
 
     /* shelf packer cursor */
     int shelf_x, shelf_y, shelf_h;
 
     glyph_slot *slots;
-    int         slot_count, slot_cap;
+    int slot_count, slot_cap;
 
     map_entry map[MAP_CAP];
 };
 
 /* ---- hash ---- */
 static inline uint32_t hash_cp(uint32_t key) {
-    key *= 2654435761u;   /* Knuth multiplicative */
+    key *= 2654435761u; /* Knuth multiplicative */
     return key & (MAP_CAP - 1);
 }
 
@@ -198,7 +210,7 @@ static int map_find(glyph_atlas *a, uint32_t key) {
     uint32_t h = hash_cp(key);
     for (int probe = 0; probe < MAP_CAP; probe++) {
         map_entry *e = &a->map[h];
-        if (e->key == 0) return -1;        /* empty slot -> not present */
+        if (e->key == 0) return -1; /* empty slot -> not present */
         if (e->key == key) return (int)e->slot;
         h = (h + 1) & (MAP_CAP - 1);
     }
@@ -209,7 +221,11 @@ static void map_insert(glyph_atlas *a, uint32_t key, uint32_t slot) {
     uint32_t h = hash_cp(key);
     for (int probe = 0; probe < MAP_CAP; probe++) {
         map_entry *e = &a->map[h];
-        if (e->key == 0 || e->key == key) { e->key = key; e->slot = slot; return; }
+        if (e->key == 0 || e->key == key) {
+            e->key  = key;
+            e->slot = slot;
+            return;
+        }
         h = (h + 1) & (MAP_CAP - 1);
     }
     /* map full: silently drop (working set exceeded MAP_CAP, absurd for a
@@ -225,7 +241,7 @@ static bool atlas_reserve(glyph_atlas *a, int w, int h, uint16_t *ox, uint16_t *
         a->shelf_x = 0;
         a->shelf_h = 0;
     }
-    if (a->shelf_y + h > ATLAS_H) return false;   /* atlas full */
+    if (a->shelf_y + h > ATLAS_H) return false; /* atlas full */
     *ox = (uint16_t)a->shelf_x;
     *oy = (uint16_t)a->shelf_y;
     a->shelf_x += w;
@@ -245,7 +261,8 @@ static bool face_init(face *fc, const uint8_t *data, size_t len, bool owns, int 
         if (owns) free((void *)data);
         return false;
     }
-    fc->data = data; fc->owns = owns;
+    fc->data = data;
+    fc->owns = owns;
     int ascent, descent, line_gap;
     stbtt_GetFontVMetrics(&fc->font, &ascent, &descent, &line_gap);
 
@@ -263,18 +280,24 @@ static bool face_init(face *fc, const uint8_t *data, size_t len, bool owns, int 
     /* Baseline: center the line box in the cell, then place the baseline at the
      * top of the box + the ascent. half_gap splits the leading above/below so
      * text sits vertically centered rather than jammed against the cell top. */
-    int half_gap = (int)((line_gap * fc->scale) * 0.5f + 0.5f);
+    int half_gap  = (int)((line_gap * fc->scale) * 0.5f + 0.5f);
     fc->ascent_px = (int)(ascent * fc->scale + 0.5f) + half_gap;
-    fc->ready = true;
+    fc->ready     = true;
     return true;
 }
 
 /* Load a face from a file path (owned buffer). Silent no-op if unreadable. */
 static bool face_init_path(face *fc, const char *path, int cell_h) {
-    if (!path || !path[0]) { memset(fc, 0, sizeof(*fc)); return false; }
-    size_t len = 0;
+    if (!path || !path[0]) {
+        memset(fc, 0, sizeof(*fc));
+        return false;
+    }
+    size_t len   = 0;
     uint8_t *buf = read_file(path, &len);
-    if (!buf) { memset(fc, 0, sizeof(*fc)); return false; }
+    if (!buf) {
+        memset(fc, 0, sizeof(*fc));
+        return false;
+    }
     return face_init(fc, buf, len, true, cell_h);
 }
 
@@ -288,8 +311,10 @@ static void mark_dirty_rows(glyph_atlas *a, int y0, int y1) {
     if (y0 < 0) y0 = 0;
     if (y1 > ATLAS_H) y1 = ATLAS_H;
     if (y0 >= y1) return;
-    if (!a->dirty) { a->dirty_y0 = y0; a->dirty_y1 = y1; }
-    else {
+    if (!a->dirty) {
+        a->dirty_y0 = y0;
+        a->dirty_y1 = y1;
+    } else {
         if (y0 < a->dirty_y0) a->dirty_y0 = y0;
         if (y1 > a->dirty_y1) a->dirty_y1 = y1;
     }
@@ -316,8 +341,10 @@ static void mark_color_dirty_rows(glyph_atlas *a, int y0, int y1) {
     if (y0 < 0) y0 = 0;
     if (y1 > ATLAS_H) y1 = ATLAS_H;
     if (y0 >= y1) return;
-    if (!a->color_dirty) { a->color_dirty_y0 = y0; a->color_dirty_y1 = y1; }
-    else {
+    if (!a->color_dirty) {
+        a->color_dirty_y0 = y0;
+        a->color_dirty_y1 = y1;
+    } else {
         if (y0 < a->color_dirty_y0) a->color_dirty_y0 = y0;
         if (y1 > a->color_dirty_y1) a->color_dirty_y1 = y1;
     }
@@ -328,8 +355,7 @@ static void mark_color_dirty_rows(glyph_atlas *a, int y0, int y1) {
  * is premultiplied during averaging so translucent edges don't bleed the
  * (undefined) colour of fully-transparent source texels, then un-premultiplied
  * back to straight alpha for the atlas (the shader composites straight). */
-static void rgba_downscale(const uint8_t *src, int sw, int sh,
-                           uint8_t *dst, int dw, int dh) {
+static void rgba_downscale(const uint8_t *src, int sw, int sh, uint8_t *dst, int dw, int dh) {
     for (int dy = 0; dy < dh; dy++) {
         int sy0 = (int)((int64_t)dy * sh / dh);
         int sy1 = (int)((int64_t)(dy + 1) * sh / dh);
@@ -338,12 +364,13 @@ static void rgba_downscale(const uint8_t *src, int sw, int sh,
             int sx0 = (int)((int64_t)dx * sw / dw);
             int sx1 = (int)((int64_t)(dx + 1) * sw / dw);
             if (sx1 <= sx0) sx1 = sx0 + 1;
-            uint32_t ar = 0, ag = 0, ab = 0, aa = 0; int cnt = 0;
+            uint32_t ar = 0, ag = 0, ab = 0, aa = 0;
+            int cnt = 0;
             for (int y = sy0; y < sy1 && y < sh; y++) {
                 const uint8_t *row = src + (size_t)y * sw * 4;
                 for (int x = sx0; x < sx1 && x < sw; x++) {
                     const uint8_t *p = row + (size_t)x * 4;
-                    uint32_t al = p[3];
+                    uint32_t al      = p[3];
                     ar += (uint32_t)p[0] * al;
                     ag += (uint32_t)p[1] * al;
                     ab += (uint32_t)p[2] * al;
@@ -352,7 +379,10 @@ static void rgba_downscale(const uint8_t *src, int sw, int sh,
                 }
             }
             uint8_t *o = dst + ((size_t)dy * dw + dx) * 4;
-            if (cnt == 0 || aa == 0) { o[0] = o[1] = o[2] = o[3] = 0; continue; }
+            if (cnt == 0 || aa == 0) {
+                o[0] = o[1] = o[2] = o[3] = 0;
+                continue;
+            }
             o[0] = (uint8_t)(ar / aa);
             o[1] = (uint8_t)(ag / aa);
             o[2] = (uint8_t)(ab / aa);
@@ -370,7 +400,10 @@ static int raster_emoji(glyph_atlas *a, uint32_t cp) {
     if (!cbdt_has(a->emoji, cp)) return -1;
     int sw = 0, sh = 0;
     uint8_t *rgba = cbdt_render(a->emoji, cp, &sw, &sh);
-    if (!rgba || sw <= 0 || sh <= 0) { free(rgba); return -1; }
+    if (!rgba || sw <= 0 || sh <= 0) {
+        free(rgba);
+        return -1;
+    }
 
     /* Cell span must match the screen model's char_width: SMP pictographs and
      * the wide-emoji blocks occupy TWO cells; BMP dingbats/symbols occupy one.
@@ -383,34 +416,45 @@ static int raster_emoji(glyph_atlas *a, uint32_t cp) {
     int box_h = a->cell_h;
     int dw = box_w, dh = box_h;
     /* preserve aspect within the box */
-    if (sw * box_h > sh * box_w) dh = (int)((int64_t)box_w * sh / sw);
-    else                          dw = (int)((int64_t)box_h * sw / sh);
+    if (sw * box_h > sh * box_w)
+        dh = (int)((int64_t)box_w * sh / sw);
+    else
+        dw = (int)((int64_t)box_h * sw / sh);
     if (dw < 1) dw = 1;
     if (dh < 1) dh = 1;
 
     uint16_t ox, oy;
-    if (!color_reserve(a, dw + 1, dh + 1, &ox, &oy)) { free(rgba); return -1; }
+    if (!color_reserve(a, dw + 1, dh + 1, &ox, &oy)) {
+        free(rgba);
+        return -1;
+    }
 
     /* downscale into a temp, then blit into the atlas at (ox,oy) */
     uint8_t *tmp = malloc((size_t)dw * dh * 4);
-    if (!tmp) { free(rgba); return -1; }
+    if (!tmp) {
+        free(rgba);
+        return -1;
+    }
     rgba_downscale(rgba, sw, sh, tmp, dw, dh);
     free(rgba);
     for (int y = 0; y < dh; y++)
-        memcpy(a->color_bitmap + ((size_t)(oy + y) * ATLAS_W + ox) * 4,
-               tmp + (size_t)y * dw * 4, (size_t)dw * 4);
+        memcpy(a->color_bitmap + ((size_t)(oy + y) * ATLAS_W + ox) * 4, tmp + (size_t)y * dw * 4,
+               (size_t)dw * 4);
     free(tmp);
     mark_color_dirty_rows(a, oy, oy + dh);
 
     if (a->slot_count >= a->slot_cap) {
-        int ncap = a->slot_cap * 2;
+        int ncap       = a->slot_cap * 2;
         glyph_slot *ns = realloc(a->slots, (size_t)ncap * sizeof(glyph_slot));
         if (!ns) return -1;
-        a->slots = ns;
+        a->slots    = ns;
         a->slot_cap = ncap;
     }
     glyph_slot *s = &a->slots[a->slot_count];
-    s->x = ox; s->y = oy; s->w = (uint16_t)dw; s->h = (uint16_t)dh;
+    s->x          = ox;
+    s->y          = oy;
+    s->w          = (uint16_t)dw;
+    s->h          = (uint16_t)dh;
     /* centre the (possibly aspect-shrunk) strike inside the 2-cell box */
     s->off_x = (int16_t)((box_w - dw) / 2);
     s->off_y = (int16_t)((box_h - dh) / 2);
@@ -419,9 +463,8 @@ static int raster_emoji(glyph_atlas *a, uint32_t cp) {
     return a->slot_count++;
 }
 
-glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
-                                   const char *bold_path, const char *italic_path,
-                                   int cell_w, int cell_h) {
+glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len, const char *bold_path,
+                                   const char *italic_path, int cell_w, int cell_h) {
     if (cell_w <= 0 || cell_h <= 0) return NULL;
 
     glyph_atlas *a = calloc(1, sizeof(*a));
@@ -435,11 +478,18 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
      * therefore never free it again (that was a double free). */
     if (font_data && font_len) {
         uint8_t *copy = malloc(font_len);
-        if (!copy) { free(a); return NULL; }
+        if (!copy) {
+            free(a);
+            return NULL;
+        }
         memcpy(copy, font_data, font_len);
-        if (!face_init(&a->regular, copy, font_len, true, cell_h)) { free(a); return NULL; }
+        if (!face_init(&a->regular, copy, font_len, true, cell_h)) {
+            free(a);
+            return NULL;
+        }
     } else {
-        size_t len = 0; uint8_t *loaded = NULL;
+        size_t len      = 0;
+        uint8_t *loaded = NULL;
 #ifdef NEOWALL_HAVE_FONTCONFIG
         char *system_path = fontconfig_match("monospace", true, false);
         if (system_path) {
@@ -450,9 +500,15 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
         for (int i = 0; !loaded && kDefaultFontPaths[i]; i++) {
             loaded = read_file(kDefaultFontPaths[i], &len);
         }
-        if (!loaded) { free(a); return NULL; }
+        if (!loaded) {
+            free(a);
+            return NULL;
+        }
         /* face_init already freed `loaded` if it rejected the font. */
-        if (!face_init(&a->regular, loaded, len, true, cell_h)) { free(a); return NULL; }
+        if (!face_init(&a->regular, loaded, len, true, cell_h)) {
+            free(a);
+            return NULL;
+        }
     }
 
     /* --- optional bold / italic faces (fall back to regular if absent) --- */
@@ -461,7 +517,8 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
 
     /* --- fallback chain for glyphs the primary lacks (CJK/symbols) --- */
 #ifdef NEOWALL_HAVE_FONTCONFIG
-    const char *fallback_families[] = {"Noto Sans Mono CJK", "Noto Sans Symbols 2", "sans-serif", NULL};
+    const char *fallback_families[] = {"Noto Sans Mono CJK", "Noto Sans Symbols 2", "sans-serif",
+                                       NULL};
     for (int i = 0; fallback_families[i] && a->fallback_count < MAX_FALLBACK; i++) {
         char *path = fontconfig_match(fallback_families[i], false, false);
         if (path && face_init_path(&a->fallback[a->fallback_count], path, cell_h))
@@ -479,22 +536,29 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
 #ifdef NEOWALL_HAVE_FONTCONFIG
     char *emoji_path = fontconfig_match("emoji", false, true);
     if (emoji_path) {
-        size_t elen = 0;
+        size_t elen    = 0;
         uint8_t *edata = read_file(emoji_path, &elen);
         if (edata) {
             cbdt_font *cf = cbdt_open(edata, elen);
-            if (cf) { a->emoji = cf; a->emoji_data = edata; }
-            else free(edata);
+            if (cf) {
+                a->emoji      = cf;
+                a->emoji_data = edata;
+            } else
+                free(edata);
         }
         free(emoji_path);
     }
 #endif
     for (int i = 0; !a->emoji && kColorEmojiFontPaths[i]; i++) {
-        size_t elen = 0;
+        size_t elen    = 0;
         uint8_t *edata = read_file(kColorEmojiFontPaths[i], &elen);
         if (!edata) continue;
         cbdt_font *cf = cbdt_open(edata, elen);
-        if (cf) { a->emoji = cf; a->emoji_data = edata; break; }
+        if (cf) {
+            a->emoji      = cf;
+            a->emoji_data = edata;
+            break;
+        }
         free(edata);
     }
 
@@ -503,21 +567,25 @@ glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
     /* Color atlas is only allocated when an emoji font is actually present. */
     if (a->emoji) {
         a->color_bitmap = calloc((size_t)ATLAS_W * ATLAS_H * 4, 1);
-        if (!a->color_bitmap) {   /* degrade gracefully: no color emoji, text still works */
-            cbdt_close(a->emoji); a->emoji = NULL;
-            free(a->emoji_data);  a->emoji_data = NULL;
+        if (!a->color_bitmap) { /* degrade gracefully: no color emoji, text still works */
+            cbdt_close(a->emoji);
+            a->emoji = NULL;
+            free(a->emoji_data);
+            a->emoji_data = NULL;
         }
     }
     a->slot_cap = 512;
-    a->slots = calloc((size_t)a->slot_cap, sizeof(glyph_slot));
+    a->slots    = calloc((size_t)a->slot_cap, sizeof(glyph_slot));
     if (!a->slots) goto fail;
 
     a->shelf_x = a->shelf_y = a->shelf_h = 0;
     a->cshelf_x = a->cshelf_y = a->cshelf_h = 0;
-    a->dirty = true;
-    a->dirty_y0 = 0; a->dirty_y1 = ATLAS_H;   /* first upload covers all */
-    a->color_dirty = a->emoji ? true : false;
-    a->color_dirty_y0 = 0; a->color_dirty_y1 = ATLAS_H;
+    a->dirty                                = true;
+    a->dirty_y0                             = 0;
+    a->dirty_y1                             = ATLAS_H; /* first upload covers all */
+    a->color_dirty                          = a->emoji ? true : false;
+    a->color_dirty_y0                       = 0;
+    a->color_dirty_y1                       = ATLAS_H;
     return a;
 
     /* One teardown path so the constructor can never drift out of sync with
@@ -528,8 +596,7 @@ fail:
     return NULL;
 }
 
-glyph_atlas *glyph_atlas_create(const uint8_t *font_data, size_t font_len,
-                                int cell_w, int cell_h) {
+glyph_atlas *glyph_atlas_create(const uint8_t *font_data, size_t font_len, int cell_w, int cell_h) {
     return glyph_atlas_create_ex(font_data, font_len, NULL, NULL, cell_w, cell_h);
 }
 
@@ -543,7 +610,8 @@ void glyph_atlas_destroy(glyph_atlas *a) {
     face_free(&a->regular);
     face_free(&a->bold);
     face_free(&a->italic);
-    for (int i = 0; i < a->fallback_count; i++) face_free(&a->fallback[i]);
+    for (int i = 0; i < a->fallback_count; i++)
+        face_free(&a->fallback[i]);
     free(a);
 }
 
@@ -552,7 +620,7 @@ void glyph_atlas_destroy(glyph_atlas *a) {
  * would need a second raster pass; acceptable degrade). */
 static face *pick_face(glyph_atlas *a, uint32_t style) {
     if ((style & STYLE_ITALIC) && a->italic.ready) return &a->italic;
-    if ((style & STYLE_BOLD)   && a->bold.ready)   return &a->bold;
+    if ((style & STYLE_BOLD) && a->bold.ready) return &a->bold;
     return &a->regular;
 }
 
@@ -561,13 +629,13 @@ static face *pick_face(glyph_atlas *a, uint32_t style) {
  * These are the Unicode ranges with Emoji_Presentation or common emoji dingbats;
  * plain letters/box-drawing/CJK are deliberately excluded so text stays crisp. */
 static bool prefers_color_emoji(uint32_t cp) {
-    return (cp >= 0x1F000 && cp <= 0x1FAFF) ||   /* SMP emoji + symbols + pictographs */
-           (cp >= 0x2600  && cp <= 0x27BF)  ||   /* Misc symbols + Dingbats */
-           (cp >= 0x2B00  && cp <= 0x2BFF)  ||   /* Misc symbols & arrows (stars) */
-           (cp >= 0x2190  && cp <= 0x21FF)  ||   /* arrows (emoji-presentation subset) */
-           cp == 0x203C || cp == 0x2049 ||       /* !! ?! */
-           (cp >= 0x2122 && cp <= 0x2139) ||     /* TM, info */
-           (cp >= 0x1F1E6 && cp <= 0x1F1FF);     /* regional indicators (flags) */
+    return (cp >= 0x1F000 && cp <= 0x1FAFF) || /* SMP emoji + symbols + pictographs */
+           (cp >= 0x2600 && cp <= 0x27BF) ||   /* Misc symbols + Dingbats */
+           (cp >= 0x2B00 && cp <= 0x2BFF) ||   /* Misc symbols & arrows (stars) */
+           (cp >= 0x2190 && cp <= 0x21FF) ||   /* arrows (emoji-presentation subset) */
+           cp == 0x203C || cp == 0x2049 ||     /* !! ?! */
+           (cp >= 0x2122 && cp <= 0x2139) ||   /* TM, info */
+           (cp >= 0x1F1E6 && cp <= 0x1F1FF);   /* regional indicators (flags) */
 }
 
 /* Rasterize a font glyph from a specific face into the atlas; returns the new
@@ -576,7 +644,7 @@ static bool prefers_color_emoji(uint32_t cp) {
 static int raster_face(glyph_atlas *a, face *fc, uint32_t cp) {
     if (!fc || !fc->ready) return -1;
     int gi = stbtt_FindGlyphIndex(&fc->font, (int)cp);
-    if (gi == 0) return -1;   /* not in this face */
+    if (gi == 0) return -1; /* not in this face */
 
     int x0, y0, x1, y1;
     stbtt_GetGlyphBitmapBox(&fc->font, gi, fc->scale, fc->scale, &x0, &y0, &x1, &y1);
@@ -594,23 +662,25 @@ static int raster_face(glyph_atlas *a, face *fc, uint32_t cp) {
     uint16_t ox, oy;
     if (!atlas_reserve(a, gw + 1, gh + 1, &ox, &oy)) return -1;
 
-    stbtt_MakeGlyphBitmap(&fc->font,
-                          a->bitmap + (size_t)oy * ATLAS_W + ox,
-                          gw, gh, ATLAS_W, fc->scale, fc->scale, gi);
+    stbtt_MakeGlyphBitmap(&fc->font, a->bitmap + (size_t)oy * ATLAS_W + ox, gw, gh, ATLAS_W,
+                          fc->scale, fc->scale, gi);
     mark_dirty_rows(a, oy, oy + gh);
 
     if (a->slot_count >= a->slot_cap) {
-        int ncap = a->slot_cap * 2;
+        int ncap       = a->slot_cap * 2;
         glyph_slot *ns = realloc(a->slots, (size_t)ncap * sizeof(glyph_slot));
         if (!ns) return -1;
-        a->slots = ns;
+        a->slots    = ns;
         a->slot_cap = ncap;
     }
     glyph_slot *s = &a->slots[a->slot_count];
-    s->x = ox; s->y = oy; s->w = (uint16_t)gw; s->h = (uint16_t)gh;
-    s->off_x = (int16_t)x0;                        /* glyph left bearing */
-    s->off_y = (int16_t)(fc->ascent_px + y0);      /* top of ink from cell top */
-    s->valid = true;
+    s->x          = ox;
+    s->y          = oy;
+    s->w          = (uint16_t)gw;
+    s->h          = (uint16_t)gh;
+    s->off_x      = (int16_t)x0;                   /* glyph left bearing */
+    s->off_y      = (int16_t)(fc->ascent_px + y0); /* top of ink from cell top */
+    s->valid      = true;
     return a->slot_count++;
 }
 
@@ -627,23 +697,30 @@ static int rasterize(glyph_atlas *a, uint32_t cp, uint32_t style) {
         uint8_t *tmp = malloc((size_t)cw * ch);
         if (tmp && glyph_synth_render(cp, tmp, cw, ch)) {
             uint16_t ox, oy;
-            if (!atlas_reserve(a, cw + 1, ch + 1, &ox, &oy)) { free(tmp); goto blank; }
+            if (!atlas_reserve(a, cw + 1, ch + 1, &ox, &oy)) {
+                free(tmp);
+                goto blank;
+            }
             for (int y = 0; y < ch; y++)
-                memcpy(a->bitmap + (size_t)(oy + y) * ATLAS_W + ox,
-                       tmp + (size_t)y * cw, (size_t)cw);
+                memcpy(a->bitmap + (size_t)(oy + y) * ATLAS_W + ox, tmp + (size_t)y * cw,
+                       (size_t)cw);
             mark_dirty_rows(a, oy, oy + ch);
             free(tmp);
             if (a->slot_count >= a->slot_cap) {
-                int ncap = a->slot_cap * 2;
+                int ncap       = a->slot_cap * 2;
                 glyph_slot *ns = realloc(a->slots, (size_t)ncap * sizeof(glyph_slot));
                 if (!ns) goto blank;
-                a->slots = ns;
+                a->slots    = ns;
                 a->slot_cap = ncap;
             }
             glyph_slot *s = &a->slots[a->slot_count];
-            s->x = ox; s->y = oy; s->w = (uint16_t)cw; s->h = (uint16_t)ch;
-            s->off_x = 0; s->off_y = 0;   /* fills the cell exactly */
-            s->valid = true;
+            s->x          = ox;
+            s->y          = oy;
+            s->w          = (uint16_t)cw;
+            s->h          = (uint16_t)ch;
+            s->off_x      = 0;
+            s->off_y      = 0; /* fills the cell exactly */
+            s->valid      = true;
             map_insert(a, key, (uint32_t)a->slot_count);
             return a->slot_count++;
         }
@@ -656,7 +733,10 @@ static int rasterize(glyph_atlas *a, uint32_t cp, uint32_t style) {
      * monochrome outlines that a text/symbol face happens to carry. */
     if (prefers_color_emoji(cp)) {
         int cidx = raster_emoji(a, cp);
-        if (cidx >= 0) { map_insert(a, key, (uint32_t)cidx); return cidx; }
+        if (cidx >= 0) {
+            map_insert(a, key, (uint32_t)cidx);
+            return cidx;
+        }
     }
 
     /* 1) the styled face, 2) regular (if we started styled), 3) fallback chain. */
@@ -667,13 +747,19 @@ static int rasterize(glyph_atlas *a, uint32_t cp, uint32_t style) {
      * the monochrome fallback fonts (catches emoji the text face lacks). */
     if (idx < 0) {
         int cidx = raster_emoji(a, cp);
-        if (cidx >= 0) { map_insert(a, key, (uint32_t)cidx); return cidx; }
+        if (cidx >= 0) {
+            map_insert(a, key, (uint32_t)cidx);
+            return cidx;
+        }
     }
 
     for (int i = 0; idx < 0 && i < a->fallback_count; i++)
         idx = raster_face(a, &a->fallback[i], cp);
 
-    if (idx >= 0) { map_insert(a, key, (uint32_t)idx); return idx; }
+    if (idx >= 0) {
+        map_insert(a, key, (uint32_t)idx);
+        return idx;
+    }
 
 blank:
     if (a->slot_count >= a->slot_cap) return -1;
@@ -686,12 +772,11 @@ blank:
     }
 }
 
-const glyph_slot *glyph_atlas_get_styled(glyph_atlas *a, uint32_t cp,
-                                         bool bold, bool italic) {
+const glyph_slot *glyph_atlas_get_styled(glyph_atlas *a, uint32_t cp, bool bold, bool italic) {
     static const glyph_slot blank = {0};
     if (!a || cp == 0) return &blank;
     uint32_t style = (bold ? STYLE_BOLD : 0u) | (italic ? STYLE_ITALIC : 0u);
-    int idx = map_find(a, cp | style);
+    int idx        = map_find(a, cp | style);
     if (idx < 0) idx = rasterize(a, cp, style);
     if (idx < 0 || idx >= a->slot_count) return &blank;
     return &a->slots[idx];
@@ -701,21 +786,43 @@ const glyph_slot *glyph_atlas_get(glyph_atlas *a, uint32_t cp) {
     return glyph_atlas_get_styled(a, cp, false, false);
 }
 
-const uint8_t *glyph_atlas_bitmap(const glyph_atlas *a) { return a ? a->bitmap : NULL; }
-int  glyph_atlas_width(const glyph_atlas *a)  { (void)a; return ATLAS_W; }
-int  glyph_atlas_height(const glyph_atlas *a) { (void)a; return ATLAS_H; }
-bool glyph_atlas_dirty(const glyph_atlas *a)  { return a ? a->dirty : false; }
-void glyph_atlas_clear_dirty(glyph_atlas *a)  { if (a) { a->dirty = false; a->dirty_y0 = a->dirty_y1 = 0; } }
+const uint8_t *glyph_atlas_bitmap(const glyph_atlas *a) {
+    return a ? a->bitmap : NULL;
+}
+int glyph_atlas_width(const glyph_atlas *a) {
+    (void)a;
+    return ATLAS_W;
+}
+int glyph_atlas_height(const glyph_atlas *a) {
+    (void)a;
+    return ATLAS_H;
+}
+bool glyph_atlas_dirty(const glyph_atlas *a) {
+    return a ? a->dirty : false;
+}
+void glyph_atlas_clear_dirty(glyph_atlas *a) {
+    if (a) {
+        a->dirty    = false;
+        a->dirty_y0 = a->dirty_y1 = 0;
+    }
+}
 
 void glyph_atlas_dirty_rows(const glyph_atlas *a, int *y0, int *y1) {
     if (y0) *y0 = a ? a->dirty_y0 : 0;
     if (y1) *y1 = a ? a->dirty_y1 : 0;
 }
 
-const uint8_t *glyph_atlas_color_bitmap(const glyph_atlas *a) { return a ? a->color_bitmap : NULL; }
-bool glyph_atlas_color_dirty(const glyph_atlas *a) { return a ? a->color_dirty : false; }
+const uint8_t *glyph_atlas_color_bitmap(const glyph_atlas *a) {
+    return a ? a->color_bitmap : NULL;
+}
+bool glyph_atlas_color_dirty(const glyph_atlas *a) {
+    return a ? a->color_dirty : false;
+}
 void glyph_atlas_clear_color_dirty(glyph_atlas *a) {
-    if (a) { a->color_dirty = false; a->color_dirty_y0 = a->color_dirty_y1 = 0; }
+    if (a) {
+        a->color_dirty    = false;
+        a->color_dirty_y0 = a->color_dirty_y1 = 0;
+    }
 }
 void glyph_atlas_color_dirty_rows(const glyph_atlas *a, int *y0, int *y1) {
     if (y0) *y0 = a ? a->color_dirty_y0 : 0;

@@ -15,18 +15,16 @@
 
 /* Vertex shader for pixelate transition */
 static const char *pixelate_vertex_shader_source =
-    GLSL_VERSION_STRING
-    "in vec2 position;\n"
-    "in vec2 texcoord;\n"
-    "out vec2 v_texcoord;\n"
-    "void main() {\n"
-    "    gl_Position = vec4(position, 0.0, 1.0);\n"
-    "    v_texcoord = texcoord;\n"
-    "}\n";
+    GLSL_VERSION_STRING "in vec2 position;\n"
+                        "in vec2 texcoord;\n"
+                        "out vec2 v_texcoord;\n"
+                        "void main() {\n"
+                        "    gl_Position = vec4(position, 0.0, 1.0);\n"
+                        "    v_texcoord = texcoord;\n"
+                        "}\n";
 
 /* Pixelate/mosaic fragment shader */
-static const char *pixelate_fragment_shader_source =
-    GLSL_VERSION_STRING
+static const char *pixelate_fragment_shader_source = GLSL_VERSION_STRING
     "in vec2 v_texcoord;\n"
     "out vec4 fragColor;\n"
     "uniform sampler2D texture0;\n"
@@ -82,11 +80,8 @@ static const char *pixelate_fragment_shader_source =
     "}\n";
 
 bool shader_create_pixelate_program(GLuint *program) {
-    return shader_create_program_from_sources(
-        pixelate_vertex_shader_source,
-        pixelate_fragment_shader_source,
-        program
-    );
+    return shader_create_program_from_sources(pixelate_vertex_shader_source,
+                                              pixelate_fragment_shader_source, program);
 }
 
 bool transition_pixelate_render(struct output_state *output, float progress) {
@@ -112,15 +107,12 @@ bool transition_pixelate_render(struct output_state *output, float progress) {
     }
 
     /* Resolution needed for pixelate shader */
-    float resolution[2] = { (float)output->width, (float)output->height };
+    float resolution[2] = {(float)output->width, (float)output->height};
 
     /* Draw blended transition with both textures */
-    if (!transition_draw_blended_textures(&ctx,
-                                           output->next_texture,
-                                           output->texture,
-                                           progress,
-                                           0.0f,  /* time not used by pixelate */
-                                           resolution)) {
+    if (!transition_draw_blended_textures(&ctx, output->next_texture, output->texture, progress,
+                                          0.0f, /* time not used by pixelate */
+                                          resolution)) {
         transition_end(&ctx);
         return false;
     }

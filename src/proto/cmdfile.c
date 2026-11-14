@@ -99,7 +99,7 @@ int read_set_index_file(void) {
     }
     char line[64];
     long parsed = -1;
-    bool valid = fgets(line, sizeof(line), fp) != NULL;
+    bool valid  = fgets(line, sizeof(line), fp) != NULL;
     fclose(fp);
     unlink(claimed);
     if (!valid) return -1;
@@ -156,8 +156,7 @@ bool write_set_terminal_file(const char *cmd) {
     /* Store the command verbatim on one line. Newlines in the command would
      * confuse the single-line reader, so reject them up front. */
     size_t len = strlen(cmd);
-    if (write(fd, cmd, len) != (ssize_t)len ||
-        write(fd, "\n", 1) != 1) {
+    if (write(fd, cmd, len) != (ssize_t)len || write(fd, "\n", 1) != 1) {
         fprintf(stderr, "Failed to write set-terminal file: %s\n", strerror(errno));
         close(fd);
         unlink(tmp);
@@ -177,7 +176,7 @@ bool write_set_terminal_file(const char *cmd) {
  * newer concurrently-published command. */
 bool read_set_terminal_file(char *out, size_t out_len) {
     if (!out || out_len == 0) return false;
-    out[0] = '\0';
+    out[0]           = '\0';
     const char *path = get_set_terminal_file_path();
     char claimed[NW_PATH_MAX];
     int n = snprintf(claimed, sizeof(claimed), "%s.take-%d", path, (int)getpid());

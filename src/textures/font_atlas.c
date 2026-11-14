@@ -19,9 +19,9 @@
 #define FA_CELL_W 8
 #define FA_CELL_H 12
 #define FA_COLS   16
-#define FA_ROWS   6          /* 96 cells: ascii 32..127 */
-#define FA_W      (FA_COLS * FA_CELL_W)   /* 128 */
-#define FA_H      (FA_ROWS * FA_CELL_H)   /* 72  */
+#define FA_ROWS   6                     /* 96 cells: ascii 32..127 */
+#define FA_W      (FA_COLS * FA_CELL_W) /* 128 */
+#define FA_H      (FA_ROWS * FA_CELL_H) /* 72  */
 
 /* Each glyph = 12 rows, each row an 8-bit mask (bit7 = leftmost pixel).
  * Only the columns/rows actually used carry ink; the rest is blank so the
@@ -35,6 +35,7 @@ typedef unsigned char g12[12];
 /* helper: a blank row */
 #define _ 0x00
 
+/* clang-format off */
 static const g12 GLYPHS[96] = {
 /* 32 space */ {_,_,_,_,_,_,_,_,_,_,_,_},
 /* 33 ! */ {_,_,0x20,0x20,0x20,0x20,0x20,_,0x20,_,_,_},
@@ -133,6 +134,7 @@ static const g12 GLYPHS[96] = {
 /*126 ~ */ {_,_,_,0x48,0xA8,0x90,_,_,_,_,_,_},
 /*127    */ {_,_,_,_,_,_,_,_,_,_,_,_},
 };
+/* clang-format on */
 
 #undef _
 
@@ -140,7 +142,8 @@ GLuint texture_create_font_atlas(int width, int height) {
     /* width/height args are accepted for API symmetry but the atlas has a
      * fixed native size; the caller passes DEFAULT_TEXTURE_SIZE which we
      * ignore in favour of the exact glyph grid. */
-    (void)width; (void)height;
+    (void)width;
+    (void)height;
 
     unsigned char *data = calloc((size_t)FA_W * FA_H * 4, 1);
     if (!data) {
@@ -148,22 +151,22 @@ GLuint texture_create_font_atlas(int width, int height) {
     }
 
     for (int idx = 0; idx < 96; idx++) {
-        int cellCol = idx % FA_COLS;
-        int cellRow = idx / FA_COLS;
-        int ox = cellCol * FA_CELL_W;
-        int oy = cellRow * FA_CELL_H;
+        int cellCol  = idx % FA_COLS;
+        int cellRow  = idx / FA_COLS;
+        int ox       = cellCol * FA_CELL_W;
+        int oy       = cellRow * FA_CELL_H;
         const g12 *g = &GLYPHS[idx];
         for (int r = 0; r < FA_CELL_H; r++) {
             unsigned char mask = (*g)[r];
             for (int c = 0; c < FA_CELL_W; c++) {
                 unsigned char ink = (mask & (0x80u >> c)) ? 255u : 0u;
-                int px = ox + c;
-                int py = oy + r;
-                size_t o = ((size_t)py * FA_W + px) * 4u;
-                data[o + 0] = ink;
-                data[o + 1] = ink;
-                data[o + 2] = ink;
-                data[o + 3] = ink;
+                int px            = ox + c;
+                int py            = oy + r;
+                size_t o          = ((size_t)py * FA_W + px) * 4u;
+                data[o + 0]       = ink;
+                data[o + 1]       = ink;
+                data[o + 2]       = ink;
+                data[o + 3]       = ink;
             }
         }
     }
@@ -171,8 +174,7 @@ GLuint texture_create_font_atlas(int width, int height) {
     GLuint texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FA_W, FA_H, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, data);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FA_W, FA_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     /* LINEAR: bilinear ramp at glyph edges so the shader can anti-alias them
      * with a smoothstep threshold (nwGlyph). CLAMP stops cells bleeding into
      * neighbours. A 1px transparent gutter around each glyph in the bitmap

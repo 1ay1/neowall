@@ -57,13 +57,13 @@ const char *get_pid_file_path(void) {
  * until shutdown, making singleton ownership independent of PID reuse. */
 bool update_pid_file(void) {
     const char *pid_path = get_pid_file_path();
-    int fd = pid_lock_fd;
+    int fd               = pid_lock_fd;
     if (fd < 0 || ftruncate(fd, 0) != 0 || lseek(fd, 0, SEEK_SET) < 0) {
         log_error("Failed to update locked PID file %s: %s", pid_path, strerror(errno));
         return false;
     }
     char buf[32];
-    int n = snprintf(buf, sizeof(buf), "%d\n", (int)getpid());
+    int n   = snprintf(buf, sizeof(buf), "%d\n", (int)getpid());
     bool ok = n > 0 && write(fd, buf, (size_t)n) == n && fsync(fd) == 0;
     if (!ok) log_error("Failed to write PID to %s: %s", pid_path, strerror(errno));
     return ok;
@@ -86,11 +86,10 @@ static bool unlink_locked_pid_inode(int fd) {
  * inode's lock and verifying that the pathname still names that inode. */
 bool remove_stale_pid_file(void) {
     const char *pid_path = get_pid_file_path();
-    int fd = open(pid_path, O_RDWR | O_CLOEXEC);
+    int fd               = open(pid_path, O_RDWR | O_CLOEXEC);
     if (fd < 0) return errno == ENOENT;
     bool removed = false;
-    if (flock(fd, LOCK_EX | LOCK_NB) == 0)
-        removed = unlink_locked_pid_inode(fd);
+    if (flock(fd, LOCK_EX | LOCK_NB) == 0) removed = unlink_locked_pid_inode(fd);
     close(fd);
     return removed;
 }
@@ -111,13 +110,13 @@ void remove_pid_file(void) {
  * harmless: only the held lock denotes a live daemon. */
 pid_claim try_take_pid_file(pid_t *existing_pid_out) {
     const char *pid_path = get_pid_file_path();
-    int fd = open(pid_path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    int fd               = open(pid_path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
     if (fd < 0) {
         log_error("Failed to open PID file %s: %s", pid_path, strerror(errno));
         return PID_CLAIM_FAILED;
     }
     if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
-        FILE *fp = fdopen(dup(fd), "r");
+        FILE *fp    = fdopen(dup(fd), "r");
         long parsed = 0;
         char line[64];
         if (fp && fgets(line, sizeof(line), fp)) {
@@ -136,4 +135,3 @@ pid_claim try_take_pid_file(pid_t *existing_pid_out) {
     }
     return PID_CLAIM_OK;
 }
-

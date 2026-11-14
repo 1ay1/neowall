@@ -16,7 +16,7 @@ typedef struct x11_occlusion {
     Window root;
     struct neowall_state *state;
     Atom client_list_stacking, wm_state, wm_state_fullscreen;
-    uint64_t last_check_ms;     /* polled, at most every 250 ms */
+    uint64_t last_check_ms; /* polled, at most every 250 ms */
     bool active;
 } x11_occlusion;
 

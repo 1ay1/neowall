@@ -30,7 +30,7 @@ static bool apply_builtin(struct neowall_state *state) {
     config_builtin_default(&def);
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o; o = o->next) {
-        struct wallpaper_config copy = def;   /* output_apply_config deep-copies */
+        struct wallpaper_config copy = def; /* output_apply_config deep-copies */
         output_apply_config(o, &copy);
     }
     pthread_rwlock_unlock(&state->output_list_lock);
@@ -51,7 +51,7 @@ static void apply_globals(struct neowall_state *state, const config_doc *doc) {
 
 /* Each output gets exactly one config: its own block, or default. */
 static bool apply_doc(struct neowall_state *state, const config_doc *doc, bool *applied_any) {
-    bool failed = false;
+    bool failed  = false;
     *applied_any = false;
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o; o = o->next) {
@@ -63,8 +63,9 @@ static bool apply_doc(struct neowall_state *state, const config_doc *doc, bool *
         if (output_apply_config(o, &cfg)) {
             *applied_any = true;
             log_info("Output %s: %s", output_name(o),
-                     cfg.type == WALLPAPER_SHADER   ? cfg.shader_path :
-                     cfg.type == WALLPAPER_TERMINAL ? cfg.term_cmd : cfg.path);
+                     cfg.type == WALLPAPER_SHADER     ? cfg.shader_path
+                     : cfg.type == WALLPAPER_TERMINAL ? cfg.term_cmd
+                                                      : cfg.path);
         } else {
             log_error("Failed to apply config to output '%s'", output_name(o));
             failed = true;
@@ -95,7 +96,7 @@ bool app_config_load(struct neowall_state *state, const char *path) {
     }
     apply_globals(state, doc);
     bool any = false;
-    bool ok = apply_doc(state, doc, &any);
+    bool ok  = apply_doc(state, doc, &any);
     config_doc_free(doc);
     if (!ok) {
         log_error("Configuration was valid, but one or more outputs failed to apply it");
@@ -123,7 +124,7 @@ bool app_config_reload(struct neowall_state *state, const char *path) {
     }
     apply_globals(state, doc);
     bool any = false;
-    bool ok = apply_doc(state, doc, &any);
+    bool ok  = apply_doc(state, doc, &any);
     config_doc_free(doc);
     if (!ok) {
         log_error("Configuration was valid, but one or more outputs failed to apply it");

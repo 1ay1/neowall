@@ -19,16 +19,16 @@
 
 #include "neowall/shader/shader_scaffold.h"
 
-static int checks = 0;
+static int checks   = 0;
 static int failures = 0;
 
-#define CHECK(cond)                                                            \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
-        }                                                                      \
+#define CHECK(cond)                                                                                \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                        \
+        }                                                                                          \
     } while (0)
 
 /* Point HOME at a scratch dir so the real ~/.config is never touched. */
@@ -172,7 +172,8 @@ int main(void) {
     /* Best-effort cleanup; the scratch dir is under /tmp either way. */
     char cmd[600];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", scratch);
-    if (system(cmd) != 0) { /* nothing useful to do on failure */ }
+    if (system(cmd) != 0) { /* nothing useful to do on failure */
+    }
 
     printf("shader_scaffold: %d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

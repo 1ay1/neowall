@@ -64,7 +64,7 @@ typedef x11_rect_t rect_t;
  * stops holding, both need their own Display connection instead. */
 /* Xlib error handlers get no context pointer, so this one flag is global.
  * Loop thread only, set and read within one check. */
-static unsigned char occ_x_error;  /* Last X error code seen, 0 = none. */
+static unsigned char occ_x_error; /* Last X error code seen, 0 = none. */
 
 static int occ_error_handler(Display *dpy, XErrorEvent *err) {
     occ_x_error = err->error_code;
@@ -75,8 +75,7 @@ static int occ_error_handler(Display *dpy, XErrorEvent *err) {
         log_error("x11_occlusion: unexpected X error while walking "
                   "_NET_CLIENT_LIST_STACKING: %s (code %u, request %u.%u, "
                   "resource 0x%lx) - skipping that window",
-                  text, err->error_code, err->request_code, err->minor_code,
-                  err->resourceid);
+                  text, err->error_code, err->request_code, err->minor_code, err->resourceid);
     }
     return 0;
 }
@@ -88,15 +87,15 @@ static bool window_has_state(const x11_occlusion *occ, Window win, Atom target) 
     unsigned long n, rem;
     unsigned char *data = NULL;
 
-    if (XGetWindowProperty(dpy, win, occ->wm_state,
-                           0, 64, False, XA_ATOM,
-                           &type, &format, &n, &rem, &data) != Success || !data) {
+    if (XGetWindowProperty(dpy, win, occ->wm_state, 0, 64, False, XA_ATOM, &type, &format, &n, &rem,
+                           &data) != Success ||
+        !data) {
         return false;
     }
     /* format 32 items are longs in Xlib's buffer; anything else isn't Atoms */
     if (type != XA_ATOM || format != 32) n = 0;
 
-    bool found = false;
+    bool found  = false;
     Atom *atoms = (Atom *)data;
     for (unsigned long i = 0; i < n; i++) {
         if (atoms[i] == target) {
@@ -108,8 +107,7 @@ static bool window_has_state(const x11_occlusion *occ, Window win, Atom target) 
     return found;
 }
 
-static bool get_window_geometry(Display *dpy, Window win,
-                                int *x, int *y, int *w, int *h) {
+static bool get_window_geometry(Display *dpy, Window win, int *x, int *y, int *w, int *h) {
     Window child;
     int wx, wy;
     unsigned int ww, wh, border, depth;
@@ -126,7 +124,7 @@ static bool get_window_geometry(Display *dpy, Window win,
 }
 
 static void check_fullscreen_state(x11_occlusion *occ) {
-    Display *x_display = occ->dpy;
+    Display *x_display            = occ->dpy;
     struct neowall_state *g_state = occ->state;
     if (!x_display || !g_state) {
         return;
@@ -137,9 +135,9 @@ static void check_fullscreen_state(x11_occlusion *occ) {
     unsigned long n, rem;
     unsigned char *data = NULL;
 
-    if (XGetWindowProperty(x_display, occ->root, occ->client_list_stacking,
-                           0, 1024, False, XA_WINDOW,
-                           &type, &format, &n, &rem, &data) != Success || !data) {
+    if (XGetWindowProperty(x_display, occ->root, occ->client_list_stacking, 0, 1024, False,
+                           XA_WINDOW, &type, &format, &n, &rem, &data) != Success ||
+        !data) {
         return;
     }
     if (type != XA_WINDOW || format != 32) {
@@ -152,9 +150,9 @@ static void check_fullscreen_state(x11_occlusion *occ) {
      * of one-at-a-time — amortized O(n) instead of O(n^2) reallocations, and
      * a failed grow now logs and bails for the rest of the list rather than
      * silently dropping a single fullscreen window from consideration. */
-    rect_t *fs = NULL;
+    rect_t *fs   = NULL;
     int fs_count = 0;
-    int fs_cap = 0;
+    int fs_cap   = 0;
 
     /* Scoped to the per-window queries below, and only to those: the root property
      * fetch above ran under the default handler, so a failure there is still fatal
@@ -165,36 +163,35 @@ static void check_fullscreen_state(x11_occlusion *occ) {
     for (unsigned long i = 0; i < n; i++) {
         occ_x_error = 0;
 
-        bool is_fullscreen =
-            window_has_state(occ, windows[i], occ->wm_state_fullscreen);
+        bool is_fullscreen = window_has_state(occ, windows[i], occ->wm_state_fullscreen);
         if (occ_x_error) {
-            continue;  /* Window died (silent), or something else went wrong and the
-                        * handler logged it. Either way there is no answer to use. */
+            continue; /* Window died (silent), or something else went wrong and the
+                       * handler logged it. Either way there is no answer to use. */
         }
         if (!is_fullscreen) {
             continue;
         }
 
         int wx, wy, ww, wh;
-        if (!get_window_geometry(x_display, windows[i], &wx, &wy, &ww, &wh) ||
-            occ_x_error) {
-            continue;  /* Window died under us — it cannot be occluding anything. */
+        if (!get_window_geometry(x_display, windows[i], &wx, &wy, &ww, &wh) || occ_x_error) {
+            continue; /* Window died under us — it cannot be occluding anything. */
         }
         if (fs_count == fs_cap) {
             int new_cap = fs_cap ? fs_cap * 2 : 8;
             rect_t *tmp = realloc(fs, (size_t)new_cap * sizeof(*fs));
             if (!tmp) {
                 log_error("x11_occlusion: realloc failed for %d fullscreen rects, "
-                          "truncating list", new_cap);
+                          "truncating list",
+                          new_cap);
                 break;
             }
-            fs = tmp;
+            fs     = tmp;
             fs_cap = new_cap;
         }
-        fs[fs_count++] = (rect_t){ wx, wy, ww, wh };
+        fs[fs_count++] = (rect_t){wx, wy, ww, wh};
     }
 
-    XSync(x_display, False);  /* Deliver any straggling error before we un-install. */
+    XSync(x_display, False); /* Deliver any straggling error before we un-install. */
     XSetErrorHandler(prev_handler);
 
     XFree(data);
@@ -208,9 +205,9 @@ static void check_fullscreen_state(x11_occlusion *occ) {
             continue;
         }
 
-        bool was = atomic_load_explicit(&o->occluded, memory_order_acquire);
-        x11_rect_t orect = { o->x_offset, o->y_offset, o->width, o->height };
-        bool now = x11_rect_is_covered(orect, fs, fs_count);
+        bool was         = atomic_load_explicit(&o->occluded, memory_order_acquire);
+        x11_rect_t orect = {o->x_offset, o->y_offset, o->width, o->height};
+        bool now         = x11_rect_is_covered(orect, fs, fs_count);
 
         atomic_store_explicit(&o->occluded, now, memory_order_release);
 
@@ -233,13 +230,13 @@ static void check_fullscreen_state(x11_occlusion *occ) {
 bool x11_occlusion_init(x11_occlusion *occ, Display *display, struct neowall_state *state) {
     if (!occ || !display || !state) return false;
     *occ = (x11_occlusion){
-        .dpy = display,
-        .root = DefaultRootWindow(display),
-        .state = state,
+        .dpy                  = display,
+        .root                 = DefaultRootWindow(display),
+        .state                = state,
         .client_list_stacking = XInternAtom(display, "_NET_CLIENT_LIST_STACKING", False),
-        .wm_state = XInternAtom(display, "_NET_WM_STATE", False),
-        .wm_state_fullscreen = XInternAtom(display, "_NET_WM_STATE_FULLSCREEN", False),
-        .active = true,
+        .wm_state             = XInternAtom(display, "_NET_WM_STATE", False),
+        .wm_state_fullscreen  = XInternAtom(display, "_NET_WM_STATE_FULLSCREEN", False),
+        .active               = true,
     };
     check_fullscreen_state(occ);
     return true;

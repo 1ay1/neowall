@@ -20,7 +20,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     char err[128];
     if (nw_is_ok(nw_shadertoy_import((const char *)data, size, &im, err, sizeof(err)))) {
         nw_shader_source *s = NULL;
-        if (nw_is_ok(nw_shader_source_parse(im.glsl, NULL, im.manifest, &s))) nw_shader_source_free(s);
+        if (nw_is_ok(nw_shader_source_parse(im.glsl, NULL, im.manifest, &s)))
+            nw_shader_source_free(s);
         nw_import_free(&im);
     }
     return 0;

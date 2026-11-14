@@ -23,8 +23,16 @@
 #include "hyprland_coverage.h"
 
 static int fails, checks;
-#define CHECK(c, ...) do { checks++; if (!(c)) { fails++; \
-    printf("  FAIL line %d: ", __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
+#define CHECK(c, ...)                                                                              \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(c)) {                                                                                \
+            fails++;                                                                               \
+            printf("  FAIL line %d: ", __LINE__);                                                  \
+            printf(__VA_ARGS__);                                                                   \
+            printf("\n");                                                                          \
+        }                                                                                          \
+    } while (0)
 
 /* What the fake answers; swapped by the test under the lock. */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -38,7 +46,7 @@ static void *serve(void *arg) {
         int c = accept(g_listen, NULL, NULL);
         if (c < 0) continue;
         char cmd[64] = {0};
-        ssize_t n = recv(c, cmd, sizeof(cmd) - 1, 0);
+        ssize_t n    = recv(c, cmd, sizeof(cmd) - 1, 0);
         pthread_mutex_lock(&g_lock);
         const char *reply = (n > 0 && strstr(cmd, "monitors")) ? g_monitors : g_clients;
         if (reply) {
@@ -54,7 +62,7 @@ static void *serve(void *arg) {
 static void serve_json(const char *mon, const char *cli) {
     pthread_mutex_lock(&g_lock);
     g_monitors = mon;
-    g_clients = cli;
+    g_clients  = cli;
     pthread_mutex_unlock(&g_lock);
 }
 
@@ -77,9 +85,9 @@ static const char MONITORS[] =
     " {\"id\": 1, \"name\": \"HDMI-A-1\", \"x\": 1000, \"y\": 0, \"width\": 1000, \"height\": 500,"
     "  \"activeWorkspace\": {\"id\": 2, \"name\": \"2\"}, \"reserved\": [0, 0, 0, 0]}]";
 
-#define CLIENT(mon, ws, x, y, w, h, extra) \
-    "{\"address\": \"0x1\", \"mapped\": true, \"hidden\": false, \"at\": [" #x ", " #y "]," \
-    " \"size\": [" #w ", " #h "], \"workspace\": {\"id\": " #ws ", \"name\": \"x\"}," \
+#define CLIENT(mon, ws, x, y, w, h, extra)                                                         \
+    "{\"address\": \"0x1\", \"mapped\": true, \"hidden\": false, \"at\": [" #x ", " #y "],"        \
+    " \"size\": [" #w ", " #h "], \"workspace\": {\"id\": " #ws ", \"name\": \"x\"},"              \
     " \"monitor\": " #mon ", \"title\": \"a \\\"quoted\\\" {title}\", \"fullscreen\": " extra "}"
 
 int main(void) {
@@ -97,7 +105,8 @@ int main(void) {
     struct sockaddr_un a = {.sun_family = AF_UNIX};
     snprintf(a.sun_path, sizeof(a.sun_path), "%s/.socket.sock", path);
     g_listen = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (g_listen < 0 || bind(g_listen, (struct sockaddr *)&a, sizeof(a)) != 0 || listen(g_listen, 8) != 0) {
+    if (g_listen < 0 || bind(g_listen, (struct sockaddr *)&a, sizeof(a)) != 0 ||
+        listen(g_listen, 8) != 0) {
         perror("fake hyprland socket");
         return 1;
     }
@@ -114,9 +123,8 @@ int main(void) {
 
     /* 1. One window on DP-1 covering the left half below the bar; one on a
      *    hidden workspace; one on the other monitor. */
-    static const char c1[] = "[" CLIENT(0, 1, 0, 30, 500, 470, "0") ","
-                             CLIENT(0, 7, 0, 0, 1000, 500, "0") ","
-                             CLIENT(1, 2, 1100, 50, 200, 100, "1") "]";
+    static const char c1[] = "[" CLIENT(0, 1, 0, 30, 500, 470, "0") "," CLIENT(
+        0, 7, 0, 0, 1000, 500, "0") "," CLIENT(1, 2, 1100, 50, 200, 100, "1") "]";
     serve_json(MONITORS, c1);
     refresh();
     CHECK(!hyprland_output_covered(&dp, 0.6f), "half covered < 60%%");
@@ -126,15 +134,18 @@ int main(void) {
     CHECK(n == 1 && w[0].x == 0 && w[0].y == 30 && w[0].w == 500 && w[0].h == 470,
           "rect %.0f,%.0f %.0fx%.0f", w[0].x, w[0].y, w[0].w, w[0].h);
     n = hyprland_output_windows(&hdmi, w, 8);
-    CHECK(n == 1 && w[0].x == 100 && w[0].y == 50, "output-local coords on HDMI: %.0f,%.0f", w[0].x, w[0].y);
+    CHECK(n == 1 && w[0].x == 100 && w[0].y == 50, "output-local coords on HDMI: %.0f,%.0f", w[0].x,
+          w[0].y);
     CHECK(n == 1 && w[0].focused, "fullscreen window reported focused");
     CHECK(hyprland_output_windows(&other, w, 8) == 0, "unknown output sees no windows");
     CHECK(hyprland_output_windows(&dp, w, 0) == 0, "max 0 writes nothing");
 
     /* 2. Full tiling with no gaps covers; the same tiling with 20px gaps
      *    leaves strips that keep it under 100%. */
-    static const char tiled[] = "[" CLIENT(0, 1, 0, 30, 500, 470, "0") "," CLIENT(0, 1, 500, 30, 500, 470, "0") "]";
-    static const char gapped[] = "[" CLIENT(0, 1, 20, 50, 470, 430, "0") "," CLIENT(0, 1, 510, 50, 470, 430, "0") "]";
+    static const char tiled[] =
+        "[" CLIENT(0, 1, 0, 30, 500, 470, "0") "," CLIENT(0, 1, 500, 30, 500, 470, "0") "]";
+    static const char gapped[] =
+        "[" CLIENT(0, 1, 20, 50, 470, 430, "0") "," CLIENT(0, 1, 510, 50, 470, 430, "0") "]";
     serve_json(MONITORS, tiled);
     refresh();
     CHECK(hyprland_output_covered(&dp, 1.0f), "gapless tiling covers 100%%");
@@ -167,8 +178,8 @@ int main(void) {
     serve_json(MONITORS, hang);
     refresh();
     CHECK(hyprland_output_windows(&dp, w, 8) == 1, "fresh again");
-    serve_json(NULL, NULL);   /* the fake now answers with nothing */
-    usleep(3300 * 1000);      /* past HYPR_SNAPSHOT_TTL_MS (3000) */
+    serve_json(NULL, NULL); /* the fake now answers with nothing */
+    usleep(3300 * 1000);    /* past HYPR_SNAPSHOT_TTL_MS (3000) */
     hyprland_coverage_refresh();
     CHECK(hyprland_output_windows(&dp, w, 8) == 0, "stale snapshot reports no windows");
     CHECK(!hyprland_output_covered(&dp, 0.01f), "stale snapshot is never 'covered'");
@@ -181,7 +192,7 @@ int main(void) {
     g_stop = 1;
     shutdown(g_listen, SHUT_RDWR);
     close(g_listen);
-    int wake = socket(AF_UNIX, SOCK_STREAM, 0);   /* unblock accept */
+    int wake = socket(AF_UNIX, SOCK_STREAM, 0); /* unblock accept */
     if (connect(wake, (struct sockaddr *)&a, sizeof(a)) == 0) close(wake);
     pthread_join(th, NULL);
     char cmd[300];

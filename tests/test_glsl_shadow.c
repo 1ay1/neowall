@@ -38,8 +38,7 @@
  * uniforms, not functions) is included along with the library proper. */
 #define MAX_INJECTED_CHUNKS 15
 
-static size_t injected_chunks(const char *out[MAX_INJECTED_CHUNKS],
-                              bool include_uniforms) {
+static size_t injected_chunks(const char *out[MAX_INJECTED_CHUNKS], bool include_uniforms) {
     size_t n = 0;
     if (include_uniforms) out[n++] = neowall_reactive_uniforms;
     out[n++] = neowall_glsl_stdlib;
@@ -57,31 +56,32 @@ static size_t injected_chunks(const char *out[MAX_INJECTED_CHUNKS],
     out[n++] = neowall_glsl_stdlib8c;
     out[n++] = neowall_glsl_stdlib8d;
     /* The per-hook defaults are separate strings; audit them too. */
-    for (size_t i = 0; i < 3; i++) out[n++] = neowall_scene_hook_defaults[i];
+    for (size_t i = 0; i < 3; i++)
+        out[n++] = neowall_scene_hook_defaults[i];
     return n;
 }
 
-static int checks = 0;
+static int checks   = 0;
 static int failures = 0;
 
-#define CHECK(cond)                                                            \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
-        }                                                                      \
+#define CHECK(cond)                                                                                \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                        \
+        }                                                                                          \
     } while (0)
 
-#define CHECK_MSG(cond, ...)                                                   \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);               \
-            fprintf(stderr, __VA_ARGS__);                                      \
-            fprintf(stderr, "\n");                                             \
-        }                                                                      \
+#define CHECK_MSG(cond, ...)                                                                       \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fprintf(stderr, "\n");                                                                 \
+        }                                                                                          \
     } while (0)
 
 /* ------------------------------------------------------------------ *
@@ -244,20 +244,18 @@ static void test_aliases_forward_to_real_symbols(void) {
         const neowall_stdlib_alias *a = &neowall_stdlib_aliases[i];
 
         /* The alias body must mention an nw* target. */
-        CHECK_MSG(strstr(a->decl, "nw") != NULL,
-                  "alias `%s` does not forward to an nw* symbol", a->name);
+        CHECK_MSG(strstr(a->decl, "nw") != NULL, "alias `%s` does not forward to an nw* symbol",
+                  a->name);
 
         /* Derive nwFoo from foo and require the library defines it. */
         char canonical[64];
-        snprintf(canonical, sizeof(canonical), "nw%c%s",
-                 a->name[0] - 32, a->name + 1);
+        snprintf(canonical, sizeof(canonical), "nw%c%s", a->name[0] - 32, a->name + 1);
         CHECK_MSG(glsl_shadow_contains(lib, canonical),
-                  "alias `%s` forwards to `%s`, which the std-lib does not define",
-                  a->name, canonical);
+                  "alias `%s` forwards to `%s`, which the std-lib does not define", a->name,
+                  canonical);
 
         /* The alias must define the name it claims. */
-        CHECK_MSG(defines(a->decl, a->name),
-                  "alias entry `%s` does not actually define `%s`",
+        CHECK_MSG(defines(a->decl, a->name), "alias entry `%s` does not actually define `%s`",
                   a->name, a->name);
     }
 
@@ -269,10 +267,8 @@ static void test_aliases_forward_to_real_symbols(void) {
 static void test_alias_table_has_no_duplicates(void) {
     for (size_t i = 0; i < NEOWALL_STDLIB_ALIAS_COUNT; i++) {
         for (size_t j = i + 1; j < NEOWALL_STDLIB_ALIAS_COUNT; j++) {
-            CHECK_MSG(strcmp(neowall_stdlib_aliases[i].name,
-                             neowall_stdlib_aliases[j].name) != 0,
-                      "duplicate alias entry for `%s`",
-                      neowall_stdlib_aliases[i].name);
+            CHECK_MSG(strcmp(neowall_stdlib_aliases[i].name, neowall_stdlib_aliases[j].name) != 0,
+                      "duplicate alias entry for `%s`", neowall_stdlib_aliases[i].name);
         }
     }
 }
@@ -307,10 +303,8 @@ static void test_issue_82_regression(void) {
         }
     }
 
-    CHECK_MSG(suppressed == 1, "expected exactly sdBox suppressed, got %d",
-              suppressed);
-    CHECK_MSG(emitted == (int)NEOWALL_STDLIB_ALIAS_COUNT - 1,
-              "unrelated aliases were withheld");
+    CHECK_MSG(suppressed == 1, "expected exactly sdBox suppressed, got %d", suppressed);
+    CHECK_MSG(emitted == (int)NEOWALL_STDLIB_ALIAS_COUNT - 1, "unrelated aliases were withheld");
 
     /* The shader's own helpers are seen; its calls are not mistaken for defs. */
     CHECK(glsl_shadow_contains(s, "map"));
@@ -327,7 +321,7 @@ static void test_issue_82_regression(void) {
 static void test_uniform_block_defines_no_functions(void) {
     const char *with[MAX_INJECTED_CHUNKS];
     const char *without[MAX_INJECTED_CHUNKS];
-    size_t n_with = injected_chunks(with, true);
+    size_t n_with    = injected_chunks(with, true);
     size_t n_without = injected_chunks(without, false);
 
     CHECK(n_with == n_without + 1);
@@ -347,7 +341,8 @@ static void test_uniform_block_defines_no_functions(void) {
     }
     CHECK_MSG(leaked == 0,
               "reactive uniform block defines %zu function-like name(s); "
-              "they would escape the std-lib namespace audit", leaked);
+              "they would escape the std-lib namespace audit",
+              leaked);
     glsl_shadow_free(s);
 }
 
@@ -366,17 +361,16 @@ static void test_scene_kit_gating(void) {
 
     /* Calling it without defining it does not either -- that shader would be
      * broken anyway, but it must not be broken by US injecting a declaration. */
-    CHECK(!defines("void mainImage(out vec4 o, vec2 u){ float d = nwMap(vec3(u,0)); }\n",
-                   "nwMap"));
+    CHECK(!defines("void mainImage(out vec4 o, vec2 u){ float d = nwMap(vec3(u,0)); }\n", "nwMap"));
 
     /* A shader supplying its own material suppresses the kit's default. */
-    CHECK(defines("vec3 nwMaterial(vec3 p, vec3 n){ return vec3(1.0); }\n",
-                  "nwMaterial"));
+    CHECK(defines("vec3 nwMaterial(vec3 p, vec3 n){ return vec3(1.0); }\n", "nwMaterial"));
     CHECK(!defines("// nwMaterial defaults to grey\n", "nwMaterial"));
 
     /* The realistic combination: both defined in one source. */
     glsl_shadow_set *s = glsl_shadow_create();
-    glsl_shadow_scan(s,
+    glsl_shadow_scan(
+        s,
         "vec3 nwMaterial(vec3 p, vec3 n){ return vec3(0.5); }\n"
         "float nwMap(vec3 p){ return nwGround(p, -0.5); }\n"
         "void mainImage(out vec4 o, vec2 u){ o = vec4(nwRender(nwCameraOrbit(u,4.,0.,0.3)),1.); }\n");

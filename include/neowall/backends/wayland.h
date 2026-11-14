@@ -70,10 +70,10 @@ typedef struct wayland {
     struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
     /* Per-pointer shape device, created lazily on first pointer enter. */
     struct wp_cursor_shape_device_v1 *cursor_shape_device;
-    
+
     /* Back-pointer to main neowall state */
     struct neowall_state *state;
-    
+
     /* Cursor state for setting cursor on pointer enter.
      * Theme name and base size come from XCURSOR_THEME / XCURSOR_SIZE so we
      * honor the user's configuration instead of forcing a wlroots default.
@@ -81,9 +81,9 @@ typedef struct wayland {
      * for crisp HiDPI rendering. */
     struct wl_cursor_theme *cursor_theme;
     struct wl_surface *cursor_surface;
-    char *cursor_theme_name;   /* strdup'd, may be NULL (libwayland-cursor picks default) */
-    int cursor_base_size;      /* unscaled size in logical pixels */
-    int cursor_loaded_scale;   /* scale factor the current theme was loaded at */
+    char *cursor_theme_name; /* strdup'd, may be NULL (libwayland-cursor picks default) */
+    int cursor_base_size;    /* unscaled size in logical pixels */
+    int cursor_loaded_scale; /* scale factor the current theme was loaded at */
 
     /* Initialization flag */
     bool initialized;

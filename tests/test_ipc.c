@@ -14,10 +14,17 @@
 #include "neowall/runtime/rt.h"
 
 static int failures = 0, checks = 0;
-static char g_sock[108];   /* sun_path size */
-#define CHECK(c, ...) do { checks++; if (!(c)) { failures++; \
-    fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
-    fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
+static char g_sock[108]; /* sun_path size */
+#define CHECK(c, ...)                                                                              \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(c)) {                                                                                \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fputc('\n', stderr);                                                                   \
+        }                                                                                          \
+    } while (0)
 
 enum { K_STOP = 1 };
 
@@ -49,15 +56,23 @@ static void upd(void *self, const rt_msg *m, rt_cmds *cmds) {
 }
 
 /* The client side runs on its own thread while the loop serves. */
-typedef struct { int ok; } client_result;
+typedef struct {
+    int ok;
+} client_result;
 
 static int raw(const char *send, char *out, size_t outsz) {
-    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    int fd               = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     struct sockaddr_un a = {.sun_family = AF_UNIX};
     snprintf(a.sun_path, sizeof a.sun_path, "%s", g_sock);
-    if (connect(fd, (struct sockaddr *)&a, sizeof a) != 0) { close(fd); return -1; }
-    if (write(fd, send, strlen(send)) < 0) { close(fd); return -1; }
-    ssize_t n = read(fd, out, outsz - 1);
+    if (connect(fd, (struct sockaddr *)&a, sizeof a) != 0) {
+        close(fd);
+        return -1;
+    }
+    if (write(fd, send, strlen(send)) < 0) {
+        close(fd);
+        return -1;
+    }
+    ssize_t n          = read(fd, out, outsz - 1);
     out[n > 0 ? n : 0] = '\0';
     close(fd);
     return (int)n;
@@ -76,13 +91,14 @@ static void *client(void *arg) {
     CHECK(strcmp(reply, "unknown") == 0, "err text, got '%s'", reply);
 
     /* A client that never finishes its line doesn't block the next one. */
-    int stuck = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    int stuck            = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     struct sockaddr_un a = {.sun_family = AF_UNIX};
     snprintf(a.sun_path, sizeof a.sun_path, "%s", g_sock);
     CHECK(connect(stuck, (struct sockaddr *)&a, sizeof a) == 0, "stuck client connects");
     CHECK(write(stuck, "ech", 3) == 3, "stuck client writes half a line");
     CHECK(nw_ipc_request(g_sock, "echo", "after", reply, sizeof reply, 2000) == NW_IPC_OK &&
-          strcmp(reply, "after") == 0, "a stuck client doesn't wedge the server");
+              strcmp(reply, "after") == 0,
+          "a stuck client doesn't wedge the server");
     close(stuck);
 
     char out[256];
@@ -116,12 +132,12 @@ int main(void) {
 
     rt_loop *l = rt_loop_new();
     server_t s = {0};
-    s.srv = ipc_server_start(l, g_sock, on_req, &s);
+    s.srv      = ipc_server_start(l, g_sock, on_req, &s);
     CHECK(s.srv != NULL, "server starts");
 
     struct stat st;
-    CHECK(stat(g_sock, &st) == 0 && (st.st_mode & 0777) == 0600,
-          "socket is 0600, got %o", st.st_mode & 0777);
+    CHECK(stat(g_sock, &st) == 0 && (st.st_mode & 0777) == 0600, "socket is 0600, got %o",
+          st.st_mode & 0777);
 
     /* A second server must not steal a live socket. */
     rt_loop *l2 = rt_loop_new();
@@ -142,12 +158,12 @@ int main(void) {
     rt_loop_free(l);
 
     /* A stale socket file (a crashed daemon) is replaced, not refused. */
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    int fd               = socket(AF_UNIX, SOCK_STREAM, 0);
     struct sockaddr_un a = {.sun_family = AF_UNIX};
     snprintf(a.sun_path, sizeof a.sun_path, "%s", g_sock);
     CHECK(bind(fd, (struct sockaddr *)&a, sizeof a) == 0, "make a stale socket");
-    close(fd);   /* bound but nobody listening: a crashed daemon's leftover */
-    l = rt_loop_new();
+    close(fd); /* bound but nobody listening: a crashed daemon's leftover */
+    l     = rt_loop_new();
     s.srv = ipc_server_start(l, g_sock, on_req, &s);
     CHECK(s.srv != NULL, "a stale socket is replaced");
     ipc_server_stop(s.srv);

@@ -22,10 +22,10 @@
  * X11_OR_ENV_INVALID: the caller warns and falls back to auto-detect, rather
  * than silently treating a typo ("true", "2", "") as "unset". */
 typedef enum {
-    X11_OR_ENV_UNSET = 0,   /* not in the environment: auto-detect */
-    X11_OR_ENV_FORCE_ON,    /* "1": force override-redirect */
-    X11_OR_ENV_FORCE_OFF,   /* "0": force a managed window */
-    X11_OR_ENV_INVALID,     /* present but unrecognised: warn, then auto-detect */
+    X11_OR_ENV_UNSET = 0, /* not in the environment: auto-detect */
+    X11_OR_ENV_FORCE_ON,  /* "1": force override-redirect */
+    X11_OR_ENV_FORCE_OFF, /* "0": force a managed window */
+    X11_OR_ENV_INVALID,   /* present but unrecognised: warn, then auto-detect */
 } x11_or_env_t;
 
 /* Classify a NEOWALL_X11_OVERRIDE_REDIRECT value. NULL (absent from the
@@ -57,8 +57,8 @@ typedef struct {
     bool x_error;              /* an X error was raised while reading the child */
 
     /* _NET_SUPPORTED, read off the root alongside the handshake. */
-    bool supported_prop_valid;   /* root carries _NET_SUPPORTED, type XA_ATOM, format 32 */
-    bool desktop_in_supported;   /* _NET_WM_WINDOW_TYPE_DESKTOP is in that list */
+    bool supported_prop_valid; /* root carries _NET_SUPPORTED, type XA_ATOM, format 32 */
+    bool desktop_in_supported; /* _NET_WM_WINDOW_TYPE_DESKTOP is in that list */
 } x11_wm_check_obs_t;
 
 /* True if the observations prove a live EWMH window manager owns the screen. */
@@ -129,8 +129,8 @@ bool x11_or_decide(x11_or_env_t env, bool wm_present);
  * because a WM restart flaps the property down and straight back up. */
 typedef enum {
     X11_WM_ACTION_NONE = 0,
-    X11_WM_ACTION_RECREATE_MANAGED,   /* WM appeared: override-redirect -> managed */
-    X11_WM_ACTION_RECREATE_OVERRIDE,  /* WM went away: managed -> override-redirect */
+    X11_WM_ACTION_RECREATE_MANAGED,  /* WM appeared: override-redirect -> managed */
+    X11_WM_ACTION_RECREATE_OVERRIDE, /* WM went away: managed -> override-redirect */
 } x11_wm_action_t;
 
 x11_wm_action_t x11_wm_transition(bool env_forced, bool current_override_redirect,

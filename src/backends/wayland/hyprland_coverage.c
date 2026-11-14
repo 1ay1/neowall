@@ -22,19 +22,19 @@
 #include "hyprland_coverage.h"
 #include "neowall/core/time.h"
 
-#define HYPR_REFRESH_MS    500
-#define HYPR_RECV_TIMEOUT_MS 200   /* cap blocking time per IPC call */
-#define HYPR_SNAPSHOT_TTL_MS 3000  /* drop snapshot if no successful refresh in this long */
+#define HYPR_REFRESH_MS      500
+#define HYPR_RECV_TIMEOUT_MS 200  /* cap blocking time per IPC call */
+#define HYPR_SNAPSHOT_TTL_MS 3000 /* drop snapshot if no successful refresh in this long */
 /* Grid resolution for rasterizing window rects on a monitor. Needs to be fine
  * enough that typical Hyprland gaps (~10-20 px) actually leave at least one
  * uncovered cell between adjacent tiles — otherwise inward-rounded edges
  * coincide and the gap is invisible to the coverage calculation. At 256x256
  * a cell on a 3440-wide monitor is ~13 px, which resolves single-digit gaps.
  * 256*256 = 64 KiB static buffer; trivially fits. */
-#define GRID_W             256
-#define GRID_H             256
-#define MAX_MONITORS       16
-#define MAX_CLIENTS        256
+#define GRID_W       256
+#define GRID_H       256
+#define MAX_MONITORS 16
+#define MAX_CLIENTS  256
 
 typedef struct {
     int id;
@@ -64,8 +64,8 @@ static struct {
     int n_monitors;
     hypr_client_t clients[MAX_CLIENTS];
     int n_clients;
-    uint64_t attempt_ms;          /* throttles retries */
-    uint64_t ok_ms;               /* freshness of the snapshot */
+    uint64_t attempt_ms; /* throttles retries */
+    uint64_t ok_ms;      /* freshness of the snapshot */
 } g_hypr = {.lock = PTHREAD_MUTEX_INITIALIZER};
 
 /* ---------- IPC ---------- */
@@ -88,9 +88,8 @@ static int open_hypr_socket(void) {
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     struct sockaddr_un addr = {0};
-    addr.sun_family = AF_UNIX;
-    int n = snprintf(addr.sun_path, sizeof(addr.sun_path),
-                     "%s/hypr/%s/.socket.sock", xdg, his);
+    addr.sun_family         = AF_UNIX;
+    int n = snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/hypr/%s/.socket.sock", xdg, his);
     if (n <= 0 || (size_t)n >= sizeof(addr.sun_path)) {
         close(fd);
         return -1;
@@ -149,8 +148,8 @@ static char *hypr_query(const char *cmd, size_t *out_len) {
      * trailing whitespace). Anything else means we got a truncated read and
      * must NOT commit a partial parse over the previous good snapshot. */
     size_t end = len;
-    while (end > 0 && (buf[end - 1] == ' ' || buf[end - 1] == '\t'
-                       || buf[end - 1] == '\n' || buf[end - 1] == '\r')) {
+    while (end > 0 && (buf[end - 1] == ' ' || buf[end - 1] == '\t' || buf[end - 1] == '\n' ||
+                       buf[end - 1] == '\r')) {
         end--;
     }
     if (end < 2 || buf[0] != '[' || buf[end - 1] != ']') {
@@ -166,7 +165,8 @@ static char *hypr_query(const char *cmd, size_t *out_len) {
 
 /* Skip whitespace. */
 static const char *skip_ws(const char *p) {
-    while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+    while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
+        p++;
     return p;
 }
 
@@ -176,12 +176,15 @@ static const char *skip_ws(const char *p) {
 static const char *find_key(const char *obj_start, const char *key) {
     if (!obj_start || *obj_start != '{') return NULL;
     const char *p = obj_start + 1;
-    int depth = 0;
-    size_t klen = strlen(key);
-    bool in_str = false;
+    int depth     = 0;
+    size_t klen   = strlen(key);
+    bool in_str   = false;
     while (*p) {
         if (in_str) {
-            if (*p == '\\' && p[1]) { p += 2; continue; }
+            if (*p == '\\' && p[1]) {
+                p += 2;
+                continue;
+            }
             if (*p == '"') in_str = false;
             p++;
             continue;
@@ -191,14 +194,15 @@ static const char *find_key(const char *obj_start, const char *key) {
             const char *ks = p + 1;
             const char *ke = ks;
             while (*ke && *ke != '"') {
-                if (*ke == '\\' && ke[1]) ke += 2;
-                else ke++;
+                if (*ke == '\\' && ke[1])
+                    ke += 2;
+                else
+                    ke++;
             }
             if (!*ke) return NULL;
-            bool key_match = depth == 0 && (size_t)(ke - ks) == klen
-                             && memcmp(ks, key, klen) == 0;
-            p = ke + 1;
-            p = skip_ws(p);
+            bool key_match = depth == 0 && (size_t)(ke - ks) == klen && memcmp(ks, key, klen) == 0;
+            p              = ke + 1;
+            p              = skip_ws(p);
             if (*p == ':') {
                 p++;
                 p = skip_ws(p);
@@ -208,7 +212,11 @@ static const char *find_key(const char *obj_start, const char *key) {
             }
             continue;
         }
-        if (*p == '{' || *p == '[') { depth++; p++; continue; }
+        if (*p == '{' || *p == '[') {
+            depth++;
+            p++;
+            continue;
+        }
         if (*p == '}' || *p == ']') {
             if (depth == 0) return NULL;
             depth--;
@@ -222,9 +230,9 @@ static const char *find_key(const char *obj_start, const char *key) {
 
 static int parse_int_at(const char *p, int dflt) {
     if (!p) return dflt;
-    p = skip_ws(p);
+    p         = skip_ws(p);
     char *end = NULL;
-    long v = strtol(p, &end, 10);
+    long v    = strtol(p, &end, 10);
     if (end == p) return dflt;
     return (int)v;
 }
@@ -236,12 +244,12 @@ static bool parse_int_pair(const char *p, int out[2]) {
     if (*p != '[') return false;
     p++;
     char *end = NULL;
-    out[0] = (int)strtol(p, &end, 10);
+    out[0]    = (int)strtol(p, &end, 10);
     if (end == p) return false;
     p = skip_ws(end);
     if (*p != ',') return false;
     p++;
-    p = skip_ws(p);
+    p      = skip_ws(p);
     out[1] = (int)strtol(p, &end, 10);
     if (end == p) return false;
     return true;
@@ -249,7 +257,8 @@ static bool parse_int_pair(const char *p, int out[2]) {
 
 /* Parse "[a, b, c, d]" array of four ints. Returns count actually parsed. */
 static int parse_int_quad(const char *p, int out[4]) {
-    for (int i = 0; i < 4; i++) out[i] = 0;
+    for (int i = 0; i < 4; i++)
+        out[i] = 0;
     if (!p) return 0;
     p = skip_ws(p);
     if (*p != '[') return 0;
@@ -259,20 +268,29 @@ static int parse_int_quad(const char *p, int out[4]) {
         p = skip_ws(p);
         if (*p == ']' || *p == '\0') break;
         char *end = NULL;
-        long v = strtol(p, &end, 10);
+        long v    = strtol(p, &end, 10);
         if (end == p) break;
         out[n++] = (int)v;
-        p = skip_ws(end);
-        if (*p == ',') { p++; continue; }
+        p        = skip_ws(end);
+        if (*p == ',') {
+            p++;
+            continue;
+        }
         if (*p == ']') break;
     }
     return n;
 }
 
 static void parse_string_at(const char *p, char *out, size_t cap) {
-    if (!p || !cap) { if (out && cap) out[0] = '\0'; return; }
+    if (!p || !cap) {
+        if (out && cap) out[0] = '\0';
+        return;
+    }
     p = skip_ws(p);
-    if (*p != '"') { out[0] = '\0'; return; }
+    if (*p != '"') {
+        out[0] = '\0';
+        return;
+    }
     p++;
     size_t i = 0;
     while (*p && *p != '"' && i + 1 < cap) {
@@ -296,20 +314,34 @@ static const char *next_array_obj(const char **cursor) {
     p = skip_ws(p);
     if (*p == '[') p++;
     p = skip_ws(p);
-    if (*p == ',') { p++; p = skip_ws(p); }
+    if (*p == ',') {
+        p++;
+        p = skip_ws(p);
+    }
     if (*p != '{') return NULL;
     const char *obj_start = p;
-    int depth = 0;
-    bool in_str = false;
+    int depth             = 0;
+    bool in_str           = false;
     while (*p) {
         if (in_str) {
-            if (*p == '\\' && p[1]) { p += 2; continue; }
+            if (*p == '\\' && p[1]) {
+                p += 2;
+                continue;
+            }
             if (*p == '"') in_str = false;
             p++;
             continue;
         }
-        if (*p == '"') { in_str = true; p++; continue; }
-        if (*p == '{') { depth++; p++; continue; }
+        if (*p == '"') {
+            in_str = true;
+            p++;
+            continue;
+        }
+        if (*p == '{') {
+            depth++;
+            p++;
+            continue;
+        }
         if (*p == '}') {
             depth--;
             p++;
@@ -327,19 +359,19 @@ static const char *next_array_obj(const char **cursor) {
 /* ---------- refresh ---------- */
 
 static void parse_monitors(const char *json) {
-    g_hypr.n_monitors = 0;
+    g_hypr.n_monitors  = 0;
     const char *cursor = json;
     const char *obj;
     while ((obj = next_array_obj(&cursor)) && g_hypr.n_monitors < MAX_MONITORS) {
         hypr_monitor_t *m = &g_hypr.monitors[g_hypr.n_monitors];
-        m->id = parse_int_at(find_key(obj, "id"), -1);
+        m->id             = parse_int_at(find_key(obj, "id"), -1);
         parse_string_at(find_key(obj, "name"), m->name, sizeof(m->name));
-        m->x = parse_int_at(find_key(obj, "x"), 0);
-        m->y = parse_int_at(find_key(obj, "y"), 0);
-        m->w = parse_int_at(find_key(obj, "width"), 0);
-        m->h = parse_int_at(find_key(obj, "height"), 0);
+        m->x           = parse_int_at(find_key(obj, "x"), 0);
+        m->y           = parse_int_at(find_key(obj, "y"), 0);
+        m->w           = parse_int_at(find_key(obj, "width"), 0);
+        m->h           = parse_int_at(find_key(obj, "height"), 0);
         const char *ws = find_key(obj, "activeWorkspace");
-        m->active_ws = parse_int_at(find_key(ws, "id"), -1);
+        m->active_ws   = parse_int_at(find_key(ws, "id"), -1);
         /* `reserved`: [left, top, right, bottom] per Hyprland's HyprCtl.cpp.
          * Strip from the wallpaper region so layer-shell surfaces (waybar etc.)
          * don't count as "uncovered wallpaper" that drags the fraction below
@@ -357,24 +389,27 @@ static void parse_monitors(const char *json) {
 }
 
 static void parse_clients(const char *json) {
-    g_hypr.n_clients = 0;
+    g_hypr.n_clients   = 0;
     const char *cursor = json;
     const char *obj;
     while ((obj = next_array_obj(&cursor)) && g_hypr.n_clients < MAX_CLIENTS) {
         hypr_client_t *c = &g_hypr.clients[g_hypr.n_clients];
-        c->monitor = parse_int_at(find_key(obj, "monitor"), -1);
-        const char *ws = find_key(obj, "workspace");
-        c->ws = parse_int_at(find_key(ws, "id"), -1);
-        int at[2] = {0, 0};
-        int sz[2] = {0, 0};
+        c->monitor       = parse_int_at(find_key(obj, "monitor"), -1);
+        const char *ws   = find_key(obj, "workspace");
+        c->ws            = parse_int_at(find_key(ws, "id"), -1);
+        int at[2]        = {0, 0};
+        int sz[2]        = {0, 0};
         parse_int_pair(find_key(obj, "at"), at);
         parse_int_pair(find_key(obj, "size"), sz);
-        c->x = at[0]; c->y = at[1]; c->w = sz[0]; c->h = sz[1];
+        c->x               = at[0];
+        c->y               = at[1];
+        c->w               = sz[0];
+        c->h               = sz[1];
         const char *mapped = find_key(obj, "mapped");
         const char *hidden = find_key(obj, "hidden");
-        c->mapped = mapped && *mapped == 't';
-        c->hidden = hidden && *hidden == 't';
-        c->fullscreen = parse_int_at(find_key(obj, "fullscreen"), 0);
+        c->mapped          = mapped && *mapped == 't';
+        c->hidden          = hidden && *hidden == 't';
+        c->fullscreen      = parse_int_at(find_key(obj, "fullscreen"), 0);
         if (c->w > 0 && c->h > 0 && c->mapped && !c->hidden) {
             g_hypr.n_clients++;
         }
@@ -441,8 +476,7 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
     /* If the snapshot is too old (IPC has been failing, Hyprland restarted,
      * socket got wedged, ...), don't trust it. Better to render an extra frame
      * than to leave the wallpaper frozen forever. */
-    if (g_hypr.ok_ms == 0 ||
-        get_time_ms() - g_hypr.ok_ms > HYPR_SNAPSHOT_TTL_MS) {
+    if (g_hypr.ok_ms == 0 || get_time_ms() - g_hypr.ok_ms > HYPR_SNAPSHOT_TTL_MS) {
         pthread_mutex_unlock(&g_hypr.lock);
         return false;
     }
@@ -460,8 +494,8 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
     int wy0 = m->y + m->reserved_top;
     int wx1 = m->x + m->w - m->reserved_right;
     int wy1 = m->y + m->h - m->reserved_bottom;
-    int ww = wx1 - wx0;
-    int wh = wy1 - wy0;
+    int ww  = wx1 - wx0;
+    int wh  = wy1 - wy0;
     if (ww <= 0 || wh <= 0) {
         pthread_mutex_unlock(&g_hypr.lock);
         return false;
@@ -518,8 +552,7 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
     return frac >= threshold;
 }
 
-int hyprland_output_windows(const struct output_state *o,
-                            nw_window_rect *out, int max) {
+int hyprland_output_windows(const struct output_state *o, nw_window_rect *out, int max) {
     if (!o || !out || max <= 0 || !hyprland_coverage_available()) return 0;
 
     /* Refresh here rather than relying on the occlusion path to have done it.
@@ -536,8 +569,7 @@ int hyprland_output_windows(const struct output_state *o,
      * must report nothing rather than pin windows to where they used to be.
      * A shader lighting up a stale rectangle is more obviously wrong than one
      * that simply sees an empty desktop. */
-    if (g_hypr.ok_ms == 0 ||
-        get_time_ms() - g_hypr.ok_ms > HYPR_SNAPSHOT_TTL_MS) {
+    if (g_hypr.ok_ms == 0 || get_time_ms() - g_hypr.ok_ms > HYPR_SNAPSHOT_TTL_MS) {
         pthread_mutex_unlock(&g_hypr.lock);
         return 0;
     }
@@ -562,10 +594,10 @@ int hyprland_output_windows(const struct output_state *o,
 
         /* Clip to the monitor so a window straddling two screens does not
          * report negative or overhanging coordinates. */
-        int x0 = c->x     < m->x        ? m->x        : c->x;
-        int y0 = c->y     < m->y        ? m->y        : c->y;
-        int x1 = c->x+c->w > m->x+m->w  ? m->x+m->w   : c->x + c->w;
-        int y1 = c->y+c->h > m->y+m->h  ? m->y+m->h   : c->y + c->h;
+        int x0 = c->x < m->x ? m->x : c->x;
+        int y0 = c->y < m->y ? m->y : c->y;
+        int x1 = c->x + c->w > m->x + m->w ? m->x + m->w : c->x + c->w;
+        int y1 = c->y + c->h > m->y + m->h ? m->y + m->h : c->y + c->h;
         if (x1 <= x0 || y1 <= y0) continue;
 
         out[n].x = (float)(x0 - m->x);

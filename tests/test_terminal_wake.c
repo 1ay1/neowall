@@ -14,9 +14,16 @@
 #include "neowall/terminal/terminal.h"
 
 static int failures = 0, checks = 0;
-#define CHECK(c, ...) do { checks++; if (!(c)) { failures++; \
-    fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
-    fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
+#define CHECK(c, ...)                                                                              \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(c)) {                                                                                \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fputc('\n', stderr);                                                                   \
+        }                                                                                          \
+    } while (0)
 
 static atomic_int g_calls;
 static atomic_uintptr_t g_ctx;
@@ -41,11 +48,13 @@ static bool wait_for(int min_calls, int timeout_ms) {
 }
 
 int main(void) {
-    int marker = 0;
+    int marker        = 0;
     term_spawn_opts o = {
-        .cmd = "sh -c 'printf one; sleep 0.3; printf two; sleep 30'",
-        .cols = 40, .rows = 5,
-        .on_output = on_output, .on_output_ctx = &marker,
+        .cmd           = "sh -c 'printf one; sleep 0.3; printf two; sleep 30'",
+        .cols          = 40,
+        .rows          = 5,
+        .on_output     = on_output,
+        .on_output_ctx = &marker,
     };
     terminal *t = NULL;
     nw_result r = term_spawn(&o, &t);
@@ -62,18 +71,19 @@ int main(void) {
     sleep_ms(150);
     int settled = atomic_load(&g_calls);
     sleep_ms(400);
-    CHECK(atomic_load(&g_calls) == settled,
-          "a quiet child doesn't fire the hook (%d -> %d)", settled, atomic_load(&g_calls));
+    CHECK(atomic_load(&g_calls) == settled, "a quiet child doesn't fire the hook (%d -> %d)",
+          settled, atomic_load(&g_calls));
 
     term_destroy(t);
 
     /* No hook set: spawning and output must still work. */
     term_spawn_opts plain = {.cmd = "sh -c 'printf x; sleep 30'", .cols = 10, .rows = 2};
-    t = NULL;
+    t                     = NULL;
     CHECK(nw_is_ok(term_spawn(&plain, &t)) && t, "spawn without a hook");
     if (t) {
         uint64_t e0 = term_dirty_epoch(t);
-        for (int i = 0; i < 100 && term_dirty_epoch(t) == e0; i++) sleep_ms(10);
+        for (int i = 0; i < 100 && term_dirty_epoch(t) == e0; i++)
+            sleep_ms(10);
         CHECK(term_dirty_epoch(t) != e0, "output still advances the epoch with no hook");
         term_destroy(t);
     }

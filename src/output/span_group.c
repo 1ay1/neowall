@@ -30,7 +30,7 @@ static uint64_t cycle_list_digest(const struct wallpaper_config *c) {
     uint64_t total = 0;
     for (size_t i = 0; i < c->cycle_count; i++) {
         const char *p = c->cycle_paths[i];
-        uint64_t h = 1469598103934665603ull;  /* FNV-1a 64 */
+        uint64_t h    = 1469598103934665603ull; /* FNV-1a 64 */
         for (; p && *p; p++) {
             h ^= (unsigned char)*p;
             h *= 1099511628211ull;
@@ -87,8 +87,8 @@ void outputs_update_spans(struct output_state **outs, size_t count) {
         }
 
         struct span_rect rects[NW_MAX_OUTPUTS];
-        size_t n = 0;
-        size_t self = 0;
+        size_t n       = 0;
+        size_t self    = 0;
         uint64_t start = 0;
 
         for (size_t j = 0; j < count && n < NW_MAX_OUTPUTS; j++) {
@@ -115,9 +115,8 @@ void outputs_update_spans(struct output_state **outs, size_t count) {
              * width/scale when logical_size has not arrived (or the compositor
              * lacks zxdg_output_manager_v1). On X11 scale is 1, there is no
              * xdg logical size, and width/scale is the identity. */
-            int32_t scale = output_normalized_scale(o);
-            int32_t logical_w =
-                o->xdg_logical_width > 0 ? o->xdg_logical_width : o->width / scale;
+            int32_t scale     = output_normalized_scale(o);
+            int32_t logical_w = o->xdg_logical_width > 0 ? o->xdg_logical_width : o->width / scale;
             int32_t logical_h =
                 o->xdg_logical_height > 0 ? o->xdg_logical_height : o->height / scale;
             rects[n++] = (struct span_rect){
@@ -128,8 +127,8 @@ void outputs_update_spans(struct output_state **outs, size_t count) {
                 .scale     = scale,
                 /* The real framebuffer, so span_compute maps the logical box
                  * into exactly these pixels under fractional scale. */
-                .device_w  = o->width,
-                .device_h  = o->height,
+                .device_w = o->width,
+                .device_h = o->height,
             };
 
             /* Earliest start in the group, so every member's iTime agrees. A
@@ -161,13 +160,11 @@ void outputs_update_spans(struct output_state **outs, size_t count) {
          * clone. The two are indistinguishable from the rects alone, so this is
          * logged rather than rejected: a wrongly-nested group is a bug at the
          * seam above, not something to detect down here. */
-        if (v.virt_w == me->width && v.virt_h == me->height &&
-            v.off_x == 0 && v.off_y == 0) {
+        if (v.virt_w == me->width && v.virt_h == me->height && v.off_x == 0 && v.off_y == 0) {
             if (me->spanned) {
                 log_debug("Output %s: no longer spanning, its logical rect "
                           "%dx%d+%d+%d (scale %d) contains every peer's in the group",
-                          output_get_identifier(me),
-                          rects[self].logical_w, rects[self].logical_h,
+                          output_get_identifier(me), rects[self].logical_w, rects[self].logical_h,
                           rects[self].logical_x, rects[self].logical_y, rects[self].scale);
             }
             me->spanned = false;
@@ -175,10 +172,10 @@ void outputs_update_spans(struct output_state **outs, size_t count) {
         }
         if (!me->spanned) {
             log_debug("Output %s: spanning, drawing %dx%d+%d+%d of a %dx%d virtual screen",
-                      output_get_identifier(me),
-                      me->width, me->height, v.off_x, v.off_y, v.virt_w, v.virt_h);
+                      output_get_identifier(me), me->width, me->height, v.off_x, v.off_y, v.virt_w,
+                      v.virt_h);
         }
-        me->span = v;
+        me->span    = v;
         me->spanned = true;
     }
 }
@@ -221,9 +218,8 @@ static void output_adopt_group_wallpaper(struct output_state *o, struct output_s
     snprintf(live, sizeof(live), "%s", output_live_path(leader));
 
     if (entry[0] != '\0' && o->config->cycle_paths) {
-        o->config->current_cycle_index =
-            cycle_restore_index(o->config->cycle_paths, o->config->cycle_count, entry,
-                                o->config->current_cycle_index);
+        o->config->current_cycle_index = cycle_restore_index(
+            o->config->cycle_paths, o->config->cycle_count, entry, o->config->current_cycle_index);
     }
     pthread_mutex_unlock(&o->state->state_mutex);
 
@@ -237,8 +233,7 @@ static void output_adopt_group_wallpaper(struct output_state *o, struct output_s
     snprintf(o->span_synced_path, sizeof(o->span_synced_path), "%s", live);
 
     if (o->config->type == WALLPAPER_SHADER) {
-        if (strcmp(output_live_path(o), live) != 0 &&
-            nw_is_err(output_set_shader(o, live))) {
+        if (strcmp(output_live_path(o), live) != 0 && nw_is_err(output_set_shader(o, live))) {
             log_error("Failed to sync output %s onto its span group's shader: %s",
                       o->model[0] ? o->model : "unknown", live);
             return;
@@ -281,7 +276,7 @@ void outputs_sync_span_group(struct output_state **outs, size_t count, size_t in
         return;
     }
     if (strcmp(me->span_synced_path, live) == 0) {
-        return;  /* already tried this one and it did not take */
+        return; /* already tried this one and it did not take */
     }
 
     log_info("Syncing output %s onto its span group's wallpaper: %s",

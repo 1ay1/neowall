@@ -9,20 +9,28 @@
 #include "neowall/shader/shadertoy_import.h"
 
 static int failures, checks;
-#define CHECK(c, ...) do { checks++; if (!(c)) { failures++; \
-    fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
-    fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
+#define CHECK(c, ...)                                                                              \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(c)) {                                                                                \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fputc('\n', stderr);                                                                   \
+        }                                                                                          \
+    } while (0)
 
 static nw_import import(const char *json, bool want_ok) {
-    nw_import im = {0};
+    nw_import im  = {0};
     char err[256] = "";
-    nw_result r = nw_shadertoy_import(json, strlen(json), &im, err, sizeof(err));
+    nw_result r   = nw_shadertoy_import(json, strlen(json), &im, err, sizeof(err));
     CHECK(nw_is_ok(r) == want_ok, "import %s: %s", want_ok ? "should work" : "should fail", err);
     if (!want_ok) CHECK(err[0], "a failure says why");
     return im;
 }
 
-/* the API's format: {"Shader": {info, renderpass[{inputs[{channel, ctype, src, sampler}], code, name}]}} */
+/* the API's format: {"Shader": {info, renderpass[{inputs[{channel, ctype, src, sampler}], code,
+ * name}]}} */
 static const char api[] =
     "{\"Shader\":{\"ver\":\"0.1\",\"info\":{\"id\":\"abc123\",\"name\":\"Wave \\\"Pool\\\" \\u00e9t\\u00e9\","
     "\"username\":\"someone\"},\"renderpass\":["
@@ -62,9 +70,9 @@ static const char feedback[] =
 
 static nw_shader_source *parse(const nw_import *im) {
     nw_shader_source *s = NULL;
-    nw_result r = nw_shader_source_parse(im->glsl, NULL, im->manifest, &s);
-    CHECK(nw_is_ok(r), "the imported shader parses: %s\n%s\n--\n%s", r.context ? r.context : "", im->glsl,
-          im->manifest ? im->manifest : "(no manifest)");
+    nw_result r         = nw_shader_source_parse(im->glsl, NULL, im->manifest, &s);
+    CHECK(nw_is_ok(r), "the imported shader parses: %s\n%s\n--\n%s", r.context ? r.context : "",
+          im->glsl, im->manifest ? im->manifest : "(no manifest)");
     return s;
 }
 
@@ -72,24 +80,27 @@ int main(void) {
     log_quiet_errors(true);
 
     nw_import im = import(api, true);
-    CHECK(im.name && !strcmp(im.name, "Wave \"Pool\" \xc3\xa9t\xc3\xa9"), "title with escapes: %s", im.name ? im.name : "");
+    CHECK(im.name && !strcmp(im.name, "Wave \"Pool\" \xc3\xa9t\xc3\xa9"), "title with escapes: %s",
+          im.name ? im.name : "");
     CHECK(strstr(im.glsl, "shadertoy.com/view/abc123"), "links the original");
     CHECK(strstr(im.glsl, "// Common\nfloat wave"), "common first");
     char *a = strstr(im.glsl, "// Buffer A"), *img = strstr(im.glsl, "// Image");
     CHECK(a && img && a < img, "buffer before image");
     CHECK(!strstr(im.glsl, "mainSound"), "sound pass left out");
-    CHECK(im.manifest && strstr(im.manifest, "bufferA {\n  ch0 self\n  ch1 noise\n}"), "buffer A bindings:\n%s",
-          im.manifest ? im.manifest : "");
-    CHECK(im.manifest && strstr(im.manifest, "image {\n  ch0 bufferA\n  ch2 sky\n  ch3 audio\n}"), "image bindings:\n%s",
-          im.manifest ? im.manifest : "");
-    CHECK(im.notes && strstr(im.notes, "texture") && strstr(im.notes, "cube map") && strstr(im.notes, "music") &&
-              strstr(im.notes, "Sound"),
+    CHECK(im.manifest && strstr(im.manifest, "bufferA {\n  ch0 self\n  ch1 noise\n}"),
+          "buffer A bindings:\n%s", im.manifest ? im.manifest : "");
+    CHECK(im.manifest && strstr(im.manifest, "image {\n  ch0 bufferA\n  ch2 sky\n  ch3 audio\n}"),
+          "image bindings:\n%s", im.manifest ? im.manifest : "");
+    CHECK(im.notes && strstr(im.notes, "texture") && strstr(im.notes, "cube map") &&
+              strstr(im.notes, "music") && strstr(im.notes, "Sound"),
           "notes what was swapped:\n%s", im.notes ? im.notes : "");
     nw_shader_source *s = parse(&im);
     if (s) {
         int pa = nw_shader_source_find_pass(s, "Buffer A");
         CHECK(s->passes.len == 2 && pa >= 0, "two passes");
-        CHECK(pa >= 0 && s->passes.data[pa].ch[0].kind == NW_IN_PASS && s->passes.data[pa].ch[0].pass == pa, "feedback");
+        CHECK(pa >= 0 && s->passes.data[pa].ch[0].kind == NW_IN_PASS &&
+                  s->passes.data[pa].ch[0].pass == pa,
+              "feedback");
         CHECK(s->passes.data[s->image_pass].ch[2].kind == NW_IN_SKY, "image ch2 is the sky");
         CHECK(s->passes.data[s->image_pass].ch[3].kind == NW_IN_AUDIO, "image ch3 is audio");
         nw_shader_source_free(s);
@@ -97,17 +108,18 @@ int main(void) {
     nw_import_free(&im);
 
     im = import(site, true);
-    CHECK(im.manifest && strstr(im.manifest, "image {\n  ch0 cube\n}"), "site format: cube binding:\n%s",
-          im.manifest ? im.manifest : "");
+    CHECK(im.manifest && strstr(im.manifest, "image {\n  ch0 cube\n}"),
+          "site format: cube binding:\n%s", im.manifest ? im.manifest : "");
     s = parse(&im);
     if (s) {
-        CHECK(s->passes.len == 2 && s->passes.data[s->image_pass].ch[0].kind == NW_IN_CUBE, "image reads Cube A");
+        CHECK(s->passes.len == 2 && s->passes.data[s->image_pass].ch[0].kind == NW_IN_CUBE,
+              "image reads Cube A");
         nw_shader_source_free(s);
     }
     nw_import_free(&im);
 
     im = import(feedback, true);
-    s = parse(&im);
+    s  = parse(&im);
     if (s) nw_shader_source_free(s);
     nw_import_free(&im);
 
@@ -118,9 +130,10 @@ int main(void) {
     bad = import("{\"Shader\":{}}", false);
     bad = import("{\"Shader\":{\"renderpass\":[{\"name\":\"Buffer A\",\"code\":\"x\"}]}}", false);
     bad = import("{\"a\":\"\\uD800\"} x", false);
-    bad = import("[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]"
-                 "]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
-                 false);
+    bad = import(
+        "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]"
+        "]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+        false);
     (void)bad;
 
     printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);

@@ -61,10 +61,10 @@ struct span_rect {
  * twice the size of the one its scale-1 neighbour is handed. Same scene, same
  * logical extent, sampled at each output's own density. */
 struct span_view {
-    int32_t virt_w;     /* iResolution.x: bounding box of every rect, at my scale */
-    int32_t virt_h;     /* iResolution.y */
-    int32_t off_x;      /* added to gl_FragCoord.x */
-    int32_t off_y;      /* added to gl_FragCoord.y */
+    int32_t virt_w; /* iResolution.x: bounding box of every rect, at my scale */
+    int32_t virt_h; /* iResolution.y */
+    int32_t off_x;  /* added to gl_FragCoord.x */
+    int32_t off_y;  /* added to gl_FragCoord.y */
 };
 
 /* Virtual view for rects[index] within the bounding box of all `count` rects.
@@ -89,7 +89,6 @@ struct span_view {
  * Returns false (leaving *out untouched) if index is out of range, if rects[index]
  * is itself degenerate, or if no rect is valid.
  */
-bool span_compute(const struct span_rect *rects, size_t count, size_t index,
-                  struct span_view *out);
+bool span_compute(const struct span_rect *rects, size_t count, size_t index, struct span_view *out);
 
 #endif /* NEOWALL_OUTPUT_SPAN_H */

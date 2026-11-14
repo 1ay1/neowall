@@ -49,14 +49,14 @@ term_gpu *wallshader_terminal(wallshader *s);
 
 typedef struct {
     int width, height;
-    double time;                 /* iTime, seconds */
-    double present_at;           /* when this frame is shown (s, monotonic), or 0 */
+    double time;       /* iTime, seconds */
+    double present_at; /* when this frame is shown (s, monotonic), or 0 */
     float mouse[2];
-    int span_w, span_h;          /* the whole span, or 0x0 */
-    int span_x, span_y;          /* this output's offset in it (y from the bottom) */
-    const float *windows;        /* count rects, x y w h, output px, y-down */
+    int span_w, span_h;   /* the whole span, or 0x0 */
+    int span_x, span_y;   /* this output's offset in it (y from the bottom) */
+    const float *windows; /* count rects, x y w h, output px, y-down */
     int window_count;
-    const float *focused;        /* 4 floats, or NULL */
+    const float *focused; /* 4 floats, or NULL */
     /* the config's `channels` (and image cycling on iChannel0): textures
      * that fill channels the shader's own bindings leave open, or 0 */
     unsigned channels[4];

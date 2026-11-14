@@ -26,17 +26,22 @@
 void neowall_test_fft(float *re, float *im, int n);
 #else
 #define NW_FFT_LINKAGE static
-#define NW_FFT_NAME fft
+#define NW_FFT_NAME    fft
 #endif
 
 NW_FFT_LINKAGE void NW_FFT_NAME(float *re, float *im, int n) {
     for (int i = 1, j = 0; i < n; i++) {
         int bit = n >> 1;
-        for (; j & bit; bit >>= 1) j ^= bit;
+        for (; j & bit; bit >>= 1)
+            j ^= bit;
         j ^= bit;
         if (i < j) {
-            float tr = re[i]; re[i] = re[j]; re[j] = tr;
-            float ti = im[i]; im[i] = im[j]; im[j] = ti;
+            float tr = re[i];
+            re[i]    = re[j];
+            re[j]    = tr;
+            float ti = im[i];
+            im[i]    = im[j];
+            im[j]    = ti;
         }
     }
     for (int len = 2; len <= n; len <<= 1) {
@@ -48,10 +53,13 @@ NW_FFT_LINKAGE void NW_FFT_NAME(float *re, float *im, int n) {
                 int a = i + k, b = i + k + len / 2;
                 float tr = cr * re[b] - ci * im[b];
                 float ti = cr * im[b] + ci * re[b];
-                re[b] = re[a] - tr; im[b] = im[a] - ti;
-                re[a] += tr;        im[a] += ti;
+                re[b]    = re[a] - tr;
+                im[b]    = im[a] - ti;
+                re[a] += tr;
+                im[a] += ti;
                 float ncr = cr * wr - ci * wi;
-                ci = cr * wi + ci * wr; cr = ncr;
+                ci        = cr * wi + ci * wr;
+                cr        = ncr;
             }
         }
     }

@@ -45,23 +45,23 @@ extern "C" {
 #define RT_MSG_PAYLOAD 48
 
 typedef union rt_payload {
-    int64_t  i;
+    int64_t i;
     uint64_t u;
-    double   d;
-    void    *p;
-    const char *s;                      /* static storage only */
+    double d;
+    void *p;
+    const char *s; /* static storage only */
     unsigned char bytes[RT_MSG_PAYLOAD];
 } rt_payload;
 
 typedef struct rt_msg {
-    uint32_t kind;                      /* program-defined; 0 is reserved */
-    uint32_t id;                        /* program-defined target (an output) */
+    uint32_t kind; /* program-defined; 0 is reserved */
+    uint32_t id;   /* program-defined target (an output) */
     rt_payload v;
 } rt_msg;
 
 /* An effect update asks for. Same shape as a message, separate type. */
 typedef struct rt_cmd {
-    uint32_t kind;                      /* program-defined; 0 is reserved */
+    uint32_t kind; /* program-defined; 0 is reserved */
     uint32_t id;
     rt_payload v;
 } rt_cmd;
@@ -127,9 +127,9 @@ typedef enum { RT_EFFECT_CMD, RT_EFFECT_SEND, RT_EFFECT_QUIT } rt_effect_tag;
 typedef struct rt_effect {
     rt_effect_tag tag;
     union {
-        rt_cmd cmd;                     /* RT_EFFECT_CMD */
-        rt_msg msg;                     /* RT_EFFECT_SEND */
-        int code;                       /* RT_EFFECT_QUIT */
+        rt_cmd cmd; /* RT_EFFECT_CMD */
+        rt_msg msg; /* RT_EFFECT_SEND */
+        int code;   /* RT_EFFECT_QUIT */
     } u;
 } rt_effect;
 
@@ -139,7 +139,7 @@ rt_cmds *rt_cmds_new(void);
 void rt_cmds_free(rt_cmds *cmds);
 void rt_cmds_clear(rt_cmds *cmds);
 size_t rt_cmds_len(const rt_cmds *cmds);
-const rt_effect *rt_cmds_at(const rt_cmds *cmds, size_t i);   /* NULL past the end */
+const rt_effect *rt_cmds_at(const rt_cmds *cmds, size_t i); /* NULL past the end */
 
 /* ── fds ──────────────────────────────────────────────────────────────── */
 
@@ -165,8 +165,7 @@ typedef bool (*rt_prepare_fn)(void *ctx, rt_loop *loop);
  * callbacks ran. For a host that must balance prepare
  * (wl_display_prepare_read / cancel_read) and then dispatch what was read. */
 typedef void (*rt_after_wait_fn)(void *ctx, rt_loop *loop, bool fd_was_ready);
-void rt_set_host_hooks(rt_loop *loop, rt_prepare_fn prepare,
-                       rt_after_wait_fn after, void *ctx);
+void rt_set_host_hooks(rt_loop *loop, rt_prepare_fn prepare, rt_after_wait_fn after, void *ctx);
 
 /* ── signals ──────────────────────────────────────────────────────────── */
 

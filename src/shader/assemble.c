@@ -57,10 +57,9 @@ static const char prefix[] =
     "#define HW_PERFORMANCE 1\n"
     "out vec4 fragColor;\n";
 
-static const char suffix[] =
-    "void main() {\n"
-    "    mainImage(fragColor, gl_FragCoord.xy + iSpanOffset);\n"
-    "}\n";
+static const char suffix[] = "void main() {\n"
+                             "    mainImage(fragColor, gl_FragCoord.xy + iSpanOffset);\n"
+                             "}\n";
 
 /* A Cube A pass is drawn once per face. nwCubeFace picks the face (GL
  * order: +X -X +Y -Y +Z -Z) and the ray is the direction through this texel,
@@ -91,7 +90,7 @@ typedef struct {
 static bool put_injected(builder *b, const char *s) {
     for (const char *p = s; *p;) {
         const char *nl = strchr(p, '\n');
-        size_t n = nl ? (size_t)(nl - p) + 1 : strlen(p);
+        size_t n       = nl ? (size_t)(nl - p) + 1 : strlen(p);
         if (!nw_str_append_n(&b->text, p, n) || !nw_list_push(&b->map, ((nw_src_loc){NULL, 0})))
             return false;
         p += n;
@@ -103,19 +102,21 @@ static bool put_injected(builder *b, const char *s) {
 /* Append author text carrying `#line N S` directives (from source.c). The
  * directive itself is emitted, and N and S seed the map for what follows. */
 static bool put_tagged(builder *b, const nw_shader_source *src, const char *s) {
-    int line = 1;
+    int line         = 1;
     const char *file = src->path;
     for (const char *p = s; *p;) {
         const char *nl = strchr(p, '\n');
-        size_t n = nl ? (size_t)(nl - p) + 1 : strlen(p);
+        size_t n       = nl ? (size_t)(nl - p) + 1 : strlen(p);
         if (!strncmp(p, "#line ", 6)) {
             int sn = 0;
-            if (sscanf(p + 6, "%d %d", &line, &sn) == 2 && sn >= 0 && (size_t)sn < src->includes.len)
+            if (sscanf(p + 6, "%d %d", &line, &sn) == 2 && sn >= 0 &&
+                (size_t)sn < src->includes.len)
                 file = src->includes.data[sn];
             if (!nw_str_append_n(&b->text, p, n) || !nw_list_push(&b->map, ((nw_src_loc){NULL, 0})))
                 return false;
         } else {
-            if (!nw_str_append_n(&b->text, p, n) || !nw_list_push(&b->map, ((nw_src_loc){file, line})))
+            if (!nw_str_append_n(&b->text, p, n) ||
+                !nw_list_push(&b->map, ((nw_src_loc){file, line})))
                 return false;
             line++;
         }
@@ -139,24 +140,35 @@ size_t nw_shader_preamble_chunks(const char **out, size_t max) {
         "uniform sampler2D iChannel2;\n"
         "uniform sampler2D iChannel3;\n";
     const char *all[] = {
-        prefix, channels, neowall_reactive_uniforms,
-        neowall_glsl_stdlib, neowall_glsl_stdlib2, neowall_glsl_stdlib3,
-        neowall_glsl_stdlib4, neowall_glsl_stdlib5, neowall_glsl_stdlib6,
-        neowall_glsl_stdlib7, neowall_glsl_stdlib8, neowall_glsl_stdlib8a2,
-        neowall_glsl_stdlib8c, neowall_glsl_stdlib8d,
+        prefix,
+        channels,
+        neowall_reactive_uniforms,
+        neowall_glsl_stdlib,
+        neowall_glsl_stdlib2,
+        neowall_glsl_stdlib3,
+        neowall_glsl_stdlib4,
+        neowall_glsl_stdlib5,
+        neowall_glsl_stdlib6,
+        neowall_glsl_stdlib7,
+        neowall_glsl_stdlib8,
+        neowall_glsl_stdlib8a2,
+        neowall_glsl_stdlib8c,
+        neowall_glsl_stdlib8d,
     };
     size_t n = NW_COUNTOF(all) < max ? NW_COUNTOF(all) : max;
-    for (size_t i = 0; i < n; i++) out[i] = all[i];
+    for (size_t i = 0; i < n; i++)
+        out[i] = all[i];
     return n;
 }
 
 nw_result nw_shader_assemble(const nw_shader_source *src, int pass, char **text, nw_src_loc **map,
                              size_t *map_len) {
-    if (pass < 0 || (size_t)pass >= src->passes.len) return nw_err(NW_ERR_INVALID_ARG, "no such pass");
+    if (pass < 0 || (size_t)pass >= src->passes.len)
+        return nw_err(NW_ERR_INVALID_ARG, "no such pass");
     const nw_pass_src *p = &src->passes.data[pass];
 
     /* Normalise Shadertoy-isms the macros can't (stray #version etc). */
-    char *body = nw_compat_fix(p->body);
+    char *body   = nw_compat_fix(p->body);
     char *common = src->common ? nw_compat_fix(src->common) : NULL;
     if (!body || (src->common && !common)) {
         free(body);
@@ -166,21 +178,25 @@ nw_result nw_shader_assemble(const nw_shader_source *src, int pass, char **text,
 
     /* Which friendly names the shader defines itself: those aliases yield. */
     glsl_shadow_set *shadow = glsl_shadow_create();
-    bool shadow_ok = shadow && glsl_shadow_scan(shadow, body) && (!common || glsl_shadow_scan(shadow, common));
+    bool shadow_ok =
+        shadow && glsl_shadow_scan(shadow, body) && (!common || glsl_shadow_scan(shadow, common));
 
     builder b = {0};
-    bool ok = put_injected(&b, prefix) && put_injected(&b, neowall_reactive_uniforms);
+    bool ok   = put_injected(&b, prefix) && put_injected(&b, neowall_reactive_uniforms);
     /* a channel reading a cube pass is a samplerCube; every other a sampler2D */
     for (int c = 0; ok && c < NW_CHANNELS; c++) {
         char line[64];
         snprintf(line, sizeof(line), "uniform %s iChannel%d;\n",
-                 p->ch[c].kind == NW_IN_CUBE || p->ch[c].kind == NW_IN_SKY ? "samplerCube" : "sampler2D", c);
+                 p->ch[c].kind == NW_IN_CUBE || p->ch[c].kind == NW_IN_SKY ? "samplerCube"
+                                                                           : "sampler2D",
+                 c);
         ok = put_injected(&b, line);
     }
     const char *const lib[] = {neowall_glsl_stdlib,  neowall_glsl_stdlib2, neowall_glsl_stdlib3,
                                neowall_glsl_stdlib4, neowall_glsl_stdlib5, neowall_glsl_stdlib6,
                                neowall_glsl_stdlib7};
-    for (size_t i = 0; ok && i < NW_COUNTOF(lib); i++) ok = put_injected(&b, lib[i]);
+    for (size_t i = 0; ok && i < NW_COUNTOF(lib); i++)
+        ok = put_injected(&b, lib[i]);
     for (size_t i = 0; ok && i < NEOWALL_STDLIB_ALIAS_COUNT; i++)
         if (shadow_ok && !glsl_shadow_contains(shadow, neowall_stdlib_aliases[i].name))
             ok = put_injected(&b, neowall_stdlib_aliases[i].decl);
@@ -189,12 +205,15 @@ nw_result nw_shader_assemble(const nw_shader_source *src, int pass, char **text,
         static const char *const hooks[] = {"nwMaterial", "nwGloss", "nwEmissive"};
         ok = put_injected(&b, neowall_glsl_stdlib8) && put_injected(&b, neowall_glsl_stdlib8a2);
         for (size_t i = 0; ok && i < NW_COUNTOF(hooks); i++)
-            if (!glsl_shadow_contains(shadow, hooks[i])) ok = put_injected(&b, neowall_scene_hook_defaults[i]);
-        ok = ok && put_injected(&b, neowall_glsl_stdlib8c) && put_injected(&b, neowall_glsl_stdlib8d);
+            if (!glsl_shadow_contains(shadow, hooks[i]))
+                ok = put_injected(&b, neowall_scene_hook_defaults[i]);
+        ok = ok && put_injected(&b, neowall_glsl_stdlib8c) &&
+             put_injected(&b, neowall_glsl_stdlib8d);
     }
     glsl_shadow_free(shadow);
 
-    for (size_t i = 0; ok && i < src->params.len; i++) ok = decl_param(&b, &src->params.data[i]);
+    for (size_t i = 0; ok && i < src->params.len; i++)
+        ok = decl_param(&b, &src->params.data[i]);
     for (size_t i = 0; ok && i < src->binds.len; i++) {
         bool is_param = false;
         for (size_t k = 0; k < src->params.len; k++)
@@ -210,7 +229,9 @@ nw_result nw_shader_assemble(const nw_shader_source *src, int pass, char **text,
     if (ok) ok = put_tagged(&b, src, body);
     /* main() is injected; give it its own source number so its errors
      * never land on an author's line */
-    if (ok) ok = put_injected(&b, "#line 1 9999\n") && put_injected(&b, p->is_cube ? cube_suffix : suffix);
+    if (ok)
+        ok = put_injected(&b, "#line 1 9999\n") &&
+             put_injected(&b, p->is_cube ? cube_suffix : suffix);
     free(body);
     free(common);
 
@@ -219,8 +240,8 @@ nw_result nw_shader_assemble(const nw_shader_source *src, int pass, char **text,
         nw_list_free(&b.map);
         return nw_err(NW_ERR_OOM, "assemble");
     }
-    *text = nw_str_take(&b.text);
-    *map = b.map.data;
+    *text    = nw_str_take(&b.text);
+    *map     = b.map.data;
     *map_len = b.map.len;
     return nw_ok();
 }

@@ -22,7 +22,7 @@ static double now_ms(void) {
 }
 
 static double build_ms(const char *path) {
-    double t = now_ms();
+    double t      = now_ms();
     wallshader *s = NULL;
     if (nw_is_err(wallshader_load(path, &s))) return -1;
     double d = now_ms() - t;
@@ -43,10 +43,10 @@ static double frame_us(const char *path) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
     double total = 0;
-    const int N = 200;
+    const int N  = 200;
     for (int i = 0; i < N + 10; i++) {
         wallshader_frame f = {.width = 320, .height = 180, .time = i / 60.0};
-        double t = now_ms();
+        double t           = now_ms();
         wallshader_draw(s, &f);
         if (i >= 10) total += now_ms() - t;
         glFinish();
@@ -59,7 +59,7 @@ static double frame_us(const char *path) {
 
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : "examples/shaders";
-    char cdir[] = "/tmp/nwbench-XXXXXX";
+    char cdir[]     = "/tmp/nwbench-XXXXXX";
     if (!mkdtemp(cdir)) return 1;
     setenv("XDG_CACHE_HOME", cdir, 1);
     const char *err = gl_headless_init();
@@ -68,8 +68,8 @@ int main(int argc, char **argv) {
         return 77;
     }
     log_set_level(LOG_LEVEL_ERROR);
-    printf("GL: %s\n%-20s %9s %9s %9s\n", (const char *)glGetString(GL_RENDERER), "shader", "cold ms",
-           "cached ms", "frame us");
+    printf("GL: %s\n%-20s %9s %9s %9s\n", (const char *)glGetString(GL_RENDERER), "shader",
+           "cold ms", "cached ms", "frame us");
     DIR *d = opendir(dir);
     struct dirent *de;
     double tc = 0, tw = 0, tf = 0;

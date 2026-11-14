@@ -12,7 +12,8 @@
 #include "neowall/output/state_file.h"
 #include "neowall/state/state.h"
 
-static void output_install_shader(struct output_state *output, wallshader *fresh, const char *shader_path);
+static void output_install_shader(struct output_state *output, wallshader *fresh,
+                                  const char *shader_path);
 
 nw_result output_set_shader(struct output_state *output, const char *shader_path) {
     if (!output || !shader_path) {
@@ -31,8 +32,8 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
     snprintf(model_copy, sizeof(model_copy), "%s", output->model);
     pthread_mutex_unlock(&output->state->state_mutex);
 
-    log_info("Setting shader for output %s: %s",
-             model_copy[0] ? model_copy : "unknown", shader_path);
+    log_info("Setting shader for output %s: %s", model_copy[0] ? model_copy : "unknown",
+             shader_path);
 
     /* Defensive checks before any EGL/GL operations */
     if (!output->state) {
@@ -46,7 +47,10 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
     }
 
     /* CRITICAL: Ensure EGL context is current before any GL operations */
-    if (!output->compositor_surface || !egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
+    if (!output->compositor_surface ||
+        !egl_make_surface_current(output->state->egl_display,
+                                  output->compositor_surface->egl_surface,
+                                  output->state->egl_context)) {
         log_error("Failed to make EGL context current for shader set");
         return nw_err(NW_ERR_GL, "eglMakeCurrent failed for shader set");
     }
@@ -60,7 +64,8 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
         log_debug("EGL surface not ready for output %s, deferring shader load: %s",
                   output->model[0] ? output->model : "unknown", shader_path);
         /* Store shader path in config for later application when surface is ready */
-        config_str_set(output->config->shader_path, sizeof(output->config->shader_path), shader_path);
+        config_str_set(output->config->shader_path, sizeof(output->config->shader_path),
+                       shader_path);
         output->config->type = WALLPAPER_SHADER;
         /* Deferred, not failed: the render loop applies this path once the
          * surface comes up, so callers must not treat it as a load failure. */
@@ -69,8 +74,7 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
 
     /* What rendering needs is an EGL surface; how the backend got one (a
      * wl_egl_window, an X11 window, a pbuffer) doesn't matter here. */
-    if (!output->compositor_surface ||
-        output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
+    if (!output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         log_error("EGL surface not created for output %s, cannot set shader",
                   output->model[0] ? output->model : "unknown");
         return nw_err(NW_ERR_GL, "EGL surface not created");
@@ -84,10 +88,13 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
     }
 
     /* Make EGL context current before creating shader program */
-    if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
+    if (!egl_make_surface_current(output->state->egl_display,
+                                  output->compositor_surface->egl_surface,
+                                  output->state->egl_context)) {
         EGLint egl_error = eglGetError();
-        log_error("Failed to make EGL context current for output %s: 0x%x (display may be disconnected)",
-                  output->model[0] ? output->model : "unknown", egl_error);
+        log_error(
+            "Failed to make EGL context current for output %s: 0x%x (display may be disconnected)",
+            output->model[0] ? output->model : "unknown", egl_error);
         return nw_err(NW_ERR_GL, "eglMakeCurrent failed");
     }
 
@@ -97,7 +104,7 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
     /* Build the new one before dropping the old: a shader that doesn't
      * compile leaves what's on screen alone. */
     wallshader *fresh = NULL;
-    nw_result lr = wallshader_load(shader_path, &fresh);
+    nw_result lr      = wallshader_load(shader_path, &fresh);
     if (nw_is_err(lr)) {
         log_error("Failed to load shader: %s", shader_path);
         return lr;
@@ -108,7 +115,8 @@ nw_result output_set_shader(struct output_state *output, const char *shader_path
 
 /* Put a loaded shader on screen in place of whatever was there. The output's
  * context must be current. */
-static void output_install_shader(struct output_state *output, wallshader *fresh, const char *shader_path) {
+static void output_install_shader(struct output_state *output, wallshader *fresh,
+                                  const char *shader_path) {
     /* a build that was still going belongs to the shader we're replacing,
      * and so does a reload waiting on it */
     wallshader_load_cancel(output->pending_shader);
@@ -132,7 +140,8 @@ static void output_install_shader(struct output_state *output, wallshader *fresh
      * (which would underflow the elapsed-time calculation in render.c). */
     output->shader_paused_at = 0;
 
-    log_info("Loaded shader with %d pass(es): %s", wallshader_pass_count(output->shader), shader_path);
+    log_info("Loaded shader with %d pass(es): %s", wallshader_pass_count(output->shader),
+             shader_path);
 
     /* Update config with new shader path - protected by state mutex */
     pthread_mutex_lock(&output->state->state_mutex);
@@ -146,21 +155,22 @@ static void output_install_shader(struct output_state *output, wallshader *fresh
     /* Write state to file */
     const char *mode_str = wallpaper_mode_to_string(output->config->mode);
     write_wallpaper_state(output_get_identifier(output), shader_path, mode_str,
-                         output->config->current_cycle_index,
-                         output->config->cycle_count,
-                         "active");
+                          output->config->current_cycle_index, output->config->cycle_count,
+                          "active");
 
     /* Mark for immediate redraw with new shader */
     atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
-    
+
     /* Initialize frame time for animation */
-    uint64_t now = get_time_ms();
+    uint64_t now            = get_time_ms();
     output->last_frame_time = now;
     output->last_cycle_time = now;
 
     /* Configure vsync based on shader_fps setting */
     if (output->compositor_surface && output->compositor_surface->egl_surface != EGL_NO_SURFACE) {
-        if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
+        if (!egl_make_surface_current(output->state->egl_display,
+                                      output->compositor_surface->egl_surface,
+                                      output->state->egl_context)) {
             log_error("Failed to make EGL context current for vsync config");
         } else {
             /* Configure vsync for shader rendering */
@@ -203,13 +213,14 @@ nw_result output_set_shader_async(struct output_state *output, const char *shade
         output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         return output_set_shader(output, shader_path);
     }
-    if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface,
+    if (!egl_make_surface_current(output->state->egl_display,
+                                  output->compositor_surface->egl_surface,
                                   output->state->egl_context)) {
         return nw_err(NW_ERR_GL, "eglMakeCurrent failed");
     }
     wallshader_load_cancel(output->pending_shader);
     output->pending_shader = NULL;
-    output_unstage(output);   /* a newer request replaces a waiting reload */
+    output_unstage(output); /* a newer request replaces a waiting reload */
     log_info("Setting shader for output %s: %s (building in the background)",
              output->model[0] ? output->model : "unknown", shader_path);
     nw_result r = wallshader_load_start(shader_path, &output->pending_shader);
@@ -234,16 +245,18 @@ bool output_poll_shader_build(struct output_state *output) {
         snprintf(path, sizeof(path), "%s", output->pending_shader_path);
         /* a reload was waiting on this shader: its config goes live with it */
         struct wallpaper_config *staged = output->staged_config;
-        output->staged_config = NULL;
+        output->staged_config           = NULL;
         output_install_shader(output, fresh, path);
         output->pending_failures = 0;
         if (staged) output_commit_staged(output, staged);
     } else if (output->staged_config) {
         /* a reload's shader didn't compile: the old config and shader stay */
-        log_error("Failed to load shader: %s (keeping the current config)", output->pending_shader_path);
+        log_error("Failed to load shader: %s (keeping the current config)",
+                  output->pending_shader_path);
         output_unstage(output);
     } else {
-        log_error("Failed to load shader: %s (keeping the current one)", output->pending_shader_path);
+        log_error("Failed to load shader: %s (keeping the current one)",
+                  output->pending_shader_path);
         /* a broken entry in a cycle: try the next, but give up after a
          * whole lap so an all-broken list stops */
         if (output->config->cycle && output->config->cycle_count > 1 &&

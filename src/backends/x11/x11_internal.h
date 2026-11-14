@@ -67,9 +67,9 @@
  * PRIORITY: 50 (medium - used when Wayland not available)
  */
 
-#define BACKEND_NAME "x11-tiling-wm"
+#define BACKEND_NAME        "x11-tiling-wm"
 #define BACKEND_DESCRIPTION "X11 backend for tiling window managers (i3, bspwm, dwm, etc.)"
-#define BACKEND_PRIORITY 50
+#define BACKEND_PRIORITY    50
 
 /* Backend-specific data */
 
@@ -151,45 +151,43 @@ typedef struct {
     EGLSurface egl_surface;
     EGLNativeWindowType native_window;
     bool mapped;
-    bool owns_root_pixmap;  /* Only the origin (0,0) surface drives the root-window
-                            * background pixmap for pseudo-transparency. Secondary
-                            * monitors render their own window but must not clobber
-                            * the shared root pixmap with just their slice. */
-    Pixmap root_pixmap;  /* Pixmap set on root window for pseudo-transparency.
-                          * Whether it is *advertised* is backend state, not surface
-                          * state: see x11_backend_data_t.published_root_pixmap.
-                          * Until the first commit fills it, it holds whatever
-                          * XCreatePixmap handed back, which is undefined — so it is
-                          * not advertised at create time. */
-    GC gc;               /* Graphics context for copying to pixmap */
-    XImage *ximage;      /* XImage for transferring OpenGL pixels to pixmap */
-    unsigned char *pixel_buffer;  /* Buffer for glReadPixels */
+    bool owns_root_pixmap;       /* Only the origin (0,0) surface drives the root-window
+                                  * background pixmap for pseudo-transparency. Secondary
+                                  * monitors render their own window but must not clobber
+                                  * the shared root pixmap with just their slice. */
+    Pixmap root_pixmap;          /* Pixmap set on root window for pseudo-transparency.
+                                  * Whether it is *advertised* is backend state, not surface
+                                  * state: see x11_backend_data_t.published_root_pixmap.
+                                  * Until the first commit fills it, it holds whatever
+                                  * XCreatePixmap handed back, which is undefined — so it is
+                                  * not advertised at create time. */
+    GC gc;                       /* Graphics context for copying to pixmap */
+    XImage *ximage;              /* XImage for transferring OpenGL pixels to pixmap */
+    unsigned char *pixel_buffer; /* Buffer for glReadPixels */
 } x11_surface_data_t;
 
 /* Geometry of one physical monitor within the X screen. */
 typedef struct {
-    char name[64];   /* RandR connector name, e.g. "DVI-D-0" */
-    int x, y;        /* Top-left within the screen */
+    char name[64]; /* RandR connector name, e.g. "DVI-D-0" */
+    int x, y;      /* Top-left within the screen */
     int width, height;
 } x11_monitor_t;
 
 bool x11_use_override_redirect(x11_backend_data_t *backend);
-void x11_set_wallpaper_properties(x11_backend_data_t *backend, Window window,
-                                         int pos_x, int pos_y, int width, int height);
+void x11_set_wallpaper_properties(x11_backend_data_t *backend, Window window, int pos_x, int pos_y,
+                                  int width, int height);
 void x11_get_screen_dimensions(x11_backend_data_t *backend, int *width, int *height);
 struct compositor_surface *x11_create_surface(void *backend_data,
-                                                     const compositor_surface_config_t *config);
+                                              const compositor_surface_config_t *config);
 void x11_destroy_surface(struct compositor_surface *surface);
 bool x11_configure_surface(struct compositor_surface *surface,
-                                  const compositor_surface_config_t *config);
+                           const compositor_surface_config_t *config);
 void x11_distribute_mouse(x11_backend_data_t *backend, int root_x, int root_y);
 void x11_unpublish_root_pixmap(x11_backend_data_t *backend);
 void x11_commit_surface(struct compositor_surface *surface);
-bool x11_create_egl_window(struct compositor_surface *surface,
-                                  int32_t width, int32_t height);
+bool x11_create_egl_window(struct compositor_surface *surface, int32_t width, int32_t height);
 void x11_destroy_egl_window(struct compositor_surface *surface);
-bool x11_resize_egl_window(struct compositor_surface *surface,
-                                 int32_t width, int32_t height);
+bool x11_resize_egl_window(struct compositor_surface *surface, int32_t width, int32_t height);
 EGLNativeWindowType x11_get_native_window(struct compositor_surface *surface);
 bool x11_attach_surface(struct neowall_state *state, struct output_state *out);
 bool x11_init_outputs(void *backend_data, struct neowall_state *state);

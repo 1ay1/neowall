@@ -14,7 +14,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-static int g_fails = 0;
+static int g_fails  = 0;
 static int g_checks = 0;
 
 static void feed(term_screen *s, const char *bytes) {
@@ -27,10 +27,11 @@ static void expect_line(term_screen *s, int y, const char *want) {
     const term_cell *r = term_screen_row(s, y);
     char buf[512];
     int o = 0, last = -1, cols = term_screen_cols(s);
-    for (int x = 0; x < cols; x++) if (r[x].cp) last = x;
+    for (int x = 0; x < cols; x++)
+        if (r[x].cp) last = x;
     for (int x = 0; x <= last && o < (int)sizeof(buf) - 1; x++) {
         uint32_t cp = r[x].cp;
-        buf[o++] = cp ? (cp < 128 ? (char)cp : '?') : ' ';
+        buf[o++]    = cp ? (cp < 128 ? (char)cp : '?') : ' ';
     }
     buf[o] = 0;
     if (strcmp(buf, want) != 0) {
@@ -41,24 +42,27 @@ static void expect_line(term_screen *s, int y, const char *want) {
 
 static void expect(bool cond, const char *what) {
     g_checks++;
-    if (!cond) { printf("  FAIL: %s\n", what); g_fails++; }
+    if (!cond) {
+        printf("  FAIL: %s\n", what);
+        g_fails++;
+    }
 }
 
 int main(void) {
     /* --- a count of 0 means 1 (ICH/ECH/DCH), like xterm, and never eats a
      *     neighbouring wide glyph --- */
     term_screen *s = term_screen_create(10, 2);
-    feed(s, "ABCDE\x1b[1;3H\x1b[0@");       /* insert 1 blank at col 3 */
+    feed(s, "ABCDE\x1b[1;3H\x1b[0@"); /* insert 1 blank at col 3 */
     expect_line(s, 0, "AB CDE");
-    feed(s, "\x1b[1;1H\x1b[0X");            /* erase 1 char at col 1 */
+    feed(s, "\x1b[1;1H\x1b[0X"); /* erase 1 char at col 1 */
     expect_line(s, 0, " B CDE");
-    feed(s, "\x1b[1;1H\x1b[0P");            /* delete 1 char at col 1 */
+    feed(s, "\x1b[1;1H\x1b[0P"); /* delete 1 char at col 1 */
     expect_line(s, 0, "B CDE");
     term_screen_destroy(s);
 
     s = term_screen_create(10, 2);
-    feed(s, "\xe4\xb8\xad\xe6\x96\x87");      /* two wide glyphs, cols 1-4 */
-    feed(s, "\x1b[1;3H\x1b[0X");            /* erase 1 at the second's head */
+    feed(s, "\xe4\xb8\xad\xe6\x96\x87"); /* two wide glyphs, cols 1-4 */
+    feed(s, "\x1b[1;3H\x1b[0X");         /* erase 1 at the second's head */
     {
         const term_cell *r = term_screen_row(s, 0);
         expect(r[0].cp == 0x4E2D && (r[1].attr & TERM_ATTR_WIDE_TAIL),
@@ -72,7 +76,7 @@ int main(void) {
     s = term_screen_create(20, 6);
     feed(s, "Hello");
     expect_line(s, 0, "Hello");
-    feed(s, "\x1b[2;3HXY");            /* row2 col3 */
+    feed(s, "\x1b[2;3HXY"); /* row2 col3 */
     expect_line(s, 1, "  XY");
     term_screen_destroy(s);
 
@@ -83,21 +87,22 @@ int main(void) {
     {
         const term_cell *r = term_screen_row(s, 0);
         expect(r[0].fg.kind == TERM_COLOR_INDEXED && r[0].fg.idx == 196, "256-colour idx 196");
-        expect(r[3].fg.kind == TERM_COLOR_RGB && r[3].fg.r == 10 && r[3].fg.g == 20 && r[3].fg.b == 30,
+        expect(r[3].fg.kind == TERM_COLOR_RGB && r[3].fg.r == 10 && r[3].fg.g == 20 &&
+                   r[3].fg.b == 30,
                "truecolour 10,20,30");
     }
     term_screen_destroy(s);
 
     /* --- erase line to end (EL 0) --- */
     s = term_screen_create(10, 3);
-    feed(s, "ABCDEFGHIJ\x1b[1;4H\x1b[0K");   /* cursor col4, clear to EOL -> ABC */
+    feed(s, "ABCDEFGHIJ\x1b[1;4H\x1b[0K"); /* cursor col4, clear to EOL -> ABC */
     expect_line(s, 0, "ABC");
     term_screen_destroy(s);
 
     /* --- scroll region (DECSTBM) + scroll-on-bottom --- */
     s = term_screen_create(6, 4);
-    feed(s, "\x1b[2;3r");                  /* region rows 2..3 */
-    feed(s, "\x1b[2;1HL2\r\nL3\r\nL4");     /* overfill -> scroll up within region */
+    feed(s, "\x1b[2;3r");               /* region rows 2..3 */
+    feed(s, "\x1b[2;1HL2\r\nL3\r\nL4"); /* overfill -> scroll up within region */
     expect_line(s, 1, "L3");
     expect_line(s, 2, "L4");
     term_screen_destroy(s);
@@ -112,15 +117,15 @@ int main(void) {
 
     /* --- insert / delete chars (ICH / DCH) --- */
     s = term_screen_create(12, 2);
-    feed(s, "ABCDEF\x1b[1;2H\x1b[2P");       /* delete 2 at col2 -> ADEF */
+    feed(s, "ABCDEF\x1b[1;2H\x1b[2P"); /* delete 2 at col2 -> ADEF */
     expect_line(s, 0, "ADEF");
-    feed(s, "\x1b[1;1H\x1b[3@");             /* insert 3 blanks at col1 */
+    feed(s, "\x1b[1;1H\x1b[3@"); /* insert 3 blanks at col1 */
     expect_line(s, 0, "   ADEF");
     term_screen_destroy(s);
 
     /* --- multibyte glyph (box-drawing) stored as one codepoint --- */
     s = term_screen_create(4, 1);
-    feed(s, "\xE2\x94\x80");                /* U+2500 ─ */
+    feed(s, "\xE2\x94\x80"); /* U+2500 ─ */
     {
         const term_cell *r = term_screen_row(s, 0);
         expect(r[0].cp == 0x2500, "box-drawing U+2500 decoded");
@@ -129,7 +134,7 @@ int main(void) {
 
     /* --- DEC special-graphics charset (ESC(0 + SI/SO) --- */
     s = term_screen_create(12, 1);
-    feed(s, "\x1b(0qqxl\x1b(BAB");   /* q q ->─ ─, x ->│, l ->┌, then ASCII AB */
+    feed(s, "\x1b(0qqxl\x1b(BAB"); /* q q ->─ ─, x ->│, l ->┌, then ASCII AB */
     {
         const term_cell *r = term_screen_row(s, 0);
         expect(r[0].cp == 0x2500, "DEC 'q' -> U+2500 horizontal");
@@ -143,10 +148,12 @@ int main(void) {
 
     /* --- SI/SO shift between G0(ASCII) and G1(DEC graphics) --- */
     s = term_screen_create(8, 1);
-    feed(s, "\x1b)0"        /* designate G1 = DEC graphics */
-            "A"            /* GL=G0=ASCII -> 'A' */
-            "\x0e" "q"     /* SO -> GL=G1, 'q' -> U+2500 */
-            "\x0f" "B");   /* SI -> GL=G0, 'B' */
+    feed(s, "\x1b)0" /* designate G1 = DEC graphics */
+            "A"      /* GL=G0=ASCII -> 'A' */
+            "\x0e"
+            "q" /* SO -> GL=G1, 'q' -> U+2500 */
+            "\x0f"
+            "B"); /* SI -> GL=G0, 'B' */
     {
         const term_cell *r = term_screen_row(s, 0);
         expect(r[0].cp == 'A', "SI/SO: G0 'A'");
@@ -166,9 +173,9 @@ int main(void) {
 
     /* --- OSC 0/2 window title --- */
     s = term_screen_create(8, 1);
-    feed(s, "\x1b]0;My Title\x07");   /* OSC 0 ; text BEL */
+    feed(s, "\x1b]0;My Title\x07"); /* OSC 0 ; text BEL */
     expect(strcmp(term_screen_title(s), "My Title") == 0, "OSC 0 sets title");
-    feed(s, "\x1b]2;Second\x1b\\");   /* OSC 2 ; text ST */
+    feed(s, "\x1b]2;Second\x1b\\"); /* OSC 2 ; text ST */
     expect(strcmp(term_screen_title(s), "Second") == 0, "OSC 2 sets title (ST-terminated)");
     term_screen_destroy(s);
 
@@ -185,21 +192,21 @@ int main(void) {
 
         /* DSR 6 (CPR) at a known cursor position -> CSI row;col R (1-based). */
         feed(s, "\x1b[3;7H\x1b[6n");
-        n = term_screen_take_reply(s, rep, sizeof(rep));
+        n      = term_screen_take_reply(s, rep, sizeof(rep));
         rep[n] = 0;
         expect(strcmp(rep, "\x1b[3;7R") == 0, "DSR 6n -> CPR row;col");
 
         /* Primary DA (CSI c) -> a VT-class attribute report starting CSI ? */
         feed(s, "\x1b[c");
         n = term_screen_take_reply(s, rep, sizeof(rep));
-        expect(n >= 3 && rep[0] == 0x1b && rep[1] == '[' && rep[2] == '?' &&
-               rep[n-1] == 'c', "Primary DA -> CSI ? ... c");
+        expect(n >= 3 && rep[0] == 0x1b && rep[1] == '[' && rep[2] == '?' && rep[n - 1] == 'c',
+               "Primary DA -> CSI ? ... c");
 
         /* Secondary DA (CSI > c) -> CSI > ... c */
         feed(s, "\x1b[>c");
         n = term_screen_take_reply(s, rep, sizeof(rep));
-        expect(n >= 3 && rep[0] == 0x1b && rep[1] == '[' && rep[2] == '>' &&
-               rep[n-1] == 'c', "Secondary DA -> CSI > ... c");
+        expect(n >= 3 && rep[0] == 0x1b && rep[1] == '[' && rep[2] == '>' && rep[n - 1] == 'c',
+               "Secondary DA -> CSI > ... c");
 
         /* Buffer is empty once drained. */
         n = term_screen_take_reply(s, rep, sizeof(rep));
@@ -250,12 +257,12 @@ int main(void) {
     term_screen_destroy(s);
 
     s = term_screen_create(4, 1);
-    feed(s, "A\xE7\x95\x8C" "X");
+    feed(s, "A\xE7\x95\x8C"
+            "X");
     expect(term_screen_resize(s, 3, 1), "resize reports success");
     {
         const term_cell *r = term_screen_row(s, 0);
-        expect(r[1].cp == 0,
-               "shrinking through wide tail clears retained head");
+        expect(r[1].cp == 0, "shrinking through wide tail clears retained head");
         expect(r[2].cp == 0 && !(r[2].attr & TERM_ATTR_WIDE_TAIL),
                "shrinking through wide tail clears retained tail");
     }
@@ -263,17 +270,21 @@ int main(void) {
 
     /* A cursor saved before a shrink must not land outside the new grid. */
     s = term_screen_create(80, 24);
-    feed(s, "\x1b[24;80H\x1b" "7");
+    feed(s, "\x1b[24;80H\x1b"
+            "7");
     expect(term_screen_resize(s, 40, 12), "shrink after DECSC");
-    feed(s, "\x1b" "8X");
+    feed(s, "\x1b"
+            "8X");
     {
         const term_cell *r = term_screen_row(s, 11);
         expect(r[39].cp == 'X', "DECRC after shrink prints inside the grid");
     }
     /* same for the alt screen's saved cursor */
-    feed(s, "\x1b[?1049h\x1b[12;40H\x1b" "7");
+    feed(s, "\x1b[?1049h\x1b[12;40H\x1b"
+            "7");
     expect(term_screen_resize(s, 10, 3), "shrink on alt screen");
-    feed(s, "\x1b" "8Y");
+    feed(s, "\x1b"
+            "8Y");
     expect(term_screen_row(s, 2)[9].cp == 'Y', "alt DECRC after shrink stays in grid");
     term_screen_destroy(s);
 

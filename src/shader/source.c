@@ -73,13 +73,16 @@ static char *dir_of(nw_arena *a, const char *path) {
 /* `#include "file"` at the start of a line (whitespace allowed). */
 static bool parse_include(const char *line, size_t len, char *out, size_t cap) {
     size_t i = 0;
-    while (i < len && (line[i] == ' ' || line[i] == '\t')) i++;
+    while (i < len && (line[i] == ' ' || line[i] == '\t'))
+        i++;
     if (len - i < 9 || strncmp(line + i, "#include", 8)) return false;
     i += 8;
-    while (i < len && (line[i] == ' ' || line[i] == '\t')) i++;
+    while (i < len && (line[i] == ' ' || line[i] == '\t'))
+        i++;
     if (i >= len || line[i] != '"') return false;
     size_t s = ++i;
-    while (i < len && line[i] != '"') i++;
+    while (i < len && line[i] != '"')
+        i++;
     if (i >= len || i - s >= cap) return false;
     memcpy(out, line + s, i - s);
     out[i - s] = '\0';
@@ -94,7 +97,7 @@ static nw_result expand(expander *e, const char *text, const char *file, int dep
     int ln = 1;
     for (const char *p = text; *p; ln++) {
         const char *nl = strchr(p, '\n');
-        size_t len = nl ? (size_t)(nl - p) : strlen(p);
+        size_t len     = nl ? (size_t)(nl - p) : strlen(p);
         if (len && p[len - 1] == '\r') len--;
         char inc[512];
         if (parse_include(p, len, inc, sizeof(inc))) {
@@ -102,8 +105,9 @@ static nw_result expand(expander *e, const char *text, const char *file, int dep
                 log_error("<memory>:%d: #include isn't allowed here", ln);
                 return nw_err(NW_ERR_PARSE, "include");
             }
-            const char *full = inc[0] == '/' ? nw_arena_strdup(e->arena, inc)
-                                             : nw_arena_printf(e->arena, "%s/%s", dir_of(e->arena, file), inc);
+            const char *full =
+                inc[0] == '/' ? nw_arena_strdup(e->arena, inc)
+                              : nw_arena_printf(e->arena, "%s/%s", dir_of(e->arena, file), inc);
             for (size_t i = 0; i < e->stack.len; i++) {
                 if (!strcmp(e->stack.data[i], full)) {
                     log_error("%s:%d: #include \"%s\" includes itself", file, ln, inc);
@@ -139,19 +143,23 @@ static nw_result expand(expander *e, const char *text, const char *file, int dep
 static const char *find_main(const char *p) {
     while (*p) {
         if (p[0] == '/' && p[1] == '/') {
-            while (*p && *p != '\n') p++;
+            while (*p && *p != '\n')
+                p++;
             continue;
         }
         if (p[0] == '/' && p[1] == '*') {
             p += 2;
-            while (*p && !(p[0] == '*' && p[1] == '/')) p++;
+            while (*p && !(p[0] == '*' && p[1] == '/'))
+                p++;
             if (*p) p += 2;
             continue;
         }
         if (!strncmp(p, "void", 4) && !isalnum((unsigned char)p[4]) && p[4] != '_') {
             const char *q = p + 4;
-            while (*q == ' ' || *q == '\t' || *q == '\n') q++;
-            if (!strncmp(q, "mainImage", 9) && !isalnum((unsigned char)q[9]) && q[9] != '_') return p;
+            while (*q == ' ' || *q == '\t' || *q == '\n')
+                q++;
+            if (!strncmp(q, "mainImage", 9) && !isalnum((unsigned char)q[9]) && q[9] != '_')
+                return p;
             if (!strncmp(q, "mainCubemap", 11) && !isalnum((unsigned char)q[11]) && q[11] != '_')
                 return p;
         }
@@ -166,17 +174,21 @@ static const char *func_end(const char *p) {
     bool seen = false;
     while (*p) {
         if (p[0] == '/' && p[1] == '/') {
-            while (*p && *p != '\n') p++;
+            while (*p && *p != '\n')
+                p++;
             continue;
         }
         if (p[0] == '/' && p[1] == '*') {
             p += 2;
-            while (*p && !(p[0] == '*' && p[1] == '/')) p++;
+            while (*p && !(p[0] == '*' && p[1] == '/'))
+                p++;
             if (*p) p += 2;
             continue;
         }
-        if (*p == '{') depth++, seen = true;
-        else if (*p == '}' && --depth == 0 && seen) return p + 1;
+        if (*p == '{')
+            depth++, seen = true;
+        else if (*p == '}' && --depth == 0 && seen)
+            return p + 1;
         p++;
     }
     return p;
@@ -192,27 +204,36 @@ static int line_index(const char *text, const char *at) {
 /* The pass a comment line names, or NULL. Comment-only lines. */
 static const char *marker_name(nw_arena *a, const char *line, size_t len) {
     size_t i = 0;
-    while (i < len && isspace((unsigned char)line[i])) i++;
+    while (i < len && isspace((unsigned char)line[i]))
+        i++;
     if (len - i < 2 || line[i] != '/' || (line[i + 1] != '/' && line[i + 1] != '*')) return NULL;
     char buf[256];
     size_t n = len - i < sizeof(buf) - 1 ? len - i : sizeof(buf) - 1;
     memcpy(buf, line + i, n);
-    buf[n] = '\0';
+    buf[n]                              = '\0';
     static const char *const fixed[][2] = {
-        {"Buffer A", "Buffer A"}, {"BufferA", "Buffer A"}, {"Buffer B", "Buffer B"},
-        {"BufferB", "Buffer B"},  {"Buffer C", "Buffer C"}, {"BufferC", "Buffer C"},
-        {"Buffer D", "Buffer D"}, {"BufferD", "Buffer D"},
+        {"Buffer A", "Buffer A"},
+        {"BufferA",  "Buffer A"},
+        {"Buffer B", "Buffer B"},
+        {"BufferB",  "Buffer B"},
+        {"Buffer C", "Buffer C"},
+        {"BufferC",  "Buffer C"},
+        {"Buffer D", "Buffer D"},
+        {"BufferD",  "Buffer D"},
     };
     for (size_t k = 0; k < NW_COUNTOF(fixed); k++)
         if (strstr(buf, fixed[k][0])) return fixed[k][1];
     const char *body = buf + 2;
-    while (*body == ' ' || *body == '\t' || *body == '=' || *body == '-') body++;
+    while (*body == ' ' || *body == '\t' || *body == '=' || *body == '-')
+        body++;
     if (!strncasecmp(body, "Image", 5) && !isalnum((unsigned char)body[5])) return "Image";
     if (!strncasecmp(body, "Pass:", 5)) {
         body += 5;
-        while (*body == ' ') body++;
+        while (*body == ' ')
+            body++;
         size_t m = strcspn(body, "*/\n");
-        while (m && isspace((unsigned char)body[m - 1])) m--;
+        while (m && isspace((unsigned char)body[m - 1]))
+            m--;
         if (m) return nw_arena_strndup(a, body, m);
     }
     return NULL;
@@ -241,14 +262,15 @@ static bool parse_param(nw_arena *a, const char *ann, const char *decl, nw_param
     double lo = strtod(p, &end);
     if (end != p) {
         p = end;
-        while (*p == ' ') p++;
+        while (*p == ' ')
+            p++;
         if (p[0] == '.' && p[1] == '.') {
             p += 2;
             double hi = strtod(p, &end);
             if (end != p) {
                 out->min = (float)lo;
                 out->max = (float)hi;
-                p = end;
+                p        = end;
             }
         }
     }
@@ -258,29 +280,33 @@ static bool parse_param(nw_arena *a, const char *ann, const char *decl, nw_param
     const char *q2 = q1 ? strchr(q1 + 1, '"') : NULL;
     if (q2) out->help = nw_arena_strndup(a, q1 + 1, (size_t)(q2 - q1 - 1));
 
-    while (isspace((unsigned char)*decl)) decl++;
+    while (isspace((unsigned char)*decl))
+        decl++;
     if (strncmp(decl, "uniform", 7) || !isspace((unsigned char)decl[7])) return false;
     decl += 7;
     char type[16], name[64];
     if (sscanf(decl, " %15s %63[A-Za-z0-9_]", type, name) != 2) return false;
     int w = type_width(type);
     if (!w) return false;
-    out->type = nw_arena_strdup(a, type);
-    out->name = nw_arena_strdup(a, name);
+    out->type      = nw_arena_strdup(a, type);
+    out->name      = nw_arena_strdup(a, name);
     const char *eq = strchr(decl, '=');
     if (eq) {
-        const char *v = eq + 1;
+        const char *v     = eq + 1;
         const char *paren = strchr(v, '(');
-        const char *semi = strchr(v, ';');
+        const char *semi  = strchr(v, ';');
         if (paren && (!semi || paren < semi)) v = paren + 1;
         for (int i = 0; i < w; i++) {
             out->def[i] = strtof(v, &end);
             if (end == v) {
-                if (i == 1) for (int k = 1; k < w; k++) out->def[k] = out->def[0]; /* vec3(0.5) */
+                if (i == 1)
+                    for (int k = 1; k < w; k++)
+                        out->def[k] = out->def[0]; /* vec3(0.5) */
                 break;
             }
             v = end;
-            while (*v == ' ' || *v == ',') v++;
+            while (*v == ' ' || *v == ',')
+                v++;
         }
         if (!strcmp(type, "bool")) out->def[0] = strstr(eq, "true") ? 1.0f : 0.0f;
     }
@@ -331,24 +357,25 @@ typedef struct {
  * Lines in `skip` are blanked. */
 static int file_index(const nw_shader_source *src, const char *file) {
     for (size_t i = 0; i < src->includes.len; i++)
-        if (src->includes.data[i] == file || (file && !strcmp(src->includes.data[i], file))) return (int)i;
+        if (src->includes.data[i] == file || (file && !strcmp(src->includes.data[i], file)))
+            return (int)i;
     return 0;
 }
 
 static const char *emit_range(const nw_shader_source *src, nw_arena *a, const mapped *m,
                               const char *text, range r, const bool *skip, const char **first_file,
                               int *first_line) {
-    nw_str s = {0};
+    nw_str s             = {0};
     const char *cur_file = NULL;
-    int cur_line = -1;
-    const char *p = text;
+    int cur_line         = -1;
+    const char *p        = text;
     for (int i = 0; i < r.from && *p; i++) {
         const char *nl = strchr(p, '\n');
-        p = nl ? nl + 1 : p + strlen(p);
+        p              = nl ? nl + 1 : p + strlen(p);
     }
     for (int i = r.from; i < r.to && *p; i++) {
-        const char *nl = strchr(p, '\n');
-        size_t len = nl ? (size_t)(nl - p) : strlen(p);
+        const char *nl        = strchr(p, '\n');
+        size_t len            = nl ? (size_t)(nl - p) : strlen(p);
         const nw_src_loc *loc = &m->map.data[i];
         if (i == r.from) {
             *first_file = loc->file;
@@ -359,8 +386,10 @@ static const char *emit_range(const nw_shader_source *src, nw_arena *a, const ma
             cur_file = loc->file;
             cur_line = loc->line;
         }
-        if (skip && skip[i]) nw_str_append(&s, "");
-        else nw_str_append_n(&s, p, len);
+        if (skip && skip[i])
+            nw_str_append(&s, "");
+        else
+            nw_str_append_n(&s, p, len);
         nw_str_append(&s, "\n");
         cur_line++;
         p = nl ? nl + 1 : p + len;
@@ -399,24 +428,28 @@ static bool cube_like(const char *body, int c) {
     snprintf(name, sizeof(name), "iChannel%d", c);
     for (const char *p = strstr(body, name); p; p = strstr(p + 1, name)) {
         const char *q = p + strlen(name);
-        while (*q == ' ') q++;
+        while (*q == ' ')
+            q++;
         if (*q != ',') continue;
         q++;
-        while (*q == ' ') q++;
+        while (*q == ' ')
+            q++;
         if (!strncmp(q, "vec3(", 5)) return true;
         /* calls that give back a direction */
         static const char *const dir_fns[] = {"reflect(", "refract(", "normalize(", "cross("};
-        bool fn = false;
+        bool fn                            = false;
         for (size_t k = 0; k < NW_COUNTOF(dir_fns); k++)
             if (!strncmp(q, dir_fns[k], strlen(dir_fns[k]))) fn = true;
         if (fn) {
             /* normalize(uv) on a vec2 is a 2D lookup: only count it when the
              * argument is itself a vec3 (or another call we can't see into) */
             const char *a = strchr(q, '(') + 1;
-            while (*a == ' ') a++;
+            while (*a == ' ')
+                a++;
             char arg[64];
             size_t m = 0;
-            while ((isalnum((unsigned char)a[m]) || a[m] == '_') && m < sizeof(arg) - 1) arg[m] = a[m], m++;
+            while ((isalnum((unsigned char)a[m]) || a[m] == '_') && m < sizeof(arg) - 1)
+                arg[m] = a[m], m++;
             arg[m] = '\0';
             if (strncmp(q, "normalize(", 10) || !m || a[m] != ')') return true;
             char d2[80];
@@ -427,7 +460,8 @@ static bool cube_like(const char *body, int c) {
         /* a plain identifier: is it declared vec3 somewhere in the pass? */
         char id[64];
         size_t n = 0;
-        while ((isalnum((unsigned char)q[n]) || q[n] == '_') && n < sizeof(id) - 1) id[n] = q[n], n++;
+        while ((isalnum((unsigned char)q[n]) || q[n] == '_') && n < sizeof(id) - 1)
+            id[n] = q[n], n++;
         id[n] = '\0';
         if (!n || (q[n] != ')' && q[n] != ' ' && q[n] != ',')) continue;
         char decl[80];
@@ -446,7 +480,7 @@ static bool noise_like(const char *body, int c) {
     snprintf(name, sizeof(name), "iChannel%d", c);
     for (const char *p = strstr(body, name); p; p = strstr(p + 1, name)) {
         const char *eol = strchr(p, '\n');
-        size_t n = eol ? (size_t)(eol - p) : strlen(p);
+        size_t n        = eol ? (size_t)(eol - p) : strlen(p);
         char line[256];
         if (n >= sizeof(line)) n = sizeof(line) - 1;
         memcpy(line, p, n);
@@ -464,7 +498,7 @@ static bool self_like(const char *body, int c) {
     snprintf(name, sizeof(name), "iChannel%d", c);
     for (const char *p = strstr(body, name); p; p = strstr(p + 1, name)) {
         const char *eol = strchr(p, '\n');
-        size_t n = eol ? (size_t)(eol - p) : strlen(p);
+        size_t n        = eol ? (size_t)(eol - p) : strlen(p);
         char line[256];
         if (n >= sizeof(line)) n = sizeof(line) - 1;
         memcpy(line, p, n);
@@ -481,12 +515,14 @@ static void default_bindings(nw_shader_source *src) {
     int bufs[16];
     int cube = -1;
     for (size_t i = 0; i < src->passes.len && nbuf < 16; i++)
-        if (src->passes.data[i].is_cube) cube = (int)i;
-        else if (!src->passes.data[i].is_image) bufs[nbuf++] = (int)i;
+        if (src->passes.data[i].is_cube)
+            cube = (int)i;
+        else if (!src->passes.data[i].is_image)
+            bufs[nbuf++] = (int)i;
 
     for (size_t i = 0; i < src->passes.len; i++) {
         nw_pass_src *p = &src->passes.data[i];
-        int next_buf = 0;
+        int next_buf   = 0;
         for (int c = 0; c < NW_CHANNELS; c++) {
             nw_input *in = &p->ch[c];
             if (!uses_channel(p->body, c)) {
@@ -496,10 +532,12 @@ static void default_bindings(nw_shader_source *src) {
             if ((int)i != cube && cube_like(p->body, c)) {
                 /* sampled with a direction: the Cube A pass, or a built-in
                  * sky standing in for one of Shadertoy's cube maps */
-                *in = cube >= 0 ? (nw_input){.kind = NW_IN_CUBE, .pass = cube} : (nw_input){.kind = NW_IN_SKY};
+                *in = cube >= 0 ? (nw_input){.kind = NW_IN_CUBE, .pass = cube}
+                                : (nw_input){.kind = NW_IN_SKY};
             } else if (noise_like(p->body, c)) {
                 *in = (nw_input){.kind = NW_IN_NOISE, .wrap_repeat = true};
-            } else if (!p->is_image && c == 0 && nbuf > 0 && bufs[0] == (int)i && self_like(p->body, c)) {
+            } else if (!p->is_image && c == 0 && nbuf > 0 && bufs[0] == (int)i &&
+                       self_like(p->body, c)) {
                 /* the first buffer reading its own coords: feedback. Later
                  * buffers' ch0 is Buffer A by Shadertoy convention. */
                 *in = (nw_input){.kind = NW_IN_PASS, .pass = (int)i};
@@ -510,7 +548,7 @@ static void default_bindings(nw_shader_source *src) {
                 for (int k = 0; k < nbuf; k++) {
                     int bi = bufs[(next_buf + k) % nbuf];
                     if (bi != (int)i) {
-                        pick = bi;
+                        pick     = bi;
                         next_buf = (next_buf + k + 1) % nbuf;
                         break;
                     }
@@ -528,28 +566,38 @@ static void default_bindings(nw_shader_source *src) {
 
 static bool parse_input(nw_shader_source *src, const char *dir, const char *v, nw_input *out,
                         const char *where) {
-    static const struct { const char *name; nw_input_kind kind; } fixed[] = {
-        {"noise", NW_IN_NOISE}, {"audio", NW_IN_AUDIO}, {"font", NW_IN_FONT},
-        {"keyboard", NW_IN_KEYBOARD}, {"blue_noise", NW_IN_BLUE_NOISE}, {"bluenoise", NW_IN_BLUE_NOISE},
-        {"none", NW_IN_NONE}, {"sky", NW_IN_SKY},
+    static const struct {
+        const char *name;
+        nw_input_kind kind;
+    } fixed[] = {
+        {"noise",      NW_IN_NOISE     },
+        {"audio",      NW_IN_AUDIO     },
+        {"font",       NW_IN_FONT      },
+        {"keyboard",   NW_IN_KEYBOARD  },
+        {"blue_noise", NW_IN_BLUE_NOISE},
+        {"bluenoise",  NW_IN_BLUE_NOISE},
+        {"none",       NW_IN_NONE      },
+        {"sky",        NW_IN_SKY       },
     };
     *out = (nw_input){0};
     /* an image, tagged (texture:art.png) or by extension. Before the
      * built-in names, so a file called noise.png is still a file. */
     const char *file = !strncasecmp(v, "texture:", 8) ? v + 8 : NULL;
-    const char *dot = strrchr(v, '.');
-    if (!file && dot && (!strcasecmp(dot, ".png") || !strcasecmp(dot, ".jpg") || !strcasecmp(dot, ".jpeg")))
+    const char *dot  = strrchr(v, '.');
+    if (!file && dot &&
+        (!strcasecmp(dot, ".png") || !strcasecmp(dot, ".jpg") || !strcasecmp(dot, ".jpeg")))
         file = v;
     if (file && *file) {
-        out->kind = NW_IN_IMAGE;
+        out->kind        = NW_IN_IMAGE;
         out->wrap_repeat = true;
-        out->path = file[0] == '/' || file[0] == '~' || !dir ? nw_arena_strdup(&src->arena_, file)
-                                                             : nw_arena_printf(&src->arena_, "%s/%s", dir, file);
+        out->path        = file[0] == '/' || file[0] == '~' || !dir
+                               ? nw_arena_strdup(&src->arena_, file)
+                               : nw_arena_printf(&src->arena_, "%s/%s", dir, file);
         return out->path != NULL;
     }
     for (size_t k = 0; k < NW_COUNTOF(fixed); k++) {
         if (!strcasecmp(v, fixed[k].name)) {
-            out->kind = fixed[k].kind;
+            out->kind        = fixed[k].kind;
             out->wrap_repeat = fixed[k].kind == NW_IN_NOISE || fixed[k].kind == NW_IN_BLUE_NOISE;
             return true;
         }
@@ -564,8 +612,10 @@ static bool parse_input(nw_shader_source *src, const char *dir, const char *v, n
         out->kind = NW_IN_NONE;
         return true;
     }
-    log_error("%s: unknown channel source '%s' (a pass name, cube, self, noise, blue_noise, audio, font, sky, "
-             "keyboard, none, or an image file)", where, v);
+    log_error(
+        "%s: unknown channel source '%s' (a pass name, cube, self, noise, blue_noise, audio, font, sky, "
+        "keyboard, none, or an image file)",
+        where, v);
     return false;
 }
 
@@ -582,11 +632,12 @@ static nw_result apply_pass_block(nw_shader_source *src, const char *dir, int pi
                                   const char *where) {
     nw_pass_src *p = &src->passes.data[pi];
     for (size_t i = 0; i < o->count; i++) {
-        const char *k = o->entries[i].key;
+        const char *k      = o->entries[i].key;
         const VibeValue *v = o->entries[i].value;
-        const char *sv = v->type == VIBE_TYPE_STRING ? v->as_string : NULL;
-        int c = -1;
-        if ((!strncmp(k, "ch", 2) && strlen(k) == 3) || (!strncmp(k, "channel", 7) && strlen(k) == 8))
+        const char *sv     = v->type == VIBE_TYPE_STRING ? v->as_string : NULL;
+        int c              = -1;
+        if ((!strncmp(k, "ch", 2) && strlen(k) == 3) ||
+            (!strncmp(k, "channel", 7) && strlen(k) == 8))
             c = k[strlen(k) - 1] - '0';
         if (c >= 0 && c < NW_CHANNELS) {
             if (!sv) {
@@ -602,13 +653,17 @@ static nw_result apply_pass_block(nw_shader_source *src, const char *dir, int pi
             continue;
         }
         int e;
-        static const char *const fmts[] = {"rgba8", "rgba16f", "rgba32f"};
+        static const char *const fmts[]    = {"rgba8", "rgba16f", "rgba32f"};
         static const char *const filters[] = {"linear", "nearest", "mipmap"};
-        static const char *const wraps[] = {"clamp", "repeat", "mirror"};
-        if (!strcmp(k, "format") && sv && want_enum(sv, fmts, 3, &e)) p->format = (nw_format)e;
-        else if (!strcmp(k, "filter") && sv && want_enum(sv, filters, 3, &e)) p->filter = (nw_filter)e;
-        else if (!strcmp(k, "wrap") && sv && want_enum(sv, wraps, 3, &e)) p->wrap = (nw_wrap)e;
-        else if (!strcmp(k, "scale") && (v->type == VIBE_TYPE_FLOAT || v->type == VIBE_TYPE_INTEGER)) {
+        static const char *const wraps[]   = {"clamp", "repeat", "mirror"};
+        if (!strcmp(k, "format") && sv && want_enum(sv, fmts, 3, &e))
+            p->format = (nw_format)e;
+        else if (!strcmp(k, "filter") && sv && want_enum(sv, filters, 3, &e))
+            p->filter = (nw_filter)e;
+        else if (!strcmp(k, "wrap") && sv && want_enum(sv, wraps, 3, &e))
+            p->wrap = (nw_wrap)e;
+        else if (!strcmp(k, "scale") &&
+                 (v->type == VIBE_TYPE_FLOAT || v->type == VIBE_TYPE_INTEGER)) {
             double s = v->type == VIBE_TYPE_FLOAT ? v->as_float : (double)v->as_integer;
             if (!(s > 0 && s <= 4)) {
                 log_error("%s: 'scale' must be in (0, 4]", where);
@@ -626,7 +681,7 @@ static nw_result apply_pass_block(nw_shader_source *src, const char *dir, int pi
 }
 
 static nw_result apply_manifest(nw_shader_source *src, const char *text, const char *mpath) {
-    VibeError verr = {0};
+    VibeError verr  = {0};
     VibeValue *root = vibe_parse(text, strlen(text), &verr);
     if (!root) {
         log_error("%s:%d: %s", mpath, verr.line, verr.message ? verr.message : "syntax error");
@@ -634,11 +689,11 @@ static nw_result apply_manifest(nw_shader_source *src, const char *text, const c
         return nw_err(NW_ERR_PARSE, "manifest syntax");
     }
     const char *dir = src->path ? dir_of(&src->arena_, src->path) : NULL;
-    nw_result r = nw_ok();
+    nw_result r     = nw_ok();
     VibeObject *top = root->as_object;
     for (size_t i = 0; !nw_is_err(r) && i < top->count; i++) {
         const char *k = top->entries[i].key;
-        VibeValue *v = top->entries[i].value;
+        VibeValue *v  = top->entries[i].value;
         char where[768];
         snprintf(where, sizeof(where), "%s: %s", mpath, k);
         if (!strcmp(k, "shader")) continue; /* resolved by the loader */
@@ -646,8 +701,8 @@ static nw_result apply_manifest(nw_shader_source *src, const char *text, const c
             /* pass { "Buffer A" { ... } } */
             for (size_t j = 0; !nw_is_err(r) && j < v->as_object->count; j++) {
                 const char *pn = v->as_object->entries[j].key;
-                VibeValue *b = v->as_object->entries[j].value;
-                int pi = nw_shader_source_find_pass(src, pn);
+                VibeValue *b   = v->as_object->entries[j].value;
+                int pi         = nw_shader_source_find_pass(src, pn);
                 snprintf(where, sizeof(where), "%s: pass \"%s\"", mpath, pn);
                 if (pi < 0 || b->type != VIBE_TYPE_OBJECT) {
                     log_error("%s: no such pass in the shader", where);
@@ -662,7 +717,8 @@ static nw_result apply_manifest(nw_shader_source *src, const char *text, const c
                 char num[32];
                 const char *spec = b->type == VIBE_TYPE_STRING ? b->as_string : NULL;
                 if (!spec && (b->type == VIBE_TYPE_FLOAT || b->type == VIBE_TYPE_INTEGER)) {
-                    snprintf(num, sizeof(num), "%g", b->type == VIBE_TYPE_FLOAT ? b->as_float : (double)b->as_integer);
+                    snprintf(num, sizeof(num), "%g",
+                             b->type == VIBE_TYPE_FLOAT ? b->as_float : (double)b->as_integer);
                     spec = num;
                 }
                 nw_uniform_bind ub = {nw_arena_strdup(&src->arena_, v->as_object->entries[j].key),
@@ -686,7 +742,8 @@ static nw_result apply_manifest(nw_shader_source *src, const char *text, const c
             /* old form: channel0 audio  (applies to the image pass) */
             int c = k[7] - '0';
             if (c < 0 || c >= NW_CHANNELS ||
-                !parse_input(src, dir, v->as_string, &src->passes.data[src->image_pass].ch[c], where)) {
+                !parse_input(src, dir, v->as_string, &src->passes.data[src->image_pass].ch[c],
+                             where)) {
                 r = nw_err(NW_ERR_PARSE, "manifest");
             } else {
                 src->explicit_bindings = true;
@@ -713,9 +770,9 @@ static nw_result apply_manifest(nw_shader_source *src, const char *text, const c
  * later (a cycle), gives last frame's output: that's feedback. Image runs
  * last. Stable: ties keep file order. */
 static nw_result order_passes(nw_shader_source *src) {
-    size_t n = src->passes.len;
+    size_t n   = src->passes.len;
     int *order = calloc(n, sizeof(int));
-    int *pos = calloc(n, sizeof(int));
+    int *pos   = calloc(n, sizeof(int));
     bool *done = calloc(n, sizeof(bool));
     if (!order || !pos || !done) {
         free(order), free(pos), free(done);
@@ -734,7 +791,7 @@ static nw_result order_passes(nw_shader_source *src) {
                     ready = false;
             }
             if (ready) {
-                done[i] = true;
+                done[i]    = true;
                 order[k++] = (int)i;
             }
         }
@@ -743,17 +800,18 @@ static nw_result order_passes(nw_shader_source *src) {
              * whose reads of not-yet-run passes become last-frame reads */
             for (size_t i = 0; i < n; i++)
                 if (!done[i] && (int)i != src->image_pass) {
-                    done[i] = true;
+                    done[i]    = true;
                     order[k++] = (int)i;
                     break;
                 }
             if (k == before) {
                 done[src->image_pass] = true;
-                order[k++] = src->image_pass;
+                order[k++]            = src->image_pass;
             }
         }
     }
-    for (size_t i = 0; i < n; i++) pos[order[i]] = (int)i;
+    for (size_t i = 0; i < n; i++)
+        pos[order[i]] = (int)i;
 
     NW_LIST(nw_pass_src) sorted = {0};
     if (!nw_list_reserve(&sorted, n)) {
@@ -763,14 +821,15 @@ static nw_result order_passes(nw_shader_source *src) {
     for (size_t i = 0; i < n; i++) {
         nw_pass_src p = src->passes.data[order[i]];
         for (int c = 0; c < NW_CHANNELS; c++)
-            if (p.ch[c].kind == NW_IN_PASS || p.ch[c].kind == NW_IN_CUBE) p.ch[c].pass = pos[p.ch[c].pass];
+            if (p.ch[c].kind == NW_IN_PASS || p.ch[c].kind == NW_IN_CUBE)
+                p.ch[c].pass = pos[p.ch[c].pass];
         sorted.data[sorted.len++] = p;
     }
     src->image_pass = pos[src->image_pass];
     nw_list_free(&src->passes);
     src->passes.data = sorted.data;
-    src->passes.len = sorted.len;
-    src->passes.cap = sorted.cap;
+    src->passes.len  = sorted.len;
+    src->passes.cap  = sorted.cap;
     free(order), free(pos), free(done);
     return nw_ok();
 }
@@ -778,10 +837,11 @@ static nw_result order_passes(nw_shader_source *src) {
 /* ── load ────────────────────────────────────────────────────────────── */
 
 static bool body_animated(const char *b) {
-    static const char *const t[] = {"iTime", "iFrame", "iDate", "iMouse", "iTimeDelta", "iAudio",
-                                    "iKeyEnergy", "iMouseEnergy", "iCpu", "iRam", "iGpu", "iNet",
-                                    "iDisk", "iLoad", "iWindow", "iFocusedWindow", "iTimeOfDay",
-                                    "iSun", "iBattery", "iThermal", "iActivity", "iPulse", "iState"};
+    static const char *const t[] = {
+        "iTime",      "iFrame",       "iDate",     "iMouse",         "iTimeDelta", "iAudio",
+        "iKeyEnergy", "iMouseEnergy", "iCpu",      "iRam",           "iGpu",       "iNet",
+        "iDisk",      "iLoad",        "iWindow",   "iFocusedWindow", "iTimeOfDay", "iSun",
+        "iBattery",   "iThermal",     "iActivity", "iPulse",         "iState"};
     for (size_t i = 0; i < NW_COUNTOF(t); i++)
         if (strstr(b, t[i])) return true;
     return false;
@@ -793,24 +853,29 @@ bool nw_shader_requires_ok(const char *text, const char *path) {
      * comment isn't a requirement */
     for (const char *line = text; line && *line;) {
         const char *p = line;
-        while (*p == ' ' || *p == '\t') p++;
+        while (*p == ' ' || *p == '\t')
+            p++;
         if (!strncmp(p, "#pragma", 7)) {
             p += 7;
-            while (*p == ' ' || *p == '\t') p++;
+            while (*p == ' ' || *p == '\t')
+                p++;
             if (!strncmp(p, "neowall", 7)) {
                 p += 7;
-                while (*p == ' ' || *p == '\t') p++;
+                while (*p == ' ' || *p == '\t')
+                    p++;
                 if (!strncmp(p, "requires", 8)) {
                     p += 8;
                     int major = 0, minor = 0, patch = 0;
                     if (sscanf(p, "%d.%d.%d", &major, &minor, &patch) < 1) {
-                        log_warn("%s: malformed '#pragma neowall requires' (ignored)", path ? path : "<memory>");
+                        log_warn("%s: malformed '#pragma neowall requires' (ignored)",
+                                 path ? path : "<memory>");
                         return true;
                     }
                     if (major * 10000 + minor * 100 + patch > NEOWALL_VERSION_NUMBER) {
                         /* newer uniforms would silently read 0: refuse instead */
-                        log_error("%s requires neowall %d.%d.%d, but this is %s", path ? path : "<memory>",
-                                  major, minor, patch, NEOWALL_VERSION_STRING);
+                        log_error("%s requires neowall %d.%d.%d, but this is %s",
+                                  path ? path : "<memory>", major, minor, patch,
+                                  NEOWALL_VERSION_STRING);
                         return false;
                     }
                     return true;
@@ -818,19 +883,20 @@ bool nw_shader_requires_ok(const char *text, const char *path) {
             }
         }
         const char *eol = strchr(line, '\n');
-        line = eol ? eol + 1 : NULL;
+        line            = eol ? eol + 1 : NULL;
     }
     return true;
 }
 
 nw_result nw_shader_source_parse(const char *text, const char *name, const char *manifest_text,
                                  nw_shader_source **out) {
-    if (!nw_shader_requires_ok(text, name)) return nw_err(NW_ERR_UNSUPPORTED, "shader requires a newer neowall");
+    if (!nw_shader_requires_ok(text, name))
+        return nw_err(NW_ERR_UNSUPPORTED, "shader requires a newer neowall");
     nw_shader_source *src = calloc(1, sizeof(*src));
     if (!src) return nw_err(NW_ERR_OOM, "shader source");
     nw_arena_init(&src->arena_);
-    nw_arena *a = &src->arena_;
-    src->path = name ? nw_arena_strdup(a, name) : NULL;
+    nw_arena *a      = &src->arena_;
+    src->path        = name ? nw_arena_strdup(a, name) : NULL;
     const char *file = src->path ? src->path : "<memory>";
     if (src->path) (void)nw_list_push(&src->includes, src->path);
 
@@ -844,10 +910,10 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
         goto fail;
     }
     const char *all = nw_str_cstr(&e.out.text);
-    int nlines = (int)e.out.map.len;
+    int nlines      = (int)e.out.map.len;
 
     /* lines that are `// @param` + `uniform` pairs: record and blank them */
-    bool *skip = calloc((size_t)nlines + 1, sizeof(bool));
+    bool *skip            = calloc((size_t)nlines + 1, sizeof(bool));
     const char **line_ptr = calloc((size_t)nlines + 1, sizeof(char *));
     if (!skip || !line_ptr) {
         free(skip), free(line_ptr);
@@ -857,24 +923,27 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
     {
         const char *p = all;
         for (int i = 0; i < nlines; i++) {
-            line_ptr[i] = p;
+            line_ptr[i]    = p;
             const char *nl = strchr(p, '\n');
-            p = nl ? nl + 1 : p + strlen(p);
+            p              = nl ? nl + 1 : p + strlen(p);
         }
     }
     for (int i = 0; i + 1 < nlines; i++) {
         const char *ln = line_ptr[i];
-        size_t len = (size_t)(line_ptr[i + 1] - ln);
+        size_t len     = (size_t)(line_ptr[i + 1] - ln);
         char ann[512], decl[512];
         size_t lead = 0;
-        while (lead < len && (ln[lead] == ' ' || ln[lead] == '\t')) lead++;
+        while (lead < len && (ln[lead] == ' ' || ln[lead] == '\t'))
+            lead++;
         if (len >= sizeof(ann) || len - lead < 9 || strncmp(ln + lead, "//", 2)) continue;
         size_t at = lead + 2;
-        while (at < len && ln[at] == ' ') at++;
+        while (at < len && ln[at] == ' ')
+            at++;
         if (strncmp(ln + at, "@param", 6)) continue;
         memcpy(ann, ln, len);
         ann[len] = '\0';
-        size_t dlen = (size_t)((i + 2 < nlines ? line_ptr[i + 2] : all + strlen(all)) - line_ptr[i + 1]);
+        size_t dlen =
+            (size_t)((i + 2 < nlines ? line_ptr[i + 2] : all + strlen(all)) - line_ptr[i + 1]);
         if (dlen >= sizeof(decl)) continue;
         memcpy(decl, line_ptr[i + 1], dlen);
         decl[dlen] = '\0';
@@ -887,8 +956,9 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
             }
             skip[i + 1] = true;
         } else {
-            log_warn("%s:%d: @param must sit right above 'uniform <float|vecN|int|bool> name [= value];'",
-                    e.out.map.data[i].file ? e.out.map.data[i].file : file, e.out.map.data[i].line);
+            log_warn(
+                "%s:%d: @param must sit right above 'uniform <float|vecN|int|bool> name [= value];'",
+                e.out.map.data[i].file ? e.out.map.data[i].file : file, e.out.map.data[i].line);
         }
     }
 
@@ -897,16 +967,20 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
      * doesn't play: leave its function out so it can't break the picture. */
     for (const char *sp = strstr(all, "mainSound"); sp; sp = strstr(sp + 1, "mainSound")) {
         const char *fn = sp;
-        while (fn > all && fn[-1] != '\n') fn--;
+        while (fn > all && fn[-1] != '\n')
+            fn--;
         const char *t = fn;
-        while (*t == ' ' || *t == '\t') t++;
+        while (*t == ' ' || *t == '\t')
+            t++;
         if (strncmp(t, "vec2", 4) || (isalnum((unsigned char)sp[9]) || sp[9] == '_')) continue;
         int from = line_index(all, fn), to = line_index(all, func_end(sp));
-        for (int k = from; k <= to && k < nlines; k++) skip[k] = true;
+        for (int k = from; k <= to && k < nlines; k++)
+            skip[k] = true;
         log_info("%s: skipping the sound pass (mainSound): wallpapers don't play audio", file);
     }
     NW_LIST(const char *) mains = {0};
-    for (const char *m = find_main(all); m; m = find_main(func_end(m))) (void)nw_list_push(&mains, m);
+    for (const char *m = find_main(all); m; m = find_main(func_end(m)))
+        (void)nw_list_push(&mains, m);
     if (mains.len == 0) {
         log_error("%s: no 'void mainImage(out vec4, in vec2)' found", file);
         free(skip), free(line_ptr);
@@ -929,8 +1003,9 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
     }
     for (size_t pi = 0; pi < mains.len; pi++) {
         int from = line_index(all, mains.data[pi]);
-        int to = line_index(all, func_end(mains.data[pi]));
-        for (int k = from; k <= to && k < nlines; k++) in_main[k] = true;
+        int to   = line_index(all, func_end(mains.data[pi]));
+        for (int k = from; k <= to && k < nlines; k++)
+            in_main[k] = true;
     }
     if (mains.len > 1) {
         /* common = all lines not in a main, with markers blanked */
@@ -941,43 +1016,46 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
             r = nw_err(NW_ERR_OOM, "passes");
             goto fail;
         }
-        for (int k = 0; k < nlines; k++) cskip[k] = skip[k] || in_main[k];
+        for (int k = 0; k < nlines; k++)
+            cskip[k] = skip[k] || in_main[k];
         range cr = {0, nlines};
-        src->common = emit_range(src, a, &e.out, all, cr, cskip, &src->common_file, &src->common_first_line);
+        src->common =
+            emit_range(src, a, &e.out, all, cr, cskip, &src->common_file, &src->common_first_line);
         free(cskip);
     }
 
     for (size_t pi = 0; pi < mains.len; pi++) {
-        int fn_line = line_index(all, mains.data[pi]);
+        int fn_line  = line_index(all, mains.data[pi]);
         int end_line = line_index(all, func_end(mains.data[pi])) + 1;
         /* the function, not the comment, says it's a cube pass */
         const char *fn = mains.data[pi] + 4;
-        while (*fn == ' ' || *fn == '\t' || *fn == '\n') fn++;
+        while (*fn == ' ' || *fn == '\t' || *fn == '\n')
+            fn++;
         bool cube = !strncmp(fn, "mainCubemap", 11);
         /* marker: up to 5 comment lines above the function */
         const char *pname = NULL;
         for (int k = fn_line - 1; k >= 0 && k >= fn_line - 5 && !pname; k--) {
             if (in_main[k]) break;
             size_t len = (size_t)(line_ptr[k + 1] - line_ptr[k]);
-            pname = marker_name(a, line_ptr[k], len - (len && line_ptr[k][len - 1] == '\n'));
+            pname      = marker_name(a, line_ptr[k], len - (len && line_ptr[k][len - 1] == '\n'));
         }
         if (cube) {
             pname = "Cube A"; /* Shadertoy has exactly one */
         } else if (!pname || !strcmp(pname, "Cube A")) {
             static const char *const letters[] = {"Buffer A", "Buffer B", "Buffer C", "Buffer D"};
             pname = pi == mains.len - 1 ? "Image"
-                    : pi < 4           ? letters[pi]
-                                       : nw_arena_printf(a, "Buffer %zu", pi + 1);
+                    : pi < 4            ? letters[pi]
+                                        : nw_arena_printf(a, "Buffer %zu", pi + 1);
         }
         nw_pass_src p = {
-            .name = pname,
+            .name     = pname,
             .is_image = !cube && !strcmp(pname, "Image"),
-            .is_cube = cube,
-            .format = NW_FMT_RGBA16F,
-            .scale = 1.0,
+            .is_cube  = cube,
+            .format   = NW_FMT_RGBA16F,
+            .scale    = 1.0,
         };
         range rr = mains.len == 1 ? (range){0, nlines} : (range){fn_line, end_line};
-        p.body = emit_range(src, a, &e.out, all, rr, skip, &p.file, &p.first_line);
+        p.body   = emit_range(src, a, &e.out, all, rr, skip, &p.file, &p.first_line);
         if (!p.body || !nw_list_push(&src->passes, p)) {
             free(in_main), free(skip), free(line_ptr);
             nw_list_free(&mains);
@@ -1011,7 +1089,7 @@ nw_result nw_shader_source_parse(const char *text, const char *name, const char 
             goto fail;
         }
         src->passes.data[src->image_pass].is_image = true;
-        src->passes.data[src->image_pass].name = "Image";
+        src->passes.data[src->image_pass].name     = "Image";
     }
     for (size_t i = 0; i < src->passes.len; i++)
         for (size_t j = i + 1; j < src->passes.len; j++)
@@ -1054,7 +1132,7 @@ nw_result nw_shader_source_load(const char *path, nw_shader_source **out) {
     char glsl[1024], manifest[1024];
     snprintf(glsl, sizeof(glsl), "%s", path);
     const char *dot = strrchr(path, '.');
-    char *mtext = NULL;
+    char *mtext     = NULL;
 
     if (dot && !strcmp(dot, ".neowall")) {
         /* the manifest names the shader; default <name>.glsl */
@@ -1065,14 +1143,17 @@ nw_result nw_shader_source_load(const char *path, nw_shader_source **out) {
             return nw_err(NW_ERR_NOT_FOUND, "manifest");
         }
         snprintf(glsl, sizeof(glsl), "%.*s.glsl", (int)(dot - path), path);
-        VibeError ve = {0};
+        VibeError ve    = {0};
         VibeValue *root = vibe_parse(mtext, strlen(mtext), &ve);
         if (root) {
             VibeValue *sh = vibe_object_get(root->as_object, "shader");
             if (sh && sh->type == VIBE_TYPE_STRING) {
                 const char *slash = strrchr(path, '/');
-                if (sh->as_string[0] == '/' || !slash) snprintf(glsl, sizeof(glsl), "%s", sh->as_string);
-                else snprintf(glsl, sizeof(glsl), "%.*s/%s", (int)(slash - path), path, sh->as_string);
+                if (sh->as_string[0] == '/' || !slash)
+                    snprintf(glsl, sizeof(glsl), "%s", sh->as_string);
+                else
+                    snprintf(glsl, sizeof(glsl), "%.*s/%s", (int)(slash - path), path,
+                             sh->as_string);
             }
             vibe_value_free(root);
         }

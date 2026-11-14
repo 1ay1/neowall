@@ -49,16 +49,16 @@
  * ============================================================================ */
 
 typedef struct nw_vec {
-    void  *data;        /* contiguous storage, or NULL when cap == 0 */
-    size_t len;         /* number of live elements */
-    size_t cap;         /* allocated capacity in elements */
-    size_t elem_size;   /* sizeof(element) */
+    void *data;       /* contiguous storage, or NULL when cap == 0 */
+    size_t len;       /* number of live elements */
+    size_t cap;       /* allocated capacity in elements */
+    size_t elem_size; /* sizeof(element) */
 } nw_vec;
 
 static inline void nw_vec_init(nw_vec *v, size_t elem_size) {
-    v->data = NULL;
-    v->len = 0;
-    v->cap = 0;
+    v->data      = NULL;
+    v->len       = 0;
+    v->cap       = 0;
     v->elem_size = elem_size;
 }
 
@@ -69,15 +69,15 @@ static inline bool nw_vec_reserve(nw_vec *v, size_t want) {
     }
     size_t new_cap = v->cap ? v->cap : 8;
     while (new_cap < want) {
-        size_t grown = new_cap + new_cap / 2;   /* 1.5x */
-        new_cap = grown > new_cap ? grown : new_cap + 1;  /* guard overflow */
+        size_t grown = new_cap + new_cap / 2;                 /* 1.5x */
+        new_cap      = grown > new_cap ? grown : new_cap + 1; /* guard overflow */
     }
     void *p = realloc(v->data, new_cap * v->elem_size);
     if (!p) {
         return false;
     }
     v->data = p;
-    v->cap = new_cap;
+    v->cap  = new_cap;
     return true;
 }
 
@@ -115,7 +115,7 @@ static inline void nw_vec_free(nw_vec *v, void (*dtor)(void *)) {
     nw_vec_clear(v, dtor);
     free(v->data);
     v->data = NULL;
-    v->cap = 0;
+    v->cap  = 0;
 }
 
 /* ============================================================================
@@ -129,54 +129,62 @@ static inline void nw_vec_free(nw_vec *v, void (*dtor)(void *)) {
  * NW_VEC_DEFINE with `static inline` linkage via NW_VEC_DEFINE_STATIC.
  */
 
-#define NW_VEC_DECLARE(Name, T)                                                \
-    typedef struct Name {                                                      \
-        T     *data;                                                           \
-        size_t len;                                                            \
-        size_t cap;                                                            \
-    } Name;                                                                    \
-    void  Name##_init(Name *v);                                                \
-    void  Name##_free(Name *v);                                                \
-    bool  Name##_push(Name *v, T value);                                       \
-    T    *Name##_at(const Name *v, size_t i);                                  \
-    bool  Name##_reserve(Name *v, size_t want);                                \
-    void  Name##_clear(Name *v);
+#define NW_VEC_DECLARE(Name, T)                                                                    \
+    typedef struct Name {                                                                          \
+        T *data;                                                                                   \
+        size_t len;                                                                                \
+        size_t cap;                                                                                \
+    } Name;                                                                                        \
+    void Name##_init(Name *v);                                                                     \
+    void Name##_free(Name *v);                                                                     \
+    bool Name##_push(Name *v, T value);                                                            \
+    T *Name##_at(const Name *v, size_t i);                                                         \
+    bool Name##_reserve(Name *v, size_t want);                                                     \
+    void Name##_clear(Name *v);
 
-#define NW_VEC__BODY(Name, T, LINKAGE)                                         \
-    LINKAGE void Name##_init(Name *v) {                                        \
-        v->data = NULL; v->len = 0; v->cap = 0;                               \
-    }                                                                          \
-    LINKAGE bool Name##_reserve(Name *v, size_t want) {                       \
-        nw_vec core = { v->data, v->len, v->cap, sizeof(T) };                 \
-        bool ok = nw_vec_reserve(&core, want);                                \
-        v->data = (T *)core.data; v->cap = core.cap;                          \
-        return ok;                                                             \
-    }                                                                          \
-    LINKAGE bool Name##_push(Name *v, T value) {                              \
-        if (!Name##_reserve(v, v->len + 1)) return false;                     \
-        v->data[v->len++] = value;                                            \
-        return true;                                                           \
-    }                                                                          \
-    LINKAGE T *Name##_at(const Name *v, size_t i) {                           \
-        return i < v->len ? &v->data[i] : NULL;                               \
-    }                                                                          \
-    LINKAGE void Name##_clear(Name *v) { v->len = 0; }                        \
-    LINKAGE void Name##_free(Name *v) {                                       \
-        free(v->data); v->data = NULL; v->len = 0; v->cap = 0;                \
+#define NW_VEC__BODY(Name, T, LINKAGE)                                                             \
+    LINKAGE void Name##_init(Name *v) {                                                            \
+        v->data = NULL;                                                                            \
+        v->len  = 0;                                                                               \
+        v->cap  = 0;                                                                               \
+    }                                                                                              \
+    LINKAGE bool Name##_reserve(Name *v, size_t want) {                                            \
+        nw_vec core = {v->data, v->len, v->cap, sizeof(T)};                                        \
+        bool ok     = nw_vec_reserve(&core, want);                                                 \
+        v->data     = (T *)core.data;                                                              \
+        v->cap      = core.cap;                                                                    \
+        return ok;                                                                                 \
+    }                                                                                              \
+    LINKAGE bool Name##_push(Name *v, T value) {                                                   \
+        if (!Name##_reserve(v, v->len + 1)) return false;                                          \
+        v->data[v->len++] = value;                                                                 \
+        return true;                                                                               \
+    }                                                                                              \
+    LINKAGE T *Name##_at(const Name *v, size_t i) {                                                \
+        return i < v->len ? &v->data[i] : NULL;                                                    \
+    }                                                                                              \
+    LINKAGE void Name##_clear(Name *v) {                                                           \
+        v->len = 0;                                                                                \
+    }                                                                                              \
+    LINKAGE void Name##_free(Name *v) {                                                            \
+        free(v->data);                                                                             \
+        v->data = NULL;                                                                            \
+        v->len  = 0;                                                                               \
+        v->cap  = 0;                                                                               \
     }
 
-#define NW_VEC_DEFINE(Name, T)         NW_VEC__BODY(Name, T, /* extern */)
+#define NW_VEC_DEFINE(Name, T) NW_VEC__BODY(Name, T, /* extern */)
 
 /* Self-contained header-only typed vector: emits the struct AND static-inline
  * bodies in one shot. Do NOT precede this with NW_VEC_DECLARE (that would
  * redeclare the functions with external linkage). Callers rarely use every
  * helper, so they're marked unused to keep clang's -Wunused-function quiet. */
-#define NW_VEC_DEFINE_STATIC(Name, T)                                         \
-    typedef struct Name {                                                     \
-        T     *data;                                                          \
-        size_t len;                                                           \
-        size_t cap;                                                           \
-    } Name;                                                                   \
+#define NW_VEC_DEFINE_STATIC(Name, T)                                                              \
+    typedef struct Name {                                                                          \
+        T *data;                                                                                   \
+        size_t len;                                                                                \
+        size_t cap;                                                                                \
+    } Name;                                                                                        \
     NW_VEC__BODY(Name, T, __attribute__((unused)) static inline)
 
 #endif /* NEOWALL_VEC_H */

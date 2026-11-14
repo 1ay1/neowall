@@ -28,8 +28,8 @@ struct neowall_state {
      * the changed region. */
     void *swap_with_damage;
     bool swap_damage_supported;
-    bool gl_robust;           /* context created with reset notification */
-    bool gpu_health_pending;  /* gpu_health_init waits for a surface */
+    bool gl_robust;          /* context created with reset notification */
+    bool gpu_health_pending; /* gpu_health_init waits for a surface */
 
     /* Outputs: a list under output_list_lock, each refcounted. */
     struct output_state *outputs;
@@ -38,9 +38,9 @@ struct neowall_state {
     char config_path[NW_PATH_MAX];
 
     /* Read by worker threads. */
-    atomic_bool running;            /* false once the daemon is stopping */
-    atomic_bool mouse_interaction;  /* bind the pointer, feed iMouse */
-    atomic_bool term_raw_input;     /* pass Ctrl-C/D/\/Z to a focused terminal */
+    atomic_bool running;           /* false once the daemon is stopping */
+    atomic_bool mouse_interaction; /* bind the pointer, feed iMouse */
+    atomic_bool term_raw_input;    /* pass Ctrl-C/D/\/Z to a focused terminal */
 
     /* Lock order: output_list_lock, then state_mutex, never the reverse.
      * state_file_lock serialises state-file writes. */
@@ -49,8 +49,8 @@ struct neowall_state {
     pthread_mutex_t state_file_lock;
 
     /* `neowall watch` */
-    int watch_fd;                   /* inotify fd, -1 when not watching */
-    char watch_path[NW_PATH_MAX];   /* '' = none */
+    int watch_fd;                 /* inotify fd, -1 when not watching */
+    char watch_path[NW_PATH_MAX]; /* '' = none */
 
     /* preview/watch run beside the real daemon: no pid file, no socket */
     bool is_preview;
@@ -61,8 +61,8 @@ struct neowall_state {
     /* How lower layers tell the program something happened, without
      * knowing it exists. app_run sets them; any thread may call them; NULL
      * (e.g. in tests) means nobody's listening. */
-    void (*on_output_dirty)(struct output_state *output);   /* needs a redraw */
-    void (*on_outputs_changed)(uint32_t name);               /* added or resized */
+    void (*on_output_dirty)(struct output_state *output); /* needs a redraw */
+    void (*on_outputs_changed)(uint32_t name);            /* added or resized */
     /* an output is up (surface + GL) and wants its wallpaper now */
     bool (*on_output_ready)(struct neowall_state *state, struct output_state *output);
 };

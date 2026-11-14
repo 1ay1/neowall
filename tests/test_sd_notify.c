@@ -11,7 +11,13 @@
 #include <unistd.h>
 
 static int fails = 0;
-#define CHECK(c, what) do { if (!(c)) { printf("  FAIL: %s\n", what); fails++; } } while (0)
+#define CHECK(c, what)                                                                             \
+    do {                                                                                           \
+        if (!(c)) {                                                                                \
+            printf("  FAIL: %s\n", what);                                                          \
+            fails++;                                                                               \
+        }                                                                                          \
+    } while (0)
 
 static int bind_dgram(struct sockaddr_un *addr, socklen_t len) {
     int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
@@ -21,7 +27,7 @@ static int bind_dgram(struct sockaddr_un *addr, socklen_t len) {
 
 static void expect_recv(int fd, const char *want, const char *what) {
     char buf[128] = {0};
-    ssize_t n = recv(fd, buf, sizeof(buf) - 1, MSG_DONTWAIT);
+    ssize_t n     = recv(fd, buf, sizeof(buf) - 1, MSG_DONTWAIT);
     CHECK(n == (ssize_t)strlen(want) && strcmp(buf, want) == 0, what);
 }
 

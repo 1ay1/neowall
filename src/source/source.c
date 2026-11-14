@@ -25,7 +25,7 @@
  * ========================================================================== */
 
 static const nw_source_vtable *g_registry[NW_SOURCE_REGISTRY_MAX];
-static size_t                  g_registry_count;
+static size_t g_registry_count;
 
 nw_result nw_source_register(const nw_source_vtable *vt) {
     if (!vt || !vt->name || !vt->name[0]) {
@@ -70,7 +70,9 @@ void nw_source_registry_reset(void) {
     g_registry_count = 0;
 }
 
-size_t nw_source_registry_count(void) { return g_registry_count; }
+size_t nw_source_registry_count(void) {
+    return g_registry_count;
+}
 
 const char *nw_source_registry_name_at(size_t index) {
     if (index >= g_registry_count) {
@@ -94,7 +96,7 @@ static const char *skip_ws(const char *p) {
  * that it consumed everything, so "5s" stays a modifier and not a value. */
 static bool parse_number(const char *text, double *out) {
     char *end = NULL;
-    double v = strtod(text, &end);
+    double v  = strtod(text, &end);
     if (end == text) {
         return false;
     }
@@ -112,8 +114,8 @@ static bool parse_number(const char *text, double *out) {
  * tells `watch` apart from `5s` without a keyword table.
  */
 static bool parse_duration(const char *text, uint32_t *out_ms) {
-    char  *end = NULL;
-    double v   = strtod(text, &end);
+    char *end = NULL;
+    double v  = strtod(text, &end);
     if (end == text || v < 0) {
         return false;
     }
@@ -166,7 +168,7 @@ static bool copy_token(const char *start, const char *end, char *out, size_t cap
 /* Find the closing paren matching the open paren at `open`, honouring quotes
  * so a command like exec("echo )") does not terminate early. */
 static const char *match_paren(const char *open) {
-    int  depth = 0;
+    int depth  = 0;
     char quote = '\0';
     for (const char *p = open; *p; p++) {
         if (quote) {
@@ -192,11 +194,11 @@ static const char *match_paren(const char *open) {
 
 /* Split the inside of a call on top-level commas (quote- and paren-aware).
  * Returns the number of fields found, or -1 on overflow. */
-static int split_args(const char *body, const char *end, const char **starts,
-                      const char **ends, int max_fields) {
-    int         count = 0;
-    int         depth = 0;
-    char        quote = '\0';
+static int split_args(const char *body, const char *end, const char **starts, const char **ends,
+                      int max_fields) {
+    int count         = 0;
+    int depth         = 0;
+    char quote        = '\0';
     const char *field = body;
 
     for (const char *p = body; p < end; p++) {
@@ -351,7 +353,7 @@ nw_result nw_source_open(const nw_source_spec *spec, nw_source *out, char *err, 
     }
 
     char provider_err[NW_SOURCE_ERR_MAX] = {0};
-    void *self = vt->open(spec, provider_err, sizeof(provider_err));
+    void *self                           = vt->open(spec, provider_err, sizeof(provider_err));
     if (!self) {
         if (err && err_cap) {
             snprintf(err, err_cap, "%s: %s", spec->name,
@@ -373,7 +375,7 @@ nw_result nw_source_open(const nw_source_spec *spec, nw_source *out, char *err, 
 
 nw_result nw_source_open_text(const char *text, nw_source *out, char *err, size_t err_cap) {
     nw_source_spec spec;
-    nw_result      r = nw_source_spec_parse(text, &spec);
+    nw_result r = nw_source_spec_parse(text, &spec);
     if (nw_is_err(r)) {
         if (err && err_cap) {
             snprintf(err, err_cap, "%s", r.context ? r.context : "parse failed");

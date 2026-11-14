@@ -22,56 +22,54 @@
 #include "neowall/core/vibe.h"
 
 static int failures = 0;
-static int checks = 0;
+static int checks   = 0;
 
 /* Parse `src`; assert it SUCCEEDS and yields the given string at `path`. */
-#define CHECK_STR(src, path, expect)                                           \
-    do {                                                                       \
-        checks++;                                                              \
-        VibeParser *p = vibe_parser_new();                                     \
-        VibeValue *r = vibe_parse_string(p, (src));                            \
-        const char *got = r ? vibe_get_string(r, (path)) : NULL;               \
-        if (!got || strcmp(got, (expect)) != 0) {                              \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s = \"%s\", expected \"%s\"\n",      \
-                    __FILE__, __LINE__, (path), got ? got : "(null)",          \
-                    (expect));                                                 \
-        }                                                                      \
-        if (r) vibe_value_free(r);                                             \
-        vibe_parser_free(p);                                                   \
+#define CHECK_STR(src, path, expect)                                                               \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        VibeParser *p   = vibe_parser_new();                                                       \
+        VibeValue *r    = vibe_parse_string(p, (src));                                             \
+        const char *got = r ? vibe_get_string(r, (path)) : NULL;                                   \
+        if (!got || strcmp(got, (expect)) != 0) {                                                  \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s = \"%s\", expected \"%s\"\n", __FILE__, __LINE__,      \
+                    (path), got ? got : "(null)", (expect));                                       \
+        }                                                                                          \
+        if (r) vibe_value_free(r);                                                                 \
+        vibe_parser_free(p);                                                                       \
     } while (0)
 
 /* Parse `src`; assert it FAILS (returns NULL and sets an error). */
-#define CHECK_REJECT(src)                                                      \
-    do {                                                                       \
-        checks++;                                                              \
-        VibeParser *p = vibe_parser_new();                                     \
-        VibeValue *r = vibe_parse_string(p, (src));                            \
-        VibeError e = vibe_get_last_error(p);                                  \
-        if (r != NULL || !e.has_error) {                                       \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: expected reject, got accept for:\n%s\n",\
-                    __FILE__, __LINE__, (src));                                \
-        }                                                                      \
-        if (r) vibe_value_free(r);                                             \
-        vibe_parser_free(p);                                                   \
+#define CHECK_REJECT(src)                                                                          \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        VibeParser *p = vibe_parser_new();                                                         \
+        VibeValue *r  = vibe_parse_string(p, (src));                                               \
+        VibeError e   = vibe_get_last_error(p);                                                    \
+        if (r != NULL || !e.has_error) {                                                           \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: expected reject, got accept for:\n%s\n", __FILE__,        \
+                    __LINE__, (src));                                                              \
+        }                                                                                          \
+        if (r) vibe_value_free(r);                                                                 \
+        vibe_parser_free(p);                                                                       \
     } while (0)
 
 /* Parse `src`; assert it SUCCEEDS and yields the given int64 at `path`. */
-#define CHECK_INT(src, path, expect)                                           \
-    do {                                                                       \
-        checks++;                                                              \
-        VibeParser *p = vibe_parser_new();                                     \
-        VibeValue *r = vibe_parse_string(p, (src));                            \
-        int64_t got = r ? vibe_get_int(r, (path)) : -1;                        \
-        if (!r || got != (expect)) {                                           \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s = %lld, expected %lld\n",          \
-                    __FILE__, __LINE__, (path), (long long)got,                \
-                    (long long)(expect));                                      \
-        }                                                                      \
-        if (r) vibe_value_free(r);                                             \
-        vibe_parser_free(p);                                                   \
+#define CHECK_INT(src, path, expect)                                                               \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        VibeParser *p = vibe_parser_new();                                                         \
+        VibeValue *r  = vibe_parse_string(p, (src));                                               \
+        int64_t got   = r ? vibe_get_int(r, (path)) : -1;                                          \
+        if (!r || got != (expect)) {                                                               \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s = %lld, expected %lld\n", __FILE__, __LINE__, (path),  \
+                    (long long)got, (long long)(expect));                                          \
+        }                                                                                          \
+        if (r) vibe_value_free(r);                                                                 \
+        vibe_parser_free(p);                                                                       \
     } while (0)
 
 int main(void) {
@@ -79,10 +77,9 @@ int main(void) {
     CHECK_STR("default {\n  shader retro.glsl\n}\n", "default.shader", "retro.glsl");
     CHECK_INT("default {\n  duration 300\n}\n", "default.duration", 300);
     CHECK_INT("default {\n  duration -7\n}\n", "default.duration", -7);
-    CHECK_STR("output {\n  DP-1 { shader matrix.glsl }\n}\n",
-              "output.DP-1.shader", "matrix.glsl");
-    CHECK_STR("default { path ~/Pictures/Wallpapers/ }\n",
-              "default.path", "~/Pictures/Wallpapers/");
+    CHECK_STR("output {\n  DP-1 { shader matrix.glsl }\n}\n", "output.DP-1.shader", "matrix.glsl");
+    CHECK_STR("default { path ~/Pictures/Wallpapers/ }\n", "default.path",
+              "~/Pictures/Wallpapers/");
 
     /* --- bug 1: value on the next line must not be silently dropped --- */
     CHECK_REJECT("default {\n  shader\n  retro.glsl\n}\n");
@@ -102,13 +99,13 @@ int main(void) {
     /* scalar arrays parse */
     {
         checks++;
-        VibeParser *p = vibe_parser_new();
-        VibeValue *r = vibe_parse_string(p, "x [ a b c ]\n");
+        VibeParser *p  = vibe_parser_new();
+        VibeValue *r   = vibe_parse_string(p, "x [ a b c ]\n");
         VibeArray *arr = r ? vibe_get_array(r, "x") : NULL;
         if (!arr || arr->count != 3) {
             failures++;
-            fprintf(stderr, "FAIL %s:%d: scalar array count=%zu, expected 3\n",
-                    __FILE__, __LINE__, arr ? arr->count : (size_t)0);
+            fprintf(stderr, "FAIL %s:%d: scalar array count=%zu, expected 3\n", __FILE__, __LINE__,
+                    arr ? arr->count : (size_t)0);
         }
         if (r) vibe_value_free(r);
         vibe_parser_free(p);
@@ -120,7 +117,7 @@ int main(void) {
     {
         checks++;
         VibeParser *p = vibe_parser_new();
-        VibeValue *r = vibe_parse_string(p, "x [ { a 1 } { b 2 } ]\n");
+        VibeValue *r  = vibe_parse_string(p, "x [ { a 1 } { b 2 } ]\n");
         if (r != NULL) {
             failures++;
             fprintf(stderr, "FAIL %s:%d: objects-in-array should be rejected (First Law)\n",

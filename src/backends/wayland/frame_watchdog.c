@@ -24,13 +24,13 @@
 typedef struct watched_output {
     struct output_state *output;
     struct wl_callback *callback;
-    uint64_t armed_at_ms;       /* when `callback` was requested */
-    uint64_t last_done_ms;      /* when the last one came back; 0 = never */
+    uint64_t armed_at_ms;  /* when `callback` was requested */
+    uint64_t last_done_ms; /* when the last one came back; 0 = never */
     struct watched_output *next;
 } watched_output_t;
 
 static watched_output_t *watched = NULL;
-static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t lock      = PTHREAD_MUTEX_INITIALIZER;
 static const struct wl_callback_listener frame_listener;
 
 static void arm_locked(watched_output_t *w);
@@ -42,7 +42,7 @@ static void on_frame_done(void *data, struct wl_callback *cb, uint32_t time) {
     if (cb) {
         wl_callback_destroy(cb);
     }
-    w->callback = NULL;
+    w->callback     = NULL;
     w->last_done_ms = get_time_ms();
     pthread_mutex_unlock(&lock);
 }
@@ -55,8 +55,7 @@ static void arm_locked(watched_output_t *w) {
     if (!w || !w->output || !w->output->compositor_surface || w->callback) {
         return;
     }
-    struct wl_surface *surf =
-        (struct wl_surface *)w->output->compositor_surface->native_surface;
+    struct wl_surface *surf = (struct wl_surface *)w->output->compositor_surface->native_surface;
     if (!surf) {
         return;
     }
@@ -81,8 +80,8 @@ static watched_output_t *add_locked(struct output_state *o) {
     watched_output_t *w = calloc(1, sizeof(*w));
     if (!w) return NULL;
     w->output = o;
-    w->next = watched;
-    watched = w;
+    w->next   = watched;
+    watched   = w;
     return w;
 }
 
@@ -118,7 +117,7 @@ bool frame_watchdog_output_occluded(struct output_state *o) {
     if (!o) return false;
     pthread_mutex_lock(&lock);
     watched_output_t *w = find_locked(o);
-    bool occ = false;
+    bool occ            = false;
     if (w && w->callback) {
         occ = (get_time_ms() - w->armed_at_ms) > OCCLUSION_TIMEOUT_MS;
     }
@@ -156,7 +155,7 @@ void frame_watchdog_update(struct neowall_state *state) {
     for (struct output_state *o = state->outputs; o; o = o->next) {
         if (!o->config->pause_on_fullscreen) continue;
 
-        bool was = atomic_load_explicit(&o->occluded, memory_order_acquire);
+        bool was    = atomic_load_explicit(&o->occluded, memory_order_acquire);
         bool nowocc = false;
         if (frame_watchdog_wanted(o)) {
             frame_watchdog_arm(o);

@@ -8,12 +8,12 @@
 #include <GL/gl.h>
 #include "neowall/core/constants.h"
 #include "neowall/config/wallpaper.h"
-#include "neowall/core/result.h"        /* For nw_result */
-#include "neowall/image/image.h"   /* For struct image_data and enum image_format */
+#include "neowall/core/result.h" /* For nw_result */
+#include "neowall/image/image.h" /* For struct image_data and enum image_format */
 #include "neowall/shader/wallshader.h"
-#include "neowall/shader/shader_clock.h"      /* For shader_clock_tracker */
+#include "neowall/shader/shader_clock.h" /* For shader_clock_tracker */
 #include "neowall/output/frame_clock.h"
-#include "neowall/output/span.h"   /* For struct span_view */
+#include "neowall/output/span.h" /* For struct span_view */
 
 /* Constants */
 
@@ -24,11 +24,12 @@ struct compositor_surface;
 
 /* Output (monitor) state */
 struct output_state {
-    void *native_output;                /* Platform-specific output handle (wl_output* for Wayland, NULL for X11) */
-    void *xdg_output;                   /* Extended output info (zxdg_output_v1* for Wayland) */
-    struct compositor_surface *compositor_surface;  /* Compositor abstraction surface */
+    void
+        *native_output; /* Platform-specific output handle (wl_output* for Wayland, NULL for X11) */
+    void *xdg_output;   /* Extended output info (zxdg_output_v1* for Wayland) */
+    struct compositor_surface *compositor_surface; /* Compositor abstraction surface */
 
-    uint32_t name;              /* Output name/ID */
+    uint32_t name; /* Output name/ID */
     /* width/height represent the current physical buffer in pixels */
     int32_t width;
     int32_t height;
@@ -91,11 +92,11 @@ struct output_state {
 
     char make[64];
     char model[64];
-    char connector_name[64];    /* Connector name (e.g., HDMI-A-2, DP-1) from xdg-output */
+    char connector_name[64]; /* Connector name (e.g., HDMI-A-2, DP-1) from xdg-output */
 
     bool configured;
-    atomic_bool needs_redraw;         /* Atomic: written from main loop, occlusion callbacks, render */
-    atomic_bool occluded;             /* Output is fully occluded by a fullscreen window */
+    atomic_bool needs_redraw; /* Atomic: written from main loop, occlusion callbacks, render */
+    atomic_bool occluded;     /* Output is fully occluded by a fullscreen window */
 
     /* Lifetime reference count. Starts at 1 (the output-list's reference).
      * The render loop takes a transient ref on each output it snapshots so a
@@ -105,58 +106,62 @@ struct output_state {
      * output_unref. */
     atomic_int refcount;
 
-    struct neowall_state *state;  /* Back-pointer to global state */
+    struct neowall_state *state; /* Back-pointer to global state */
 
     /* Configuration for this output */
     struct wallpaper_config *config;
-    
+
     struct image_data *current_image;
-    struct image_data *next_image;      /* For transitions */
+    struct image_data *next_image; /* For transitions */
 
     GLuint texture;
-    GLuint next_texture;                /* For transitions */
-    
+    GLuint next_texture; /* For transitions */
+
     /* Double-buffered preload for zero-stall transitions */
-    GLuint preload_texture;             /* Next texture to transition to */
-    struct image_data *preload_image;   /* Image data for preloaded texture */
-    char preload_path[NW_PATH_MAX];  /* Path of preloaded image */
+    GLuint preload_texture;           /* Next texture to transition to */
+    struct image_data *preload_image; /* Image data for preloaded texture */
+    char preload_path[NW_PATH_MAX];   /* Path of preloaded image */
     atomic_bool preload_ready;        /* Is preload_texture ready for use? */
-    
+
     /* Background thread for async image loading */
-    pthread_t preload_thread;           /* Background preload thread */
+    pthread_t preload_thread;          /* Background preload thread */
     atomic_bool preload_thread_active; /* Is background thread running? */
-    atomic_bool preload_thread_join_pending; /* A completed/running joinable thread must be joined */
-    atomic_bool preload_should_stop;   /* Cooperative cancellation flag for preload thread */
-    atomic_uint_fast64_t preprocessing_generation; /* Invalidates geometry/config-dependent images */
-    atomic_bool geometry_change_pending; /* Callback-safe request; GL work is deferred to event loop */
+    atomic_bool
+        preload_thread_join_pending; /* A completed/running joinable thread must be joined */
+    atomic_bool preload_should_stop; /* Cooperative cancellation flag for preload thread */
+    atomic_uint_fast64_t
+        preprocessing_generation; /* Invalidates geometry/config-dependent images */
+    atomic_bool
+        geometry_change_pending; /* Callback-safe request; GL work is deferred to event loop */
     bool terminal_auto_cols;
     bool terminal_auto_rows;
     uint64_t preload_generation;
     int32_t preload_width;
     int32_t preload_height;
     enum wallpaper_mode preload_mode;
-    pthread_mutex_t preload_mutex;      /* Protects preload_image during thread handoff */
-    struct image_data *preload_decoded_image; /* Image decoded in background, ready for GPU upload */
+    pthread_mutex_t preload_mutex; /* Protects preload_image during thread handoff */
+    struct image_data
+        *preload_decoded_image;         /* Image decoded in background, ready for GPU upload */
     atomic_bool preload_upload_pending; /* Background thread finished, main thread should upload */
-    
+
     /* the config's `channels` as iChannel0..3 (0 = the shader's own binding) */
     GLuint channel_tex[4];
     int channel_w[4], channel_h[4];
-    
+
     GLuint program;
-    GLuint glitch_program;              /* Shader program for glitch transition */
-    GLuint pixelate_program;            /* Shader program for pixelate transition */
-    wallshader *shader;                 /* the running shader (shader and terminal wallpapers) */
+    GLuint glitch_program;   /* Shader program for glitch transition */
+    GLuint pixelate_program; /* Shader program for pixelate transition */
+    wallshader *shader;      /* the running shader (shader and terminal wallpapers) */
     /* a shader compiling in the background to replace it (cycling, reload) */
     struct wallshader_pending *pending_shader;
     char pending_shader_path[NW_PATH_MAX];
-    size_t pending_failures;            /* broken cycle entries skipped in a row */
+    size_t pending_failures; /* broken cycle entries skipped in a row */
     /* A reload whose shader is still compiling: the whole config waits here
      * and goes live with the shader. NULL when none. stage_failed records a
      * staged build that failed (or was replaced), for the reload's reply. */
     struct wallpaper_config *staged_config;
     bool stage_failed;
-    GLuint vao;                         /* Vertex array object (required for OpenGL 3.3 Core) */
+    GLuint vao; /* Vertex array object (required for OpenGL 3.3 Core) */
     GLuint vbo;
 
     /* Cached uniform locations for performance */
@@ -193,7 +198,7 @@ struct output_state {
     } gl_state;
 
     uint64_t last_frame_time;
-    uint64_t last_cycle_time;           /* Last time wallpaper was changed/cycled */
+    uint64_t last_cycle_time; /* Last time wallpaper was changed/cycled */
     uint64_t transition_start_time;
     uint64_t shader_start_time;         /* Time when shader was loaded (for animation) */
     uint64_t shader_paused_at;          /* Wall-clock ms when shader animation was frozen,
@@ -209,29 +214,29 @@ struct output_state {
     shader_clock_tracker clock_tracker; /* Watches iTime for backward steps so a
                                          * visible "jumps back in time" glitch is
                                          * reported with its cause. Main-thread only. */
-    GLuint   clock_fade_tex;            /* Last frame before a clock reset or shader swap */
+    GLuint clock_fade_tex;              /* Last frame before a clock reset or shader swap */
     uint64_t clock_fade_start;          /* ms; >0 while it fades out over the new clock */
-    bool     clock_fade_rebased;        /* Tell the tracker the next jump is a rebase */
-    bool     swap_fade_pending;         /* a shader swap's fade starts on the next frame */
-    double   last_shader_time;          /* iTime of the last drawn frame */
+    bool clock_fade_rebased;            /* Tell the tracker the next jump is a rebase */
+    bool swap_fade_pending;             /* a shader swap's fade starts on the next frame */
+    double last_shader_time;            /* iTime of the last drawn frame */
     float transition_progress;
     uint64_t frames_rendered;
-    bool shader_load_failed;            /* Set to true after 3 failed shader load attempts */
-    uint32_t swap_fail_streak;          /* consecutive failed swaps (gpu_health) */
-    
+    bool shader_load_failed;   /* Set to true after 3 failed shader load attempts */
+    uint32_t swap_fail_streak; /* consecutive failed swaps (gpu_health) */
+
     /* FPS measurement */
-    uint64_t fps_last_log_time;         /* Last time we logged FPS */
-    uint64_t fps_last_frame;            /* ms, the previous frame (for the worst gap) */
-    uint64_t fps_worst_gap;             /* longest ms between frames this window */
-    uint64_t fps_frame_count;           /* Frames rendered since last FPS log */
-    float fps_current;                  /* Current measured FPS */
-    
+    uint64_t fps_last_log_time; /* Last time we logged FPS */
+    uint64_t fps_last_frame;    /* ms, the previous frame (for the worst gap) */
+    uint64_t fps_worst_gap;     /* longest ms between frames this window */
+    uint64_t fps_frame_count;   /* Frames rendered since last FPS log */
+    float fps_current;          /* Current measured FPS */
+
     /* Mouse tracking (for shader iMouse uniform) */
-    float mouse_x;                      /* Mouse X position in pixels (or -1 for center) */
-    float mouse_y;                      /* Mouse Y position in pixels (or -1 for center) */
-    
+    float mouse_x; /* Mouse X position in pixels (or -1 for center) */
+    float mouse_y; /* Mouse Y position in pixels (or -1 for center) */
+
     /* High-precision frame pacing for vsync-off mode */
-    int frame_timer_fd;                 /* timerfd for precise frame timing when vsync is disabled */
+    int frame_timer_fd; /* timerfd for precise frame timing when vsync is disabled */
 
     /* Phase-locked pacer state (vsync-off animated wallpapers). The frame timer
      * is armed as a ONE-SHOT ABSOLUTE deadline instead of a free-running
@@ -241,17 +246,17 @@ struct output_state {
      * with the display's vblank cadence (the source of periodic judder that a
      * fixed-interval timer produces). If a frame overruns its slot the deadline
      * is snapped forward (drop, don't pile up catch-up frames). */
-    uint64_t pace_period_ns;            /* target frame period; 0 = pacer inactive */
-    uint64_t pace_next_deadline_ns;     /* absolute CLOCK_MONOTONIC target for next present */
+    uint64_t pace_period_ns;        /* target frame period; 0 = pacer inactive */
+    uint64_t pace_next_deadline_ns; /* absolute CLOCK_MONOTONIC target for next present */
 
     /* Real presentation-time feedback (wp_presentation, Wayland only). When the
      * compositor reports an actual present timestamp + hardware refresh period
      * these carry the ground truth the pacer phase-locks to; 0 = none yet. */
-    uint64_t pace_last_present_ns;      /* last real present time (pacer clock) */
-    uint64_t pace_hw_refresh_ns;        /* measured display refresh period, 0 = unknown */
-    nw_frame_clock frame_clock;         /* stamps iTime with the vblank it shows at */
-    uint64_t frame_target_ns;           /* stamp of the frame being drawn, 0 = wall clock */
-    int      frame_latency_used;        /* latency the stamp assumed (fed back on present) */
+    uint64_t pace_last_present_ns; /* last real present time (pacer clock) */
+    uint64_t pace_hw_refresh_ns;   /* measured display refresh period, 0 = unknown */
+    nw_frame_clock frame_clock;    /* stamps iTime with the vblank it shows at */
+    uint64_t frame_target_ns;      /* stamp of the frame being drawn, 0 = wall clock */
+    int frame_latency_used;        /* latency the stamp assumed (fed back on present) */
 
     struct output_state *next;
 };
@@ -325,9 +330,8 @@ void output_reload_forget(struct output_state *output);
  * `shader_path` (may be NULL/"") is an optional GLSL file that samples the
  * terminal via nwTerm() for CRT/glow styling; NULL uses a built-in crisp
  * pass-through. cols/rows may be 0 to derive a grid from the output size. */
-nw_result output_set_terminal(struct output_state *output, const char *cmd,
-                              const char *shader_path, const char *font_path,
-                              int cols, int rows);
+nw_result output_set_terminal(struct output_state *output, const char *cmd, const char *shader_path,
+                              const char *font_path, int cols, int rows);
 bool output_apply_config(struct output_state *output, struct wallpaper_config *config);
 void output_apply_deferred_config(struct output_state *output);
 void output_cycle_wallpaper(struct output_state *output);
@@ -364,8 +368,8 @@ bool output_render_frame(struct output_state *output);
 
 /* Forward a pointer event to this output's terminal wallpaper (pixel coords
  * relative to the output top-left). No-op unless the output runs a terminal. */
-bool output_terminal_mouse(struct output_state *output, int px, int py,
-                           int button, bool pressed, bool motion);
+bool output_terminal_mouse(struct output_state *output, int px, int py, int button, bool pressed,
+                           bool motion);
 
 /* Forward already-encoded key bytes to this output's terminal wallpaper child.
  * No-op unless the output runs a terminal. */
@@ -390,7 +394,7 @@ bool output_pace_advance(struct output_state *output, uint64_t now_ns);
  * presentation clock (ns), `refresh_ns` = display refresh period (ns, 0 if
  * unknown). The next output_pace_advance() phase-locks to this instead of its
  * own predicted deadline and quantises the period to whole refreshes. */
-void output_pace_note_present(struct output_state *output,
-                              uint64_t present_ns, uint64_t refresh_ns);
+void output_pace_note_present(struct output_state *output, uint64_t present_ns,
+                              uint64_t refresh_ns);
 
 #endif /* OUTPUT_H */

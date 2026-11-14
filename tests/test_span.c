@@ -20,23 +20,23 @@
 #include "neowall/output/span.h"
 
 static int failures = 0;
-static int checks = 0;
+static int checks   = 0;
 
-#define CHECK(cond)                                                            \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
-        }                                                                      \
+#define CHECK(cond)                                                                                \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                        \
+        }                                                                                          \
     } while (0)
 
-#define CHECK_VIEW(v, w, h, ox, oy)                                            \
-    do {                                                                       \
-        CHECK((v).virt_w == (w));                                              \
-        CHECK((v).virt_h == (h));                                              \
-        CHECK((v).off_x == (ox));                                              \
-        CHECK((v).off_y == (oy));                                              \
+#define CHECK_VIEW(v, w, h, ox, oy)                                                                \
+    do {                                                                                           \
+        CHECK((v).virt_w == (w));                                                                  \
+        CHECK((v).virt_h == (h));                                                                  \
+        CHECK((v).off_x == (ox));                                                                  \
+        CHECK((v).off_y == (oy));                                                                  \
     } while (0)
 
 /* Every slice must sit wholly inside the virtual screen. Catches a sign error
@@ -60,7 +60,9 @@ static void check_contained(const struct span_rect *rects, size_t count) {
 /* A lone output must be untouched by spanning: the virtual screen is exactly it
  * and both offsets are zero, so the shader sees precisely what it saw before. */
 static void test_single_monitor_is_identity(void) {
-    struct span_rect rects[] = {{0, 0, 2560, 1440, 1}};
+    struct span_rect rects[] = {
+        {0, 0, 2560, 1440, 1}
+    };
     struct span_view v;
 
     CHECK(span_compute(rects, 1, 0, &v));
@@ -70,7 +72,9 @@ static void test_single_monitor_is_identity(void) {
 
 /* Even parked away from the origin, one output alone spans only itself. */
 static void test_single_monitor_at_offset_is_identity(void) {
-    struct span_rect rects[] = {{100, 50, 1920, 1080, 1}};
+    struct span_rect rects[] = {
+        {100, 50, 1920, 1080, 1}
+    };
     struct span_view v;
 
     CHECK(span_compute(rects, 1, 0, &v));
@@ -79,7 +83,7 @@ static void test_single_monitor_at_offset_is_identity(void) {
 
 static void test_horizontal_pair(void) {
     struct span_rect rects[] = {
-        {0, 0, 2560, 1440, 1},
+        {0,    0, 2560, 1440, 1},
         {2560, 0, 2560, 1440, 1},
     };
     struct span_view v;
@@ -96,8 +100,8 @@ static void test_horizontal_pair(void) {
  * the bottom monitor is the one that sits at zero. */
 static void test_vertical_pair_flips_y(void) {
     struct span_rect rects[] = {
-        {0, 0, 2560, 1440, 1},     /* top */
-        {0, 1440, 2560, 1440, 1},  /* bottom */
+        {0, 0,    2560, 1440, 1}, /* top */
+        {0, 1440, 2560, 1440, 1}, /* bottom */
     };
     struct span_view v;
 
@@ -113,7 +117,7 @@ static void test_vertical_pair_flips_y(void) {
  * logical_y` would give it 0 and hang it off the wrong edge. */
 static void test_mixed_heights_top_aligned(void) {
     struct span_rect rects[] = {
-        {0, 0, 2560, 1440, 1},
+        {0,    0, 2560, 1440, 1},
         {2560, 0, 1920, 1080, 1},
     };
     struct span_view v;
@@ -129,7 +133,7 @@ static void test_mixed_heights_top_aligned(void) {
  * still does too — but the box is the tall one's height. */
 static void test_mixed_heights_bottom_aligned(void) {
     struct span_rect rects[] = {
-        {0, 0, 2560, 1440, 1},
+        {0,    0,   2560, 1440, 1},
         {2560, 360, 1920, 1080, 1},
     };
     struct span_view v;
@@ -147,7 +151,7 @@ static void test_mixed_heights_bottom_aligned(void) {
 static void test_negative_x_offset(void) {
     struct span_rect rects[] = {
         {-2560, 0, 2560, 1440, 1},
-        {0, 0, 2560, 1440, 1},
+        {0,     0, 2560, 1440, 1},
     };
     struct span_view v;
 
@@ -162,8 +166,8 @@ static void test_negative_x_offset(void) {
  * high off_y, and the origin monitor drops to 0. */
 static void test_negative_y_offset(void) {
     struct span_rect rects[] = {
-        {0, -1440, 2560, 1440, 1},  /* above origin */
-        {0, 0, 2560, 1440, 1},
+        {0, -1440, 2560, 1440, 1}, /* above origin */
+        {0, 0,     2560, 1440, 1},
     };
     struct span_view v;
 
@@ -177,8 +181,8 @@ static void test_negative_y_offset(void) {
 /* An L-shape exercises both axes at once. */
 static void test_mixed_arrangement(void) {
     struct span_rect rects[] = {
-        {0, 0, 1920, 1080, 1},
-        {1920, 0, 2560, 1440, 1},
+        {0,    0,    1920, 1080, 1},
+        {1920, 0,    2560, 1440, 1},
         {1920, 1440, 1280, 1024, 1},
     };
     struct span_view v;
@@ -197,7 +201,7 @@ static void test_mixed_arrangement(void) {
  * box would drag the origin to (0,0) and shift every real output's slice. */
 static void test_unsized_output_is_ignored(void) {
     struct span_rect rects[] = {
-        {0, 0, 0, 0, 1},
+        {0,    0, 0,    0,    1},
         {2560, 0, 2560, 1440, 1},
         {5120, 0, 2560, 1440, 1},
     };
@@ -231,8 +235,8 @@ static void test_unsized_output_is_ignored(void) {
  * the bezel, and the same logical distance per screen centimetre on both. */
 static void test_mixed_scale_hidpi_beside_sdr(void) {
     struct span_rect rects[] = {
-        {0, 0, 1920, 1080, 2},     /* A: logical 1920x1080 @ (0,0), 3840x2160 device */
-        {1920, 0, 1920, 1080, 1},  /* B: logical 1920x1080 @ (1920,0), 1920x1080 device */
+        {0,    0, 1920, 1080, 2}, /* A: logical 1920x1080 @ (0,0), 3840x2160 device */
+        {1920, 0, 1920, 1080, 1}, /* B: logical 1920x1080 @ (1920,0), 1920x1080 device */
     };
     struct span_view v;
 
@@ -263,8 +267,8 @@ static void test_mixed_scale_hidpi_beside_sdr(void) {
  *                   off_y (2520 - (1080 + 1440)) * 1 = 0 */
 static void test_mixed_scale_stacked_flips_y_in_logical_space(void) {
     struct span_rect rects[] = {
-        {0, 0, 1920, 1080, 2},     /* top:    logical 1920x1080, 3840x2160 device */
-        {0, 1080, 2560, 1440, 1},  /* bottom: logical 2560x1440, 2560x1440 device */
+        {0, 0,    1920, 1080, 2}, /* top:    logical 1920x1080, 3840x2160 device */
+        {0, 1080, 2560, 1440, 1}, /* bottom: logical 2560x1440, 2560x1440 device */
     };
     struct span_view v;
 
@@ -281,11 +285,11 @@ static void test_mixed_scale_stacked_flips_y_in_logical_space(void) {
  * agree on a scale, logical and device differ only by that constant. */
 static void test_uniform_scale_is_a_constant_factor(void) {
     struct span_rect one[] = {
-        {0, 0, 2560, 1440, 1},
+        {0,    0, 2560, 1440, 1},
         {2560, 0, 2560, 1440, 1},
     };
     struct span_rect two[] = {
-        {0, 0, 2560, 1440, 2},
+        {0,    0, 2560, 1440, 2},
         {2560, 0, 2560, 1440, 2},
     };
     struct span_view a, b;
@@ -307,11 +311,11 @@ static void test_uniform_scale_is_a_constant_factor(void) {
  * 0, which must read as 1 rather than collapsing the scene to nothing. */
 static void test_scale_one_and_unset_are_the_pixel_identity(void) {
     struct span_rect ones[] = {
-        {0, 0, 2560, 1440, 1},
+        {0,    0, 2560, 1440, 1},
         {2560, 0, 1920, 1080, 1},
     };
     struct span_rect unset[] = {
-        {0, 0, 2560, 1440, 0},
+        {0,    0, 2560, 1440, 0},
         {2560, 0, 1920, 1080, 0},
     };
     struct span_view v;
@@ -342,8 +346,8 @@ static void test_scale_one_and_unset_are_the_pixel_identity(void) {
  *             columns 0..1280 = the LEFT 1280. The top-left crop. */
 static void test_nested_clone_gets_the_matching_crop(void) {
     struct span_rect rects[] = {
-        {0, 0, 1920, 1080, 1},  /* big */
-        {0, 0, 1280, 720, 1},   /* clone of it, smaller mode, same origin */
+        {0, 0, 1920, 1080, 1}, /* big */
+        {0, 0, 1280, 720,  1}, /* clone of it, smaller mode, same origin */
     };
     struct span_view v;
 
@@ -364,9 +368,9 @@ static void test_nested_clone_gets_the_matching_crop(void) {
  *   tiled: off_x 1920; off_y 1080 - 1080 = 0 */
 static void test_nested_clone_does_not_disable_the_group(void) {
     struct span_rect rects[] = {
-        {0, 0, 1920, 1080, 1},     /* big */
-        {0, 0, 1280, 720, 1},      /* its clone */
-        {1920, 0, 1920, 1080, 1},  /* an ordinary tiled monitor beside them */
+        {0,    0, 1920, 1080, 1}, /* big */
+        {0,    0, 1280, 720,  1}, /* its clone */
+        {1920, 0, 1920, 1080, 1}, /* an ordinary tiled monitor beside them */
     };
     struct span_view v;
 
@@ -380,7 +384,9 @@ static void test_nested_clone_does_not_disable_the_group(void) {
 }
 
 static void test_rejects_bad_input(void) {
-    struct span_rect rects[] = {{0, 0, 2560, 1440, 1}};
+    struct span_rect rects[] = {
+        {0, 0, 2560, 1440, 1}
+    };
     struct span_view v;
 
     CHECK(!span_compute(NULL, 1, 0, &v));
@@ -405,8 +411,8 @@ static void test_rejects_bad_input(void) {
 static void test_fractional_scale_abuts_without_seam(void) {
     struct span_rect rects[] = {
         /* logical_x, logical_y, logical_w, logical_h, scale, device_w, device_h */
-        {0,    0, 1707, 960, 2, 2560, 1440},  /* left  @ 1.5x */
-        {1707, 0, 1707, 960, 2, 2560, 1440},  /* right @ 1.5x */
+        {0,    0, 1707, 960, 2, 2560, 1440}, /* left  @ 1.5x */
+        {1707, 0, 1707, 960, 2, 2560, 1440}, /* right @ 1.5x */
     };
     struct span_view v;
 
@@ -431,8 +437,8 @@ static void test_fractional_scale_abuts_without_seam(void) {
  *          and off_x + 1920 = 3627 = virt_w: exact abut on the scale-1 side too. */
 static void test_fractional_beside_integer(void) {
     struct span_rect rects[] = {
-        {0,    0, 1707, 960,  2, 2560, 1440},  /* @1.5x */
-        {1707, 0, 1920, 1080, 1, 1920, 1080},  /* @1x   */
+        {0,    0, 1707, 960,  2, 2560, 1440}, /* @1.5x */
+        {1707, 0, 1920, 1080, 1, 1920, 1080}, /* @1x   */
     };
     struct span_view v;
 
@@ -441,7 +447,7 @@ static void test_fractional_beside_integer(void) {
     CHECK(v.off_x == 0);
     CHECK(span_compute(rects, 2, 1, &v));
     CHECK(v.virt_w == 3627);
-    CHECK(v.off_x + rects[1].device_w == v.virt_w);  /* the scale-1 head abuts exactly */
+    CHECK(v.off_x + rects[1].device_w == v.virt_w); /* the scale-1 head abuts exactly */
 }
 
 int main(void) {

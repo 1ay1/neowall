@@ -30,7 +30,7 @@ int64_t rt_now_ns(void) {
 /* ── storage ──────────────────────────────────────────────────────────── */
 
 typedef struct {
-    uint32_t handle;            /* 0 = free slot */
+    uint32_t handle; /* 0 = free slot */
     int fd;
     unsigned interest;
     rt_fd_fn fn;
@@ -39,10 +39,10 @@ typedef struct {
 
 typedef struct {
     uint32_t kind, id;
-    int64_t period_ns;          /* > 0 repeating; 0 one-shot */
+    int64_t period_ns; /* > 0 repeating; 0 one-shot */
     int64_t due_ns;
-    bool fired;                 /* one-shot already delivered */
-    bool seen;                  /* returned by the latest subscribe() */
+    bool fired; /* one-shot already delivered */
+    bool seen;  /* returned by the latest subscribe() */
 } rt_timer;
 
 struct rt_subs {
@@ -75,16 +75,19 @@ struct rt_loop {
     rt_timer *timers;
     size_t ntimers, captimers;
 
-    rt_msg *local;              /* rt_send queue, folded this step */
+    rt_msg *local; /* rt_send queue, folded this step */
     size_t nlocal, caplocal;
 
-    rt_cmds cmds;               /* what the current update pushed; reused */
+    rt_cmds cmds; /* what the current update pushed; reused */
 
     rt_mailbox mb;
 
-    int sfd;                    /* signalfd, -1 until first rt_on_signal */
+    int sfd; /* signalfd, -1 until first rt_on_signal */
     sigset_t sigmask;
-    struct { int signo; uint32_t kind; } sigs[RT_SIGS_MAX];
+    struct {
+        int signo;
+        uint32_t kind;
+    } sigs[RT_SIGS_MAX];
     int nsigs;
 
     rt_prepare_fn prepare;
@@ -118,7 +121,7 @@ rt_loop *rt_loop_new(void) {
     rt_loop *l = calloc(1, sizeof(*l));
     if (!l) return NULL;
     l->next_handle = 1;
-    l->sfd = -1;
+    l->sfd         = -1;
     sigemptyset(&l->sigmask);
     pthread_mutex_init(&l->mb.mu, NULL);
     l->mb.efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -149,11 +152,13 @@ void rt_loop_free(rt_loop *l) {
 }
 
 void rt_quit(rt_loop *l, int code) {
-    l->quitting = true;
+    l->quitting  = true;
     l->exit_code = code;
 }
 
-uint64_t rt_steps(const rt_loop *l) { return l->steps; }
+uint64_t rt_steps(const rt_loop *l) {
+    return l->steps;
+}
 
 /* ── mailbox ──────────────────────────────────────────────────────────── */
 
@@ -173,10 +178,11 @@ bool rt_post(rt_loop *l, const rt_msg *msg) {
             pthread_mutex_unlock(&mb->mu);
             return false;
         }
-        for (size_t i = 0; i < mb->len; i++) nb[i] = mb->buf[(mb->head + i) % mb->cap];
+        for (size_t i = 0; i < mb->len; i++)
+            nb[i] = mb->buf[(mb->head + i) % mb->cap];
         free(mb->buf);
-        mb->buf = nb;
-        mb->cap = ncap;
+        mb->buf  = nb;
+        mb->cap  = ncap;
         mb->head = 0;
     }
     mb->buf[(mb->head + mb->len) % mb->cap] = *msg;
@@ -184,8 +190,8 @@ bool rt_post(rt_loop *l, const rt_msg *msg) {
     /* Wake under the lock, so the loop can't drain, find the queue empty,
      * and sleep past a message that was just added. */
     uint64_t one = 1;
-    ssize_t w = write(mb->efd, &one, sizeof(one));
-    (void)w;   /* EAGAIN: the counter is already non-zero, a wake is pending */
+    ssize_t w    = write(mb->efd, &one, sizeof(one));
+    (void)w; /* EAGAIN: the counter is already non-zero, a wake is pending */
     pthread_mutex_unlock(&mb->mu);
     return true;
 }
@@ -203,9 +209,10 @@ static size_t mailbox_take(rt_loop *l, bool woke, rt_msg **out, size_t *outcap) 
     pthread_mutex_lock(&mb->mu);
     size_t n = mb->len;
     if (n && grow((void **)out, outcap, n, sizeof(rt_msg))) {
-        for (size_t i = 0; i < n; i++) (*out)[i] = mb->buf[(mb->head + i) % mb->cap];
+        for (size_t i = 0; i < n; i++)
+            (*out)[i] = mb->buf[(mb->head + i) % mb->cap];
         mb->head = 0;
-        mb->len = 0;
+        mb->len  = 0;
     } else {
         n = 0;
     }
@@ -246,7 +253,9 @@ void rt_cmd_quit(rt_cmds *c, int code) {
     cmds_add(c, &e);
 }
 
-rt_cmds *rt_cmds_new(void) { return calloc(1, sizeof(rt_cmds)); }
+rt_cmds *rt_cmds_new(void) {
+    return calloc(1, sizeof(rt_cmds));
+}
 
 void rt_cmds_free(rt_cmds *c) {
     if (!c) return;
@@ -254,9 +263,13 @@ void rt_cmds_free(rt_cmds *c) {
     free(c);
 }
 
-void rt_cmds_clear(rt_cmds *c) { c->n = 0; }
+void rt_cmds_clear(rt_cmds *c) {
+    c->n = 0;
+}
 
-size_t rt_cmds_len(const rt_cmds *c) { return c->n; }
+size_t rt_cmds_len(const rt_cmds *c) {
+    return c->n;
+}
 
 const rt_effect *rt_cmds_at(const rt_cmds *c, size_t i) {
     return i < c->n ? &c->buf[i] : NULL;
@@ -274,13 +287,16 @@ uint32_t rt_watch(rt_loop *l, int fd, unsigned interest, rt_fd_fn fn, void *ctx)
     }
     size_t slot = l->nwatch;
     for (size_t i = 0; i < l->nwatch; i++) {
-        if (!l->watch[i].handle) { slot = i; break; }
+        if (!l->watch[i].handle) {
+            slot = i;
+            break;
+        }
     }
     if (slot == l->nwatch) {
         if (!grow((void **)&l->watch, &l->capwatch, l->nwatch + 1, sizeof(rt_watcher))) return 0;
         l->nwatch++;
     }
-    if (l->next_handle == 0) l->next_handle = 1;   /* 0 means a free slot */
+    if (l->next_handle == 0) l->next_handle = 1; /* 0 means a free slot */
     l->watch[slot] = (rt_watcher){l->next_handle++, fd, interest, fn, ctx};
     return l->watch[slot].handle;
 }
@@ -305,9 +321,9 @@ void rt_unwatch(rt_loop *l, uint32_t handle) {
 }
 
 void rt_set_host_hooks(rt_loop *l, rt_prepare_fn prepare, rt_after_wait_fn after, void *ctx) {
-    l->prepare = prepare;
+    l->prepare    = prepare;
     l->after_wait = after;
-    l->host_ctx = ctx;
+    l->host_ctx   = ctx;
 }
 
 /* ── signals ──────────────────────────────────────────────────────────── */
@@ -315,7 +331,8 @@ void rt_set_host_hooks(rt_loop *l, rt_prepare_fn prepare, rt_after_wait_fn after
 bool rt_block_signals(const int *signos) {
     sigset_t set;
     sigemptyset(&set);
-    for (const int *s = signos; *s; s++) sigaddset(&set, *s);
+    for (const int *s = signos; *s; s++)
+        sigaddset(&set, *s);
     return pthread_sigmask(SIG_BLOCK, &set, NULL) == 0;
 }
 
@@ -327,9 +344,9 @@ bool rt_on_signal(rt_loop *l, int signo, uint32_t kind) {
         log_error("rt: signalfd: %s", strerror(errno));
         return false;
     }
-    l->sfd = fd;
+    l->sfd                  = fd;
     l->sigs[l->nsigs].signo = signo;
-    l->sigs[l->nsigs].kind = kind;
+    l->sigs[l->nsigs].kind  = kind;
     l->nsigs++;
     return true;
 }
@@ -340,7 +357,7 @@ static void signals_take(rt_loop *l) {
         for (int i = 0; i < l->nsigs; i++) {
             if ((int)si.ssi_signo == l->sigs[i].signo) {
                 rt_msg m = {.kind = l->sigs[i].kind, .id = si.ssi_signo};
-                m.v.i = si.ssi_int;   /* sigqueue() payload, 0 for kill() */
+                m.v.i    = si.ssi_int; /* sigqueue() payload, 0 for kill() */
                 rt_send(l, &m);
                 break;
             }
@@ -358,7 +375,7 @@ static rt_timer *find_timer(rt_loop *l, uint32_t kind, uint32_t id) {
 
 static rt_timer *upsert_timer(rt_loop *l, uint32_t kind, uint32_t id, bool *created) {
     rt_timer *t = find_timer(l, kind, id);
-    *created = false;
+    *created    = false;
     if (t) return t;
     if (!grow((void **)&l->timers, &l->captimers, l->ntimers + 1, sizeof(rt_timer))) {
         log_error("rt: out of memory adding a timer (kind %u id %u)", kind, id);
@@ -366,8 +383,8 @@ static rt_timer *upsert_timer(rt_loop *l, uint32_t kind, uint32_t id, bool *crea
     }
     t = &l->timers[l->ntimers++];
     memset(t, 0, sizeof(*t));
-    t->kind = kind;
-    t->id = id;
+    t->kind  = kind;
+    t->id    = id;
     *created = true;
     return t;
 }
@@ -381,8 +398,8 @@ void rt_sub_every(rt_subs *s, uint32_t kind, uint32_t id, int64_t period_ns) {
     if (created || t->period_ns != period_ns) {
         /* New, or the period changed: restart the phase from now. */
         t->period_ns = period_ns;
-        t->due_ns = rt_now_ns() + period_ns;
-        t->fired = false;
+        t->due_ns    = rt_now_ns() + period_ns;
+        t->fired     = false;
     }
 }
 
@@ -393,15 +410,16 @@ void rt_sub_at(rt_subs *s, uint32_t kind, uint32_t id, int64_t at_ns) {
     t->seen = true;
     if (created || t->period_ns != 0 || t->due_ns != at_ns) {
         t->period_ns = 0;
-        t->due_ns = at_ns;
-        t->fired = false;
+        t->due_ns    = at_ns;
+        t->fired     = false;
     }
 }
 
 /* Re-run subscribe() and drop every timer it didn't mention. */
 static void reconcile(rt_loop *l, const rt_program *p) {
     if (!p->subscribe) return;
-    for (size_t i = 0; i < l->ntimers; i++) l->timers[i].seen = false;
+    for (size_t i = 0; i < l->ntimers; i++)
+        l->timers[i].seen = false;
     rt_subs s = {l};
     p->subscribe(p->self, &s);
     size_t w = 0;
@@ -418,7 +436,7 @@ static void timers_fire(rt_loop *l, int64_t now) {
         rt_timer *t = &l->timers[i];
         if (t->fired || t->due_ns > now) continue;
         rt_msg m = {.kind = t->kind, .id = t->id};
-        m.v.i = t->due_ns;
+        m.v.i    = t->due_ns;
         rt_send(l, &m);
         if (t->period_ns > 0) {
             t->due_ns += t->period_ns;
@@ -450,12 +468,14 @@ static void run_cmds(rt_loop *l, const rt_program *p) {
         switch (e.tag) {
         case RT_EFFECT_SEND: rt_send(l, &e.u.msg); break;
         case RT_EFFECT_QUIT:
-            l->quitting = true;
+            l->quitting  = true;
             l->exit_code = e.u.code;
             break;
         case RT_EFFECT_CMD:
-            if (p->perform) p->perform(p->self, l, &e.u.cmd);
-            else log_error("rt: command %u but the program has no perform", e.u.cmd.kind);
+            if (p->perform)
+                p->perform(p->self, l, &e.u.cmd);
+            else
+                log_error("rt: command %u but the program has no perform", e.u.cmd.kind);
             break;
         }
     }
@@ -465,10 +485,10 @@ static void run_cmds(rt_loop *l, const rt_program *p) {
 /* Fold the local queue. A command may send more messages, folded in this
  * same step; the cap bounds a program that keeps sending itself messages. */
 static bool fold(rt_loop *l, const rt_program *p, size_t *folded) {
-    size_t i = 0;
+    size_t i         = 0;
     const size_t cap = 4096;
     while (i < l->nlocal && !l->quitting) {
-        rt_msg m = l->local[i++];
+        rt_msg m  = l->local[i++];
         l->cmds.n = 0;
         p->update(p->self, &m, &l->cmds);
         run_cmds(l, p);
@@ -481,14 +501,14 @@ static bool fold(rt_loop *l, const rt_program *p, size_t *folded) {
 }
 
 int rt_run(rt_loop *l, const rt_program *p) {
-    struct pollfd *pfd = NULL;
+    struct pollfd *pfd   = NULL;
     uint32_t *pfd_handle = NULL;
     size_t cappfd = 0, cappfh = 0;
-    rt_msg *inbox = NULL;
+    rt_msg *inbox   = NULL;
     size_t capinbox = 0;
 
     reconcile(l, p);
-    if (p->present) p->present(p->self, l);   /* first frame */
+    if (p->present) p->present(p->self, l); /* first frame */
 
     while (!l->quitting) {
         /* 1. Let the host flush and report work it already holds. */
@@ -503,12 +523,12 @@ int rt_run(rt_loop *l, const rt_program *p) {
             break;
         }
         const size_t mb_slot = n;
-        pfd[n] = (struct pollfd){.fd = l->mb.efd, .events = POLLIN};
-        pfd_handle[n++] = 0;
-        size_t sig_slot = SIZE_MAX;
+        pfd[n]               = (struct pollfd){.fd = l->mb.efd, .events = POLLIN};
+        pfd_handle[n++]      = 0;
+        size_t sig_slot      = SIZE_MAX;
         if (l->sfd >= 0) {
-            sig_slot = n;
-            pfd[n] = (struct pollfd){.fd = l->sfd, .events = POLLIN};
+            sig_slot        = n;
+            pfd[n]          = (struct pollfd){.fd = l->sfd, .events = POLLIN};
             pfd_handle[n++] = 0;
         }
         const size_t first_watch = n;
@@ -521,13 +541,13 @@ int rt_run(rt_loop *l, const rt_program *p) {
             short ev = 0;
             if (w->interest & RT_READ) ev |= POLLIN;
             if (w->interest & RT_WRITE) ev |= POLLOUT;
-            pfd[n] = (struct pollfd){.fd = w->fd, .events = ev};
+            pfd[n]          = (struct pollfd){.fd = w->fd, .events = ev};
             pfd_handle[n++] = w->handle;
         }
 
         /* 3. Wait until the next deadline, exactly. A deadline in the future
          * never becomes 0 (that spins); one in the past doesn't wait. */
-        int64_t now = rt_now_ns();
+        int64_t now   = rt_now_ns();
         int64_t until = next_deadline(l);
         if (p->wait_hint_ns) {
             const int64_t h = p->wait_hint_ns(p->self);
@@ -543,9 +563,9 @@ int rt_run(rt_loop *l, const rt_program *p) {
         } else if (until >= 0) {
             int64_t left = until - now;
             if (left < 0) left = 0;
-            ts.tv_sec = (time_t)(left / 1000000000LL);
+            ts.tv_sec  = (time_t)(left / 1000000000LL);
             ts.tv_nsec = (long)(left % 1000000000LL);
-            tp = &ts;
+            tp         = &ts;
         }
         int r = ppoll(pfd, (nfds_t)n, tp, NULL);
         if (r < 0 && errno != EINTR) {
@@ -559,7 +579,10 @@ int rt_run(rt_loop *l, const rt_program *p) {
         bool fd_ready = false;
         if (r > 0) {
             for (size_t i = first_watch; i < n; i++)
-                if (pfd[i].revents) { fd_ready = true; break; }
+                if (pfd[i].revents) {
+                    fd_ready = true;
+                    break;
+                }
         }
 
         /* 4. Turn what happened into messages, in a fixed order: signals,
@@ -569,7 +592,7 @@ int rt_run(rt_loop *l, const rt_program *p) {
         if (r > 0) {
             for (size_t i = first_watch; i < n; i++) {
                 if (!pfd[i].revents) continue;
-                rt_watcher *w = find_watch(l, pfd_handle[i]);   /* may be gone */
+                rt_watcher *w = find_watch(l, pfd_handle[i]); /* may be gone */
                 if (!w) continue;
                 unsigned ev = 0;
                 if (pfd[i].revents & POLLIN) ev |= RT_READ;
@@ -581,8 +604,9 @@ int rt_run(rt_loop *l, const rt_program *p) {
         }
         if (l->after_wait) l->after_wait(l->host_ctx, l, fd_ready);
         const bool mb_woke = r > 0 && (pfd[mb_slot].revents & POLLIN);
-        size_t got = mailbox_take(l, mb_woke, &inbox, &capinbox);
-        for (size_t i = 0; i < got; i++) rt_send(l, &inbox[i]);
+        size_t got         = mailbox_take(l, mb_woke, &inbox, &capinbox);
+        for (size_t i = 0; i < got; i++)
+            rt_send(l, &inbox[i]);
         timers_fire(l, rt_now_ns());
 
         /* 5. Fold, re-subscribe, draw. */

@@ -22,19 +22,19 @@ bool egl_is_current(EGLDisplay dpy, EGLSurface surf, EGLContext ctx) {
 }
 
 void egl_forget_current(void) {
-    g_current.dpy = EGL_NO_DISPLAY;
+    g_current.dpy  = EGL_NO_DISPLAY;
     g_current.surf = EGL_NO_SURFACE;
-    g_current.ctx = EGL_NO_CONTEXT;
+    g_current.ctx  = EGL_NO_CONTEXT;
 }
 
 bool egl_make_current_raw(EGLDisplay dpy, EGLSurface surf, EGLContext ctx) {
     if (!eglMakeCurrent(dpy, surf, surf, ctx)) {
-        egl_forget_current();   /* EGL may have unbound the old one */
+        egl_forget_current(); /* EGL may have unbound the old one */
         return false;
     }
-    g_current.dpy = dpy;
+    g_current.dpy  = dpy;
     g_current.surf = surf;
-    g_current.ctx = ctx;
+    g_current.ctx  = ctx;
     return true;
 }
 

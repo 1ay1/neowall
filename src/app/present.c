@@ -46,14 +46,13 @@ struct frame {
 static bool output_wants_frame(const struct frame *f, struct output_state *output) {
     if (output->config->pause_on_fullscreen &&
         atomic_load_explicit(&output->occluded, memory_order_acquire)) {
-        return false;   /* a fullscreen window covers it */
+        return false; /* a fullscreen window covers it */
     }
     /* Shader pause keeps the last frame on screen with the GPU idle; the
      * clock is reconciled on resume (apply_shader_pause). */
     if (output->config->type == WALLPAPER_SHADER && f->m->shader_paused) return false;
     if (!atomic_load_explicit(&output->needs_redraw, memory_order_acquire) ||
-        !output->compositor_surface ||
-        output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
+        !output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         return false;
     }
     /* Vsync on Wayland: draw only once this output's frame callback came back.
@@ -61,23 +60,24 @@ static bool output_wants_frame(const struct frame *f, struct output_state *outpu
      * others. vsync=false keeps its own timerfd: gating both on one output
      * makes two pacers beat (~23 FPS). */
     bool frame_paced = output->config->vsync &&
-        compositor_surface_supports_frame_pacing(output->compositor_surface);
+                       compositor_surface_supports_frame_pacing(output->compositor_surface);
     return !frame_paced || compositor_surface_frame_ready(output->compositor_surface);
 }
 
 /* Advance an image cross-fade to `now`. */
 static void output_step_transition(struct output_state *output, uint64_t now) {
     if (output->transition_start_time == 0 || output->config->transition == TRANSITION_NONE) return;
-    uint64_t elapsed = now - output->transition_start_time;
-    uint64_t dur_ms = (uint64_t)(output->config->transition_duration * 1000.0f);
-    float progress = dur_ms > 0 ? (float)elapsed / (float)dur_ms : 1.0f;
+    uint64_t elapsed            = now - output->transition_start_time;
+    uint64_t dur_ms             = (uint64_t)(output->config->transition_duration * 1000.0f);
+    float progress              = dur_ms > 0 ? (float)elapsed / (float)dur_ms : 1.0f;
     output->transition_progress = progress >= 1.0f ? 1.0f : ease_in_out_cubic(progress);
 }
 
 /* Count a shader frame and log the measured FPS every two seconds, with the
  * longest gap between frames: a stall shows there even when the average
  * still says 60. */
-static void output_meter_fps(struct output_state *output, uint64_t frame_start, uint64_t frame_end) {
+static void output_meter_fps(struct output_state *output, uint64_t frame_start,
+                             uint64_t frame_end) {
     output->fps_frame_count++;
     if (output->fps_last_frame && frame_end - output->fps_last_frame > output->fps_worst_gap)
         output->fps_worst_gap = frame_end - output->fps_last_frame;
@@ -85,26 +85,27 @@ static void output_meter_fps(struct output_state *output, uint64_t frame_start, 
     if (output->fps_last_log_time == 0) output->fps_last_log_time = frame_end;
     uint64_t elapsed = frame_end - output->fps_last_log_time;
     if (elapsed < 2000) return;
-    float fps = (float)output->fps_frame_count / ((float)elapsed / 1000.0f);
+    float fps           = (float)output->fps_frame_count / ((float)elapsed / 1000.0f);
     output->fps_current = fps;
     uint64_t frame_time = frame_end - frame_start;
     if (output->config->vsync) {
         log_info("FPS [%s]: %.1f FPS (vsync: monitor sync, frame_time: %lums, worst gap: %lums)",
                  output->model, fps, frame_time, output->fps_worst_gap);
     } else {
-        log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums, worst gap: %lums)", output->model, fps,
-                 shader_fps_resolve(output->config->shader_fps), frame_time, output->fps_worst_gap);
+        log_info("FPS [%s]: %.1f FPS (target: %d, frame_time: %lums, worst gap: %lums)",
+                 output->model, fps, shader_fps_resolve(output->config->shader_fps), frame_time,
+                 output->fps_worst_gap);
     }
-    output->fps_frame_count = 0;
-    output->fps_worst_gap = 0;
+    output->fps_frame_count   = 0;
+    output->fps_worst_gap     = 0;
     output->fps_last_log_time = frame_end;
 }
 
 /* Log render failures at most once a second, with a count of the rest. */
 static void log_render_failure(struct output_state *output) {
-    static uint64_t last = 0;
+    static uint64_t last  = 0;
     static int suppressed = 0;
-    if (output->shader_load_failed) return;   /* already explained */
+    if (output->shader_load_failed) return; /* already explained */
     uint64_t now = get_time_ms();
     if (now - last < 1000) {
         suppressed++;
@@ -116,7 +117,7 @@ static void log_render_failure(struct output_state *output) {
     } else {
         log_error("Failed to render frame for output %s", output->model);
     }
-    last = now;
+    last       = now;
     suppressed = 0;
 }
 
@@ -128,8 +129,7 @@ static void output_swap_terminal(struct output_state *output, const char *cmd) {
     log_info("Swapping terminal wallpaper on output %s: '%s'", name, cmd);
     /* cols/rows 0: re-derive the grid from the output size, as at spawn. */
     nw_result tr = output_set_terminal(
-        output, cmd,
-        output->config->shader_path[0] ? output->config->shader_path : NULL,
+        output, cmd, output->config->shader_path[0] ? output->config->shader_path : NULL,
         output->config->term_font[0] ? output->config->term_font : NULL, 0, 0);
     if (nw_is_err(tr)) {
         log_error("Failed to swap terminal wallpaper on output %s: %s", name,
@@ -142,18 +142,24 @@ static void output_swap_terminal(struct output_state *output, const char *cmd) {
  * origin); everything else is the full surface. Returns whether it's partial. */
 static bool output_damage_rect(const struct neowall_state *state, struct output_state *output,
                                EGLint rect[4]) {
-    rect[0] = 0; rect[1] = 0; rect[2] = INT32_MAX; rect[3] = INT32_MAX;
+    rect[0] = 0;
+    rect[1] = 0;
+    rect[2] = INT32_MAX;
+    rect[3] = INT32_MAX;
     if (!state->swap_damage_supported || output->config->type != WALLPAPER_TERMINAL ||
         !output->shader || output->config->shader_path[0] != '\0') {
         return false;
     }
     int px, py, pw, ph;
     if (wallshader_pass_count(output->shader) != 1 ||
-        !term_gpu_damage(wallshader_terminal(output->shader), output->width, output->height,
-                         &px, &py, &pw, &ph)) {
+        !term_gpu_damage(wallshader_terminal(output->shader), output->width, output->height, &px,
+                         &py, &pw, &ph)) {
         return false;
     }
-    rect[0] = px; rect[1] = py; rect[2] = pw; rect[3] = ph;
+    rect[0] = px;
+    rect[1] = py;
+    rect[2] = pw;
+    rect[3] = ph;
     return true;
 }
 
@@ -161,14 +167,14 @@ static bool output_damage_rect(const struct neowall_state *state, struct output_
  * swap, commit, pacing, and the post-frame bookkeeping. */
 static void output_present(struct frame *f, struct output_state *output, uint64_t frame_time) {
     struct neowall_state *state = f->state;
-    EGLSurface surf = output->compositor_surface->egl_surface;
+    EGLSurface surf             = output->compositor_surface->egl_surface;
 
     /* On the common single-output path the render phase left this current;
      * skipping a redundant eglMakeCurrent avoids Mesa's implicit flush. */
     if (!egl_is_current(state->egl_display, surf, state->egl_context) &&
         !egl_make_surface_current(state->egl_display, surf, state->egl_context)) {
-        log_error("Failed to make context current before swap for output %s: 0x%x",
-                  output->model, eglGetError());
+        log_error("Failed to make context current before swap for output %s: 0x%x", output->model,
+                  eglGetError());
         return;
     }
 
@@ -188,7 +194,8 @@ static void output_present(struct frame *f, struct output_state *output, uint64_
 #ifdef HAVE_WAYLAND_BACKEND
     if (wallpaper_is_animated(output->config->type)) wayland_request_present_feedback(output);
 #endif
-    if (output->config->vsync && compositor_surface_supports_frame_pacing(output->compositor_surface)) {
+    if (output->config->vsync &&
+        compositor_surface_supports_frame_pacing(output->compositor_surface)) {
         compositor_surface_frame_request(output->compositor_surface);
     }
 
@@ -197,7 +204,10 @@ static void output_present(struct frame *f, struct output_state *output, uint64_
         typedef EGLBoolean (*swap_dmg_fn)(EGLDisplay, EGLSurface, const EGLint *, EGLint);
         /* eglGetProcAddress returns a function address as void*; a union keeps
          * the conversion out of ISO C's object->function cast rule. */
-        union { void *obj; swap_dmg_fn fn; } u = { .obj = state->swap_with_damage };
+        union {
+            void *obj;
+            swap_dmg_fn fn;
+        } u     = {.obj = state->swap_with_damage};
         swap_ok = u.fn(state->egl_display, surf, rect, 1);
     } else {
         swap_ok = eglSwapBuffers(state->egl_display, surf);
@@ -235,9 +245,10 @@ static void output_present(struct frame *f, struct output_state *output, uint64_
 
     /* Animated wallpapers keep needs_redraw set so the loop draws them every
      * frame, except a settled terminal, which sleeps until its child writes. */
-    bool term_settled = output->config->type == WALLPAPER_TERMINAL &&
-                        output->shader && output->frames_rendered > 0 &&
-                        !term_gpu_animating(wallshader_terminal(output->shader), APP_TERM_FX_SETTLE_MS);
+    bool term_settled =
+        output->config->type == WALLPAPER_TERMINAL && output->shader &&
+        output->frames_rendered > 0 &&
+        !term_gpu_animating(wallshader_terminal(output->shader), APP_TERM_FX_SETTLE_MS);
     if ((output->transition_start_time == 0 || output->config->transition == TRANSITION_NONE) &&
         (!wallpaper_is_animated(output->config->type) || term_settled)) {
         atomic_store_explicit(&output->needs_redraw, false, memory_order_release);
@@ -253,21 +264,22 @@ static void explain_no_cycle(int total_outputs) {
                  "Point path/shader at a directory (ending in '/') to cycle.");
     } else {
         log_info("Cannot cycle wallpaper: none of the %d outputs cycle. "
-                 "Point path/shader at a directory (ending in '/') to cycle.", total_outputs);
+                 "Point path/shader at a directory (ending in '/') to cycle.",
+                 total_outputs);
     }
 }
 
 static void render_outputs(struct frame *f) {
     struct neowall_state *state = f->state;
-    const struct app_model *m = f->m;
+    const struct app_model *m   = f->m;
 
     uint64_t current_time = get_time_ms();
 
     /* The requests update queued. This frame acts on them and says so in
      * f->done; update clears them when that message comes back. */
-    int next_count = m->next_pending;
-    int set_index = m->set_index;
-    bool terminal_requested = m->terminal_pending;
+    int next_count           = m->next_pending;
+    int set_index            = m->set_index;
+    bool terminal_requested  = m->terminal_pending;
     const char *terminal_cmd = m->terminal_cmd;
     if (set_index >= 0) {
         f->done.flags |= APP_APPLIED_INDEX;
@@ -277,10 +289,10 @@ static void render_outputs(struct frame *f) {
         f->done.flags |= APP_APPLIED_TERMINAL;
         f->done.terminal_gen = m->terminal_gen;
     }
-    bool processed_next = false;
-    bool processed_set_index = false;
+    bool processed_next       = false;
+    bool processed_set_index  = false;
     bool has_cycleable_output = false;
-    int total_outputs = 0;
+    int total_outputs         = 0;
 
     /* === PHASE 1: snapshot the output list under the read lock ============
      * We copy the pointer list to a stack array and take a REFERENCE on each
@@ -314,7 +326,7 @@ static void render_outputs(struct frame *f) {
     }
     pthread_rwlock_unlock(&state->output_list_lock);
 
-    size_t output_n = snapshot.len;
+    size_t output_n                        = snapshot.len;
     struct output_state **outputs_snapshot = snapshot.data;
 
     if (next_count > 0) {
@@ -344,14 +356,14 @@ static void render_outputs(struct frame *f) {
          * multi-monitor configurations silently ignore later outputs. */
         if (set_index >= 0 && output->config->cycle && output->config->cycle_count > 0) {
             if ((size_t)set_index < output->config->cycle_count) {
-                log_debug("Setting wallpaper index %d for output %s",
-                          set_index, output->model[0] ? output->model : "unknown");
+                log_debug("Setting wallpaper index %d for output %s", set_index,
+                          output->model[0] ? output->model : "unknown");
                 output_set_cycle_index(output, (size_t)set_index);
                 processed_set_index = true;
-                current_time = get_time_ms();
+                current_time        = get_time_ms();
             } else {
-                log_debug("Index %d is not eligible for output %s (count: %zu)",
-                          set_index, output->model[0] ? output->model : "unknown",
+                log_debug("Index %d is not eligible for output %s (count: %zu)", set_index,
+                          output->model[0] ? output->model : "unknown",
                           output->config->cycle_count);
             }
         }
@@ -376,15 +388,14 @@ static void render_outputs(struct frame *f) {
             }
             if (!group_already_cycled) {
                 size_t cycled_count = output_cycle_group(outputs_snapshot, output_n, output);
-                current_time = get_time_ms();
-                processed_next = true;
+                current_time        = get_time_ms();
+                processed_next      = true;
                 log_info("Cycled %zu output(s) in cycle group", cycled_count);
             }
         }
 
         /* Check if we should cycle wallpaper (timer-driven) */
-        if (!m->cycle_paused &&
-            output->config->cycle && output->config->duration > 0.0f) {
+        if (!m->cycle_paused && output->config->cycle && output->config->duration > 0.0f) {
             if (output_should_cycle(output, current_time)) {
                 /* Take the whole span group across together: half a scene
                  * advancing to the next shader on its own is worse than either
@@ -401,7 +412,8 @@ static void render_outputs(struct frame *f) {
         if (!output_wants_frame(f, output)) {
             /* not drawing, but a background shader build still has to land */
             if (output->pending_shader &&
-                egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface,
+                egl_make_surface_current(state->egl_display,
+                                         output->compositor_surface->egl_surface,
                                          state->egl_context)) {
                 output_poll_shader_build(output);
             }
@@ -410,9 +422,10 @@ static void render_outputs(struct frame *f) {
 
         /* Make EGL context current for this output. Note: eglMakeCurrent can
          * synchronize with the GPU — we are NOT holding output_list_lock here. */
-        if (!egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface, state->egl_context)) {
-            log_error("Failed to make EGL context current for output %s: 0x%x",
-                     output->model, eglGetError());
+        if (!egl_make_surface_current(state->egl_display, output->compositor_surface->egl_surface,
+                                      state->egl_context)) {
+            log_error("Failed to make EGL context current for output %s: 0x%x", output->model,
+                      eglGetError());
             continue;
         }
         /* a finished background build swaps in before this frame */
@@ -443,8 +456,8 @@ static void render_outputs(struct frame *f) {
         output_step_transition(output, current_time);
 
         uint64_t frame_start = get_time_ms();
-        bool render_success = output_render_frame(output);
-        uint64_t frame_end = get_time_ms();
+        bool render_success  = output_render_frame(output);
+        uint64_t frame_end   = get_time_ms();
 
         if (render_success && output->config->type == WALLPAPER_SHADER) {
             output_meter_fps(output, frame_start, frame_end);
@@ -456,7 +469,7 @@ static void render_outputs(struct frame *f) {
 
         /* Queue for swap. The swap vec grows as needed; on OOM we simply skip
          * presenting this output's frame rather than aborting. */
-        struct swap_info si = { .output = output, .render_success = render_success };
+        struct swap_info si = {.output = output, .render_success = render_success};
         swap_vec_push(&swaps, si);
     }
 
@@ -521,7 +534,7 @@ static const char *output_display_name(const struct output_state *o) {
  * state, then only this output's config (live outputs are untouched). */
 static void bring_up_output(struct neowall_state *state, struct output_state *o) {
     const char *name = output_display_name(o);
-    if (!o->compositor_surface) return;   /* surface creation failed */
+    if (!o->compositor_surface) return; /* surface creation failed */
     if (o->width <= 0 || o->height <= 0) {
         /* The configure that sizes it posts a retry (output_on_configure_callback). */
         log_info("Reconnect: output %s has no size yet, waiting for the compositor", name);
@@ -543,7 +556,7 @@ static void bring_up_output(struct neowall_state *state, struct output_state *o)
 static void reinit_reconnected_outputs(struct neowall_state *state) {
     if (!state || !state->compositor_backend) return;
     const compositor_backend_ops_t *ops = state->compositor_backend->ops;
-    void *backend_data = state->compositor_backend->data;
+    void *backend_data                  = state->compositor_backend->data;
 
     /* A ref on each, so a removal can't free it while the lock is dropped
      * for the slow surface/GL work. */
@@ -595,11 +608,10 @@ static void mark_animated(struct neowall_state *state, const struct app_model *m
         if (o->config->type == WALLPAPER_SHADER && m->shader_paused) continue;
 
         /* A static shader painted its one frame. */
-        bool is_static = o->config->type == WALLPAPER_SHADER &&
-                         !wallshader_animated(o->shader) && o->frames_rendered > 0;
+        bool is_static = o->config->type == WALLPAPER_SHADER && !wallshader_animated(o->shader) &&
+                         o->frames_rendered > 0;
         /* A settled terminal only redraws when its child writes. */
-        bool term_idle = o->config->type == WALLPAPER_TERMINAL &&
-                         o->frames_rendered > 0 &&
+        bool term_idle = o->config->type == WALLPAPER_TERMINAL && o->frames_rendered > 0 &&
                          !term_gpu_animating(wallshader_terminal(o->shader), APP_TERM_FX_SETTLE_MS);
         /* An output with a frame timer (vsync off, or vsync without frame
          * callbacks) is driven by FRAME_DUE. Anything else is paced by its
@@ -614,10 +626,10 @@ static void mark_animated(struct neowall_state *state, const struct app_model *m
 /* ── present ──────────────────────────────────────────────────────────── */
 
 void app_present(void *self, rt_loop *loop) {
-    struct app *a = self;
+    struct app *a               = self;
     struct neowall_state *state = a->state;
-    const struct app_model *m = &a->model;
-    struct frame f = {.state = state, .m = m};
+    const struct app_model *m   = &a->model;
+    struct frame f              = {.state = state, .m = m};
 
 #ifdef HAVE_WAYLAND_BACKEND
     if (m->outputs_need_init) {
@@ -679,7 +691,7 @@ void app_present(void *self, rt_loop *loop) {
         log_debug("Stats: %.1f steps/s, %lu frames rendered, %lu errors",
                   (double)v->stats_frames / secs, state->frames_rendered, state->errors_count);
         v->stats_since_ms = now;
-        v->stats_frames = 0;
+        v->stats_frames   = 0;
     }
 }
 
@@ -687,10 +699,10 @@ void app_present(void *self, rt_loop *loop) {
  * compositor fd. If the compositor never sends it (hidden surface), the
  * frame-ready timeout must still fire, so don't sleep past it. */
 int64_t app_wait_hint(void *self) {
-    const struct app *a = self;
+    const struct app *a         = self;
     struct neowall_state *state = a->state;
-    const struct app_model *m = &a->model;
-    int64_t hint = -1;
+    const struct app_model *m   = &a->model;
+    int64_t hint                = -1;
     /* Arm the output wake only if some output has no frame callback in
      * flight; otherwise the callback wakes us and sees needs_redraw. */
     bool want_wake = false;
@@ -715,7 +727,8 @@ int64_t app_wait_hint(void *self) {
         if (!wallpaper_is_animated(o->config->type)) continue;
         if (o->config->type == WALLPAPER_SHADER && m->shader_paused) continue;
         if (o->config->pause_on_fullscreen &&
-            atomic_load_explicit(&o->occluded, memory_order_acquire)) continue;
+            atomic_load_explicit(&o->occluded, memory_order_acquire))
+            continue;
         if (atomic_load(&o->needs_redraw)) {
             hint = 0;
             break;

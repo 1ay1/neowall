@@ -22,33 +22,33 @@ int main(int argc, char **argv) {
     if (gl_headless_init()) return 77;
     log_set_level(LOG_LEVEL_ERROR);
 
-    double t = now_ms();
+    double t      = now_ms();
     wallshader *s = NULL;
     if (nw_is_err(wallshader_load(argv[1], &s))) return 1;
     printf("sync:  caller blocked %.1f ms\n", now_ms() - t);
     wallshader_free(s);
 
     /* a different text, so the driver's own cache can't help */
-    t = now_ms();
+    t                     = now_ms();
     wallshader_pending *p = NULL;
     if (nw_is_err(wallshader_load_start(argv[1], &p))) return 1;
     double start = now_ms() - t, worst = start;
     int polls = 0;
     nw_build_state st;
     while ((st = wallshader_load_poll(p, &s)) == NW_BUILD_PENDING) {
-        double t0 = now_ms();
+        double t0          = now_ms();
         struct timespec ts = {0, 16000000}; /* one frame */
         nanosleep(&ts, NULL);
         (void)t0;
         polls++;
         double t1 = now_ms();
-        st = wallshader_load_poll(p, &s);
-        double d = now_ms() - t1;
+        st        = wallshader_load_poll(p, &s);
+        double d  = now_ms() - t1;
         if (d > worst) worst = d;
         if (st != NW_BUILD_PENDING) break;
     }
-    printf("async: start %.1f ms, longest poll %.1f ms, ready after %.1f ms (%d frames)\n", start, worst,
-           now_ms() - t, polls);
+    printf("async: start %.1f ms, longest poll %.1f ms, ready after %.1f ms (%d frames)\n", start,
+           worst, now_ms() - t, polls);
     wallshader_load_cancel(p);
     if (st == NW_BUILD_DONE) wallshader_free(s);
     gl_headless_fini();

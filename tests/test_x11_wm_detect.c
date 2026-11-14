@@ -11,15 +11,15 @@
 #include "x11_wm_detect.h"
 
 static int failures = 0;
-static int checks = 0;
+static int checks   = 0;
 
-#define CHECK(cond)                                                            \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
-        }                                                                      \
+#define CHECK(cond)                                                                                \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                        \
+        }                                                                                          \
     } while (0)
 
 /* An arbitrary window id standing in for the WM's check window. */
@@ -32,11 +32,11 @@ static int checks = 0;
 static void test_wm_check_decide(void) {
     /* A live EWMH WM: root names a window, that window names itself. */
     x11_wm_check_obs_t live = {
-        .root_prop_valid = true,
-        .root_names = WM_WIN,
+        .root_prop_valid  = true,
+        .root_names       = WM_WIN,
         .child_prop_valid = true,
-        .child_names = WM_WIN,
-        .x_error = false,
+        .child_names      = WM_WIN,
+        .x_error          = false,
     };
     CHECK(x11_ewmh_wm_check_decide(&live));
 
@@ -47,12 +47,12 @@ static void test_wm_check_decide(void) {
 
     /* Property present but names None. */
     x11_wm_check_obs_t names_none = live;
-    names_none.root_names = 0;
+    names_none.root_names         = 0;
     CHECK(!x11_ewmh_wm_check_decide(&names_none));
 
     /* Root property present but the wrong type/format/count — treated as absent. */
     x11_wm_check_obs_t bad_type = live;
-    bad_type.root_prop_valid = false;
+    bad_type.root_prop_valid    = false;
     CHECK(!x11_ewmh_wm_check_decide(&bad_type));
 
     /* STALE: a WM exited without cleaning up. The root still names a window, but
@@ -60,28 +60,28 @@ static void test_wm_check_decide(void) {
      * case the temporary error handler in x11_core.c exists for; the answer must
      * be "no live WM", not a crash and not a false positive. */
     x11_wm_check_obs_t stale = {
-        .root_prop_valid = true,
-        .root_names = WM_WIN,
+        .root_prop_valid  = true,
+        .root_names       = WM_WIN,
         .child_prop_valid = false,
-        .child_names = 0,
-        .x_error = true,
+        .child_names      = 0,
+        .x_error          = true,
     };
     CHECK(!x11_ewmh_wm_check_decide(&stale));
 
     /* An x_error must lose even if a child property was somehow also read. */
     x11_wm_check_obs_t stale_but_read = live;
-    stale_but_read.x_error = true;
+    stale_but_read.x_error            = true;
     CHECK(!x11_ewmh_wm_check_decide(&stale_but_read));
 
     /* The window exists and carries the property, but it names someone else —
      * not a self-reference, so it does not prove a live WM. */
     x11_wm_check_obs_t not_self = live;
-    not_self.child_names = WM_WIN + 1;
+    not_self.child_names        = WM_WIN + 1;
     CHECK(!x11_ewmh_wm_check_decide(&not_self));
 
     /* The window exists but has no such property. */
     x11_wm_check_obs_t no_child_prop = live;
-    no_child_prop.child_prop_valid = false;
+    no_child_prop.child_prop_valid   = false;
     CHECK(!x11_ewmh_wm_check_decide(&no_child_prop));
 
     CHECK(!x11_ewmh_wm_check_decide(NULL));
@@ -95,11 +95,11 @@ static void test_wm_manages_desktop(void) {
     /* metacity / bspwm: live, and _NET_SUPPORTED advertises
      * _NET_WM_WINDOW_TYPE_DESKTOP. Managed is safe. */
     x11_wm_check_obs_t desktop_wm = {
-        .root_prop_valid = true,
-        .root_names = WM_WIN,
-        .child_prop_valid = true,
-        .child_names = WM_WIN,
-        .x_error = false,
+        .root_prop_valid      = true,
+        .root_names           = WM_WIN,
+        .child_prop_valid     = true,
+        .child_names          = WM_WIN,
+        .x_error              = false,
         .supported_prop_valid = true,
         .desktop_in_supported = true,
     };
@@ -110,22 +110,22 @@ static void test_wm_manages_desktop(void) {
      * window with _NET_WM_DESKTOP=0xFFFFFFFF above the tiling layer. Handing
      * either a managed wallpaper is worse than override-redirect, so the answer
      * must be no even though the WM is alive. */
-    x11_wm_check_obs_t tiling_wm = desktop_wm;
+    x11_wm_check_obs_t tiling_wm   = desktop_wm;
     tiling_wm.desktop_in_supported = false;
-    CHECK(x11_ewmh_wm_check_decide(&tiling_wm));       /* alive... */
-    CHECK(!x11_ewmh_wm_manages_desktop(&tiling_wm));   /* ...but not desktop-capable */
+    CHECK(x11_ewmh_wm_check_decide(&tiling_wm));     /* alive... */
+    CHECK(!x11_ewmh_wm_manages_desktop(&tiling_wm)); /* ...but not desktop-capable */
 
     /* Live WM with no _NET_SUPPORTED at all (an EWMH violation): conservative
      * answer, keep the override-redirect path. */
-    x11_wm_check_obs_t no_supported = desktop_wm;
+    x11_wm_check_obs_t no_supported   = desktop_wm;
     no_supported.supported_prop_valid = false;
     no_supported.desktop_in_supported = false;
     CHECK(!x11_ewmh_wm_manages_desktop(&no_supported));
 
     /* A stale _NET_SUPPORTED left by a dead WM must not outvote liveness. */
     x11_wm_check_obs_t dead_wm = desktop_wm;
-    dead_wm.child_prop_valid = false;
-    dead_wm.x_error = true;
+    dead_wm.child_prop_valid   = false;
+    dead_wm.x_error            = true;
     CHECK(!x11_ewmh_wm_manages_desktop(&dead_wm));
 
     CHECK(!x11_ewmh_wm_manages_desktop(NULL));
@@ -216,25 +216,25 @@ static void test_transition(void) {
 /* The whole late-WM sequence, as the daemon actually walks it: probe at init,
  * then re-probe on each root PropertyNotify. */
 static void test_late_wm_sequence(void) {
-    x11_or_env_t env = x11_or_env_parse(NULL);  /* nothing forced */
-    bool forced = x11_or_env_is_forced(env);
+    x11_or_env_t env = x11_or_env_parse(NULL); /* nothing forced */
+    bool forced      = x11_or_env_is_forced(env);
 
     /* Init, no WM yet: the root property is absent. */
     x11_wm_check_obs_t obs;
     memset(&obs, 0, sizeof(obs));
-    bool wm_present = x11_ewmh_wm_manages_desktop(&obs);
+    bool wm_present        = x11_ewmh_wm_manages_desktop(&obs);
     bool override_redirect = x11_or_decide(env, wm_present);
     CHECK(!wm_present);
-    CHECK(override_redirect);  /* came up override-redirect */
+    CHECK(override_redirect); /* came up override-redirect */
 
     /* metacity starts and publishes the handshake and its _NET_SUPPORTED.
      * PropertyNotify -> re-probe. */
     x11_wm_check_obs_t up = {
-        .root_prop_valid = true,
-        .root_names = WM_WIN,
-        .child_prop_valid = true,
-        .child_names = WM_WIN,
-        .x_error = false,
+        .root_prop_valid      = true,
+        .root_names           = WM_WIN,
+        .child_prop_valid     = true,
+        .child_names          = WM_WIN,
+        .x_error              = false,
         .supported_prop_valid = true,
         .desktop_in_supported = true,
     };
@@ -245,14 +245,14 @@ static void test_late_wm_sequence(void) {
      * _NET_SUPPORTED is not specified. If the handshake lands first, this probe
      * says "not yet" — and the _NET_SUPPORTED PropertyNotify that follows
      * triggers the re-probe that heals it (x11_dispatch_events watches both). */
-    x11_wm_check_obs_t handshake_first = up;
+    x11_wm_check_obs_t handshake_first   = up;
     handshake_first.supported_prop_valid = false;
     handshake_first.desktop_in_supported = false;
     CHECK(!x11_ewmh_wm_manages_desktop(&handshake_first));
     CHECK(x11_wm_transition(forced, override_redirect, false) == X11_WM_ACTION_NONE);
     CHECK(x11_wm_transition(forced, override_redirect, wm_present) ==
           X11_WM_ACTION_RECREATE_MANAGED);
-    override_redirect = false;  /* recreated managed */
+    override_redirect = false; /* recreated managed */
 
     /* A second PropertyNotify for the same WM must not recreate anything again. */
     CHECK(x11_wm_transition(forced, override_redirect, wm_present) == X11_WM_ACTION_NONE);
@@ -261,19 +261,19 @@ static void test_late_wm_sequence(void) {
      * window). Nothing is left to stack or repaint the wallpaper, so go back to
      * the override-redirect setup we would have had if we had started with no WM. */
     x11_wm_check_obs_t gone = {
-        .root_prop_valid = true,
-        .root_names = WM_WIN,
-        .child_prop_valid = false,
-        .child_names = 0,
-        .x_error = true,
-        .supported_prop_valid = true,   /* stale, like the handshake property */
+        .root_prop_valid      = true,
+        .root_names           = WM_WIN,
+        .child_prop_valid     = false,
+        .child_names          = 0,
+        .x_error              = true,
+        .supported_prop_valid = true, /* stale, like the handshake property */
         .desktop_in_supported = true,
     };
     wm_present = x11_ewmh_wm_manages_desktop(&gone);
     CHECK(!wm_present);
     CHECK(x11_wm_transition(forced, override_redirect, wm_present) ==
           X11_WM_ACTION_RECREATE_OVERRIDE);
-    override_redirect = true;  /* recreated override-redirect */
+    override_redirect = true; /* recreated override-redirect */
 
     /* And that is a steady state again. */
     CHECK(x11_wm_transition(forced, override_redirect, wm_present) == X11_WM_ACTION_NONE);
@@ -283,27 +283,29 @@ static void test_late_wm_sequence(void) {
  * daemon debounces the down-edge (X11_WM_GONE_DEBOUNCE_MS) and re-probes when it
  * expires, so the whole restart must cost ZERO window rebuilds. */
 static void test_wm_replace_is_a_noop(void) {
-    bool forced = false;
-    bool override_redirect = false;  /* running managed under the old WM */
+    bool forced            = false;
+    bool override_redirect = false; /* running managed under the old WM */
 
     x11_wm_check_obs_t old_wm = {
-        .root_prop_valid = true, .root_names = WM_WIN,
-        .child_prop_valid = true, .child_names = WM_WIN,
-        .supported_prop_valid = true, .desktop_in_supported = true,
+        .root_prop_valid      = true,
+        .root_names           = WM_WIN,
+        .child_prop_valid     = true,
+        .child_names          = WM_WIN,
+        .supported_prop_valid = true,
+        .desktop_in_supported = true,
     };
     x11_wm_check_obs_t none;
     memset(&none, 0, sizeof(none));
     x11_wm_check_obs_t new_wm = old_wm;
-    new_wm.root_names = WM_WIN + 9;
-    new_wm.child_names = WM_WIN + 9;
+    new_wm.root_names         = WM_WIN + 9;
+    new_wm.child_names        = WM_WIN + 9;
 
     CHECK(x11_ewmh_wm_manages_desktop(&old_wm));
 
     /* Down-edge: the old WM is gone. The action is real now, which is exactly why
      * it must be deferred rather than applied here. */
     CHECK(!x11_ewmh_wm_manages_desktop(&none));
-    CHECK(x11_wm_transition(forced, override_redirect, false) ==
-          X11_WM_ACTION_RECREATE_OVERRIDE);
+    CHECK(x11_wm_transition(forced, override_redirect, false) == X11_WM_ACTION_RECREATE_OVERRIDE);
     /* ...so the caller arms the deadline instead of rebuilding. */
 
     /* The replacement WM announces itself before the deadline expires. The caller
@@ -311,7 +313,7 @@ static void test_wm_replace_is_a_noop(void) {
      * ACTUALLY in (still managed) with a WM present is a no-op. */
     CHECK(x11_ewmh_wm_manages_desktop(&new_wm));
     CHECK(x11_wm_transition(forced, override_redirect, true) == X11_WM_ACTION_NONE);
-    CHECK(!override_redirect);  /* never rebuilt, never flickered */
+    CHECK(!override_redirect); /* never rebuilt, never flickered */
 }
 
 int main(void) {

@@ -26,12 +26,12 @@ typedef struct capture_run capture_run;
 typedef void (*capture_read_fn)(capture_run *run, int fd, void *ctx);
 
 struct capture {
-    const char *name;            /* for the log */
-    char *const *argv;           /* argv[0] is looked up on PATH */
+    const char *name;  /* for the log */
+    char *const *argv; /* argv[0] is looked up on PATH */
     capture_read_fn read;
     void *ctx;
-    capture_run *run;            /* the current run, NULL when stopped */
-    atomic_bool live;            /* the current child is producing */
+    capture_run *run; /* the current run, NULL when stopped */
+    atomic_bool live; /* the current child is producing */
 };
 
 /* Spawn and start reading. A no-op if already running. False only if the
@@ -40,8 +40,12 @@ bool capture_start(capture *c);
 /* Stop, kill the child and reap, waiting at most stop_ms. False if the
  * reader had to be abandoned. Safe when not running. */
 bool capture_stop(capture *c, long stop_ms);
-static inline bool capture_running(const capture *c) { return c->run != NULL; }
-static inline bool capture_live(capture *c) { return atomic_load(&c->live); }
+static inline bool capture_running(const capture *c) {
+    return c->run != NULL;
+}
+static inline bool capture_live(capture *c) {
+    return atomic_load(&c->live);
+}
 
 /* For the read callback: wait for data on fd or a stop. True = fd ready. */
 bool capture_poll(capture_run *run, int fd);

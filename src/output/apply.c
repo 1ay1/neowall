@@ -20,7 +20,7 @@
 /* Make a staged config live: its shader has just been installed. */
 void output_commit_staged(struct output_state *output, struct wallpaper_config *cfg) {
     struct wallpaper_config *old = output->config;
-    output->config = cfg;
+    output->config               = cfg;
     atomic_fetch_add(&output->preprocessing_generation, 1);
     output_configure_vsync(output);
     output_configure_frame_timer(output);
@@ -38,7 +38,7 @@ void output_unstage(struct output_state *output) {
     config_free_wallpaper(output->staged_config);
     free(output->staged_config);
     output->staged_config = NULL;
-    output->stage_failed = true;
+    output->stage_failed  = true;
 }
 
 bool output_reload_pending(const struct output_state *output) {
@@ -63,30 +63,25 @@ static void restore_cycle_position(struct output_state *output, struct wallpaper
          * that slot would just point to an arbitrary file (issue #47). */
         if (!cfg->shuffle) {
             const char *output_id = output_get_identifier(output);
-            int saved_index = restore_cycle_index_from_state(output_id);
+            int saved_index       = restore_cycle_index_from_state(output_id);
             if (saved_index >= 0 && saved_index < (int)cfg->cycle_count) {
                 cfg->current_cycle_index = saved_index;
-                log_info("Restored cycle position for %s: %d/%zu",
-                        output_id, saved_index, cfg->cycle_count);
+                log_info("Restored cycle position for %s: %d/%zu", output_id, saved_index,
+                         cfg->cycle_count);
 
                 /* Update the initial path to use the restored index */
                 if (cfg->type == WALLPAPER_SHADER) {
-                    snprintf(cfg->shader_path,
-                             sizeof(cfg->shader_path), "%s",
+                    snprintf(cfg->shader_path, sizeof(cfg->shader_path), "%s",
                              cfg->cycle_paths[saved_index]);
                 } else {
-                    snprintf(cfg->path,
-                             sizeof(cfg->path), "%s",
-                             cfg->cycle_paths[saved_index]);
+                    snprintf(cfg->path, sizeof(cfg->path), "%s", cfg->cycle_paths[saved_index]);
                 }
             }
         }
 
         /* Write cycle list file for 'neowall list' command */
-        write_cycle_list(output_get_identifier(output),
-                        cfg->cycle_paths,
-                        cfg->cycle_count,
-                        cfg->current_cycle_index);
+        write_cycle_list(output_get_identifier(output), cfg->cycle_paths, cfg->cycle_count,
+                         cfg->current_cycle_index);
     }
 }
 
@@ -97,16 +92,13 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     }
 
     log_debug("Applying config to output %s (compositor_surface=%p, configured=%d)",
-              output->model[0] ? output->model : "unknown",
-              (void*)output->compositor_surface,
+              output->model[0] ? output->model : "unknown", (void *)output->compositor_surface,
               output->configured);
 
     log_info("Config for output %s: type=%s, mode=%s, transition=%d, duration=%.2fs",
              output->model[0] ? output->model : "unknown",
              config->type == WALLPAPER_SHADER ? "shader" : "image",
-             wallpaper_mode_to_string(config->mode),
-             config->transition,
-             config->duration);
+             wallpaper_mode_to_string(config->mode), config->transition, config->duration);
 
     /* Build a complete owned copy before touching the live config. */
     struct wallpaper_config *copy = calloc(1, sizeof(*copy));
@@ -116,8 +108,8 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
     memcpy(copy, config, sizeof(*copy));
     copy->channel_paths = NULL;
     copy->channel_count = 0;
-    copy->cycle_paths = NULL;
-    copy->cycle_count = 0;
+    copy->cycle_paths   = NULL;
+    copy->cycle_count   = 0;
     if (config->channel_paths && config->channel_count > 0) {
         copy->channel_paths = calloc(config->channel_count, sizeof(char *));
         if (!copy->channel_paths) goto copy_failed;
@@ -157,25 +149,25 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         const char *first = copy->cycle && copy->cycle_count > 0 && copy->cycle_paths
                                 ? copy->cycle_paths[copy->current_cycle_index]
                                 : copy->shader_path;
-        output_unstage(output);                 /* a newer reload wins */
+        output_unstage(output); /* a newer reload wins */
         if (!first || !first[0] || nw_is_err(output_set_shader_async(output, first))) {
             log_error("Failed to apply shader config to output %s", output->model);
             config_free_wallpaper(copy);
             free(copy);
-            return false;                       /* nothing changed */
+            return false; /* nothing changed */
         }
-        if (!output->pending_shader) {          /* built synchronously after all */
+        if (!output->pending_shader) { /* built synchronously after all */
             output_commit_staged(output, copy);
             return true;
         }
         output->staged_config = copy;
-        output->stage_failed = false;
+        output->stage_failed  = false;
         return true;
     }
     output_unstage(output);
 
     struct wallpaper_config *old_config = output->config;
-    output->config = copy;
+    output->config                      = copy;
     atomic_fetch_add(&output->preprocessing_generation, 1);
 
     restore_cycle_position(output, output->config);
@@ -202,11 +194,12 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         /* Shader mode */
         const char *initial_shader = NULL;
 
-        if (output->config->cycle && output->config->cycle_count > 0 && output->config->cycle_paths) {
+        if (output->config->cycle && output->config->cycle_count > 0 &&
+            output->config->cycle_paths) {
             /* Load first shader from cycle list */
             initial_shader = output->config->cycle_paths[output->config->current_cycle_index];
-            log_info("Loading initial shader from cycle: %s (index %zu/%zu)",
-                     initial_shader, output->config->current_cycle_index, output->config->cycle_count);
+            log_info("Loading initial shader from cycle: %s (index %zu/%zu)", initial_shader,
+                     output->config->current_cycle_index, output->config->cycle_count);
         } else if (output->config->shader_path[0] != '\0') {
             /* Load single shader */
             initial_shader = output->config->shader_path;
@@ -224,10 +217,11 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         /* Terminal mode: spawn the configured command as the wallpaper. */
         if (output->config->term_cmd[0] != '\0') {
             log_info("Loading terminal wallpaper: %s", output->config->term_cmd);
-            nw_result terminal_result = output_set_terminal(output, output->config->term_cmd,
-                                output->config->shader_path[0] ? output->config->shader_path : NULL,
-                                output->config->term_font[0] ? output->config->term_font : NULL,
-                                output->config->term_cols, output->config->term_rows);
+            nw_result terminal_result = output_set_terminal(
+                output, output->config->term_cmd,
+                output->config->shader_path[0] ? output->config->shader_path : NULL,
+                output->config->term_font[0] ? output->config->term_font : NULL,
+                output->config->term_cols, output->config->term_rows);
             if (nw_is_err(terminal_result)) {
                 log_error("Failed to apply terminal config to output %s: %s", output->model,
                           terminal_result.context ? terminal_result.context : "unknown error");
@@ -241,11 +235,12 @@ bool output_apply_config(struct output_state *output, struct wallpaper_config *c
         /* Image mode */
         const char *initial_path = NULL;
 
-        if (output->config->cycle && output->config->cycle_count > 0 && output->config->cycle_paths) {
+        if (output->config->cycle && output->config->cycle_count > 0 &&
+            output->config->cycle_paths) {
             /* Load first image from cycle list */
             initial_path = output->config->cycle_paths[output->config->current_cycle_index];
-            log_info("Loading initial image from cycle: %s (index %zu/%zu)",
-                     initial_path, output->config->current_cycle_index, output->config->cycle_count);
+            log_info("Loading initial image from cycle: %s (index %zu/%zu)", initial_path,
+                     output->config->current_cycle_index, output->config->cycle_count);
         } else if (output->config->path[0] != '\0') {
             /* Load single image */
             initial_path = output->config->path;
@@ -306,15 +301,13 @@ void output_apply_deferred_config(struct output_state *output) {
         /* Check if shader is not yet loaded */
         if (output->shader == NULL) {
             log_info("Applying deferred shader config to output %s: %s",
-                     output->model[0] ? output->model : "unknown",
-                     output->config->shader_path);
+                     output->model[0] ? output->model : "unknown", output->config->shader_path);
             output_set_shader(output, output->config->shader_path);
         }
     } else if (output->config->type == WALLPAPER_TERMINAL && output->config->term_cmd[0] != '\0') {
         if (output->shader == NULL) {
             log_info("Applying deferred terminal config to output %s: %s",
-                     output->model[0] ? output->model : "unknown",
-                     output->config->term_cmd);
+                     output->model[0] ? output->model : "unknown", output->config->term_cmd);
             output_set_terminal(output, output->config->term_cmd,
                                 output->config->shader_path[0] ? output->config->shader_path : NULL,
                                 output->config->term_font[0] ? output->config->term_font : NULL,
@@ -324,17 +317,17 @@ void output_apply_deferred_config(struct output_state *output) {
         /* Check if wallpaper is not yet loaded */
         if (!output->current_image && output->texture == 0) {
             log_info("Applying deferred wallpaper config to output %s: %s",
-                     output->model[0] ? output->model : "unknown",
-                     output->config->path);
+                     output->model[0] ? output->model : "unknown", output->config->path);
             output_set_wallpaper(output, output->config->path);
         }
-    } else if (output->config->cycle && output->config->cycle_count > 0 && output->config->cycle_paths) {
+    } else if (output->config->cycle && output->config->cycle_count > 0 &&
+               output->config->cycle_paths) {
         /* Handle cycling mode */
         if (!output->current_image && output->texture == 0 && output->shader == NULL) {
-            const char *initial_path = output->config->cycle_paths[output->config->current_cycle_index];
+            const char *initial_path =
+                output->config->cycle_paths[output->config->current_cycle_index];
             log_info("Applying deferred cycle config to output %s: %s",
-                     output->model[0] ? output->model : "unknown",
-                     initial_path);
+                     output->model[0] ? output->model : "unknown", initial_path);
 
             /* Determine if it's a shader or image */
             const char *ext = strrchr(initial_path, '.');

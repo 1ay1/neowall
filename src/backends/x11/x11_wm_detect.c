@@ -52,14 +52,11 @@ bool x11_ewmh_wm_manages_desktop(const x11_wm_check_obs_t *obs) {
 
 bool x11_or_decide(x11_or_env_t env, bool wm_present) {
     switch (env) {
-        case X11_OR_ENV_FORCE_ON:
-            return true;
-        case X11_OR_ENV_FORCE_OFF:
-            return false;
-        case X11_OR_ENV_UNSET:
-        case X11_OR_ENV_INVALID:
-        default:
-            return !wm_present;
+    case X11_OR_ENV_FORCE_ON: return true;
+    case X11_OR_ENV_FORCE_OFF: return false;
+    case X11_OR_ENV_UNSET:
+    case X11_OR_ENV_INVALID:
+    default: return !wm_present;
     }
 }
 

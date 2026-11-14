@@ -23,7 +23,8 @@ void neowall_test_fft(float *re, float *im, int n);
 
 /* Inverse FFT via conjugate-FFT-conjugate, then 1/n scale. */
 static void ifft(float *re, float *im, int n) {
-    for (int i = 0; i < n; i++) im[i] = -im[i];
+    for (int i = 0; i < n; i++)
+        im[i] = -im[i];
     neowall_test_fft(re, im, n);
     float inv = 1.0f / (float)n;
     for (int i = 0; i < n; i++) {
@@ -34,8 +35,8 @@ static void ifft(float *re, float *im, int n) {
 
 static int expect_close(const char *name, float got, float want, float eps) {
     if (fabsf(got - want) > eps) {
-        fprintf(stderr, "FAIL: %s: expected %g, got %g (diff %g > %g)\n",
-                name, want, got, fabsf(got - want), eps);
+        fprintf(stderr, "FAIL: %s: expected %g, got %g (diff %g > %g)\n", name, want, got,
+                fabsf(got - want), eps);
         return 1;
     }
     return 0;
@@ -47,7 +48,7 @@ static int test_roundtrip(void) {
     for (int i = 0; i < N; i++) {
         orig_re[i] = re[i] = sinf(2.0f * (float)M_PI * 3.0f * i / N) +
                              0.5f * cosf(2.0f * (float)M_PI * 7.0f * i / N);
-        im[i] = 0.0f;
+        im[i]              = 0.0f;
     }
     neowall_test_fft(re, im, N);
     ifft(re, im, N);
@@ -70,11 +71,14 @@ static int test_single_bin_sinusoid(void) {
         im[i] = 0.0f;
     }
     neowall_test_fft(re, im, N);
-    int peak = 0;
+    int peak       = 0;
     float peak_mag = 0.0f;
     for (int i = 1; i < N / 2; i++) {
         float mag = sqrtf(re[i] * re[i] + im[i] * im[i]);
-        if (mag > peak_mag) { peak_mag = mag; peak = i; }
+        if (mag > peak_mag) {
+            peak_mag = mag;
+            peak     = i;
+        }
     }
     if (peak != K) {
         fprintf(stderr, "FAIL: single_bin_sinusoid: expected peak at %d, got %d\n", K, peak);
@@ -87,7 +91,10 @@ static int test_single_bin_sinusoid(void) {
 static int test_dc(void) {
     enum { N = 32 };
     float re[N], im[N];
-    for (int i = 0; i < N; i++) { re[i] = 1.0f; im[i] = 0.0f; }
+    for (int i = 0; i < N; i++) {
+        re[i] = 1.0f;
+        im[i] = 0.0f;
+    }
     neowall_test_fft(re, im, N);
     int fails = 0;
     fails += expect_close("dc_bin_0_real", re[0], (float)N, 1e-4f);

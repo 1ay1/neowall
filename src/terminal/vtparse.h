@@ -31,7 +31,7 @@
  * of a bounded parser), never overflowed. */
 #define VT_MAX_PARAMS       32
 #define VT_MAX_INTERMEDIATE 4
-#define VT_MAX_OSC          4096   /* OSC string payload cap (title/colour/etc.) */
+#define VT_MAX_OSC          4096 /* OSC string payload cap (title/colour/etc.) */
 
 /* Parser states — the Williams automaton. */
 typedef enum vt_state {
@@ -64,8 +64,8 @@ typedef struct vt_callbacks {
     /* A complete CSI sequence: 'final' byte, params[], and any private-marker /
      * intermediate bytes. `nparams` may be 0. `private_marker` is the '<' '=' '>'
      * '?' prefix if present, else 0. */
-    void (*csi)(void *u, uint8_t final, const int *params, int nparams,
-                uint8_t private_marker, const uint8_t *intermediates, int nintermediate);
+    void (*csi)(void *u, uint8_t final, const int *params, int nparams, uint8_t private_marker,
+                const uint8_t *intermediates, int nintermediate);
 
     /* A complete ESC sequence that is NOT CSI/OSC/DCS: intermediates + final. */
     void (*esc)(void *u, uint8_t final, const uint8_t *intermediates, int nintermediate);
@@ -85,22 +85,22 @@ typedef struct vt_callbacks {
 typedef struct vtparser {
     vt_state state;
 
-    int      params[VT_MAX_PARAMS];
-    int      nparams;
-    bool     param_started;      /* have we seen a digit for the current param? */
-    bool     params_overflow;    /* too many params → CSI_IGNORE */
+    int params[VT_MAX_PARAMS];
+    int nparams;
+    bool param_started;   /* have we seen a digit for the current param? */
+    bool params_overflow; /* too many params → CSI_IGNORE */
 
-    uint8_t  intermediates[VT_MAX_INTERMEDIATE];
-    int      nintermediate;
-    bool     inter_overflow;
+    uint8_t intermediates[VT_MAX_INTERMEDIATE];
+    int nintermediate;
+    bool inter_overflow;
 
-    uint8_t  private_marker;     /* '<' '=' '>' '?' or 0 */
+    uint8_t private_marker; /* '<' '=' '>' '?' or 0 */
 
-    uint8_t  osc[VT_MAX_OSC];
-    size_t   osc_len;
-    bool     osc_overflow;
+    uint8_t osc[VT_MAX_OSC];
+    size_t osc_len;
+    bool osc_overflow;
 
-    utf8_decoder utf8;           /* ground-state UTF-8 decode (bytes may split) */
+    utf8_decoder utf8; /* ground-state UTF-8 decode (bytes may split) */
 
     /* When ESC is seen inside an OSC/DCS/SOS string, the ESC path must be able
      * to recognise a following '\' as ST and terminate the string. This records
@@ -108,7 +108,7 @@ typedef struct vtparser {
     vt_state string_return;
 
     vt_callbacks cb;
-    void        *user;
+    void *user;
 } vtparser;
 
 void vtparse_init(vtparser *p, const vt_callbacks *cb, void *user);

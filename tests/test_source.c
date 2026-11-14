@@ -33,15 +33,15 @@
 static int checks   = 0;
 static int failures = 0;
 
-#define CHECK(cond, ...)                                                       \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);               \
-            fprintf(stderr, __VA_ARGS__);                                      \
-            fprintf(stderr, "\n");                                             \
-        }                                                                      \
+#define CHECK(cond, ...)                                                                           \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fprintf(stderr, "\n");                                                                 \
+        }                                                                                          \
     } while (0)
 
 /* ==========================================================================
@@ -49,9 +49,9 @@ static int failures = 0;
  * ========================================================================== */
 
 typedef struct {
-    int   ticks;
-    int   visibility_calls;
-    bool  last_visibility;
+    int ticks;
+    int visibility_calls;
+    bool last_visibility;
     float value;
 } fake_state;
 
@@ -72,7 +72,9 @@ static void fake_tick(void *self, const nw_source_ctx *ctx) {
     st->value += 1.0f;
 }
 
-static float fake_scalar(void *self) { return ((fake_state *)self)->value; }
+static float fake_scalar(void *self) {
+    return ((fake_state *)self)->value;
+}
 
 static void fake_on_visibility(void *self, bool visible) {
     fake_state *st = self;
@@ -223,7 +225,7 @@ static void test_open_and_tick(void) {
     nw_source_register(&fake_vtable);
 
     nw_source src;
-    char      err[NW_SOURCE_ERR_MAX] = {0};
+    char err[NW_SOURCE_ERR_MAX] = {0};
 
     CHECK(nw_is_err(nw_source_open_text("nope", &src, err, sizeof(err))),
           "unknown provider should fail");
@@ -339,7 +341,7 @@ static void test_exec_is_opt_in(void) {
     nw_source_register_builtins();
 
     nw_source src;
-    char      err[NW_SOURCE_ERR_MAX] = {0};
+    char err[NW_SOURCE_ERR_MAX] = {0};
 
     nw_source_exec_set_allowed(false);
     CHECK(!nw_source_exec_allowed(), "exec off by default");
@@ -387,7 +389,8 @@ static int count_children(void) {
     FILE *f = fopen(path, "r");
     if (!f) return -1;
     int n = 0;
-    while (fscanf(f, "%63s", b) == 1) n++;
+    while (fscanf(f, "%63s", b) == 1)
+        n++;
     fclose(f);
     return n;
 }
@@ -406,7 +409,8 @@ static int procs_mentioning(const char *needle) {
         if (!f) continue;
         size_t len = fread(buf, 1, sizeof(buf) - 1, f);
         fclose(f);
-        for (size_t i = 0; i < len; i++) if (!buf[i]) buf[i] = ' ';
+        for (size_t i = 0; i < len; i++)
+            if (!buf[i]) buf[i] = ' ';
         buf[len] = '\0';
         if (strstr(buf, needle)) n++;
     }
@@ -420,7 +424,7 @@ static void test_exec_never_blocks(void) {
     nw_source_exec_set_allowed(true);
 
     char marker[] = "/tmp/nw-exec-XXXXXX";
-    int mfd = mkstemp(marker);
+    int mfd       = mkstemp(marker);
     close(mfd);
     char spec[512];
     /* prints 7, closes stdout, then it and a child of its own run for an hour */
@@ -431,10 +435,10 @@ static void test_exec_never_blocks(void) {
     CHECK(nw_is_ok(nw_source_open_text(spec, &src, err, sizeof(err))), "open: %s", err);
 
     double worst = 0.0;
-    float got = 0.0f;
+    float got    = 0.0f;
     for (int i = 0; i < 100; i++) {
         nw_source_ctx c = ctx_at((uint64_t)i * 1000);
-        double t0 = now_ms_real();
+        double t0       = now_ms_real();
         nw_source_tick(&src, &c);
         double dt = now_ms_real() - t0;
         if (dt > worst) worst = dt;
@@ -457,14 +461,14 @@ static void test_exec_never_blocks(void) {
     /* A command that never stops printing fills the buffer: same rule. */
     CHECK(nw_is_ok(nw_source_open_text("exec(\"yes 9\", 1s)", &src, err, sizeof(err))), "open yes");
     worst = 0.0;
-    got = 0.0f;
+    got   = 0.0f;
     for (int i = 0; i < 100 && got < 8.0f; i++) {
         nw_source_ctx c = ctx_at((uint64_t)i * 1000);
-        double t0 = now_ms_real();
+        double t0       = now_ms_real();
         nw_source_tick(&src, &c);
         double dt = now_ms_real() - t0;
         if (dt > worst) worst = dt;
-        got = nw_source_scalar(&src);
+        got                 = nw_source_scalar(&src);
         struct timespec ts2 = {0, 5 * 1000 * 1000};
         nanosleep(&ts2, NULL);
     }

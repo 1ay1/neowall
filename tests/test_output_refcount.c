@@ -25,12 +25,12 @@
 
 typedef struct mock_output {
     atomic_int refcount;
-    atomic_int payload;     /* written before unref; destructor must observe it */
-    bool destroyed;         /* set by destructor; guarded by being single-shot */
+    atomic_int payload; /* written before unref; destructor must observe it */
+    bool destroyed;     /* set by destructor; guarded by being single-shot */
 } mock_output;
 
-static atomic_int g_destroy_count;   /* how many times the destructor ran */
-static atomic_int g_payload_seen;    /* payload value the destructor observed */
+static atomic_int g_destroy_count; /* how many times the destructor ran */
+static atomic_int g_payload_seen;  /* payload value the destructor observed */
 
 static mock_output *mock_create(void) {
     mock_output *o = calloc(1, sizeof(*o));
@@ -40,8 +40,7 @@ static mock_output *mock_create(void) {
 static void mock_destroy(mock_output *o) {
     /* Mirror output_destroy: must run exactly once per object. */
     atomic_fetch_add_explicit(&g_destroy_count, 1, memory_order_relaxed);
-    atomic_store_explicit(&g_payload_seen,
-                          atomic_load_explicit(&o->payload, memory_order_relaxed),
+    atomic_store_explicit(&g_payload_seen, atomic_load_explicit(&o->payload, memory_order_relaxed),
                           memory_order_relaxed);
     o->destroyed = true;
     free(o);
@@ -80,7 +79,7 @@ static int run_once(void) {
     atomic_store(&g_destroy_count, 0);
     atomic_store(&g_payload_seen, 0);
 
-    g_obj = mock_create();              /* refcount = 1 (owner) */
+    g_obj = mock_create(); /* refcount = 1 (owner) */
 
     pthread_t th[THREADS];
     for (int i = 0; i < THREADS; i++) {
@@ -102,11 +101,10 @@ static int run_once(void) {
 
     int final_payload = atomic_load_explicit(&g_obj->payload, memory_order_relaxed);
 
-    mock_unref(g_obj);                  /* drop owner ref -> must free exactly once */
+    mock_unref(g_obj); /* drop owner ref -> must free exactly once */
 
     if (atomic_load(&g_destroy_count) != 1) {
-        fprintf(stderr, "FAIL: destroy ran %d times, expected 1\n",
-                atomic_load(&g_destroy_count));
+        fprintf(stderr, "FAIL: destroy ran %d times, expected 1\n", atomic_load(&g_destroy_count));
         return 1;
     }
     if (atomic_load(&g_payload_seen) != final_payload) {
@@ -115,8 +113,7 @@ static int run_once(void) {
         return 1;
     }
     if (final_payload != THREADS * ITERS) {
-        fprintf(stderr, "FAIL: payload = %d, expected %d\n",
-                final_payload, THREADS * ITERS);
+        fprintf(stderr, "FAIL: payload = %d, expected %d\n", final_payload, THREADS * ITERS);
         return 1;
     }
     return 0;
@@ -130,7 +127,6 @@ int main(void) {
             return 1;
         }
     }
-    printf("ok - refcount protocol: %d rounds x %d threads x %d iters\n",
-           20, THREADS, ITERS);
+    printf("ok - refcount protocol: %d rounds x %d threads x %d iters\n", 20, THREADS, ITERS);
     return 0;
 }

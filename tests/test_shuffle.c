@@ -17,15 +17,15 @@
 #include "neowall/config/config.h"
 
 static int failures = 0;
-static int checks = 0;
+static int checks   = 0;
 
-#define CHECK(cond)                                                            \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
-        }                                                                      \
+#define CHECK(cond)                                                                                \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                        \
+        }                                                                                          \
     } while (0)
 
 #define N 32
@@ -45,9 +45,15 @@ static bool is_permutation(char **paths, char (*storage)[16], int n) {
     for (int i = 0; i < n; i++) {
         int idx = -1;
         for (int j = 0; j < n; j++) {
-            if (paths[i] == storage[j]) { idx = j; break; }
+            if (paths[i] == storage[j]) {
+                idx = j;
+                break;
+            }
         }
-        if (idx < 0 || seen[idx]) { ok = false; break; }
+        if (idx < 0 || seen[idx]) {
+            ok = false;
+            break;
+        }
         seen[idx] = true;
     }
     free(seen);
@@ -56,13 +62,13 @@ static bool is_permutation(char **paths, char (*storage)[16], int n) {
 
 static void test_degenerate(void) {
     /* n < 2 must be a no-op (and definitely not crash). */
-    char *one[] = { "alpha" };
+    char *one[] = {"alpha"};
     config_shuffle_cycle_paths(one, 1, false);
     CHECK(strcmp(one[0], "alpha") == 0);
 
-    config_shuffle_cycle_paths(NULL, 5, false);  /* NULL paths */
-    config_shuffle_cycle_paths(one, 0, false);   /* zero len */
-    CHECK(1);  /* survived */
+    config_shuffle_cycle_paths(NULL, 5, false); /* NULL paths */
+    config_shuffle_cycle_paths(one, 0, false);  /* zero len */
+    CHECK(1);                                   /* survived */
 }
 
 static void test_permutation_full(void) {
@@ -90,7 +96,7 @@ static void test_keep_first_n_eq_2(void) {
     /* n == 2 with keep_first_at_zero: only paths[1..] is shuffleable, which
      * is a single element. The function must early-return without touching
      * either slot. */
-    char *paths[2] = { "a", "b" };
+    char *paths[2] = {"a", "b"};
     config_shuffle_cycle_paths(paths, 2, true);
     CHECK(strcmp(paths[0], "a") == 0);
     CHECK(strcmp(paths[1], "b") == 0);
@@ -109,7 +115,10 @@ static void test_actually_shuffles(void) {
         fill(paths, storage, N);
         config_shuffle_cycle_paths(paths, N, false);
         for (int i = 0; i < N; i++) {
-            if (paths[i] != storage[i]) { changed_runs++; break; }
+            if (paths[i] != storage[i]) {
+                changed_runs++;
+                break;
+            }
         }
     }
     CHECK(changed_runs > 0);

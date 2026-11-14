@@ -15,15 +15,22 @@
 extern char **environ;
 
 static int failures = 0, checks = 0;
-#define CHECK(c, ...) do { checks++; if (!(c)) { failures++; \
-    fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
-    fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
+#define CHECK(c, ...)                                                                              \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(c)) {                                                                                \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                   \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fputc('\n', stderr);                                                                   \
+        }                                                                                          \
+    } while (0)
 
 /* The child is `cat /proc/self/status`: cat leaves its signal state alone,
  * unlike sh (blocks SIGCHLD while waiting) or awk (ignores SIGPIPE). */
 static const char *field(const char *status, const char *name, char *out, size_t n) {
     const char *p = strstr(status, name);
-    out[0] = '\0';
+    out[0]        = '\0';
     if (p) sscanf(p + strlen(name), " %31s", out);
     (void)n;
     return out;
@@ -45,7 +52,8 @@ static void check_masks(const char *what, const char *status) {
 static void read_all(int fd, char *buf, size_t n) {
     size_t got = 0;
     ssize_t r;
-    while (got + 1 < n && (r = read(fd, buf + got, n - 1 - got)) > 0) got += (size_t)r;
+    while (got + 1 < n && (r = read(fd, buf + got, n - 1 - got)) > 0)
+        got += (size_t)r;
     buf[got] = '\0';
 }
 
@@ -107,7 +115,7 @@ int main(void) {
 
     /* Fds: an fd the parent forgot to mark close-on-exec (like a pty master
      * or another child's pipe) must not reach either kind of child. */
-    int stray = dup(STDERR_FILENO);          /* no FD_CLOEXEC */
+    int stray    = dup(STDERR_FILENO); /* no FD_CLOEXEC */
     char *lsfd[] = {"ls", "/proc/self/fd", NULL};
 
     CHECK(nw_pipe_cloexec(p) == 0, "pipe");
@@ -123,7 +131,8 @@ int main(void) {
     waitpid(pid, NULL, 0);
     /* ls opens one fd for the directory itself; anything else leaked */
     int n = 0;
-    for (char *t = strtok(out, "\n"); t; t = strtok(NULL, "\n")) n++;
+    for (char *t = strtok(out, "\n"); t; t = strtok(NULL, "\n"))
+        n++;
     CHECK(n <= 4, "posix_spawn child sees %d fds (0-2 + ls's own)", n);
 
     CHECK(nw_pipe_cloexec(p) == 0, "pipe");
@@ -140,7 +149,8 @@ int main(void) {
     close(p[0]);
     waitpid(pid, NULL, 0);
     n = 0;
-    for (char *t = strtok(out, "\n"); t; t = strtok(NULL, "\n")) n++;
+    for (char *t = strtok(out, "\n"); t; t = strtok(NULL, "\n"))
+        n++;
     CHECK(n <= 4, "fork child sees %d fds (0-2 + ls's own)", n);
     close(stray);
 

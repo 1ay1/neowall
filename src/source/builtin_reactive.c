@@ -38,8 +38,8 @@
  * ========================================================================== */
 
 static reactive_snapshot_t g_snapshot;
-static uint64_t            g_snapshot_ms;
-static bool                g_snapshot_valid;
+static uint64_t g_snapshot_ms;
+static bool g_snapshot_valid;
 
 static const reactive_snapshot_t *reactive_frame(uint64_t now_ms) {
     if (!g_snapshot_valid || now_ms != g_snapshot_ms) {
@@ -52,7 +52,9 @@ static const reactive_snapshot_t *reactive_frame(uint64_t now_ms) {
 
 /* Tests and reload paths need to drop the cache so a stale frame is not
  * served after the underlying sampler is reinitialised. */
-void nw_reactive_invalidate(void) { g_snapshot_valid = false; }
+void nw_reactive_invalidate(void) {
+    g_snapshot_valid = false;
+}
 
 /* ==========================================================================
  * The signal table
@@ -67,7 +69,7 @@ typedef enum { SIG_FLOAT, SIG_INT, SIG_BOOL } signal_kind;
 typedef struct {
     const char *name;
     const char *alias; /* legacy spelling from the old enum table, or NULL */
-    size_t      offset;
+    size_t offset;
     signal_kind kind;
 } reactive_signal;
 
@@ -75,65 +77,65 @@ typedef struct {
 
 static const reactive_signal g_signals[] = {
     /* load */
-    {"cpu",          NULL,          SIG(cpu, SIG_FLOAT)},
-    {"cpu_max",      NULL,          SIG(cpu_max, SIG_FLOAT)},
-    {"cpu_spread",   NULL,          SIG(cpu_spread, SIG_FLOAT)},
-    {"cpu_cores",    NULL,          SIG(cpu_cores, SIG_INT)},
-    {"ram",          NULL,          SIG(ram, SIG_FLOAT)},
-    {"ram_gb",       NULL,          SIG(ram_gb, SIG_FLOAT)},
-    {"ram_total_gb", NULL,          SIG(ram_total_gb, SIG_FLOAT)},
-    {"swap",         NULL,          SIG(swap, SIG_FLOAT)},
-    {"net_down",     "netdown",     SIG(net_down, SIG_FLOAT)},
-    {"net_up",       "netup",       SIG(net_up, SIG_FLOAT)},
-    {"net_down_mbs", NULL,          SIG(net_down_mbs, SIG_FLOAT)},
-    {"net_up_mbs",   NULL,          SIG(net_up_mbs, SIG_FLOAT)},
-    {"disk_read",    "diskread",    SIG(disk_read, SIG_FLOAT)},
-    {"disk_write",   "diskwrite",   SIG(disk_write, SIG_FLOAT)},
-    {"load",         NULL,          SIG(load_avg, SIG_FLOAT)},
-    {"load_raw",     NULL,          SIG(load_raw, SIG_FLOAT)},
+    {"cpu",          NULL,        SIG(cpu,          SIG_FLOAT)},
+    {"cpu_max",      NULL,        SIG(cpu_max,      SIG_FLOAT)},
+    {"cpu_spread",   NULL,        SIG(cpu_spread,   SIG_FLOAT)},
+    {"cpu_cores",    NULL,        SIG(cpu_cores,    SIG_INT)  },
+    {"ram",          NULL,        SIG(ram,          SIG_FLOAT)},
+    {"ram_gb",       NULL,        SIG(ram_gb,       SIG_FLOAT)},
+    {"ram_total_gb", NULL,        SIG(ram_total_gb, SIG_FLOAT)},
+    {"swap",         NULL,        SIG(swap,         SIG_FLOAT)},
+    {"net_down",     "netdown",   SIG(net_down,     SIG_FLOAT)},
+    {"net_up",       "netup",     SIG(net_up,       SIG_FLOAT)},
+    {"net_down_mbs", NULL,        SIG(net_down_mbs, SIG_FLOAT)},
+    {"net_up_mbs",   NULL,        SIG(net_up_mbs,   SIG_FLOAT)},
+    {"disk_read",    "diskread",  SIG(disk_read,    SIG_FLOAT)},
+    {"disk_write",   "diskwrite", SIG(disk_write,   SIG_FLOAT)},
+    {"load",         NULL,        SIG(load_avg,     SIG_FLOAT)},
+    {"load_raw",     NULL,        SIG(load_raw,     SIG_FLOAT)},
 
     /* thermals + GPU */
-    {"cpu_temp",     "cputemp",     SIG(cpu_temp, SIG_FLOAT)},
-    {"cpu_temp_c",   NULL,          SIG(cpu_temp_c, SIG_FLOAT)},
-    {"gpu",          NULL,          SIG(gpu, SIG_FLOAT)},
-    {"gpu_temp",     "gputemp",     SIG(gpu_temp, SIG_FLOAT)},
-    {"gpu_temp_c",   NULL,          SIG(gpu_temp_c, SIG_FLOAT)},
-    {"nv_gpu",       NULL,          SIG(nv_gpu, SIG_FLOAT)},
-    {"nv_vram",      NULL,          SIG(nv_vram, SIG_FLOAT)},
-    {"nv_temp_c",    NULL,          SIG(nv_temp_c, SIG_FLOAT)},
-    {"nv_power",     NULL,          SIG(nv_power, SIG_FLOAT)},
-    {"nv_active",    NULL,          SIG(nv_active, SIG_BOOL)},
+    {"cpu_temp",     "cputemp",   SIG(cpu_temp,     SIG_FLOAT)},
+    {"cpu_temp_c",   NULL,        SIG(cpu_temp_c,   SIG_FLOAT)},
+    {"gpu",          NULL,        SIG(gpu,          SIG_FLOAT)},
+    {"gpu_temp",     "gputemp",   SIG(gpu_temp,     SIG_FLOAT)},
+    {"gpu_temp_c",   NULL,        SIG(gpu_temp_c,   SIG_FLOAT)},
+    {"nv_gpu",       NULL,        SIG(nv_gpu,       SIG_FLOAT)},
+    {"nv_vram",      NULL,        SIG(nv_vram,      SIG_FLOAT)},
+    {"nv_temp_c",    NULL,        SIG(nv_temp_c,    SIG_FLOAT)},
+    {"nv_power",     NULL,        SIG(nv_power,     SIG_FLOAT)},
+    {"nv_active",    NULL,        SIG(nv_active,    SIG_BOOL) },
 
     /* fused shaping signals */
-    {"thermal",      NULL,          SIG(thermal, SIG_FLOAT)},
-    {"activity",     NULL,          SIG(activity, SIG_FLOAT)},
-    {"pulse",        NULL,          SIG(pulse, SIG_FLOAT)},
+    {"thermal",      NULL,        SIG(thermal,      SIG_FLOAT)},
+    {"activity",     NULL,        SIG(activity,     SIG_FLOAT)},
+    {"pulse",        NULL,        SIG(pulse,        SIG_FLOAT)},
 
     /* uptime + processes */
-    {"uptime",       NULL,          SIG(uptime_hours, SIG_FLOAT)},
-    {"procs",        "processes",   SIG(procs, SIG_FLOAT)},
-    {"proc_count",   NULL,          SIG(proc_count, SIG_INT)},
+    {"uptime",       NULL,        SIG(uptime_hours, SIG_FLOAT)},
+    {"procs",        "processes", SIG(procs,        SIG_FLOAT)},
+    {"proc_count",   NULL,        SIG(proc_count,   SIG_INT)  },
 
     /* power */
-    {"battery",      NULL,          SIG(battery, SIG_FLOAT)},
-    {"charging",     NULL,          SIG(charging, SIG_BOOL)},
+    {"battery",      NULL,        SIG(battery,      SIG_FLOAT)},
+    {"charging",     NULL,        SIG(charging,     SIG_BOOL) },
 
     /* time */
-    {"time_of_day",  "timeofday",   SIG(time_of_day, SIG_FLOAT)},
-    {"sun",          NULL,          SIG(sun, SIG_FLOAT)},
-    {"day_fraction", NULL,          SIG(day_fraction, SIG_FLOAT)},
+    {"time_of_day",  "timeofday", SIG(time_of_day,  SIG_FLOAT)},
+    {"sun",          NULL,        SIG(sun,          SIG_FLOAT)},
+    {"day_fraction", NULL,        SIG(day_fraction, SIG_FLOAT)},
 
     /* input energy */
-    {"key_energy",   "keys",        SIG(key_energy, SIG_FLOAT)},
-    {"mouse_energy", "mouse",       SIG(mouse_energy, SIG_FLOAT)},
+    {"key_energy",   "keys",      SIG(key_energy,   SIG_FLOAT)},
+    {"mouse_energy", "mouse",     SIG(mouse_energy, SIG_FLOAT)},
 
     /* audio */
-    {"audio_level",  "audio",       SIG(audio_level, SIG_FLOAT)},
-    {"audio_bass",   "bass",        SIG(audio_bass, SIG_FLOAT)},
-    {"audio_mid",    "mid",         SIG(audio_mid, SIG_FLOAT)},
-    {"audio_treble", "treble",      SIG(audio_treble, SIG_FLOAT)},
-    {"audio_beat",   "beat",        SIG(audio_beat, SIG_FLOAT)},
-    {"audio_active", NULL,          SIG(audio_active, SIG_BOOL)},
+    {"audio_level",  "audio",     SIG(audio_level,  SIG_FLOAT)},
+    {"audio_bass",   "bass",      SIG(audio_bass,   SIG_FLOAT)},
+    {"audio_mid",    "mid",       SIG(audio_mid,    SIG_FLOAT)},
+    {"audio_treble", "treble",    SIG(audio_treble, SIG_FLOAT)},
+    {"audio_beat",   "beat",      SIG(audio_beat,   SIG_FLOAT)},
+    {"audio_active", NULL,        SIG(audio_active, SIG_BOOL) },
 };
 
 #undef SIG
@@ -143,13 +145,10 @@ static const reactive_signal g_signals[] = {
 static float signal_read(const reactive_signal *sig, const reactive_snapshot_t *snap) {
     const char *base = (const char *)snap;
     switch (sig->kind) {
-        case SIG_INT:
-            return (float)(*(const int *)(const void *)(base + sig->offset));
-        case SIG_BOOL:
-            return *(const bool *)(const void *)(base + sig->offset) ? 1.0f : 0.0f;
-        case SIG_FLOAT:
-        default:
-            return *(const float *)(const void *)(base + sig->offset);
+    case SIG_INT: return (float)(*(const int *)(const void *)(base + sig->offset));
+    case SIG_BOOL: return *(const bool *)(const void *)(base + sig->offset) ? 1.0f : 0.0f;
+    case SIG_FLOAT:
+    default: return *(const float *)(const void *)(base + sig->offset);
     }
 }
 
@@ -162,7 +161,7 @@ static float signal_read(const reactive_signal *sig, const reactive_snapshot_t *
 
 typedef struct {
     const reactive_signal *sig;
-    float                  value;
+    float value;
 } reactive_state;
 
 /* The vtable name is the provider name, which is how open() knows which signal
@@ -193,14 +192,18 @@ static void *reactive_open(const nw_source_spec *spec, char *err, size_t err_cap
     return st;
 }
 
-static void reactive_close(void *self) { free(self); }
+static void reactive_close(void *self) {
+    free(self);
+}
 
 static void reactive_tick(void *self, const nw_source_ctx *ctx) {
     reactive_state *st = self;
     st->value          = signal_read(st->sig, reactive_frame(ctx->now_ms));
 }
 
-static float reactive_scalar(void *self) { return ((reactive_state *)self)->value; }
+static float reactive_scalar(void *self) {
+    return ((reactive_state *)self)->value;
+}
 
 /* One vtable per signal. They differ only in `name`; the callbacks are shared.
  * Built once at registration because nw_source_register borrows the pointer. */
@@ -236,4 +239,6 @@ void nw_source_register_reactive(void) {
     }
 }
 
-size_t nw_source_reactive_signal_count(void) { return SIGNAL_COUNT; }
+size_t nw_source_reactive_signal_count(void) {
+    return SIGNAL_COUNT;
+}

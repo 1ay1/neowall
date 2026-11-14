@@ -37,25 +37,23 @@ typedef struct glyph_atlas glyph_atlas;
 typedef struct glyph_slot {
     uint16_t x, y;        /* top-left in the atlas bitmap */
     uint16_t w, h;        /* glyph bitmap size */
-    int16_t  off_x, off_y;/* pixel offset from cell top-left to glyph top-left */
-    bool     valid;
-    bool     color;       /* true = RGBA emoji in the COLOR atlas (x,y index it),
-                             sampled directly; false = R8 coverage, tinted by fg */
+    int16_t off_x, off_y; /* pixel offset from cell top-left to glyph top-left */
+    bool valid;
+    bool color; /* true = RGBA emoji in the COLOR atlas (x,y index it),
+                   sampled directly; false = R8 coverage, tinted by fg */
 } glyph_slot;
 
 /* Create an atlas that rasterizes `font` at a cell size of cell_w x cell_h
  * pixels. `font_data`/`font_len` is the in-memory font file (owned by caller,
  * must outlive the atlas). If font_data is NULL the bundled default font is
  * used. Returns NULL on failure (bad font, OOM). */
-glyph_atlas *glyph_atlas_create(const uint8_t *font_data, size_t font_len,
-                                int cell_w, int cell_h);
+glyph_atlas *glyph_atlas_create(const uint8_t *font_data, size_t font_len, int cell_w, int cell_h);
 
 /* Like glyph_atlas_create, but also loads optional bold/italic faces (NULL =
  * none; bold/italic cells then fall back to the regular face) and a built-in
  * system fallback chain for glyphs the primary font lacks (CJK/symbols). */
-glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len,
-                                   const char *bold_path, const char *italic_path,
-                                   int cell_w, int cell_h);
+glyph_atlas *glyph_atlas_create_ex(const uint8_t *font_data, size_t font_len, const char *bold_path,
+                                   const char *italic_path, int cell_w, int cell_h);
 
 void glyph_atlas_destroy(glyph_atlas *a);
 
@@ -67,29 +65,28 @@ const glyph_slot *glyph_atlas_get(glyph_atlas *a, uint32_t cp);
 
 /* As above, but selects the bold/italic face for the glyph (falling back to
  * regular when that face isn't loaded). Bold/italic variants cache separately. */
-const glyph_slot *glyph_atlas_get_styled(glyph_atlas *a, uint32_t cp,
-                                         bool bold, bool italic);
+const glyph_slot *glyph_atlas_get_styled(glyph_atlas *a, uint32_t cp, bool bold, bool italic);
 
 /* Atlas bitmap accessors (single-channel, 8-bit coverage, row-major). The
  * shader engine uploads this to a GL_R8 texture. `dirty` is set whenever new
  * glyphs were rasterized since the last clear, so the uploader can re-push only
  * when needed. */
 const uint8_t *glyph_atlas_bitmap(const glyph_atlas *a);
-int            glyph_atlas_width(const glyph_atlas *a);
-int            glyph_atlas_height(const glyph_atlas *a);
-bool           glyph_atlas_dirty(const glyph_atlas *a);
-void           glyph_atlas_clear_dirty(glyph_atlas *a);
+int glyph_atlas_width(const glyph_atlas *a);
+int glyph_atlas_height(const glyph_atlas *a);
+bool glyph_atlas_dirty(const glyph_atlas *a);
+void glyph_atlas_clear_dirty(glyph_atlas *a);
 
 /* Color-emoji atlas (RGBA8, straight alpha, row-major). Same fixed dimensions
  * as the coverage atlas. Color glyph_slots index into THIS bitmap. Uploaded to
  * a GL_RGBA8 texture by the shader engine and sampled directly (no fg tint). */
 const uint8_t *glyph_atlas_color_bitmap(const glyph_atlas *a);
-bool           glyph_atlas_color_dirty(const glyph_atlas *a);
-void           glyph_atlas_color_dirty_rows(const glyph_atlas *a, int *y0, int *y1);
-void           glyph_atlas_clear_color_dirty(glyph_atlas *a);
+bool glyph_atlas_color_dirty(const glyph_atlas *a);
+void glyph_atlas_color_dirty_rows(const glyph_atlas *a, int *y0, int *y1);
+void glyph_atlas_clear_color_dirty(glyph_atlas *a);
 
 /* Row range [*y0, *y1) of the atlas that changed since the last clear_dirty.
  * The GL uploader pushes only these rows instead of the whole atlas. */
-void           glyph_atlas_dirty_rows(const glyph_atlas *a, int *y0, int *y1);
+void glyph_atlas_dirty_rows(const glyph_atlas *a, int *y0, int *y1);
 
 #endif /* NEOWALL_TERMINAL_GLYPH_ATLAS_H */

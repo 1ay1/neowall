@@ -69,16 +69,16 @@ typedef enum term_color_kind {
 
 typedef struct term_color {
     term_color_kind kind;
-    uint8_t idx;          /* valid when kind == TERM_COLOR_INDEXED */
-    uint8_t r, g, b;      /* valid when kind == TERM_COLOR_RGB */
+    uint8_t idx;     /* valid when kind == TERM_COLOR_INDEXED */
+    uint8_t r, g, b; /* valid when kind == TERM_COLOR_RGB */
 } term_color;
 
 /* One character cell. `cp` is a Unicode scalar value (0 = blank). */
 typedef struct term_cell {
-    uint32_t   cp;        /* Unicode codepoint; 0 == empty cell */
+    uint32_t cp; /* Unicode codepoint; 0 == empty cell */
     term_color fg;
     term_color bg;
-    uint16_t   attr;      /* OR of term_attr bits */
+    uint16_t attr; /* OR of term_attr bits */
 } term_cell;
 
 /* ------------------------------------------------------------------------ */
@@ -98,17 +98,18 @@ typedef struct term_screen term_screen;
 /* ------------------------------------------------------------------------ */
 
 typedef struct term_spawn_opts {
-    const char *cmd;          /* command line to run under the PTY (via $SHELL -c if it has spaces, else execvp). Required. */
-    int         cols;         /* initial grid width  (clamped to sane range) */
-    int         rows;         /* initial grid height */
-    int         scrollback;   /* scrollback lines to retain (0 = none) */
-    const char *term_env;     /* value for TERM (default "xterm-256color") */
-    const char *cwd;          /* working directory for the child (NULL = inherit) */
+    const char *cmd;      /* command line to run under the PTY (via $SHELL -c if it has spaces, else
+                             execvp). Required. */
+    int cols;             /* initial grid width  (clamped to sane range) */
+    int rows;             /* initial grid height */
+    int scrollback;       /* scrollback lines to retain (0 = none) */
+    const char *term_env; /* value for TERM (default "xterm-256color") */
+    const char *cwd;      /* working directory for the child (NULL = inherit) */
     /* Called on the READER thread after the child's output changed the grid
      * (optional). Must be thread-safe and cheap: it's how an idle-gated
      * renderer that has gone to sleep learns there is something to draw. */
-    void      (*on_output)(void *ctx);
-    void       *on_output_ctx;
+    void (*on_output)(void *ctx);
+    void *on_output_ctx;
 } term_spawn_opts;
 
 /* Spawn `opts.cmd` under a fresh PTY and start the reader thread. On success
@@ -149,11 +150,11 @@ bool term_child_exited(const terminal *t, int *exit_status_out);
 /* ------------------------------------------------------------------------ */
 
 typedef struct term_frame {
-    int              cols, rows;
-    const term_cell *cells;    /* rows*cols, row-major, borrowed (valid until next snapshot) */
-    int              cursor_x, cursor_y;
-    bool             cursor_visible;
-    uint64_t         epoch;    /* bumps whenever the grid changed; skip re-upload if unchanged */
+    int cols, rows;
+    const term_cell *cells; /* rows*cols, row-major, borrowed (valid until next snapshot) */
+    int cursor_x, cursor_y;
+    bool cursor_visible;
+    uint64_t epoch; /* bumps whenever the grid changed; skip re-upload if unchanged */
 } term_frame;
 
 /* Copy a frame-coherent view of the grid into the terminal's snapshot buffer
@@ -178,39 +179,39 @@ unsigned long long term_dirty_epoch(const terminal *t);
 #define TERM_SCREEN_MAX_ROWS 512
 
 term_screen *term_screen_create(int cols, int rows);
-void         term_screen_destroy(term_screen *s);
+void term_screen_destroy(term_screen *s);
 /* Resize transactionally. Returns false on allocation failure and leaves the
  * old grid and geometry untouched. Requested dimensions are clamped. */
-bool         term_screen_resize(term_screen *s, int cols, int rows);
+bool term_screen_resize(term_screen *s, int cols, int rows);
 
 /* Feed raw bytes (possibly a partial escape sequence) into the parser. State
  * carries across calls, so a sequence split across two feeds is handled. */
-void         term_screen_feed(term_screen *s, const uint8_t *bytes, size_t len);
+void term_screen_feed(term_screen *s, const uint8_t *bytes, size_t len);
 
 /* Grid accessors for tests / rendering. */
-int              term_screen_cols(const term_screen *s);
-int              term_screen_rows(const term_screen *s);
-const term_cell *term_screen_row(const term_screen *s, int y);   /* cols cells */
-void             term_screen_cursor(const term_screen *s, int *x, int *y);
+int term_screen_cols(const term_screen *s);
+int term_screen_rows(const term_screen *s);
+const term_cell *term_screen_row(const term_screen *s, int y); /* cols cells */
+void term_screen_cursor(const term_screen *s, int *x, int *y);
 
 /* Cursor visibility (DECTCEM). False when the app has hidden the cursor. */
-bool             term_screen_cursor_visible(const term_screen *s);
+bool term_screen_cursor_visible(const term_screen *s);
 
 /* Latest window title set via OSC 0/2 (empty string if none). Borrowed. */
-const char      *term_screen_title(const term_screen *s);
+const char *term_screen_title(const term_screen *s);
 
 /* Current mouse-reporting state (set by the app via DECSET 1000/1002/1003 and
  * 1006). *proto is 0 (off), 1000, 1002 or 1003; *sgr is true when SGR extended
  * coordinates were requested. Used to decide whether/how to forward pointer
  * events into the PTY. */
-void             term_screen_mouse_mode(const term_screen *s, int *proto, bool *sgr);
+void term_screen_mouse_mode(const term_screen *s, int *proto, bool *sgr);
 
 /* Drain queued reply bytes (responses to DSR / Device-Attributes / other query
  * control functions the app sent) into `out`, up to `cap` bytes; returns the
  * count copied and clears the buffer. The PTY layer writes these back to the
  * child after each feed. Query-answering is what lets probing TUIs (btop, vim)
  * finish their startup handshake and actually animate. */
-size_t           term_screen_take_reply(term_screen *s, char *out, size_t cap);
+size_t term_screen_take_reply(term_screen *s, char *out, size_t cap);
 
 /* Render the visible grid to a UTF-8 string (glyphs only, no colour), one line
  * per row, trailing blanks trimmed. Caller frees. For the headless harness so

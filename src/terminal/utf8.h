@@ -22,14 +22,18 @@
 #define UTF8_REPLACEMENT 0xFFFDu
 
 typedef struct utf8_decoder {
-    uint32_t cp;        /* codepoint accumulated so far */
-    uint8_t  need;      /* continuation bytes still expected */
-    uint8_t  seen;      /* continuation bytes consumed for current cp */
-    uint32_t lo, hi;    /* valid codepoint range for the current lead (overlong guard) */
+    uint32_t cp;     /* codepoint accumulated so far */
+    uint8_t need;    /* continuation bytes still expected */
+    uint8_t seen;    /* continuation bytes consumed for current cp */
+    uint32_t lo, hi; /* valid codepoint range for the current lead (overlong guard) */
 } utf8_decoder;
 
 static inline void utf8_reset(utf8_decoder *d) {
-    d->cp = 0; d->need = 0; d->seen = 0; d->lo = 0; d->hi = 0;
+    d->cp   = 0;
+    d->need = 0;
+    d->seen = 0;
+    d->lo   = 0;
+    d->hi   = 0;
 }
 
 /* Push one byte. Returns:
@@ -42,17 +46,29 @@ static inline void utf8_reset(utf8_decoder *d) {
 static inline int utf8_push(utf8_decoder *d, uint8_t b, uint32_t *out_cp) {
     if (d->need == 0) {
         /* Expecting a lead byte. */
-        if (b < 0x80u) {                 /* ASCII fast path */
+        if (b < 0x80u) { /* ASCII fast path */
             *out_cp = b;
             return 1;
-        } else if ((b & 0xE0u) == 0xC0u) {   /* 110xxxxx → 2-byte */
-            d->cp = b & 0x1Fu; d->need = 1; d->seen = 0; d->lo = 0x80; d->hi = 0x7FF;
+        } else if ((b & 0xE0u) == 0xC0u) { /* 110xxxxx → 2-byte */
+            d->cp   = b & 0x1Fu;
+            d->need = 1;
+            d->seen = 0;
+            d->lo   = 0x80;
+            d->hi   = 0x7FF;
             return 0;
-        } else if ((b & 0xF0u) == 0xE0u) {   /* 1110xxxx → 3-byte */
-            d->cp = b & 0x0Fu; d->need = 2; d->seen = 0; d->lo = 0x800; d->hi = 0xFFFF;
+        } else if ((b & 0xF0u) == 0xE0u) { /* 1110xxxx → 3-byte */
+            d->cp   = b & 0x0Fu;
+            d->need = 2;
+            d->seen = 0;
+            d->lo   = 0x800;
+            d->hi   = 0xFFFF;
             return 0;
-        } else if ((b & 0xF8u) == 0xF0u) {   /* 11110xxx → 4-byte */
-            d->cp = b & 0x07u; d->need = 3; d->seen = 0; d->lo = 0x10000; d->hi = 0x10FFFF;
+        } else if ((b & 0xF8u) == 0xF0u) { /* 11110xxx → 4-byte */
+            d->cp   = b & 0x07u;
+            d->need = 3;
+            d->seen = 0;
+            d->lo   = 0x10000;
+            d->hi   = 0x10FFFF;
             return 0;
         }
         /* 0x80..0xBF stray continuation, or 0xF8..0xFF invalid lead. */
@@ -80,8 +96,8 @@ static inline int utf8_push(utf8_decoder *d, uint8_t b, uint32_t *out_cp) {
     uint32_t lo = d->lo, hi = d->hi;
     utf8_reset(d);
 
-    if (cp < lo || cp > hi ||                    /* overlong / out of range */
-        (cp >= 0xD800u && cp <= 0xDFFFu)) {      /* UTF-16 surrogate half */
+    if (cp < lo || cp > hi ||               /* overlong / out of range */
+        (cp >= 0xD800u && cp <= 0xDFFFu)) { /* UTF-16 surrogate half */
         *out_cp = UTF8_REPLACEMENT;
         return 1;
     }

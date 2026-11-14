@@ -35,7 +35,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
      * The last three bytes choose display size and mode (seeds keep their
      * real headers at the front). */
     const char *path = (data[0] == 0xFF && data[1] == 0xD8) ? g_jpg : g_png;
-    int mode = data[size - 1] % 5;
+    int mode         = data[size - 1] % 5;
     int w = 1 + (data[size - 2] % 64), h = 1 + (data[size - 3] % 64);
 
     FILE *f = fopen(path, "wb");

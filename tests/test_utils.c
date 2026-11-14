@@ -17,25 +17,25 @@
 #include "neowall/core/util.h"
 
 static int failures = 0;
-static int checks = 0;
+static int checks   = 0;
 
-#define CHECK(cond)                                                            \
-    do {                                                                       \
-        checks++;                                                              \
-        if (!(cond)) {                                                         \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
-        }                                                                      \
+#define CHECK(cond)                                                                                \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (!(cond)) {                                                                             \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                        \
+        }                                                                                          \
     } while (0)
 
-#define CHECK_FEQ(a, b)                                                        \
-    do {                                                                       \
-        checks++;                                                              \
-        if (fabsf((float)(a) - (float)(b)) > 1e-5f) {                          \
-            failures++;                                                        \
-            fprintf(stderr, "FAIL %s:%d: %s (%.6f) != %s (%.6f)\n", __FILE__,  \
-                    __LINE__, #a, (double)(a), #b, (double)(b));               \
-        }                                                                      \
+#define CHECK_FEQ(a, b)                                                                            \
+    do {                                                                                           \
+        checks++;                                                                                  \
+        if (fabsf((float)(a) - (float)(b)) > 1e-5f) {                                              \
+            failures++;                                                                            \
+            fprintf(stderr, "FAIL %s:%d: %s (%.6f) != %s (%.6f)\n", __FILE__, __LINE__, #a,        \
+                    (double)(a), #b, (double)(b));                                                 \
+        }                                                                                          \
     } while (0)
 
 static void test_ease(void) {
@@ -99,7 +99,7 @@ static void test_parse_index(void) {
     CHECK(!neowall_parse_index("-1", &v));
     CHECK(!neowall_parse_index("0x10", &v));
     CHECK(!neowall_parse_index(NULL, &v));
-    CHECK(v == -1);   /* nothing written on failure */
+    CHECK(v == -1); /* nothing written on failure */
 
     /* Overflow: all digits, but far past what an int (or a long) can hold.
      * atoi("99999999999999999999") is undefined behaviour; in practice glibc
@@ -143,7 +143,7 @@ static void test_secure_runtime_dir(void) {
         struct stat st;
         CHECK(lstat(dir, &st) == 0);
         CHECK(S_ISDIR(st.st_mode));
-        CHECK((st.st_mode & (S_IRWXG | S_IRWXO)) == 0);   /* no group/other access */
+        CHECK((st.st_mode & (S_IRWXG | S_IRWXO)) == 0); /* no group/other access */
         CHECK(st.st_uid == getuid());
     }
 
@@ -160,7 +160,7 @@ static void test_secure_runtime_dir(void) {
         CHECK(d2 == NULL || strcmp(d2, sub) != 0);
         if (d2) {
             struct stat st;
-            CHECK(lstat(d2, &st) == 0 && S_ISDIR(st.st_mode));   /* real dir, not symlink */
+            CHECK(lstat(d2, &st) == 0 && S_ISDIR(st.st_mode)); /* real dir, not symlink */
             CHECK(st.st_uid == getuid());
         }
         unlink(sub);
@@ -170,8 +170,7 @@ static void test_secure_runtime_dir(void) {
 
 static void test_persisted_state_pruning(void) {
     char base[256];
-    snprintf(base, sizeof(base), "/tmp/nw-state-test-%d-%ld",
-             (int)getpid(), (long)time(NULL));
+    snprintf(base, sizeof(base), "/tmp/nw-state-test-%d-%ld", (int)getpid(), (long)time(NULL));
     CHECK(mkdir(base, 0700) == 0);
     setenv("XDG_STATE_HOME", base, 1);
 
@@ -209,17 +208,22 @@ static void test_find_data(void) {
     char base[256];
     snprintf(base, sizeof(base), "/tmp/nw-data-test-%d-%ld", (int)getpid(), (long)time(NULL));
     char d[1200], p[1200], out[1200];
-    const char *subs[] = {"home", "home/neowall", "a", "a/neowall", "a/neowall/shaders",
-                          "b", "b/neowall", "b/neowall/shaders"};
+    const char *subs[] = {"home",      "home/neowall",      "a",
+                          "a/neowall", "a/neowall/shaders", "b",
+                          "b/neowall", "b/neowall/shaders"};
     mkdir(base, 0700);
     for (size_t i = 0; i < sizeof(subs) / sizeof(subs[0]); i++) {
         snprintf(d, sizeof(d), "%s/%s", base, subs[i]);
         mkdir(d, 0700);
     }
-    snprintf(p, sizeof(p), "%s/a/neowall/shaders/x.glsl", base); touch(p);
-    snprintf(p, sizeof(p), "%s/b/neowall/shaders/x.glsl", base); touch(p);
-    snprintf(p, sizeof(p), "%s/b/neowall/shaders/only_b.glsl", base); touch(p);
-    snprintf(p, sizeof(p), "%s/home/neowall/config.vibe", base); touch(p);
+    snprintf(p, sizeof(p), "%s/a/neowall/shaders/x.glsl", base);
+    touch(p);
+    snprintf(p, sizeof(p), "%s/b/neowall/shaders/x.glsl", base);
+    touch(p);
+    snprintf(p, sizeof(p), "%s/b/neowall/shaders/only_b.glsl", base);
+    touch(p);
+    snprintf(p, sizeof(p), "%s/home/neowall/config.vibe", base);
+    touch(p);
 
     snprintf(d, sizeof(d), "%s/home", base);
     setenv("XDG_DATA_HOME", d, 1);

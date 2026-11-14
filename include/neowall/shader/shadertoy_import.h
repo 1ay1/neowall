@@ -24,7 +24,8 @@ typedef struct {
 } nw_import;
 
 /* Parse `json` (len bytes). On failure *out is untouched and `err` says why. */
-nw_result nw_shadertoy_import(const char *json, size_t len, nw_import *out, char *err, size_t err_cap);
+nw_result nw_shadertoy_import(const char *json, size_t len, nw_import *out, char *err,
+                              size_t err_cap);
 void nw_import_free(nw_import *im);
 
 #endif /* NEOWALL_SHADERTOY_IMPORT_H */

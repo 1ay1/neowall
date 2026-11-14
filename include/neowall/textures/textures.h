@@ -49,12 +49,12 @@ GLuint texture_create_abstract(int width, int height);
 GLuint texture_create_font_atlas(int width, int height);
 
 /* Texture name constants for configuration */
-#define TEXTURE_NAME_RGBA_NOISE  "rgba_noise"
-#define TEXTURE_NAME_GRAY_NOISE  "gray_noise"
-#define TEXTURE_NAME_BLUE_NOISE  "blue_noise"
-#define TEXTURE_NAME_WOOD        "wood"
-#define TEXTURE_NAME_ABSTRACT    "abstract"
-#define TEXTURE_NAME_FONT        "font"
+#define TEXTURE_NAME_RGBA_NOISE "rgba_noise"
+#define TEXTURE_NAME_GRAY_NOISE "gray_noise"
+#define TEXTURE_NAME_BLUE_NOISE "blue_noise"
+#define TEXTURE_NAME_WOOD       "wood"
+#define TEXTURE_NAME_ABSTRACT   "abstract"
+#define TEXTURE_NAME_FONT       "font"
 
 /* Default texture sizes */
 #define DEFAULT_TEXTURE_SIZE 256

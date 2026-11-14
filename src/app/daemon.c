@@ -37,12 +37,12 @@ static void handle_crash(int signum) {
     /* Map known signals to short string literals. */
     const char *msg;
     switch (signum) {
-        case SIGSEGV: msg = "CRASH: SIGSEGV (segfault)\n"; break;
-        case SIGBUS:  msg = "CRASH: SIGBUS (bus error)\n"; break;
-        case SIGILL:  msg = "CRASH: SIGILL (illegal instruction)\n"; break;
-        case SIGFPE:  msg = "CRASH: SIGFPE (floating point exception)\n"; break;
-        case SIGABRT: msg = "CRASH: SIGABRT (abort)\n"; break;
-        default:      msg = "CRASH: fatal signal\n"; break;
+    case SIGSEGV: msg = "CRASH: SIGSEGV (segfault)\n"; break;
+    case SIGBUS: msg = "CRASH: SIGBUS (bus error)\n"; break;
+    case SIGILL: msg = "CRASH: SIGILL (illegal instruction)\n"; break;
+    case SIGFPE: msg = "CRASH: SIGFPE (floating point exception)\n"; break;
+    case SIGABRT: msg = "CRASH: SIGABRT (abort)\n"; break;
+    default: msg = "CRASH: fatal signal\n"; break;
     }
 
     /* write() is async-signal-safe; printf-family functions are not. */
@@ -64,7 +64,7 @@ static void handle_crash(int signum) {
  * and so in every thread started after it. The runtime reads them from a
  * signalfd; nothing ever runs in a handler. */
 bool block_signals(void) {
-    const int sigs[] = {SIGTERM, SIGINT, SIGUSR1, SIGUSR2, SIGCONT, SIGHUP,
+    const int sigs[] = {SIGTERM,  SIGINT,       SIGUSR1,      SIGUSR2,      SIGCONT, SIGHUP,
                         SIGRTMIN, SIGRTMIN + 1, SIGRTMIN + 2, SIGRTMIN + 3, 0};
     if (!rt_block_signals(sigs)) {
         log_error("Failed to block signals: %s", strerror(errno));
@@ -80,7 +80,7 @@ void setup_crash_handlers(struct neowall_state *state) {
     memset(&crash_sa, 0, sizeof(crash_sa));
     crash_sa.sa_handler = handle_crash;
     sigemptyset(&crash_sa.sa_mask);
-    crash_sa.sa_flags = SA_RESETHAND;  /* Reset to default after first crash */
+    crash_sa.sa_flags = SA_RESETHAND; /* Reset to default after first crash */
 
     sigaction(SIGSEGV, &crash_sa, NULL);
     sigaction(SIGBUS, &crash_sa, NULL);
@@ -107,8 +107,8 @@ bool gpu_restart_allowed(void) {
     long count = 0, at = 0;
     if (v) neowall_parse_index(v, &count);
     if (t) neowall_parse_index(t, &at);
-    long now = (long)(get_time_ms() / 1000);   /* monotonic, survives exec */
-    if (now - at > 60) count = 0;              /* a minute of health resets it */
+    long now = (long)(get_time_ms() / 1000); /* monotonic, survives exec */
+    if (now - at > 60) count = 0;            /* a minute of health resets it */
     if (count >= 3) {
         log_error("GPU lost %ld times in a minute; not restarting", count);
         return false;
@@ -166,8 +166,7 @@ bool daemonize(void) {
         log_error("Failed to open /dev/null: %s", strerror(errno));
         return false;
     }
-    if (dup2(devnull, STDIN_FILENO)  < 0 ||
-        dup2(devnull, STDOUT_FILENO) < 0 ||
+    if (dup2(devnull, STDIN_FILENO) < 0 || dup2(devnull, STDOUT_FILENO) < 0 ||
         dup2(devnull, STDERR_FILENO) < 0) {
         log_error("Failed to dup2 /dev/null onto std fds: %s", strerror(errno));
         close(devnull);

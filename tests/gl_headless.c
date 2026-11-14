@@ -38,18 +38,22 @@ const char *gl_headless_init(void) {
     if (!eglInitialize(g_dpy, NULL, NULL)) return "eglInitialize failed";
     if (!eglBindAPI(EGL_OPENGL_API)) return "eglBindAPI(OpenGL) failed";
 
-    const EGLint cfg_attr[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-                               EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT, EGL_NONE};
+    const EGLint cfg_attr[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE,
+                               EGL_OPENGL_BIT, EGL_NONE};
     EGLConfig cfg;
     EGLint n = 0;
     if (!eglChooseConfig(g_dpy, cfg_attr, &cfg, 1, &n) || n < 1) {
         /* surfaceless may expose no configs; contexts work without one */
         cfg = NULL;
     }
-    const EGLint ctx_attr[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 3,
+    const EGLint ctx_attr[] = {EGL_CONTEXT_MAJOR_VERSION,
+                               3,
+                               EGL_CONTEXT_MINOR_VERSION,
+                               3,
                                EGL_CONTEXT_OPENGL_PROFILE_MASK,
-                               EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT, EGL_NONE};
-    g_ctx = eglCreateContext(g_dpy, cfg, EGL_NO_CONTEXT, ctx_attr);
+                               EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+                               EGL_NONE};
+    g_ctx                   = eglCreateContext(g_dpy, cfg, EGL_NO_CONTEXT, ctx_attr);
     if (g_ctx == EGL_NO_CONTEXT) return "no GL 3.3 core context";
     if (!eglMakeCurrent(g_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, g_ctx)) {
         return "eglMakeCurrent(surfaceless) failed";

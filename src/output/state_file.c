@@ -3,19 +3,19 @@
  * See neowall/output/state_file.h. */
 
 #ifndef _DEFAULT_SOURCE
-#define _DEFAULT_SOURCE   /* lstat, localtime_r, PATH_MAX, clock_gettime */
+#define _DEFAULT_SOURCE /* lstat, localtime_r, PATH_MAX, clock_gettime */
 #endif
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include <inttypes.h>  /* PRIu64 */
+#include <inttypes.h> /* PRIu64 */
 #include <limits.h>
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <string.h>
-#include <strings.h>  /* POSIX strcasecmp — don't redefine it ourselves */
+#include <strings.h> /* POSIX strcasecmp — don't redefine it ourselves */
 #include <unistd.h>
 #include <errno.h>
 #include <pthread.h>
@@ -33,10 +33,10 @@
 /* Must use same fallback logic as get_state_file_path to stay in sync */
 static const char *get_cycle_list_file_path(void) {
     static char path[NW_PATH_MAX];
-    const char *state_home = getenv("XDG_STATE_HOME");
+    const char *state_home  = getenv("XDG_STATE_HOME");
     const char *config_home = getenv("XDG_CONFIG_HOME");
-    const char *home = getenv("HOME");
-    
+    const char *home        = getenv("HOME");
+
     /* Prefer XDG_STATE_HOME for persistent state (usually ~/.local/state) */
     if (state_home && state_home[0] != '\0') {
         snprintf(path, sizeof(path), "%s/neowall/cycle_list", state_home);
@@ -52,7 +52,7 @@ static const char *get_cycle_list_file_path(void) {
     /* Last resort: tmpfs (will be lost on reboot) */
     else {
         const char *rt = neowall_secure_runtime_dir();
-        int n = rt ? snprintf(path, sizeof(path), "%s/cycle_list", rt) : -1;
+        int n          = rt ? snprintf(path, sizeof(path), "%s/cycle_list", rt) : -1;
         if (rt == NULL || n < 0 || (size_t)n >= sizeof(path)) {
             /* No safe directory available (or it would truncate): return an
              * empty path so callers fail closed rather than writing into a
@@ -60,16 +60,16 @@ static const char *get_cycle_list_file_path(void) {
             path[0] = '\0';
         }
     }
-    
+
     return path;
 }
 
 const char *get_state_file_path(void) {
     static char state_path[NW_PATH_MAX];
-    const char *state_home = getenv("XDG_STATE_HOME");
+    const char *state_home  = getenv("XDG_STATE_HOME");
     const char *config_home = getenv("XDG_CONFIG_HOME");
-    const char *home = getenv("HOME");
-    
+    const char *home        = getenv("HOME");
+
     /* Prefer XDG_STATE_HOME for persistent state (usually ~/.local/state) */
     if (state_home && state_home[0] != '\0') {
         snprintf(state_path, sizeof(state_path), "%s/neowall/state", state_home);
@@ -85,12 +85,12 @@ const char *get_state_file_path(void) {
     /* Last resort: tmpfs (will be lost on reboot) */
     else {
         const char *rt = neowall_secure_runtime_dir();
-        int n = rt ? snprintf(state_path, sizeof(state_path), "%s/state.txt", rt) : -1;
+        int n          = rt ? snprintf(state_path, sizeof(state_path), "%s/state.txt", rt) : -1;
         if (rt == NULL || n < 0 || (size_t)n >= sizeof(state_path)) {
             state_path[0] = '\0';
         }
     }
-    
+
     return state_path;
 }
 
@@ -108,7 +108,10 @@ static FILE *open_atomic_temp(const char *path, char *tmp, size_t tmp_size) {
     int fd = mkstemp(tmp);
     if (fd < 0) return NULL;
     FILE *fp = fdopen(fd, "w");
-    if (!fp) { close(fd); unlink(tmp); }
+    if (!fp) {
+        close(fd);
+        unlink(tmp);
+    }
     return fp;
 }
 
@@ -135,16 +138,15 @@ typedef struct {
 static pthread_mutex_t state_file_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Write current wallpaper state for multi-monitor support */
-bool write_wallpaper_state(const char *output_name, const char *wallpaper_path, 
-                           const char *mode, int cycle_index, int cycle_total,
-                           const char *status) {
+bool write_wallpaper_state(const char *output_name, const char *wallpaper_path, const char *mode,
+                           int cycle_index, int cycle_total, const char *status) {
     /* Serialize concurrent read-modify-rename transactions. */
-    
+
     const char *state_path = get_state_file_path();
-    
+
     /* Acquire lock before file operations */
     pthread_mutex_lock(&state_file_mutex);
-    
+
     /* Ensure state directory exists */
     char dir_path[NW_PATH_MAX];
     snprintf(dir_path, sizeof(dir_path), "%s", state_path);
@@ -166,21 +168,21 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
             mkdir(dir_path, 0755);
         }
     }
-    
+
     /* Read existing states from file */
     output_state_entry_t states[NW_MAX_OUTPUTS];
-    int state_count = 0;
+    int state_count   = 0;
     bool found_output = false;
-    
+
     FILE *fp_read = fopen(state_path, "r");
     if (fp_read) {
         char line[NW_PATH_MAX];
         output_state_entry_t current_entry = {0};
-        bool reading_entry = false;
-        
+        bool reading_entry                 = false;
+
         while (fgets(line, sizeof(line), fp_read)) {
             line[strcspn(line, "\n")] = 0;
-            
+
             if (strncmp(line, "[output]", 8) == 0) {
                 /* Save previous entry if exists */
                 if (reading_entry && current_entry.output_name[0] != '\0') {
@@ -194,12 +196,14 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
             } else if (reading_entry) {
                 if (strncmp(line, "name=", 5) == 0) {
                     size_t len = strlen(line + 5);
-                    if (len > sizeof(current_entry.output_name) - 1) len = sizeof(current_entry.output_name) - 1;
+                    if (len > sizeof(current_entry.output_name) - 1)
+                        len = sizeof(current_entry.output_name) - 1;
                     memcpy(current_entry.output_name, line + 5, len);
                     current_entry.output_name[len] = '\0';
                 } else if (strncmp(line, "wallpaper=", 10) == 0) {
                     size_t len = strlen(line + 10);
-                    if (len > sizeof(current_entry.wallpaper_path) - 1) len = sizeof(current_entry.wallpaper_path) - 1;
+                    if (len > sizeof(current_entry.wallpaper_path) - 1)
+                        len = sizeof(current_entry.wallpaper_path) - 1;
                     memcpy(current_entry.wallpaper_path, line + 10, len);
                     current_entry.wallpaper_path[len] = '\0';
                 } else if (strncmp(line, "mode=", 5) == 0) {
@@ -217,7 +221,8 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
                         current_entry.cycle_total = (int)value;
                 } else if (strncmp(line, "status=", 7) == 0) {
                     size_t len = strlen(line + 7);
-                    if (len > sizeof(current_entry.status) - 1) len = sizeof(current_entry.status) - 1;
+                    if (len > sizeof(current_entry.status) - 1)
+                        len = sizeof(current_entry.status) - 1;
                     memcpy(current_entry.status, line + 7, len);
                     current_entry.status[len] = '\0';
                 } else if (strncmp(line, "timestamp=", 10) == 0) {
@@ -227,17 +232,17 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
                 }
             }
         }
-        
+
         /* Save last entry */
         if (reading_entry && current_entry.output_name[0] != '\0') {
             if (state_count < NW_MAX_OUTPUTS) {
                 states[state_count++] = current_entry;
             }
         }
-        
+
         fclose(fp_read);
     }
-    
+
     /* Update or add the current output's state */
     for (int i = 0; i < state_count; i++) {
         if (output_name && strcmp(states[i].output_name, output_name) == 0) {
@@ -247,33 +252,32 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
             snprintf(states[i].mode, sizeof(states[i].mode), "%s", mode ? mode : "fill");
             states[i].cycle_index = cycle_index;
             states[i].cycle_total = cycle_total;
-            snprintf(states[i].status, sizeof(states[i].status), "%s",
-                     status ? status : "active");
+            snprintf(states[i].status, sizeof(states[i].status), "%s", status ? status : "active");
             states[i].timestamp = (long)time(NULL);
-            found_output = true;
+            found_output        = true;
             break;
         }
     }
-    
+
     /* Add new entry if not found */
     if (!found_output && state_count < NW_MAX_OUTPUTS) {
         /* snprintf both guarantees NUL-termination (the source is an unbounded
          * caller pointer) and silences GCC -O2 -Wstringop-truncation. */
         memset(&states[state_count], 0, sizeof(states[state_count]));
-        snprintf(states[state_count].output_name, sizeof(states[state_count].output_name),
-                 "%s", output_name ? output_name : "unknown");
+        snprintf(states[state_count].output_name, sizeof(states[state_count].output_name), "%s",
+                 output_name ? output_name : "unknown");
         snprintf(states[state_count].wallpaper_path, sizeof(states[state_count].wallpaper_path),
                  "%s", wallpaper_path ? wallpaper_path : "none");
-        snprintf(states[state_count].mode, sizeof(states[state_count].mode),
-                 "%s", mode ? mode : "fill");
+        snprintf(states[state_count].mode, sizeof(states[state_count].mode), "%s",
+                 mode ? mode : "fill");
         states[state_count].cycle_index = cycle_index;
         states[state_count].cycle_total = cycle_total;
-        snprintf(states[state_count].status, sizeof(states[state_count].status),
-                 "%s", status ? status : "active");
+        snprintf(states[state_count].status, sizeof(states[state_count].status), "%s",
+                 status ? status : "active");
         states[state_count].timestamp = (long)time(NULL);
         state_count++;
     }
-    
+
     /* Write a complete replacement then atomically publish it. Readers see
      * either the old complete snapshot or the new one, never truncation. */
     char tmp_path[NW_PATH_MAX];
@@ -283,7 +287,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
         pthread_mutex_unlock(&state_file_mutex);
         return false;
     }
-    
+
     for (int i = 0; i < state_count; i++) {
         fprintf(fp_write, "[output]\n");
         fprintf(fp_write, "name=%s\n", states[i].output_name);
@@ -295,7 +299,7 @@ bool write_wallpaper_state(const char *output_name, const char *wallpaper_path,
         fprintf(fp_write, "timestamp=%ld\n", states[i].timestamp);
         fprintf(fp_write, "\n");
     }
-    
+
     bool published = publish_atomic(fp_write, tmp_path, state_path);
     if (!published) log_error("Failed to publish state file %s: %s", state_path, strerror(errno));
     pthread_mutex_unlock(&state_file_mutex);
@@ -308,8 +312,8 @@ static int load_state_entries(const char *path, output_state_entry_t *states, in
 
     char line[NW_PATH_MAX];
     output_state_entry_t entry = {0};
-    bool reading = false;
-    int count = 0;
+    bool reading               = false;
+    int count                  = 0;
     while (fgets(line, sizeof(line), fp)) {
         line[strcspn(line, "\n")] = '\0';
         if (strcmp(line, "[output]") == 0) {
@@ -351,23 +355,21 @@ static int load_state_entries(const char *path, output_state_entry_t *states, in
     return failed ? -1 : count;
 }
 
-static bool publish_state_entries(const char *path,
-                                  const output_state_entry_t *states, int count) {
+static bool publish_state_entries(const char *path, const output_state_entry_t *states, int count) {
     char tmp_path[NW_PATH_MAX];
     FILE *fp = open_atomic_temp(path, tmp_path, sizeof(tmp_path));
     if (!fp) return false;
     for (int i = 0; i < count; i++) {
-        fprintf(fp, "[output]\nname=%s\nwallpaper=%s\nmode=%s\n",
-                states[i].output_name, states[i].wallpaper_path, states[i].mode);
+        fprintf(fp, "[output]\nname=%s\nwallpaper=%s\nmode=%s\n", states[i].output_name,
+                states[i].wallpaper_path, states[i].mode);
         fprintf(fp, "cycle_index=%d\ncycle_total=%d\nstatus=%s\ntimestamp=%ld\n\n",
-                states[i].cycle_index, states[i].cycle_total,
-                states[i].status, states[i].timestamp);
+                states[i].cycle_index, states[i].cycle_total, states[i].status,
+                states[i].timestamp);
     }
     return publish_atomic(fp, tmp_path, path);
 }
 
-static bool state_name_retained(const char *name,
-                                const char *const *names, size_t count) {
+static bool state_name_retained(const char *name, const char *const *names, size_t count) {
     for (size_t i = 0; i < count; i++) {
         if (names[i] && strcmp(name, names[i]) == 0) return true;
     }
@@ -435,26 +437,26 @@ bool remove_wallpaper_state(const char *output_name) {
 /* Restore cycle index from state file for the given output */
 int restore_cycle_index_from_state(const char *output_name) {
     const char *state_path = get_state_file_path();
-    FILE *fp = fopen(state_path, "r");
-    
+    FILE *fp               = fopen(state_path, "r");
+
     if (!fp) {
         log_debug("No state file found, starting from index 0");
         return 0;
     }
-    
+
     char line[NW_PATH_MAX];
     char current_output[256] = "";
-    int cycle_index = 0;
-    bool in_matching_output = false;
-    
+    int cycle_index          = 0;
+    bool in_matching_output  = false;
+
     while (fgets(line, sizeof(line), fp)) {
         /* Remove newline */
         line[strcspn(line, "\n")] = 0;
-        
+
         if (strncmp(line, "[output]", 8) == 0) {
             /* Start of new output section */
             in_matching_output = false;
-            current_output[0] = '\0';
+            current_output[0]  = '\0';
         } else if (strncmp(line, "name=", 5) == 0) {
             /* Check if this is the output we're looking for */
             size_t len = strlen(line + 5);
@@ -466,45 +468,47 @@ int restore_cycle_index_from_state(const char *output_name) {
             }
         } else if (in_matching_output && strncmp(line, "cycle_index=", 12) == 0) {
             long value;
-            if (parse_disk_long(line + 12, INT_MAX, &value)) cycle_index = (int)value;
-            else in_matching_output = false;
+            if (parse_disk_long(line + 12, INT_MAX, &value))
+                cycle_index = (int)value;
+            else
+                in_matching_output = false;
             /* Found it, can stop reading */
             break;
         }
     }
-    
+
     fclose(fp);
-    
+
     if (in_matching_output) {
         log_info("Restored cycle index %d for output %s from state", cycle_index, output_name);
         return cycle_index;
     }
-    
+
     return 0;
 }
 
 /* Read and display current wallpaper state for all outputs */
 bool read_wallpaper_state(void) {
     const char *state_path = get_state_file_path();
-    FILE *fp = fopen(state_path, "r");
-    
+    FILE *fp               = fopen(state_path, "r");
+
     if (!fp) {
         printf("No wallpaper state found.\n");
         printf("The daemon may not be running or no wallpaper has been set yet.\n");
         return false;
     }
-    
+
     char line[NW_PATH_MAX];
     output_state_entry_t current_entry = {0};
-    bool reading_entry = false;
-    int output_count = 0;
-    
+    bool reading_entry                 = false;
+    int output_count                   = 0;
+
     printf("Current wallpaper state:\n");
-    
+
     while (fgets(line, sizeof(line), fp)) {
         /* Remove newline */
         line[strcspn(line, "\n")] = 0;
-        
+
         if (strncmp(line, "[output]", 8) == 0) {
             /* Display previous entry if exists */
             if (reading_entry && current_entry.output_name[0] != '\0') {
@@ -513,7 +517,8 @@ bool read_wallpaper_state(void) {
                 printf("  Mode:      %s\n", current_entry.mode);
                 printf("  Status:    %s\n", current_entry.status);
                 if (current_entry.cycle_total > 0) {
-                    printf("  Cycling:   %d/%d\n", current_entry.cycle_index + 1, current_entry.cycle_total);
+                    printf("  Cycling:   %d/%d\n", current_entry.cycle_index + 1,
+                           current_entry.cycle_total);
                 }
                 if (current_entry.timestamp > 0) {
                     char time_str[64];
@@ -531,12 +536,14 @@ bool read_wallpaper_state(void) {
         } else if (reading_entry) {
             if (strncmp(line, "name=", 5) == 0) {
                 size_t len = strlen(line + 5);
-                if (len > sizeof(current_entry.output_name) - 1) len = sizeof(current_entry.output_name) - 1;
+                if (len > sizeof(current_entry.output_name) - 1)
+                    len = sizeof(current_entry.output_name) - 1;
                 memcpy(current_entry.output_name, line + 5, len);
                 current_entry.output_name[len] = '\0';
             } else if (strncmp(line, "wallpaper=", 10) == 0) {
                 size_t len = strlen(line + 10);
-                if (len > sizeof(current_entry.wallpaper_path) - 1) len = sizeof(current_entry.wallpaper_path) - 1;
+                if (len > sizeof(current_entry.wallpaper_path) - 1)
+                    len = sizeof(current_entry.wallpaper_path) - 1;
                 memcpy(current_entry.wallpaper_path, line + 10, len);
                 current_entry.wallpaper_path[len] = '\0';
             } else if (strncmp(line, "mode=", 5) == 0) {
@@ -559,12 +566,11 @@ bool read_wallpaper_state(void) {
                 current_entry.status[len] = '\0';
             } else if (strncmp(line, "timestamp=", 10) == 0) {
                 long value;
-                if (parse_disk_long(line + 10, LONG_MAX, &value))
-                    current_entry.timestamp = value;
+                if (parse_disk_long(line + 10, LONG_MAX, &value)) current_entry.timestamp = value;
             }
         }
     }
-    
+
     /* Display last entry */
     if (reading_entry && current_entry.output_name[0] != '\0') {
         printf("\n  Output:    %s\n", current_entry.output_name);
@@ -572,7 +578,8 @@ bool read_wallpaper_state(void) {
         printf("  Mode:      %s\n", current_entry.mode);
         printf("  Status:    %s\n", current_entry.status);
         if (current_entry.cycle_total > 0) {
-            printf("  Cycling:   %d/%d\n", current_entry.cycle_index + 1, current_entry.cycle_total);
+            printf("  Cycling:   %d/%d\n", current_entry.cycle_index + 1,
+                   current_entry.cycle_total);
         }
         if (current_entry.timestamp > 0) {
             char time_str[64];
@@ -584,15 +591,15 @@ bool read_wallpaper_state(void) {
         }
         output_count++;
     }
-    
+
     fclose(fp);
-    
+
     if (output_count == 0) {
         printf("\n  No outputs configured.\n");
     } else {
         printf("\nTotal outputs: %d\n", output_count);
     }
-    
+
     return true;
 }
 
@@ -601,9 +608,9 @@ bool write_cycle_list(const char *output_name, char **paths, size_t count, size_
     if (!output_name || !paths || count == 0) {
         return false;
     }
-    
+
     const char *list_path = get_cycle_list_file_path();
-    
+
     /* Ensure parent directory exists */
     char dir_path[NW_PATH_MAX];
     snprintf(dir_path, sizeof(dir_path), "%s", list_path);
@@ -612,20 +619,20 @@ bool write_cycle_list(const char *output_name, char **paths, size_t count, size_
         *last_slash = '\0';
         mkdir(dir_path, 0755);
     }
-    
+
     char tmp_path[NW_PATH_MAX];
     FILE *fp = open_atomic_temp(list_path, tmp_path, sizeof(tmp_path));
     if (!fp) {
         log_error("Failed to write cycle list: %s", strerror(errno));
         return false;
     }
-    
+
     fprintf(fp, "[cycle]\n");
     fprintf(fp, "output=%s\n", output_name);
     fprintf(fp, "count=%zu\n", count);
     fprintf(fp, "current=%zu\n", current_index);
     fprintf(fp, "\n");
-    
+
     for (size_t i = 0; i < count; i++) {
         fprintf(fp, "[%zu]\n", i);
         fprintf(fp, "path=%s\n", paths[i]);
@@ -634,7 +641,7 @@ bool write_cycle_list(const char *output_name, char **paths, size_t count, size_
         }
         fprintf(fp, "\n");
     }
-    
+
     if (!publish_atomic(fp, tmp_path, list_path)) {
         log_error("Failed to publish cycle list: %s", strerror(errno));
         return false;
@@ -645,8 +652,8 @@ bool write_cycle_list(const char *output_name, char **paths, size_t count, size_
 /* Read and display cycle list (called by client for 'list' command) */
 bool read_cycle_list(void) {
     const char *list_path = get_cycle_list_file_path();
-    FILE *fp = fopen(list_path, "r");
-    
+    FILE *fp              = fopen(list_path, "r");
+
     if (!fp) {
         printf("No cycle list found.\n");
         printf("The daemon may not be running or no wallpaper cycling is configured.\n");
@@ -656,18 +663,18 @@ bool read_cycle_list(void) {
         printf("  }\n");
         return false;
     }
-    
+
     char line[NW_PATH_MAX];
     char output_name[256] = {0};
-    size_t count = 0;
-    size_t current = 0;
-    int current_index = -1;
-    
+    size_t count          = 0;
+    size_t current        = 0;
+    int current_index     = -1;
+
     printf("Wallpaper cycle list:\n\n");
-    
+
     while (fgets(line, sizeof(line), fp)) {
         line[strcspn(line, "\n")] = 0;
-        
+
         if (strncmp(line, "output=", 7) == 0) {
             size_t len = strlen(line + 7);
             if (len >= sizeof(output_name)) len = sizeof(output_name) - 1;
@@ -691,8 +698,8 @@ bool read_cycle_list(void) {
             const char *path = line + 5;
             /* Extract just the filename for cleaner display */
             const char *filename = strrchr(path, '/');
-            filename = filename ? filename + 1 : path;
-            
+            filename             = filename ? filename + 1 : path;
+
             if ((size_t)current_index == current) {
                 if (isatty(STDOUT_FILENO)) {
                     printf("  %s➜ [%d] %s%s\n", COLOR_GREEN, current_index, filename, COLOR_RESET);
@@ -700,7 +707,7 @@ bool read_cycle_list(void) {
                     printf("  > [%d] %s\n", current_index, filename);
                 }
             } else {
-                 if (isatty(STDOUT_FILENO)) {
+                if (isatty(STDOUT_FILENO)) {
                     printf("    [%d] %s\n", current_index, filename);
                 } else {
                     printf("    [%d] %s\n", current_index, filename);
@@ -708,14 +715,14 @@ bool read_cycle_list(void) {
             }
         }
     }
-    
+
     fclose(fp);
-    
+
     if (count > 0) {
         printf("\nOutput: %s\n", output_name);
         printf("Total:  %zu wallpapers\n", count);
         printf("\nUse 'neowall set <index>' to jump to a specific wallpaper.\n");
     }
-    
+
     return true;
 }

@@ -636,10 +636,7 @@ run_target('run-capabilities',
 clang_format = find_program('clang-format', required: false)
 if clang_format.found()
   run_target('format',
-    command: [
-      'sh', '-c',
-      'find @0@/src @0@/include -name "*.c" -o -name "*.h" | xargs clang-format -i'.format(meson.current_source_dir())
-    ],
+    command: ['sh', files('scripts/format.sh')],
   )
 endif
 

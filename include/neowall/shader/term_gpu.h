@@ -21,8 +21,8 @@ typedef struct {
     int cols, rows, cell_w, cell_h;
     const char *font_path, *font_bold, *font_italic;
     const char *cwd, *term_env;
-    long fg, bg;                    /* 0xRRGGBB, or -1 for the built-in */
-    void (*on_output)(void *ctx);   /* reader thread: the child drew */
+    long fg, bg;                  /* 0xRRGGBB, or -1 for the built-in */
+    void (*on_output)(void *ctx); /* reader thread: the child drew */
     void *on_output_ctx;
 } term_gpu_opts;
 

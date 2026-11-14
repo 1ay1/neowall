@@ -29,18 +29,16 @@
  * proper click pass-through for desktop integration.
  */
 
-#define BACKEND_NAME "wlr-layer-shell"
+#define BACKEND_NAME        "wlr-layer-shell"
 #define BACKEND_DESCRIPTION "wlroots layer shell protocol (Hyprland, Sway, River, etc.)"
-#define BACKEND_PRIORITY 100
+#define BACKEND_PRIORITY    100
 
 /* ============================================================================
  * LAYER SURFACE CALLBACKS
  * ============================================================================ */
 
-static void layer_surface_configure(void *data,
-                                   struct zwlr_layer_surface_v1 *layer_surface,
-                                   uint32_t serial,
-                                   uint32_t width, uint32_t height) {
+static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *layer_surface,
+                                    uint32_t serial, uint32_t width, uint32_t height) {
     struct compositor_surface *surface = data;
 
     (void)layer_surface;
@@ -51,7 +49,7 @@ static void layer_surface_configure(void *data,
     zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
 
     /* Update surface dimensions */
-    surface->width = width;
+    surface->width  = width;
     surface->height = height;
 
     wlr_surface_data_t *backend_data = surface->backend_data;
@@ -65,8 +63,7 @@ static void layer_surface_configure(void *data,
     }
 }
 
-static void layer_surface_closed(void *data,
-                               struct zwlr_layer_surface_v1 *layer_surface) {
+static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *layer_surface) {
     struct compositor_surface *surface = data;
 
     (void)layer_surface;
@@ -81,36 +78,32 @@ static void layer_surface_closed(void *data,
 
 static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
     .configure = layer_surface_configure,
-    .closed = layer_surface_closed,
+    .closed    = layer_surface_closed,
 };
 
 /* ============================================================================
  * BACKEND INITIALIZATION
  * ============================================================================ */
 
-static void registry_handle_global(void *data, struct wl_registry *registry,
-                                   uint32_t name, const char *interface,
-                                   uint32_t version) {
+static void registry_handle_global(void *data, struct wl_registry *registry, uint32_t name,
+                                   const char *interface, uint32_t version) {
     wlr_backend_data_t *backend_data = data;
 
     if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
-        backend_data->layer_shell = wl_registry_bind(registry, name,
-                                                     &zwlr_layer_shell_v1_interface,
+        backend_data->layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface,
                                                      version < 4 ? version : 4);
         backend_data->layer_shell_name = name;
         log_info("Bound to wlr-layer-shell");
     } else if (strcmp(interface, wl_seat_interface.name) == 0) {
-        backend_data->seat = wl_registry_bind(registry, name,
-                                              &wl_seat_interface,
-                                              version < 5 ? version : 5);
+        backend_data->seat =
+            wl_registry_bind(registry, name, &wl_seat_interface, version < 5 ? version : 5);
         backend_data->seat_name = name;
         wl_seat_add_listener(backend_data->seat, &wlr_seat_listener, backend_data);
         log_info("Bound to wl_seat for input events");
     }
 }
 
-static void registry_handle_global_remove(void *data, struct wl_registry *registry,
-                                         uint32_t name) {
+static void registry_handle_global_remove(void *data, struct wl_registry *registry, uint32_t name) {
     wlr_backend_data_t *backend = data;
     (void)registry;
     if (!backend) return;
@@ -125,21 +118,21 @@ static void registry_handle_global_remove(void *data, struct wl_registry *regist
         }
 #endif
         if (backend->seat) wl_seat_destroy(backend->seat);
-        backend->seat = NULL;
-        backend->seat_name = 0;
+        backend->seat            = NULL;
+        backend->seat_name       = 0;
         backend->has_pointer_cap = false;
         log_warn("Wayland seat global removed; input focus cleared");
     } else if (name == backend->layer_shell_name) {
         wlr_clear_input_focus(backend);
         if (backend->layer_shell) zwlr_layer_shell_v1_destroy(backend->layer_shell);
-        backend->layer_shell = NULL;
+        backend->layer_shell      = NULL;
         backend->layer_shell_name = 0;
         log_warn("wlr-layer-shell global removed");
     }
 }
 
 static const struct wl_registry_listener registry_listener = {
-    .global = registry_handle_global,
+    .global        = registry_handle_global,
     .global_remove = registry_handle_global_remove,
 };
 
@@ -215,9 +208,9 @@ static void wlr_cleanup(void *data) {
         wl_keyboard_destroy(backend_data->keyboard);
         backend_data->keyboard = NULL;
     }
-    if (backend_data->xkb_state)  xkb_state_unref(backend_data->xkb_state);
+    if (backend_data->xkb_state) xkb_state_unref(backend_data->xkb_state);
     if (backend_data->xkb_keymap) xkb_keymap_unref(backend_data->xkb_keymap);
-    if (backend_data->xkb_ctx)    xkb_context_unref(backend_data->xkb_ctx);
+    if (backend_data->xkb_ctx) xkb_context_unref(backend_data->xkb_ctx);
 #endif
 
     if (backend_data->seat) {
@@ -247,8 +240,7 @@ static void wlr_cleanup(void *data) {
  * path then draws a correctly-sized buffer and the viewport (set below) presents
  * it 1:1. Without this we would only ever see the integer wl_output.scale, which
  * the compositor rounds (1.5 -> 2), forcing an oversized buffer it must rescale. */
-static void fractional_scale_handle_preferred(void *data,
-                                              struct wp_fractional_scale_v1 *fs,
+static void fractional_scale_handle_preferred(void *data, struct wp_fractional_scale_v1 *fs,
                                               uint32_t scale_120) {
     struct compositor_surface *surface = data;
     (void)fs;
@@ -266,8 +258,7 @@ static void fractional_scale_handle_preferred(void *data,
         if (o->compositor_surface == surface) {
             if (o->fractional_scale_120 != (int32_t)scale_120) {
                 log_info("Output %s: fractional scale %u/120 (%.3fx)",
-                         o->model[0] ? o->model : "unknown",
-                         scale_120, scale_120 / 120.0);
+                         o->model[0] ? o->model : "unknown", scale_120, scale_120 / 120.0);
                 o->fractional_scale_120 = (int32_t)scale_120;
                 wayland_apply_fractional_scale(o);
             }
@@ -313,7 +304,7 @@ static struct compositor_surface *wlr_create_surface(void *data,
     }
 
     /* Create base Wayland surface */
-    wayland_t *wl = wayland_get();
+    wayland_t *wl                 = wayland_get();
     struct wl_surface *wl_surface = wl_compositor_create_surface(wl->compositor);
     if (!wl_surface) {
         log_error("Failed to create Wayland surface");
@@ -334,30 +325,17 @@ static struct compositor_surface *wlr_create_surface(void *data,
     /* Map layer value */
     enum zwlr_layer_shell_v1_layer layer;
     switch (config->layer) {
-        case COMPOSITOR_LAYER_BACKGROUND:
-            layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
-            break;
-        case COMPOSITOR_LAYER_BOTTOM:
-            layer = ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM;
-            break;
-        case COMPOSITOR_LAYER_TOP:
-            layer = ZWLR_LAYER_SHELL_V1_LAYER_TOP;
-            break;
-        case COMPOSITOR_LAYER_OVERLAY:
-            layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
-            break;
-        default:
-            layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
+    case COMPOSITOR_LAYER_BACKGROUND: layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND; break;
+    case COMPOSITOR_LAYER_BOTTOM: layer = ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM; break;
+    case COMPOSITOR_LAYER_TOP: layer = ZWLR_LAYER_SHELL_V1_LAYER_TOP; break;
+    case COMPOSITOR_LAYER_OVERLAY: layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY; break;
+    default: layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
     }
 
     /* Create layer surface */
-    surface_data->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-        backend_data->layer_shell,
-        wl_surface,
-        (struct wl_output *)config->output,
-        layer,
-        "neowall"
-    );
+    surface_data->layer_surface =
+        zwlr_layer_shell_v1_get_layer_surface(backend_data->layer_shell, wl_surface,
+                                              (struct wl_output *)config->output, layer, "neowall");
 
     if (!surface_data->layer_surface) {
         log_error("Failed to create layer surface");
@@ -368,47 +346,39 @@ static struct compositor_surface *wlr_create_surface(void *data,
     }
 
     /* Add listener */
-    zwlr_layer_surface_v1_add_listener(surface_data->layer_surface,
-                                      &layer_surface_listener,
-                                      surface);
+    zwlr_layer_surface_v1_add_listener(surface_data->layer_surface, &layer_surface_listener,
+                                       surface);
 
     /* Initialize surface structure */
-    surface->backend_data = surface_data;
+    surface->backend_data  = surface_data;
     surface->native_output = config->output;
-    surface->config = *config;
-    surface->egl_surface = EGL_NO_SURFACE;
-    surface->egl_window = NULL;
-    surface->scale = 1;
+    surface->config        = *config;
+    surface->egl_surface   = EGL_NO_SURFACE;
+    surface->egl_window    = NULL;
+    surface->scale         = 1;
 
     /* Configure layer surface immediately to avoid protocol errors */
     /* Set size */
-    zwlr_layer_surface_v1_set_size(surface_data->layer_surface,
-                                   config->width, config->height);
+    zwlr_layer_surface_v1_set_size(surface_data->layer_surface, config->width, config->height);
 
     /* Set anchor */
     uint32_t anchor = 0;
-    if (config->anchor & COMPOSITOR_ANCHOR_TOP)
-        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP;
-    if (config->anchor & COMPOSITOR_ANCHOR_BOTTOM)
-        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
-    if (config->anchor & COMPOSITOR_ANCHOR_LEFT)
-        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT;
-    if (config->anchor & COMPOSITOR_ANCHOR_RIGHT)
-        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
+    if (config->anchor & COMPOSITOR_ANCHOR_TOP) anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP;
+    if (config->anchor & COMPOSITOR_ANCHOR_BOTTOM) anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
+    if (config->anchor & COMPOSITOR_ANCHOR_LEFT) anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT;
+    if (config->anchor & COMPOSITOR_ANCHOR_RIGHT) anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
 
     zwlr_layer_surface_v1_set_anchor(surface_data->layer_surface, anchor);
 
     /* Set exclusive zone */
-    zwlr_layer_surface_v1_set_exclusive_zone(surface_data->layer_surface,
-                                            config->exclusive_zone);
+    zwlr_layer_surface_v1_set_exclusive_zone(surface_data->layer_surface, config->exclusive_zone);
 
     /* Set keyboard interactivity. ON_DEMAND (not EXCLUSIVE) so a terminal
      * wallpaper receives keys only while the user has clicked/focused it, and
      * never steals input from real windows. */
     enum zwlr_layer_surface_v1_keyboard_interactivity kb_mode =
-        config->keyboard_interactivity ?
-        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND :
-        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
+        config->keyboard_interactivity ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
+                                       : ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
 
     zwlr_layer_surface_v1_set_keyboard_interactivity(surface_data->layer_surface, kb_mode);
 
@@ -426,19 +396,15 @@ static struct compositor_surface *wlr_create_surface(void *data,
      */
     if (wl && wl->tearing_control_manager) {
         struct wp_tearing_control_v1 *tearing = wp_tearing_control_manager_v1_get_tearing_control(
-            wl->tearing_control_manager,
-            wl_surface
-        );
+            wl->tearing_control_manager, wl_surface);
         surface->tearing_control = tearing;
 
         if (tearing) {
             bool want_tearing = !config->vsync;
 
             wp_tearing_control_v1_set_presentation_hint(
-                tearing,
-                want_tearing ? WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC
-                             : WP_TEARING_CONTROL_V1_PRESENTATION_HINT_VSYNC
-            );
+                tearing, want_tearing ? WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC
+                                      : WP_TEARING_CONTROL_V1_PRESENTATION_HINT_VSYNC);
 
             if (want_tearing) {
                 log_info("Tearing control: async presentation (vsync off)");
@@ -458,9 +424,8 @@ static struct compositor_surface *wlr_create_surface(void *data,
      * nothing here runs. The preferred_scale event that follows drives buffer
      * sizing via wayland_apply_fractional_scale(). */
     if (wl && wl->fractional_scale_manager) {
-        struct wp_fractional_scale_v1 *fs =
-            wp_fractional_scale_manager_v1_get_fractional_scale(
-                wl->fractional_scale_manager, wl_surface);
+        struct wp_fractional_scale_v1 *fs = wp_fractional_scale_manager_v1_get_fractional_scale(
+            wl->fractional_scale_manager, wl_surface);
         surface->fractional_scale = fs;
         if (fs) {
             wp_fractional_scale_v1_add_listener(fs, &fractional_scale_listener, surface);
@@ -526,7 +491,7 @@ static void wlr_destroy_surface(struct compositor_surface *surface) {
 }
 
 static bool wlr_configure_surface(struct compositor_surface *surface,
-                                 const compositor_surface_config_t *config) {
+                                  const compositor_surface_config_t *config) {
     if (!surface || !config) {
         log_error("Invalid parameters for surface configuration");
         return false;
@@ -541,25 +506,19 @@ static bool wlr_configure_surface(struct compositor_surface *surface,
     log_debug("Configuring wlr layer surface");
 
     /* Set size */
-    zwlr_layer_surface_v1_set_size(surface_data->layer_surface,
-                                   config->width, config->height);
+    zwlr_layer_surface_v1_set_size(surface_data->layer_surface, config->width, config->height);
 
     /* Set anchor */
     uint32_t anchor = 0;
-    if (config->anchor & COMPOSITOR_ANCHOR_TOP)
-        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP;
-    if (config->anchor & COMPOSITOR_ANCHOR_BOTTOM)
-        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
-    if (config->anchor & COMPOSITOR_ANCHOR_LEFT)
-        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT;
-    if (config->anchor & COMPOSITOR_ANCHOR_RIGHT)
-        anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
+    if (config->anchor & COMPOSITOR_ANCHOR_TOP) anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP;
+    if (config->anchor & COMPOSITOR_ANCHOR_BOTTOM) anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM;
+    if (config->anchor & COMPOSITOR_ANCHOR_LEFT) anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT;
+    if (config->anchor & COMPOSITOR_ANCHOR_RIGHT) anchor |= ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
 
     zwlr_layer_surface_v1_set_anchor(surface_data->layer_surface, anchor);
 
     /* Set exclusive zone */
-    zwlr_layer_surface_v1_set_exclusive_zone(surface_data->layer_surface,
-                                            config->exclusive_zone);
+    zwlr_layer_surface_v1_set_exclusive_zone(surface_data->layer_surface, config->exclusive_zone);
 
     /* Set keyboard interactivity. ON_DEMAND (not EXCLUSIVE) so a terminal
      * wallpaper receives keys only while the user has clicked/focused it, and
@@ -571,9 +530,8 @@ static bool wlr_configure_surface(struct compositor_surface *surface,
      * background layers — cannot reach their WM keybinds to recover. It must
      * never appear on this path; keep it identical to wlr_create_surface(). */
     enum zwlr_layer_surface_v1_keyboard_interactivity kb_mode =
-        config->keyboard_interactivity ?
-        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND :
-        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
+        config->keyboard_interactivity ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
+                                       : ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
 
     zwlr_layer_surface_v1_set_keyboard_interactivity(surface_data->layer_surface, kb_mode);
 
@@ -607,9 +565,9 @@ static bool wlr_set_keyboard_interactivity(struct compositor_surface *surface, b
     }
 
     zwlr_layer_surface_v1_set_keyboard_interactivity(
-        surface_data->layer_surface,
-        enabled ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
-                : ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+        surface_data->layer_surface, enabled
+                                         ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
+                                         : ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
 
     wl_surface_commit((struct wl_surface *)surface->native_surface);
 
@@ -618,8 +576,7 @@ static bool wlr_set_keyboard_interactivity(struct compositor_surface *surface, b
         wl_display_flush(wl->display);
     }
 
-    log_info("Layer surface keyboard interactivity -> %s",
-             enabled ? "on-demand" : "none");
+    log_info("Layer surface keyboard interactivity -> %s", enabled ? "on-demand" : "none");
 
     return true;
 }
@@ -646,8 +603,8 @@ static void wlr_commit_surface(struct compositor_surface *surface) {
     wl_surface_commit(wl_surface);
 }
 
-static bool wlr_create_egl_window(struct compositor_surface *surface,
-                                 int32_t width, int32_t height) {
+static bool wlr_create_egl_window(struct compositor_surface *surface, int32_t width,
+                                  int32_t height) {
     if (!surface || !surface->native_surface) {
         log_error("Invalid surface for EGL window creation");
         return false;
@@ -657,13 +614,13 @@ static bool wlr_create_egl_window(struct compositor_surface *surface,
 
     /* Create EGL window */
     struct wl_surface *wl_surface = (struct wl_surface *)surface->native_surface;
-    surface->egl_window = wl_egl_window_create(wl_surface, width, height);
+    surface->egl_window           = wl_egl_window_create(wl_surface, width, height);
     if (!surface->egl_window) {
         log_error("Failed to create EGL window");
         return false;
     }
 
-    surface->width = width;
+    surface->width  = width;
     surface->height = height;
 
     log_debug("EGL window created successfully");
@@ -671,8 +628,8 @@ static bool wlr_create_egl_window(struct compositor_surface *surface,
     return true;
 }
 
-static bool wlr_resize_egl_window(struct compositor_surface *surface,
-                                 int32_t width, int32_t height) {
+static bool wlr_resize_egl_window(struct compositor_surface *surface, int32_t width,
+                                  int32_t height) {
     if (!surface || !surface->egl_window) {
         return false;
     }
@@ -703,19 +660,16 @@ static void wlr_destroy_egl_window(struct compositor_surface *surface) {
 static compositor_capabilities_t wlr_get_capabilities(void *data) {
     (void)data;
 
-    return COMPOSITOR_CAP_LAYER_SHELL |
-           COMPOSITOR_CAP_EXCLUSIVE_ZONE |
-           COMPOSITOR_CAP_KEYBOARD_INTERACTIVITY |
-           COMPOSITOR_CAP_ANCHOR |
-           COMPOSITOR_CAP_MULTI_OUTPUT |
-           COMPOSITOR_CAP_OCCLUSION;
+    return COMPOSITOR_CAP_LAYER_SHELL | COMPOSITOR_CAP_EXCLUSIVE_ZONE |
+           COMPOSITOR_CAP_KEYBOARD_INTERACTIVITY | COMPOSITOR_CAP_ANCHOR |
+           COMPOSITOR_CAP_MULTI_OUTPUT | COMPOSITOR_CAP_OCCLUSION;
 }
 
 /* ----- occlusion (wlr-foreign-toplevel-management) ----- */
 
 static bool wlr_occlusion_init(void *data, struct neowall_state *state) {
     wlr_backend_data_t *b = data;
-    wayland_t *wl = wayland_get();
+    wayland_t *wl         = wayland_get();
     if (!b || !wl || !wl->display) {
         return false;
     }
@@ -795,8 +749,8 @@ static void wlr_on_output_removed(void *data, void *output) {
     log_debug("Output removed from wlr backend; matching input focus cleared");
 }
 
-static void wlr_damage_surface(struct compositor_surface *surface,
-                              int32_t x, int32_t y, int32_t width, int32_t height) {
+static void wlr_damage_surface(struct compositor_surface *surface, int32_t x, int32_t y,
+                               int32_t width, int32_t height) {
     if (!surface || !surface->native_surface) {
         return;
     }
@@ -826,13 +780,10 @@ static void wlr_set_vsync(struct compositor_surface *surface, bool vsync) {
         (struct wp_tearing_control_v1 *)surface->tearing_control;
 
     wp_tearing_control_v1_set_presentation_hint(
-        tearing,
-        vsync ? WP_TEARING_CONTROL_V1_PRESENTATION_HINT_VSYNC
-              : WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC
-    );
+        tearing, vsync ? WP_TEARING_CONTROL_V1_PRESENTATION_HINT_VSYNC
+                       : WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC);
 
-    log_debug("Tearing control: %s presentation",
-              vsync ? "vsync-locked" : "async");
+    log_debug("Tearing control: %s presentation", vsync ? "vsync-locked" : "async");
 }
 
 /* ============================================================================
@@ -841,7 +792,7 @@ static void wlr_set_vsync(struct compositor_surface *surface, bool vsync) {
 
 static int wlr_get_fd(void *data) {
     wlr_backend_data_t *backend = data;
-    wayland_t *wl = wayland_get();
+    wayland_t *wl               = wayland_get();
     if (!backend || !wl || !wl->display) {
         return -1;
     }
@@ -850,7 +801,7 @@ static int wlr_get_fd(void *data) {
 
 static bool wlr_prepare_events(void *data) {
     wlr_backend_data_t *backend = data;
-    wayland_t *wl = wayland_get();
+    wayland_t *wl               = wayland_get();
     if (!backend || !wl || !wl->display) {
         return false;
     }
@@ -870,7 +821,7 @@ static bool wlr_prepare_events(void *data) {
 
 static bool wlr_read_events(void *data) {
     wlr_backend_data_t *backend = data;
-    wayland_t *wl = wayland_get();
+    wayland_t *wl               = wayland_get();
     if (!backend || !wl || !wl->display) {
         return false;
     }
@@ -881,7 +832,7 @@ static bool wlr_read_events(void *data) {
 
 static bool wlr_dispatch_events(void *data) {
     wlr_backend_data_t *backend = data;
-    wayland_t *wl = wayland_get();
+    wayland_t *wl               = wayland_get();
     if (!backend || !wl || !wl->display) {
         return false;
     }
@@ -892,7 +843,7 @@ static bool wlr_dispatch_events(void *data) {
 
 static compositor_flush_result_t wlr_flush(void *data) {
     wlr_backend_data_t *backend = data;
-    wayland_t *wl = wayland_get();
+    wayland_t *wl               = wayland_get();
     if (!backend || !wl || !wl->display) {
         return COMPOSITOR_FLUSH_FATAL;
     }
@@ -905,7 +856,7 @@ static compositor_flush_result_t wlr_flush(void *data) {
 
 static void wlr_cancel_read(void *data) {
     wlr_backend_data_t *backend = data;
-    wayland_t *wl = wayland_get();
+    wayland_t *wl               = wayland_get();
     if (!backend || !wl || !wl->display) {
         return;
     }
@@ -915,7 +866,7 @@ static void wlr_cancel_read(void *data) {
 
 static int wlr_get_error(void *data) {
     wlr_backend_data_t *backend = data;
-    wayland_t *wl = wayland_get();
+    wayland_t *wl               = wayland_get();
     if (!backend || !wl || !wl->display) {
         return -1;
     }
@@ -925,7 +876,7 @@ static int wlr_get_error(void *data) {
 
 static bool wlr_sync(void *data) {
     wlr_backend_data_t *backend = data;
-    wayland_t *wl = wayland_get();
+    wayland_t *wl               = wayland_get();
     if (!backend || !wl || !wl->display) {
         return false;
     }
@@ -942,7 +893,7 @@ static bool wlr_sync(void *data) {
 
 static void *wlr_get_native_display(void *data) {
     wlr_backend_data_t *backend = data;
-    wayland_t *wl = wayland_get();
+    wayland_t *wl               = wayland_get();
     if (!backend || !wl) {
         return NULL;
     }
@@ -959,42 +910,42 @@ static EGLenum wlr_get_egl_platform(void *data) {
  * ============================================================================ */
 
 static const compositor_backend_ops_t wlr_backend_ops = {
-    .init = wlr_backend_init,
-    .cleanup = wlr_cleanup,
-    .create_surface = wlr_create_surface,
+    .init            = wlr_backend_init,
+    .cleanup         = wlr_cleanup,
+    .create_surface  = wlr_create_surface,
     .destroy_surface = wlr_destroy_surface,
     /* Compositor-paced vsync rendering (shared, wayland_core.c) */
-    .frame_request = wayland_frame_request,
-    .frame_ready = wayland_frame_ready,
-    .frame_cancel = wayland_frame_cancel,
-    .configure_surface = wlr_configure_surface,
+    .frame_request              = wayland_frame_request,
+    .frame_ready                = wayland_frame_ready,
+    .frame_cancel               = wayland_frame_cancel,
+    .configure_surface          = wlr_configure_surface,
     .set_keyboard_interactivity = wlr_set_keyboard_interactivity,
-    .commit_surface = wlr_commit_surface,
-    .create_egl_window = wlr_create_egl_window,
-    .destroy_egl_window = wlr_destroy_egl_window,
-    .resize_egl_window = wlr_resize_egl_window,
-    .get_native_window = wlr_get_native_window,
-    .get_capabilities = wlr_get_capabilities,
-    .on_output_added = wlr_on_output_added,
-    .on_output_removed = wlr_on_output_removed,
-    .damage_surface = wlr_damage_surface,
-    .set_scale = wlr_set_scale,
-    .set_vsync = wlr_set_vsync,
+    .commit_surface             = wlr_commit_surface,
+    .create_egl_window          = wlr_create_egl_window,
+    .destroy_egl_window         = wlr_destroy_egl_window,
+    .resize_egl_window          = wlr_resize_egl_window,
+    .get_native_window          = wlr_get_native_window,
+    .get_capabilities           = wlr_get_capabilities,
+    .on_output_added            = wlr_on_output_added,
+    .on_output_removed          = wlr_on_output_removed,
+    .damage_surface             = wlr_damage_surface,
+    .set_scale                  = wlr_set_scale,
+    .set_vsync                  = wlr_set_vsync,
     /* Event handling operations */
-    .get_fd = wlr_get_fd,
-    .prepare_events = wlr_prepare_events,
-    .read_events = wlr_read_events,
+    .get_fd          = wlr_get_fd,
+    .prepare_events  = wlr_prepare_events,
+    .read_events     = wlr_read_events,
     .dispatch_events = wlr_dispatch_events,
-    .flush = wlr_flush,
-    .cancel_read = wlr_cancel_read,
-    .get_error = wlr_get_error,
-    .sync = wlr_sync,
+    .flush           = wlr_flush,
+    .cancel_read     = wlr_cancel_read,
+    .get_error       = wlr_get_error,
+    .sync            = wlr_sync,
     /* Display/EGL operations */
     .get_native_display = wlr_get_native_display,
-    .get_egl_platform = wlr_get_egl_platform,
+    .get_egl_platform   = wlr_get_egl_platform,
     /* Occlusion detection */
-    .occlusion_init = wlr_occlusion_init,
-    .occlusion_update = wlr_occlusion_update,
+    .occlusion_init    = wlr_occlusion_init,
+    .occlusion_update  = wlr_occlusion_update,
     .occlusion_cleanup = wlr_occlusion_cleanup,
     /* Input config (post-config-load hook) */
     .apply_input_config = wlr_apply_input_config,
@@ -1004,9 +955,7 @@ struct compositor_backend *compositor_backend_wlr_layer_shell_init(struct neowal
     (void)state;
 
     /* Register backend in registry */
-    compositor_backend_register(BACKEND_NAME,
-                                BACKEND_DESCRIPTION,
-                                BACKEND_PRIORITY,
+    compositor_backend_register(BACKEND_NAME, BACKEND_DESCRIPTION, BACKEND_PRIORITY,
                                 &wlr_backend_ops);
 
     return NULL; /* Actual initialization happens in select_backend() */

@@ -17,8 +17,7 @@
  * wallpaper. 100M RGBA pixels is already ~400 MiB before codec scratch data. */
 #define IMAGE_MAX_PIXELS ((size_t)100000000)
 
-static bool image_buffer_size(uint32_t width, uint32_t height, size_t channels,
-                              size_t *bytes_out) {
+static bool image_buffer_size(uint32_t width, uint32_t height, size_t channels, size_t *bytes_out) {
     if (!bytes_out || width == 0 || height == 0 || channels == 0) {
         return false;
     }
@@ -36,13 +35,13 @@ static bool image_buffer_size(uint32_t width, uint32_t height, size_t channels,
  * decode 400 MB. Flat-colour PNGs compress about 1000:1, so 1 byte per 4096
  * pixels leaves plenty of room. Small images are always allowed. */
 #define IMAGE_MIN_BYTES_PER_PIXEL_INV 4096
-#define IMAGE_BOMB_FLOOR_PIXELS ((size_t)(4096u * 4096u))
+#define IMAGE_BOMB_FLOOR_PIXELS       ((size_t)(4096u * 4096u))
 
 static bool image_plausible(FILE *fp, uint32_t width, uint32_t height) {
     size_t pixels = (size_t)width * (size_t)height;
     if (pixels <= IMAGE_BOMB_FLOOR_PIXELS) return true;
     long here = ftell(fp);
-    if (here < 0 || fseek(fp, 0, SEEK_END) != 0) return true;   /* a pipe: can't tell */
+    if (here < 0 || fseek(fp, 0, SEEK_END) != 0) return true; /* a pipe: can't tell */
     long size = ftell(fp);
     if (fseek(fp, here, SEEK_SET) != 0) return false;
     if (size < 0) return true;
@@ -50,9 +49,10 @@ static bool image_plausible(FILE *fp, uint32_t width, uint32_t height) {
 }
 
 /* Forward declarations */
-static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 
-                                                   int32_t display_height, int mode);
-static struct image_data *image_scale_bilinear(struct image_data *img, uint32_t new_width, uint32_t new_height);
+static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width,
+                                                 int32_t display_height, int mode);
+static struct image_data *image_scale_bilinear(struct image_data *img, uint32_t new_width,
+                                               uint32_t new_height);
 
 /* expand_path lives in utils.c and is declared in neowall.h. This file used to
  * carry a private copy; the two had drifted apart in their error handling, so
@@ -114,8 +114,7 @@ struct image_data *image_load_png(const char *path) {
     }
 
     /* Create PNG structures */
-    png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING,
-                                                  NULL, NULL, NULL);
+    png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png_ptr) {
         log_error("Failed to create PNG read struct");
         fclose(fp);
@@ -133,7 +132,7 @@ struct image_data *image_load_png(const char *path) {
     /* Set up error handling. libpng longjmps here from any later call, so
      * everything allocated below must be reachable from these (volatile so
      * their values survive the longjmp). */
-    struct image_data *volatile img = NULL;
+    struct image_data *volatile img  = NULL;
     png_bytep *volatile row_pointers = NULL;
     if (setjmp(png_jmpbuf(png_ptr))) {
         log_error("Error reading PNG file %s", expanded_path);
@@ -154,18 +153,18 @@ struct image_data *image_load_png(const char *path) {
     /* Read PNG info */
     png_read_info(png_ptr, info_ptr);
 
-    uint32_t width = png_get_image_width(png_ptr, info_ptr);
+    uint32_t width  = png_get_image_width(png_ptr, info_ptr);
     uint32_t height = png_get_image_height(png_ptr, info_ptr);
     if (!image_plausible(fp, width, height)) {
-        log_error("PNG %s claims %ux%u but is far too small for that; not decoding",
-                  expanded_path, width, height);
-        png_error(png_ptr, "implausible size");   /* longjmps to the cleanup above */
+        log_error("PNG %s claims %ux%u but is far too small for that; not decoding", expanded_path,
+                  width, height);
+        png_error(png_ptr, "implausible size"); /* longjmps to the cleanup above */
     }
     png_byte color_type = png_get_color_type(png_ptr, info_ptr);
-    png_byte bit_depth = png_get_bit_depth(png_ptr, info_ptr);
+    png_byte bit_depth  = png_get_bit_depth(png_ptr, info_ptr);
 
-    log_debug("Loading PNG: %s (%ux%u, color_type=%d, bit_depth=%d)",
-              expanded_path, width, height, color_type, bit_depth);
+    log_debug("Loading PNG: %s (%ux%u, color_type=%d, bit_depth=%d)", expanded_path, width, height,
+              color_type, bit_depth);
 
     /* Transform to RGBA */
     if (bit_depth == 16) {
@@ -184,14 +183,12 @@ struct image_data *image_load_png(const char *path) {
         png_set_tRNS_to_alpha(png_ptr);
     }
 
-    if (color_type == PNG_COLOR_TYPE_RGB ||
-        color_type == PNG_COLOR_TYPE_GRAY ||
+    if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY ||
         color_type == PNG_COLOR_TYPE_PALETTE) {
         png_set_filler(png_ptr, 0xFF, PNG_FILLER_AFTER);
     }
 
-    if (color_type == PNG_COLOR_TYPE_GRAY ||
-        color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
+    if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
         png_set_gray_to_rgb(png_ptr);
     }
 
@@ -206,17 +203,17 @@ struct image_data *image_load_png(const char *path) {
         return NULL;
     }
 
-    img->width = width;
-    img->height = height;
+    img->width    = width;
+    img->height   = height;
     img->channels = 4; /* RGBA */
-    img->format = FORMAT_PNG;
+    img->format   = FORMAT_PNG;
     snprintf(img->path, sizeof(img->path), "%s", path);
 
     /* Allocate pixel buffer */
-    size_t row_bytes = png_get_rowbytes(png_ptr, info_ptr);
+    size_t row_bytes   = png_get_rowbytes(png_ptr, info_ptr);
     size_t pixel_bytes = 0;
-    if (!image_buffer_size(width, height, 4, &pixel_bytes) ||
-        row_bytes > SIZE_MAX / height || row_bytes * height > pixel_bytes) {
+    if (!image_buffer_size(width, height, 4, &pixel_bytes) || row_bytes > SIZE_MAX / height ||
+        row_bytes * height > pixel_bytes) {
         log_error("PNG dimensions are invalid or too large: %ux%u", width, height);
         free(img);
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
@@ -250,7 +247,7 @@ struct image_data *image_load_png(const char *path) {
 
     /* Read image data */
     png_read_image(png_ptr, row_pointers);
-    png_read_end(png_ptr, NULL);   /* may longjmp on a bad trailing chunk */
+    png_read_end(png_ptr, NULL); /* may longjmp on a bad trailing chunk */
 
     /* Clean up */
     free(row_pointers);
@@ -280,8 +277,8 @@ static void jpeg_error_exit(j_common_ptr cinfo) {
  * covers the display: libjpeg does it in the IDCT, so a 24 MP photo for a
  * 1080p screen costs a fraction of the time and memory. Modes that show
  * pixels 1:1 (center, tile) always get the full image. */
-struct image_data *image_load_jpeg_for(const char *path, int32_t display_w,
-                                       int32_t display_h, int mode) {
+struct image_data *image_load_jpeg_for(const char *path, int32_t display_w, int32_t display_h,
+                                       int mode) {
     if (!path) {
         log_error("Invalid path for JPEG loading");
         return NULL;
@@ -303,11 +300,11 @@ struct image_data *image_load_jpeg_for(const char *path, int32_t display_w,
     struct jpeg_error_mgr_ext jerr;
     /* libjpeg longjmps to the handler from any later call (a corrupt
      * scanline included), so these are freed there; volatile to survive it. */
-    struct image_data *volatile img = NULL;
+    struct image_data *volatile img    = NULL;
     unsigned char *volatile row_buffer = NULL;
 
     /* Set up error handling */
-    cinfo.err = jpeg_std_error(&jerr.pub);
+    cinfo.err           = jpeg_std_error(&jerr.pub);
     jerr.pub.error_exit = jpeg_error_exit;
 
     if (setjmp(jerr.setjmp_buffer)) {
@@ -350,21 +347,21 @@ struct image_data *image_load_jpeg_for(const char *path, int32_t display_w,
 
     if (display_w > 0 && display_h > 0 && mode != MODE_CENTER && mode != MODE_TILE) {
         /* EXIF rotation swaps the axes the screen will see. */
-        bool swap = exif_orientation >= 5;
-        uint32_t iw = swap ? cinfo.image_height : cinfo.image_width;
-        uint32_t ih = swap ? cinfo.image_width : cinfo.image_height;
+        bool swap      = exif_orientation >= 5;
+        uint32_t iw    = swap ? cinfo.image_height : cinfo.image_width;
+        uint32_t ih    = swap ? cinfo.image_width : cinfo.image_height;
         unsigned denom = 1;
         while (denom < 8 && iw / (denom * 2) >= (uint32_t)display_w &&
                ih / (denom * 2) >= (uint32_t)display_h) {
             denom *= 2;
         }
-        cinfo.scale_num = 1;
+        cinfo.scale_num   = 1;
         cinfo.scale_denom = denom;
     }
 
     if (!image_plausible(fp, cinfo.image_width, cinfo.image_height)) {
-        log_error("JPEG %s claims %ux%u but is far too small for that; not decoding",
-                  expanded_path, cinfo.image_width, cinfo.image_height);
+        log_error("JPEG %s claims %ux%u but is far too small for that; not decoding", expanded_path,
+                  cinfo.image_width, cinfo.image_height);
         jpeg_destroy_decompress(&cinfo);
         fclose(fp);
         return NULL;
@@ -373,12 +370,11 @@ struct image_data *image_load_jpeg_for(const char *path, int32_t display_w,
     /* Start decompression */
     jpeg_start_decompress(&cinfo);
 
-    uint32_t width = cinfo.output_width;
-    uint32_t height = cinfo.output_height;
+    uint32_t width    = cinfo.output_width;
+    uint32_t height   = cinfo.output_height;
     uint32_t channels = cinfo.output_components;
 
-    log_debug("Loading JPEG: %s (%ux%u, %u channels)",
-              expanded_path, width, height, channels);
+    log_debug("Loading JPEG: %s (%ux%u, %u channels)", expanded_path, width, height, channels);
 
     if (channels != 3) {
         log_error("Unexpected number of channels in JPEG: %u", channels);
@@ -396,10 +392,10 @@ struct image_data *image_load_jpeg_for(const char *path, int32_t display_w,
         return NULL;
     }
 
-    img->width = width;
-    img->height = height;
+    img->width    = width;
+    img->height   = height;
     img->channels = 4; /* We'll convert RGB to RGBA */
-    img->format = FORMAT_JPEG;
+    img->format   = FORMAT_JPEG;
     snprintf(img->path, sizeof(img->path), "%s", path);
 
     size_t rgba_bytes = 0;
@@ -420,7 +416,7 @@ struct image_data *image_load_jpeg_for(const char *path, int32_t display_w,
     }
 
     size_t row_stride = (size_t)width * 3;
-    row_buffer = malloc(row_stride);
+    row_buffer        = malloc(row_stride);
     if (!row_buffer) {
         log_error("Failed to allocate row buffer: %s", strerror(errno));
         free(img->pixels);
@@ -444,7 +440,7 @@ struct image_data *image_load_jpeg_for(const char *path, int32_t display_w,
             img->pixels[dst_idx + 0] = row_buffer[src_idx + 0]; /* R */
             img->pixels[dst_idx + 1] = row_buffer[src_idx + 1]; /* G */
             img->pixels[dst_idx + 2] = row_buffer[src_idx + 2]; /* B */
-            img->pixels[dst_idx + 3] = ALPHA_OPAQUE;                      /* A */
+            img->pixels[dst_idx + 3] = ALPHA_OPAQUE;            /* A */
         }
 
         row++;
@@ -472,26 +468,20 @@ struct image_data *image_load_jpeg_for(const char *path, int32_t display_w,
 }
 
 /* Load image from file (auto-detect format) with display-aware scaling */
-struct image_data *image_load(const char *path, int32_t display_width, 
-                              int32_t display_height, int mode) {
+struct image_data *image_load(const char *path, int32_t display_width, int32_t display_height,
+                              int mode) {
     if (!path) {
         log_error("Invalid path for image_load");
         return NULL;
     }
 
     enum image_format format = image_detect_format(path);
-    struct image_data *img = NULL;
-    
+    struct image_data *img   = NULL;
+
     switch (format) {
-        case FORMAT_PNG:
-            img = image_load_png(path);
-            break;
-        case FORMAT_JPEG:
-            img = image_load_jpeg_for(path, display_width, display_height, mode);
-            break;
-        default:
-            log_error("Unsupported or unknown image format: %s", path);
-            return NULL;
+    case FORMAT_PNG: img = image_load_png(path); break;
+    case FORMAT_JPEG: img = image_load_jpeg_for(path, display_width, display_height, mode); break;
+    default: log_error("Unsupported or unknown image format: %s", path); return NULL;
     }
 
     if (!img) {
@@ -531,80 +521,80 @@ void image_free(struct image_data *img) {
 /* Calculate optimal dimensions based on display mode */
 static void calculate_optimal_dimensions(uint32_t img_width, uint32_t img_height,
                                          int32_t display_width, int32_t display_height,
-                                         enum wallpaper_mode mode,
-                                         uint32_t *out_width, uint32_t *out_height) {
-    if (!out_width || !out_height || img_width == 0 || img_height == 0 ||
-        display_width <= 0 || display_height <= 0) {
+                                         enum wallpaper_mode mode, uint32_t *out_width,
+                                         uint32_t *out_height) {
+    if (!out_width || !out_height || img_width == 0 || img_height == 0 || display_width <= 0 ||
+        display_height <= 0) {
         if (out_width) *out_width = 0;
         if (out_height) *out_height = 0;
         return;
     }
 
-    float img_aspect = (float)img_width / (float)img_height;
+    float img_aspect     = (float)img_width / (float)img_height;
     float display_aspect = (float)display_width / (float)display_height;
-    
+
     switch (mode) {
-        case MODE_FILL:
-            /* Scale to fill display, maintaining aspect ratio (will crop) */
-            if (img_aspect > display_aspect) {
-                /* Image is wider - match height */
-                *out_height = display_height;
-                *out_width = (uint32_t)(display_height * img_aspect);
-            } else {
-                /* Image is taller - match width */
-                *out_width = display_width;
-                *out_height = (uint32_t)(display_width / img_aspect);
-            }
-            break;
-            
-        case MODE_FIT:
-            /* Scale to fit inside display, maintaining aspect ratio */
-            if (img_aspect > display_aspect) {
-                /* Image is wider - match width */
-                *out_width = display_width;
-                *out_height = (uint32_t)(display_width / img_aspect);
-            } else {
-                /* Image is taller - match height */
-                *out_height = display_height;
-                *out_width = (uint32_t)(display_height * img_aspect);
-            }
-            break;
-            
-        case MODE_STRETCH:
-            /* Stretch to exact display dimensions */
-            *out_width = display_width;
+    case MODE_FILL:
+        /* Scale to fill display, maintaining aspect ratio (will crop) */
+        if (img_aspect > display_aspect) {
+            /* Image is wider - match height */
             *out_height = display_height;
-            break;
-            
-        case MODE_CENTER:
-            /* Center mode: show at actual size (1:1 pixels), crop if too large */
-            /* No scaling - keep original dimensions, will crop in rendering if needed */
-            *out_width = img_width;
-            *out_height = img_height;
-            break;
-            
-        case MODE_TILE:
-            /* For tile, only scale down if larger than display */
-            if (img_width > (uint32_t)display_width || img_height > (uint32_t)display_height) {
-                /* Scale to fit */
-                if (img_aspect > display_aspect) {
-                    *out_width = display_width;
-                    *out_height = (uint32_t)(display_width / img_aspect);
-                } else {
-                    *out_height = display_height;
-                    *out_width = (uint32_t)(display_height * img_aspect);
-                }
+            *out_width  = (uint32_t)(display_height * img_aspect);
+        } else {
+            /* Image is taller - match width */
+            *out_width  = display_width;
+            *out_height = (uint32_t)(display_width / img_aspect);
+        }
+        break;
+
+    case MODE_FIT:
+        /* Scale to fit inside display, maintaining aspect ratio */
+        if (img_aspect > display_aspect) {
+            /* Image is wider - match width */
+            *out_width  = display_width;
+            *out_height = (uint32_t)(display_width / img_aspect);
+        } else {
+            /* Image is taller - match height */
+            *out_height = display_height;
+            *out_width  = (uint32_t)(display_height * img_aspect);
+        }
+        break;
+
+    case MODE_STRETCH:
+        /* Stretch to exact display dimensions */
+        *out_width  = display_width;
+        *out_height = display_height;
+        break;
+
+    case MODE_CENTER:
+        /* Center mode: show at actual size (1:1 pixels), crop if too large */
+        /* No scaling - keep original dimensions, will crop in rendering if needed */
+        *out_width  = img_width;
+        *out_height = img_height;
+        break;
+
+    case MODE_TILE:
+        /* For tile, only scale down if larger than display */
+        if (img_width > (uint32_t)display_width || img_height > (uint32_t)display_height) {
+            /* Scale to fit */
+            if (img_aspect > display_aspect) {
+                *out_width  = display_width;
+                *out_height = (uint32_t)(display_width / img_aspect);
             } else {
-                /* Keep original size */
-                *out_width = img_width;
-                *out_height = img_height;
+                *out_height = display_height;
+                *out_width  = (uint32_t)(display_height * img_aspect);
             }
-            break;
-            
-        default:
-            *out_width = img_width;
+        } else {
+            /* Keep original size */
+            *out_width  = img_width;
             *out_height = img_height;
-            break;
+        }
+        break;
+
+    default:
+        *out_width  = img_width;
+        *out_height = img_height;
+        break;
     }
     /* Keeping the aspect on a tiny display can truncate one side to 0. */
     if (*out_width == 0) *out_width = 1;
@@ -619,7 +609,8 @@ static void calculate_optimal_dimensions(uint32_t img_width, uint32_t img_height
  * axes were oversized — a wider-but-shorter image (e.g. 1200x298 padded to
  * 400x300) fell through to a copy loop that wrote img->width*4 bytes at a
  * pad_width*4 stride and ran off the end of the heap block. */
-static struct image_data *image_center_pad(struct image_data *img, uint32_t pad_width, uint32_t pad_height) {
+static struct image_data *image_center_pad(struct image_data *img, uint32_t pad_width,
+                                           uint32_t pad_height) {
     if (!img || !img->pixels || pad_width == 0 || pad_height == 0) {
         return img;
     }
@@ -629,8 +620,8 @@ static struct image_data *image_center_pad(struct image_data *img, uint32_t pad_
         return img;
     }
 
-    log_debug("Center-padding image from %ux%u to %ux%u",
-             img->width, img->height, pad_width, pad_height);
+    log_debug("Center-padding image from %ux%u to %ux%u", img->width, img->height, pad_width,
+              pad_height);
 
     /* Allocate new pixel buffer filled with opaque black (R=0, G=0, B=0, A=255) */
     size_t new_size = 0;
@@ -643,22 +634,22 @@ static struct image_data *image_center_pad(struct image_data *img, uint32_t pad_
         log_error("Failed to allocate memory for padded image");
         return img;
     }
-    
+
     /* Fill with opaque black (important: alpha = 255 for opaque) */
     for (size_t i = 0; i < new_size; i += 4) {
-        new_pixels[i] = 0;       /* R */
+        new_pixels[i]     = 0;   /* R */
         new_pixels[i + 1] = 0;   /* G */
         new_pixels[i + 2] = 0;   /* B */
         new_pixels[i + 3] = 255; /* A - opaque */
     }
-    
+
     /* Copy at most what fits on each axis; centre both the source window (when
      * the source is bigger) and the destination window (when it is smaller). */
-    uint32_t copy_w = (img->width  < pad_width)  ? img->width  : pad_width;
+    uint32_t copy_w = (img->width < pad_width) ? img->width : pad_width;
     uint32_t copy_h = (img->height < pad_height) ? img->height : pad_height;
-    uint32_t dst_x = (pad_width  - copy_w) / 2;
+    uint32_t dst_x  = (pad_width - copy_w) / 2;
     uint32_t dst_y0 = (pad_height - copy_h) / 2;
-    uint32_t src_x = (img->width  - copy_w) / 2;
+    uint32_t src_x  = (img->width - copy_w) / 2;
     uint32_t src_y0 = (img->height - copy_h) / 2;
 
     for (uint32_t y = 0; y < copy_h; y++) {
@@ -666,20 +657,21 @@ static struct image_data *image_center_pad(struct image_data *img, uint32_t pad_
         size_t dst_offset = ((size_t)(dst_y0 + y) * pad_width + dst_x) * 4;
         memcpy(new_pixels + dst_offset, img->pixels + src_offset, (size_t)copy_w * 4);
     }
-    
+
     /* Replace old pixels with padded ones */
     free(img->pixels);
     img->pixels = new_pixels;
-    img->width = pad_width;
+    img->width  = pad_width;
     img->height = pad_height;
-    
+
     return img;
 }
 
 /* Tile image to fill exact dimensions by repeating the source image */
-static struct image_data *image_tile_to_size(struct image_data *img, uint32_t target_width, uint32_t target_height) {
-    if (!img || !img->pixels || img->width == 0 || img->height == 0 ||
-        target_width == 0 || target_height == 0) {
+static struct image_data *image_tile_to_size(struct image_data *img, uint32_t target_width,
+                                             uint32_t target_height) {
+    if (!img || !img->pixels || img->width == 0 || img->height == 0 || target_width == 0 ||
+        target_height == 0) {
         return img;
     }
     /* No tiling needed if already exact size or larger */
@@ -687,97 +679,98 @@ static struct image_data *image_tile_to_size(struct image_data *img, uint32_t ta
         return img;
     }
 
-    log_debug("Tiling image from %ux%u to fill %ux%u",
-              img->width, img->height, target_width, target_height);
-    
+    log_debug("Tiling image from %ux%u to fill %ux%u", img->width, img->height, target_width,
+              target_height);
+
     /* Allocate new pixel buffer for tiled result */
-    size_t new_size = (size_t)target_width * target_height * 4; /* RGBA */
+    size_t new_size     = (size_t)target_width * target_height * 4; /* RGBA */
     uint8_t *new_pixels = malloc(new_size);
     if (!new_pixels) {
         log_error("Failed to allocate memory for tiled image");
         return img;
     }
-    
+
     /* Tile the image by copying it repeatedly */
     for (uint32_t dst_y = 0; dst_y < target_height; dst_y++) {
-        uint32_t src_y = dst_y % img->height;  /* Wrap vertically */
-        
+        uint32_t src_y = dst_y % img->height; /* Wrap vertically */
+
         for (uint32_t dst_x = 0; dst_x < target_width; dst_x++) {
-            uint32_t src_x = dst_x % img->width;  /* Wrap horizontally */
-            
+            uint32_t src_x = dst_x % img->width; /* Wrap horizontally */
+
             /* Copy pixel from source to destination */
             uint32_t src_offset = (src_y * img->width + src_x) * 4;
             uint32_t dst_offset = (dst_y * target_width + dst_x) * 4;
-            
+
             new_pixels[dst_offset + 0] = img->pixels[src_offset + 0]; /* R */
             new_pixels[dst_offset + 1] = img->pixels[src_offset + 1]; /* G */
             new_pixels[dst_offset + 2] = img->pixels[src_offset + 2]; /* B */
             new_pixels[dst_offset + 3] = img->pixels[src_offset + 3]; /* A */
         }
     }
-    
+
     /* Replace old pixels with tiled ones */
     free(img->pixels);
     img->pixels = new_pixels;
-    img->width = target_width;
+    img->width  = target_width;
     img->height = target_height;
-    
+
     log_debug("Image tiled to %ux%u", target_width, target_height);
     return img;
 }
 
 /* Center-crop image to exact dimensions */
-static struct image_data *image_center_crop(struct image_data *img, uint32_t crop_width, uint32_t crop_height) {
+static struct image_data *image_center_crop(struct image_data *img, uint32_t crop_width,
+                                            uint32_t crop_height) {
     if (!img || !img->pixels) {
         return img;
     }
-    
+
     /* No crop needed if already exact size */
     if (img->width == crop_width && img->height == crop_height) {
         return img;
     }
-    
+
     /* Calculate crop offsets (center crop) */
     uint32_t offset_x = (img->width > crop_width) ? (img->width - crop_width) / 2 : 0;
     uint32_t offset_y = (img->height > crop_height) ? (img->height - crop_height) / 2 : 0;
-    
+
     /* Ensure we don't crop to larger than source */
-    uint32_t actual_crop_width = (crop_width < img->width) ? crop_width : img->width;
+    uint32_t actual_crop_width  = (crop_width < img->width) ? crop_width : img->width;
     uint32_t actual_crop_height = (crop_height < img->height) ? crop_height : img->height;
-    
-    log_debug("Center-cropping image from %ux%u to %ux%u (offset: %u,%u)",
-             img->width, img->height, actual_crop_width, actual_crop_height, offset_x, offset_y);
-    
+
+    log_debug("Center-cropping image from %ux%u to %ux%u (offset: %u,%u)", img->width, img->height,
+              actual_crop_width, actual_crop_height, offset_x, offset_y);
+
     /* Allocate new pixel buffer */
-    size_t new_size = (size_t)actual_crop_width * actual_crop_height * 4; /* RGBA */
+    size_t new_size     = (size_t)actual_crop_width * actual_crop_height * 4; /* RGBA */
     uint8_t *new_pixels = malloc(new_size);
     if (!new_pixels) {
         log_error("Failed to allocate memory for cropped image");
         return img;
     }
-    
+
     /* Copy cropped region row by row */
     for (uint32_t y = 0; y < actual_crop_height; y++) {
-        uint32_t src_y = offset_y + y;
+        uint32_t src_y      = offset_y + y;
         uint32_t src_offset = (src_y * img->width + offset_x) * 4;
         uint32_t dst_offset = y * actual_crop_width * 4;
         memcpy(new_pixels + dst_offset, img->pixels + src_offset, actual_crop_width * 4);
     }
-    
+
     /* Replace old pixels with cropped ones */
     free(img->pixels);
     img->pixels = new_pixels;
-    img->width = actual_crop_width;
+    img->width  = actual_crop_width;
     img->height = actual_crop_height;
-    
+
     return img;
 }
 
 /* Scale image to optimal size for display mode */
-static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width, 
-                                                   int32_t display_height, int mode) {
-    if (!img || !img->pixels || img->width == 0 || img->height == 0 ||
-        display_width <= 0 || display_height <= 0) {
+static struct image_data *image_scale_to_display(struct image_data *img, int32_t display_width,
+                                                 int32_t display_height, int mode) {
+    if (!img || !img->pixels || img->width == 0 || img->height == 0 || display_width <= 0 ||
+        display_height <= 0) {
         return img;
     }
 
@@ -785,14 +778,14 @@ static struct image_data *image_scale_to_display(struct image_data *img, int32_t
      * the static analyzer can see both are always defined even if a future
      * mode is added to calculate_optimal_dimensions without setting them. */
     uint32_t target_width = img->width, target_height = img->height;
-    calculate_optimal_dimensions(img->width, img->height, display_width, display_height,
-                                 mode, &target_width, &target_height);
+    calculate_optimal_dimensions(img->width, img->height, display_width, display_height, mode,
+                                 &target_width, &target_height);
     if (target_width == 0 || target_height == 0) {
         log_error("Refusing to scale image to zero dimensions for %dx%d display", display_width,
                   display_height);
         return img;
     }
-    
+
     /* Scale first (when a scale is actually needed), then ALWAYS fall through to
      * the exact-size adjustment below.
      *
@@ -810,15 +803,14 @@ static struct image_data *image_scale_to_display(struct image_data *img, int32_t
     if (needs_scale && mode != MODE_FILL && mode != MODE_STRETCH) {
         if (target_width > img->width || target_height > img->height) {
             log_debug("Not upscaling %ux%u to %ux%u; will crop/pad to exact size instead",
-                     img->width, img->height, target_width, target_height);
+                      img->width, img->height, target_width, target_height);
             needs_scale = false;
         }
     }
 
     if (needs_scale) {
-        log_debug("Scaling image from %ux%u to %ux%u for %dx%d display (mode=%d)",
-                 img->width, img->height, target_width, target_height,
-                 display_width, display_height, mode);
+        log_debug("Scaling image from %ux%u to %ux%u for %dx%d display (mode=%d)", img->width,
+                  img->height, target_width, target_height, display_width, display_height, mode);
 
         img = image_scale_bilinear(img, target_width, target_height);
 
@@ -826,50 +818,51 @@ static struct image_data *image_scale_to_display(struct image_data *img, int32_t
             return img;
         }
     }
-    
+
     /* Adjust image to exact display size for seamless transitions.
      * Every mode ends up exactly display-sized; TILE repeats the source to get
      * there, the rest crop and/or pad. */
     switch (mode) {
-        case MODE_FILL:
-            /* Already scaled to fill, now crop excess to exact display size */
-            img = image_center_crop(img, display_width, display_height);
-            /* A non-uniform source may still be short on one axis. */
-            img = image_center_pad(img, display_width, display_height);
-            break;
-            
-        case MODE_FIT:
-            /* Scaled to fit inside, now pad to exact display size with black borders */
-            img = image_center_pad(img, display_width, display_height);
-            break;
-            
-        case MODE_CENTER:
-            /* No scaling (1:1 pixels): crop the overflow and/or pad the shortfall.
-             * image_center_pad handles both axes independently, so one call is
-             * enough even for mixed cases (wider but shorter than the display). */
-            img = image_center_pad(img, display_width, display_height);
-            break;
-            
-        case MODE_STRETCH:
-            /* Already scaled to exact display size, no adjustment needed */
-            break;
-            
-        case MODE_TILE:
-            /* Physically tile the image to exact display size for seamless transitions
-             * This makes transitions work perfectly while maintaining tile appearance */
-            img = image_tile_to_size(img, display_width, display_height);
-            /* Tiling only grows an image; crop/pad anything still off-size. */
-            img = image_center_pad(img, display_width, display_height);
-            break;
+    case MODE_FILL:
+        /* Already scaled to fill, now crop excess to exact display size */
+        img = image_center_crop(img, display_width, display_height);
+        /* A non-uniform source may still be short on one axis. */
+        img = image_center_pad(img, display_width, display_height);
+        break;
+
+    case MODE_FIT:
+        /* Scaled to fit inside, now pad to exact display size with black borders */
+        img = image_center_pad(img, display_width, display_height);
+        break;
+
+    case MODE_CENTER:
+        /* No scaling (1:1 pixels): crop the overflow and/or pad the shortfall.
+         * image_center_pad handles both axes independently, so one call is
+         * enough even for mixed cases (wider but shorter than the display). */
+        img = image_center_pad(img, display_width, display_height);
+        break;
+
+    case MODE_STRETCH:
+        /* Already scaled to exact display size, no adjustment needed */
+        break;
+
+    case MODE_TILE:
+        /* Physically tile the image to exact display size for seamless transitions
+         * This makes transitions work perfectly while maintaining tile appearance */
+        img = image_tile_to_size(img, display_width, display_height);
+        /* Tiling only grows an image; crop/pad anything still off-size. */
+        img = image_center_pad(img, display_width, display_height);
+        break;
     }
-    
+
     return img;
 }
 
 /* High-quality bilinear image scaling */
-static struct image_data *image_scale_bilinear(struct image_data *img, uint32_t new_width, uint32_t new_height) {
-    if (!img || !img->pixels || img->width == 0 || img->height == 0 ||
-        new_width == 0 || new_height == 0) {
+static struct image_data *image_scale_bilinear(struct image_data *img, uint32_t new_width,
+                                               uint32_t new_height) {
+    if (!img || !img->pixels || img->width == 0 || img->height == 0 || new_width == 0 ||
+        new_height == 0) {
         return img;
     }
 
@@ -885,54 +878,54 @@ static struct image_data *image_scale_bilinear(struct image_data *img, uint32_t 
         log_error("Failed to allocate scaled image buffer");
         return img;
     }
-    
+
     float x_ratio = (float)(img->width - 1) / (float)new_width;
     float y_ratio = (float)(img->height - 1) / (float)new_height;
-    
+
     /* Bilinear interpolation */
     for (uint32_t y = 0; y < new_height; y++) {
         for (uint32_t x = 0; x < new_width; x++) {
             float src_x = x * x_ratio;
             float src_y = y * y_ratio;
-            
+
             uint32_t x1 = (uint32_t)src_x;
             uint32_t y1 = (uint32_t)src_y;
             uint32_t x2 = (x1 < img->width - 1) ? x1 + 1 : x1;
             uint32_t y2 = (y1 < img->height - 1) ? y1 + 1 : y1;
-            
+
             float x_diff = src_x - x1;
             float y_diff = src_y - y1;
-            
+
             /* Get the four surrounding pixels */
-            size_t idx_tl = (y1 * img->width + x1) * 4;  /* Top-left */
-            size_t idx_tr = (y1 * img->width + x2) * 4;  /* Top-right */
-            size_t idx_bl = (y2 * img->width + x1) * 4;  /* Bottom-left */
-            size_t idx_br = (y2 * img->width + x2) * 4;  /* Bottom-right */
-            
+            size_t idx_tl = (y1 * img->width + x1) * 4; /* Top-left */
+            size_t idx_tr = (y1 * img->width + x2) * 4; /* Top-right */
+            size_t idx_bl = (y2 * img->width + x1) * 4; /* Bottom-left */
+            size_t idx_br = (y2 * img->width + x2) * 4; /* Bottom-right */
+
             size_t dst_idx = (y * new_width + x) * 4;
-            
+
             /* Interpolate each channel (RGBA) */
             for (int c = 0; c < 4; c++) {
                 float tl = img->pixels[idx_tl + c];
                 float tr = img->pixels[idx_tr + c];
                 float bl = img->pixels[idx_bl + c];
                 float br = img->pixels[idx_br + c];
-                
+
                 /* Bilinear interpolation formula */
-                float top = tl * (1.0f - x_diff) + tr * x_diff;
+                float top    = tl * (1.0f - x_diff) + tr * x_diff;
                 float bottom = bl * (1.0f - x_diff) + br * x_diff;
-                float value = top * (1.0f - y_diff) + bottom * y_diff;
-                
-                new_pixels[dst_idx + c] = (uint8_t)(value + 0.5f);  /* Round */
+                float value  = top * (1.0f - y_diff) + bottom * y_diff;
+
+                new_pixels[dst_idx + c] = (uint8_t)(value + 0.5f); /* Round */
             }
         }
     }
-    
+
     /* Free old pixels and update image */
     free(img->pixels);
     img->pixels = new_pixels;
-    img->width = new_width;
+    img->width  = new_width;
     img->height = new_height;
-    
+
     return img;
 }
