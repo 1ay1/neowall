@@ -378,10 +378,19 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git pkg-config meson ninja-build \
-            libwayland-dev libwayland-bin wayland-protocols libwayland-egl1 \
+          sudo apt-get install -y build-essential git pkg-config ninja-build python3-pip \
+            libwayland-dev libwayland-bin libwayland-egl1 \
             libx11-dev libxrandr-dev libegl1-mesa-dev libgl-dev \
             libpng-dev libjpeg-dev libxkbcommon-dev wget file desktop-file-utils
+          # 22.04 (old glibc, so the AppImage runs widely) has meson 0.61 and
+          # wayland-protocols 1.25; we need 0.64 and 1.31.
+          sudo pip3 install 'meson>=0.64,<2'
+          wget -q https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.31/downloads/wayland-protocols-1.31.tar.xz
+          echo 'a07fa722ed87676ec020d867714bc9a2f24c464da73912f39706eeef5219e238  wayland-protocols-1.31.tar.xz' | sha256sum -c
+          tar xJf wayland-protocols-1.31.tar.xz
+          (cd wayland-protocols-1.31 && meson setup b --prefix=/usr/local -Dtests=false && sudo ninja -C b install)
+          rm -rf wayland-protocols-1.31*
+          meson --version; pkg-config --modversion wayland-protocols
 
       - uses: actions/checkout@v4
         with:
@@ -399,7 +408,8 @@ jobs:
 
       - name: Build & stage into AppDir
         run: |
-          meson setup build $MESON_ARGS
+          # fail instead of quietly shipping an AppImage without one backend
+          meson setup build $MESON_ARGS -Dwayland_backend=enabled -Dx11_backend=enabled
           ninja -C build
           DESTDIR="$PWD/AppDir" ninja -C build install
           # AppImage expects an AppRun + top-level .desktop + icon.
