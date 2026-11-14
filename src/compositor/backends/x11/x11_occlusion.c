@@ -30,11 +30,11 @@ static Atom atom_net_client_list_stacking;
 static Atom atom_net_wm_state;
 static Atom atom_net_wm_state_fullscreen;
 
-/* Throttle: x11 occlusion is polled, no need to query every loop tick.
- * Per-instance state lives here — reset in init/cleanup so re-init after a
- * display server restart starts fresh, not mid-cycle. */
-static int check_counter = 0;
-#define CHECK_INTERVAL 10
+/* Polled, so throttled by time: each check is a few round trips per client
+ * window. Counting loop steps made it 6-24 checks a second while animating,
+ * depending on the refresh rate. */
+static uint64_t last_check_ms = 0;
+#define CHECK_INTERVAL_MS 250
 
 /* Coverage threshold lives in x11_geometry.h (X11_COVERAGE_NUM/DEN). */
 
@@ -96,6 +96,8 @@ static bool window_has_state(Display *dpy, Window win, Atom target) {
                            &type, &format, &n, &rem, &data) != Success || !data) {
         return false;
     }
+    /* format 32 items are longs in Xlib's buffer; anything else isn't Atoms */
+    if (type != XA_ATOM || format != 32) n = 0;
 
     bool found = false;
     Atom *atoms = (Atom *)data;
@@ -139,6 +141,10 @@ static void check_fullscreen_state(void) {
     if (XGetWindowProperty(x_display, root_window, atom_net_client_list_stacking,
                            0, 1024, False, XA_WINDOW,
                            &type, &format, &n, &rem, &data) != Success || !data) {
+        return;
+    }
+    if (type != XA_WINDOW || format != 32) {
+        XFree(data);
         return;
     }
     Window *windows = (Window *)data;
@@ -232,7 +238,7 @@ bool x11_occlusion_init(Display *display, struct neowall_state *state) {
     x_display = display;
     root_window = DefaultRootWindow(x_display);
     g_state = state;
-    check_counter = 0;  /* Fresh start — don't inherit count from previous init. */
+    last_check_ms = 0;
 
     atom_net_client_list_stacking =
         XInternAtom(x_display, "_NET_CLIENT_LIST_STACKING", False);
@@ -246,17 +252,18 @@ bool x11_occlusion_init(Display *display, struct neowall_state *state) {
 
 void x11_occlusion_update(struct neowall_state *state) {
     (void)state;
-    if (++check_counter < CHECK_INTERVAL) {
+    uint64_t now = get_time_ms();
+    if (last_check_ms && now - last_check_ms < CHECK_INTERVAL_MS) {
         return;
     }
-    check_counter = 0;
+    last_check_ms = now;
     check_fullscreen_state();
 }
 
 void x11_occlusion_cleanup(void) {
     x_display = NULL;
     g_state = NULL;
-    check_counter = 0;
+    last_check_ms = 0;
 }
 
 #endif /* HAVE_X11_BACKEND */

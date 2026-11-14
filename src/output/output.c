@@ -1907,9 +1907,12 @@ void output_set_cycle_index(struct output_state *output, size_t index) {
              index + 1, output->config->cycle_count,
              path_copy);
 
-    /* Apply the wallpaper/shader at the new index */
+    /* Apply the wallpaper/shader at the new index. A shader builds in the
+     * background like a timed cycle, so the old one keeps drawing instead of
+     * the screen freezing for the compile. */
     if (output->config->type == WALLPAPER_SHADER) {
-        output_set_shader(output, path_copy);
+        nw_result r = output_set_shader_async(output, path_copy);
+        if (nw_is_err(r)) log_error("set %zu: %s %s", index, nw_status_str(r.status), r.context ? r.context : "");
     } else {
         output_set_wallpaper(output, path_copy);
     }

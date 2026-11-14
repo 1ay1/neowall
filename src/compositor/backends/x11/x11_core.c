@@ -539,6 +539,24 @@ static void x11_get_screen_dimensions(x11_backend_data_t *backend, int *width, i
  * BACKEND INITIALIZATION
  * ============================================================================ */
 
+/* Default X error handler: log, rate-limited, and carry on. */
+static int x11_log_error_handler(Display *dpy, XErrorEvent *e) {
+    static uint64_t last_ms;
+    static unsigned suppressed;
+    uint64_t now = get_time_ms();
+    if (now - last_ms < 1000) {
+        suppressed++;
+        return 0;
+    }
+    char text[128] = {0};
+    XGetErrorText(dpy, e->error_code, text, sizeof(text));
+    log_warn("X11 error: %s (request %u.%u, resource 0x%lx)%s", text, e->request_code,
+             e->minor_code, e->resourceid, suppressed ? " (more suppressed)" : "");
+    last_ms = now;
+    suppressed = 0;
+    return 0;
+}
+
 static void *x11_backend_init(struct neowall_state *state) {
     log_info("Initializing X11 backend for tiling window managers");
 
@@ -549,6 +567,13 @@ static void *x11_backend_init(struct neowall_state *state) {
     }
 
     backend->state = state;
+
+    /* Xlib's default error handler exits the process. A wallpaper daemon
+     * should log a stray protocol error (a BadMatch on a resize, a window
+     * that went away) and keep drawing. The WM probe and the occlusion poll
+     * still swap in their own handlers and restore this one. A lost
+     * connection is an I/O error, which stays fatal. */
+    XSetErrorHandler(x11_log_error_handler);
 
     /* Open X11 display */
     backend->x_display = XOpenDisplay(NULL);
@@ -1053,28 +1078,26 @@ static void x11_distribute_mouse(x11_backend_data_t *backend, int root_x, int ro
     pthread_rwlock_unlock(&backend->state->output_list_lock);
 }
 
-/* Update mouse position for all outputs by querying X11 pointer */
+/* Update mouse position for all outputs by querying X11 pointer. One query
+ * covers every output, and XQueryPointer is a round trip, so at most one per
+ * frame interval even when several outputs commit. */
 static void x11_update_mouse_position(x11_backend_data_t *backend) {
     if (!backend || !backend->x_display || !backend->state) return;
+
+    static uint64_t last_query_us;
+    uint64_t now = get_time_us();
+    if (now - last_query_us < 4000) return;   /* a 240 Hz frame */
+    last_query_us = now;
 
     Window root_return, child_return;
     int root_x, root_y, win_x, win_y;
     unsigned int mask_return;
 
-    /* Query the current pointer position relative to root window */
     if (!XQueryPointer(backend->x_display, backend->root_window,
                        &root_return, &child_return,
                        &root_x, &root_y, &win_x, &win_y,
                        &mask_return)) {
-        return;  /* Query failed */
-    }
-
-    /* Debug: Log mouse position occasionally */
-    static uint64_t last_mouse_log = 0;
-    uint64_t now = get_time_ms();
-    if (now - last_mouse_log > 2000) {
-        log_debug("X11 mouse position: (%d, %d)", root_x, root_y);
-        last_mouse_log = now;
+        return;
     }
 
     x11_distribute_mouse(backend, root_x, root_y);

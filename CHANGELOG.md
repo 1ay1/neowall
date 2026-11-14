@@ -5,6 +5,16 @@ All notable changes to neowall. Dates are release dates.
 ## Unreleased
 
 ### Fixed
+- X11: any stray X protocol error (a window going away mid-query) ended the
+  daemon, since Xlib's default handler exits. It's now logged and drawing
+  goes on. The fullscreen check read window properties without checking
+  their type, and ran 6-24 times a second depending on refresh rate; it's
+  4 a second now. With mouse input on, the pointer was queried once per
+  output per frame (a round trip each); now once per frame.
+- `neowall set <index>` on a shader cycle froze the screen while the new
+  shader compiled; it builds in the background now, like timed cycling.
+- `neowall reload` could report "the daemon didn't answer" on a slow GPU,
+  because the reply waits for the new shader to compile.
 - An exec source whose command printed its value and kept running (or
   closed stdout early, or never stopped printing) froze the whole wallpaper:
   the render loop waited for it to exit. Reaping never blocks now, and the

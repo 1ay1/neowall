@@ -184,7 +184,10 @@ static bool can_cycle_wallpaper(void) {
  * which still say "no daemon" properly. */
 static bool ipc_command(const char *verb, const char *arg, int *rc) {
     char reply[NW_IPC_MAX_LINE];
-    nw_ipc_status st = nw_ipc_request(app_socket_path(), verb, arg, reply, sizeof(reply), 3000);
+    /* reload answers after the new config is applied, which can mean a
+     * shader compile: a second or more on software GL or a loaded machine */
+    int timeout_ms = strcmp(verb, "reload") == 0 ? 15000 : 3000;
+    nw_ipc_status st = nw_ipc_request(app_socket_path(), verb, arg, reply, sizeof(reply), timeout_ms);
     switch (st) {
     case NW_IPC_OK:
         if (reply[0]) printf("%s\n", reply);
