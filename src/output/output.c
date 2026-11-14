@@ -2293,7 +2293,8 @@ GLuint output_upload_preload_texture(struct output_state *output) {
     }
 
     /* Make EGL context current */
-    if (!egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
+    if (!output->compositor_surface ||
+        !egl_make_surface_current(output->state->egl_display, output->compositor_surface->egl_surface, output->state->egl_context)) {
         log_error("Failed to make EGL context current for preload upload");
         return 0;
     }

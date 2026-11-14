@@ -21,9 +21,12 @@
  * nw_source_ctx, so this runs headless in CI and never sleeps.
  */
 
+#include <dirent.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "neowall/source/source.h"
 
@@ -368,6 +371,111 @@ static void test_exec_is_opt_in(void) {
     nw_source_exec_set_allowed(false);
 }
 
+/* A command that prints its value, then keeps running (and has a child of
+ * its own). Ticks used to block in waitpid for the command's whole life,
+ * freezing the wallpaper; and only the shell was killed, so its child lived
+ * on. Every tick must return fast, and nothing may outlive destroy. */
+static double now_ms_real(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (double)t.tv_sec * 1e3 + (double)t.tv_nsec / 1e6;
+}
+
+static int count_children(void) {
+    char path[64], b[64];
+    snprintf(path, sizeof(path), "/proc/self/task/%d/children", (int)getpid());
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    int n = 0;
+    while (fscanf(f, "%63s", b) == 1) n++;
+    fclose(f);
+    return n;
+}
+
+/* Processes (other than us) whose command line contains `needle`. */
+static int procs_mentioning(const char *needle) {
+    DIR *d = opendir("/proc");
+    if (!d) return -1;
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] < '1' || e->d_name[0] > '9' || atoi(e->d_name) == (int)getpid()) continue;
+        char path[300], buf[4096];
+        snprintf(path, sizeof(path), "/proc/%s/cmdline", e->d_name);
+        FILE *f = fopen(path, "r");
+        if (!f) continue;
+        size_t len = fread(buf, 1, sizeof(buf) - 1, f);
+        fclose(f);
+        for (size_t i = 0; i < len; i++) if (!buf[i]) buf[i] = ' ';
+        buf[len] = '\0';
+        if (strstr(buf, needle)) n++;
+    }
+    closedir(d);
+    return n;
+}
+
+static void test_exec_never_blocks(void) {
+    nw_source_registry_reset();
+    nw_source_register_builtins();
+    nw_source_exec_set_allowed(true);
+
+    char marker[] = "/tmp/nw-exec-XXXXXX";
+    int mfd = mkstemp(marker);
+    close(mfd);
+    char spec[512];
+    /* prints 7, closes stdout, then it and a child of its own run for an hour */
+    snprintf(spec, sizeof(spec),
+             "exec(\"echo 7; exec >&-; (sleep 3600; echo x > %s) & sleep 3600\", 1s)", marker);
+    nw_source src;
+    char err[NW_SOURCE_ERR_MAX] = {0};
+    CHECK(nw_is_ok(nw_source_open_text(spec, &src, err, sizeof(err))), "open: %s", err);
+
+    double worst = 0.0;
+    float got = 0.0f;
+    for (int i = 0; i < 100; i++) {
+        nw_source_ctx c = ctx_at((uint64_t)i * 1000);
+        double t0 = now_ms_real();
+        nw_source_tick(&src, &c);
+        double dt = now_ms_real() - t0;
+        if (dt > worst) worst = dt;
+        got = nw_source_scalar(&src);
+        if (got > 6.0f && i > 5) break;
+        struct timespec ts = {0, 5 * 1000 * 1000};
+        nanosleep(&ts, NULL);
+    }
+    CHECK(got > 6.0f && got < 8.0f, "value read while the command runs on, got %f", got);
+    CHECK(worst < 100.0, "no tick blocks on the running command (worst %.0f ms)", worst);
+
+    nw_source_destroy(&src);
+    struct timespec ts = {0, 100 * 1000 * 1000};
+    nanosleep(&ts, NULL);
+    CHECK(count_children() == 0, "no exec child left after destroy (%d)", count_children());
+    /* the grandchild was in the group, so it died too */
+    CHECK(procs_mentioning(marker) == 0, "the command's own child was killed with it");
+    unlink(marker);
+
+    /* A command that never stops printing fills the buffer: same rule. */
+    CHECK(nw_is_ok(nw_source_open_text("exec(\"yes 9\", 1s)", &src, err, sizeof(err))), "open yes");
+    worst = 0.0;
+    got = 0.0f;
+    for (int i = 0; i < 100 && got < 8.0f; i++) {
+        nw_source_ctx c = ctx_at((uint64_t)i * 1000);
+        double t0 = now_ms_real();
+        nw_source_tick(&src, &c);
+        double dt = now_ms_real() - t0;
+        if (dt > worst) worst = dt;
+        got = nw_source_scalar(&src);
+        struct timespec ts2 = {0, 5 * 1000 * 1000};
+        nanosleep(&ts2, NULL);
+    }
+    CHECK(got > 8.0f && got < 10.0f, "value read from an endless writer, got %f", got);
+    CHECK(worst < 100.0, "an endless writer doesn't block a tick (worst %.0f ms)", worst);
+    nw_source_destroy(&src);
+    nanosleep(&ts, NULL);
+    CHECK(count_children() == 0, "no child left after the endless writer");
+    nw_source_exec_set_allowed(false);
+}
+
 int main(void) {
     test_registry();
     test_spec_parse_basic();
@@ -377,6 +485,7 @@ int main(void) {
     test_visibility_gates_ticking();
     test_const_and_file();
     test_exec_is_opt_in();
+    test_exec_never_blocks();
 
     printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;

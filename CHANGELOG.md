@@ -5,6 +5,15 @@ All notable changes to neowall. Dates are release dates.
 ## Unreleased
 
 ### Fixed
+- An exec source whose command printed its value and kept running (or
+  closed stdout early, or never stopped printing) froze the whole wallpaper:
+  the render loop waited for it to exit. Reaping never blocks now, and the
+  command's whole process group is killed, so a child it forked can't
+  outlive it.
+- The FPS overlay made a new GL buffer and ~250 uploads every frame, and
+  could leave blending on; image wallpapers left blending on for the next
+  draw. Every redraw of an image also logged at INFO and synced the GPU
+  with glGetError.
 - An idle wallpaper wasn't idle: a frame-callback loop woke the daemon at
   the display's refresh rate (125 wakeups/s for a static image), and the
   system sampler read /proc and /sys four times a second with nothing

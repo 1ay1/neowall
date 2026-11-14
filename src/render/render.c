@@ -96,160 +96,102 @@ static const uint8_t font_5x7[][7] = {
     /* S */ {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E},
 };
 
-/* Draw a single character at screen position */
-static void draw_char_at(int char_index, float x, float y, float char_width, float char_height,
-                         int screen_width, int screen_height) {
-    if (char_index < 0 || char_index >= 15) return;
+/* The FPS overlay: every lit pixel of the 5x7 glyphs becomes two triangles
+ * in one buffer, drawn in a single call per colour. Locations, the VAO and
+ * the VBO are made once, not per frame (it used to be ~250 glBufferData
+ * calls and a fresh VBO every frame). */
+static GLint overlay_pos = -1, overlay_color = -1;
+static GLuint overlay_vao, overlay_vbo;
 
-    const uint8_t *bitmap = font_5x7[char_index];
-    float pixel_width = char_width / 5.0f;
-    float pixel_height = char_height / 7.0f;
-
-    /* Draw each pixel of the character */
-    for (int row = 0; row < 7; row++) {
-        uint8_t line = bitmap[row];
-        for (int col = 0; col < 5; col++) {
-            if (line & (1 << (4 - col))) {
-                /* Convert screen coords to NDC */
-                float px = x + col * pixel_width;
-                float py = y + row * pixel_height;
-
-                float left = (px / screen_width) * 2.0f - 1.0f;
-                float right = ((px + pixel_width) / screen_width) * 2.0f - 1.0f;
-                float top = 1.0f - (py / screen_height) * 2.0f;
-                float bottom = 1.0f - ((py + pixel_height) / screen_height) * 2.0f;
-
-                /* Draw pixel as quad */
-                float quad[8] = {
-                    left, top,
-                    right, top,
-                    left, bottom,
-                    right, bottom
-                };
-
-                glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_DYNAMIC_DRAW);
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-            }
-        }
+static int glyph_index(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    switch (c) {
+    case '.': return 10;
+    case ' ': return 11;
+    case 'F': return 12;
+    case 'P': return 13;
+    case 'S': return 14;
+    default: return -1;
     }
 }
 
-/* Render FPS watermark overlay */
+/* Append one glyph's lit pixels as triangles. Returns vertices written. */
+static int glyph_quads(float *v, int idx, float x, float y, float cw, float ch, int sw, int sh) {
+    const uint8_t *bitmap = font_5x7[idx];
+    float pw = cw / 5.0f, ph = ch / 7.0f;
+    int n = 0;
+    for (int row = 0; row < 7; row++) {
+        for (int col = 0; col < 5; col++) {
+            if (!(bitmap[row] & (1 << (4 - col)))) continue;
+            float px = x + (float)col * pw, py = y + (float)row * ph;
+            float l = px / (float)sw * 2.0f - 1.0f, r = (px + pw) / (float)sw * 2.0f - 1.0f;
+            float t = 1.0f - py / (float)sh * 2.0f, b = 1.0f - (py + ph) / (float)sh * 2.0f;
+            const float q[12] = {l, t, r, t, l, b, r, t, r, b, l, b};
+            memcpy(v + n * 2, q, sizeof(q));
+            n += 6;
+        }
+    }
+    return n;
+}
+
 static void render_fps_watermark(struct output_state *output) {
     if (!output || !output->config->show_fps) return;
-    if (output->fps_current <= 0.0f) return;
+    if (output->fps_current <= 0.0f || !color_overlay_program) return;
 
-    /* Format FPS text */
-    char fps_text[32];
-    snprintf(fps_text, sizeof(fps_text), "%.1f FPS", output->fps_current);
+    if (!overlay_vao) {
+        overlay_pos = glGetAttribLocation(color_overlay_program, "position");
+        overlay_color = glGetUniformLocation(color_overlay_program, "color");
+        if (overlay_pos < 0 || overlay_color < 0) return;
+        glGenVertexArrays(1, &overlay_vao);
+        glGenBuffers(1, &overlay_vbo);
+        glBindVertexArray(overlay_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, overlay_vbo);
+        glVertexAttribPointer((GLuint)overlay_pos, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray((GLuint)overlay_pos);
+    }
 
-    /* Save current GL state */
-    GLboolean blend_enabled = glIsEnabled(GL_BLEND);
-    GLint current_program = 0;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
+    char text[32];
+    int len = snprintf(text, sizeof(text), "%.1f FPS", output->fps_current);
+    if (len <= 0) return;
+    if (len >= (int)sizeof(text)) len = (int)sizeof(text) - 1;
 
-    /* Enable blending for semi-transparent background */
+    /* 35 pixels per glyph at most, 6 vertices each, 2 floats each; the
+     * shadow copy (1 px down-right) goes first, then the text. */
+    static float verts[2 * 32 * 35 * 6 * 2];
+    const float cw = 12.0f, ch = 18.0f;
+    float x0 = (float)output->width - (float)len * cw - 10.0f;
+    float y0 = (float)output->height - ch - 10.0f;
+    int n = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        float off = pass == 0 ? 1.0f : 0.0f;
+        for (int i = 0; i < len; i++) {
+            int g = glyph_index(text[i]);
+            if (g >= 0) n += glyph_quads(verts + n * 2, g, x0 + (float)i * cw + off, y0 + off,
+                                         cw, ch, output->width, output->height);
+        }
+    }
+    int half = n / 2;
+
+    GLboolean blend = glIsEnabled(GL_BLEND);
+    GLint prev_prog = 0, prev_vao = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &prev_prog);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prev_vao);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    /* Use color shader */
     glUseProgram(color_overlay_program);
-    GLint pos_attrib = glGetAttribLocation(color_overlay_program, "position");
-    GLint color_uniform = glGetUniformLocation(color_overlay_program, "color");
+    glBindVertexArray(overlay_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, overlay_vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size_t)n * 2 * sizeof(float)), verts, GL_STREAM_DRAW);
 
-    if (pos_attrib < 0 || color_uniform < 0) return;
+    glUniform4f(overlay_color, 0.0f, 0.0f, 0.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, 0, half);
+    glUniform4f(overlay_color, 0.0f, 1.0f, 0.0f, 1.0f);
+    glDrawArrays(GL_TRIANGLES, half, n - half);
 
-    /* Create temporary VBO for text rendering */
-    GLuint text_vbo;
-    glGenBuffers(1, &text_vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, text_vbo);
-
-    glVertexAttribPointer(pos_attrib, 2, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(pos_attrib);
-
-    /* Position at bottom-right corner to avoid taskbar/waybar */
-    float char_width = 12.0f;
-    float char_height = 18.0f;
-    float text_width = strlen(fps_text) * char_width;
-    float text_x = output->width - text_width - 10.0f;
-    float text_y = output->height - char_height - 10.0f;
-
-    /* Draw black shadow/outline for visibility on any background */
-    glUniform4f(color_uniform, 0.0f, 0.0f, 0.0f, 1.0f);
-
-    float cursor_x = text_x;
-    float cursor_y = text_y;
-
-    /* Draw shadow at 1px offset */
-    for (size_t i = 0; i < strlen(fps_text); i++) {
-        char c = fps_text[i];
-        int char_idx = -1;
-
-        if (c >= '0' && c <= '9') {
-            char_idx = c - '0';
-        } else if (c == '.') {
-            char_idx = 10;
-        } else if (c == ' ') {
-            char_idx = 11;
-        } else if (c == 'F') {
-            char_idx = 12;
-        } else if (c == 'P') {
-            char_idx = 13;
-        } else if (c == 'S') {
-            char_idx = 14;
-        }
-
-        if (char_idx >= 0) {
-            draw_char_at(char_idx, cursor_x + 1, cursor_y + 1, char_width, char_height,
-                        output->width, output->height);
-        }
-
-        cursor_x += char_width;
-    }
-
-    /* Draw text in bright green */
-    glUniform4f(color_uniform, 0.0f, 1.0f, 0.0f, 1.0f);
-
-    cursor_x = text_x;
-    cursor_y = text_y;
-
-    for (size_t i = 0; i < strlen(fps_text); i++) {
-        char c = fps_text[i];
-        int char_idx = -1;
-
-        if (c >= '0' && c <= '9') {
-            char_idx = c - '0';
-        } else if (c == '.') {
-            char_idx = 10;
-        } else if (c == ' ') {
-            char_idx = 11;
-        } else if (c == 'F') {
-            char_idx = 12;
-        } else if (c == 'P') {
-            char_idx = 13;
-        } else if (c == 'S') {
-            char_idx = 14;
-        }
-
-        if (char_idx >= 0) {
-            draw_char_at(char_idx, cursor_x, cursor_y, char_width, char_height,
-                        output->width, output->height);
-        }
-
-        cursor_x += char_width;
-    }
-
-    glDisableVertexAttribArray(pos_attrib);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glDeleteBuffers(1, &text_vbo);
-
-    /* Restore GL state */
-    if (!blend_enabled) {
-        glDisable(GL_BLEND);
-    }
-    if (current_program != 0) {
-        glUseProgram(current_program);
-    }
+    glBindVertexArray((GLuint)prev_vao);
+    if (!blend) glDisable(GL_BLEND);
+    glUseProgram((GLuint)prev_prog);
 }
 
 /* Fullscreen quad vertices (position + texcoord) for image rendering */
@@ -277,6 +219,7 @@ static inline void cache_program_uniforms(struct output_state *output) {
     output->program_uniforms.position = glGetAttribLocation(output->program, "position");
     output->program_uniforms.texcoord = glGetAttribLocation(output->program, "texcoord");
     output->program_uniforms.tex_sampler = glGetUniformLocation(output->program, "texture0");
+    output->program_uniforms.alpha = glGetUniformLocation(output->program, "alpha");
 }
 
 /* Helper: Cache uniform locations for transition shaders */
@@ -1354,35 +1297,15 @@ bool render_frame(struct output_state *output) {
         return false;
     }
 
-    /* DEBUG: Log which texture is being used for this output */
-    static uint64_t last_log_time = 0;
-    uint64_t now = get_time_ms();
-    if (now - last_log_time > 2000) {
-        log_info("Rendering output %s with texture %u (image: %s)",
-                 output->model[0] ? output->model : "unknown",
-                 output->texture,
-                 output->config->path);
-        last_log_time = now;
-    }
-
     bind_texture(output, output->texture);
-
-    /* Check if bind succeeded */
-    GLenum bind_error = glGetError();
-    if (bind_error != GL_NO_ERROR) {
-        log_error("OpenGL error binding texture %u: 0x%x", output->texture, bind_error);
-        return false;
-    }
 
     /* Set texture unit uniform - use cached location */
     if (output->program_uniforms.tex_sampler >= 0) {
         glUniform1i(output->program_uniforms.tex_sampler, 0);
     }
-
-    /* Set alpha uniform (for transitions) - lookup once per frame is acceptable */
-    GLint alpha_uniform = glGetUniformLocation(output->program, "alpha");
-    if (alpha_uniform >= 0) {
-        glUniform1f(alpha_uniform, 1.0f);
+    /* The program is shared with fades, which leave their last alpha set. */
+    if (output->program_uniforms.alpha >= 0) {
+        glUniform1f(output->program_uniforms.alpha, 1.0f);
     }
 
     /* Handle tile mode texture wrapping - only change when needed */
@@ -1403,8 +1326,10 @@ bool render_frame(struct output_state *output) {
     /* Draw quad */
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-    /* Re-enable alpha channel writes */
+    /* Re-enable alpha channel writes, and leave blending off for whoever
+     * draws next (the shader engine, a transition) */
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    set_blend_state(output, false);
 
     /* Check for GL errors */
     GLenum gl_error = glGetError();

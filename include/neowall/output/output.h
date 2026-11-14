@@ -256,6 +256,7 @@ struct output_state {
         GLint position;
         GLint texcoord;
         GLint tex_sampler;
+        GLint alpha;
     } program_uniforms;
 
     struct {

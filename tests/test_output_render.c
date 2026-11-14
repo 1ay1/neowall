@@ -215,6 +215,24 @@ int main(void) {
     CHECK(close_rgb(read_rgb(5, H / 2), 0xff0000), "left is red: %06x", read_rgb(5, H / 2));
     CHECK(close_rgb(read_rgb(W - 5, H / 2), 0x0000ff), "right is blue: %06x", read_rgb(W - 5, H / 2));
 
+    /* 1b. The FPS overlay: green text in the bottom-right corner, drawn in
+     * one go, and GL state (blend, program) is as it was afterwards. */
+    o->fps_current = 88.8f;
+    c.show_fps = true;
+    CHECK(output_apply_config(o, &c), "apply with show_fps");
+    o->fps_current = 88.8f;
+    CHECK(draw(o), "render with overlay");
+    int green_px = 0;
+    for (int y = 8; y < 32; y++)
+        for (int x = W - 120; x < W - 8; x++)
+            if (close_rgb(read_rgb(x, y), 0x00ff00)) green_px++;
+    CHECK(green_px > 20, "overlay text is drawn (%d green pixels)", green_px);
+    CHECK(!glIsEnabled(GL_BLEND), "overlay leaves blending as it found it");
+    CHECK(glGetError() == GL_NO_ERROR, "overlay causes no GL error");
+    c.show_fps = false;
+    o->fps_current = 0.0f;
+    CHECK(output_apply_config(o, &c), "apply without show_fps");
+
     /* 2. Fit mode keeps the 2:1 aspect on a 2:1 output: still edge to edge. */
     c.mode = MODE_FIT;
     CHECK(output_apply_config(o, &c), "apply fit");

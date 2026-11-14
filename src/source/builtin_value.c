@@ -144,6 +144,7 @@ typedef struct {
     char     command[NW_SOURCE_ARG_MAX];
     float    value;
     pid_t    pid;        /* 0 when nothing is in flight */
+    pid_t    dead_pid;   /* killed, not reaped yet; 0 when none */
     int      fd;         /* read end of the pipe, -1 when idle */
     uint64_t started_ms; /* for the deadline */
     char     buf[EXEC_READ_MAX];
@@ -170,20 +171,40 @@ static void *exec_open(const nw_source_spec *spec, char *err, size_t err_cap) {
     return st;
 }
 
-/* Stop tracking the child. `hard` also signals it, for deadline and shutdown. */
+/* The child runs in its own process group (pid == pgid), so a kill reaches
+ * everything it started: `sh -c "a | b"` or a forked `sleep` would otherwise
+ * outlive every deadline and pile up. */
+static void exec_kill(pid_t pid) {
+    if (kill(-pid, SIGKILL) != 0) kill(pid, SIGKILL);
+}
+
+/* Collect a dead child without ever blocking: this runs on the render loop. */
+static bool exec_try_wait(exec_state *st) {
+    if (st->dead_pid <= 0) return true;
+    int status;
+    pid_t r = waitpid(st->dead_pid, &status, WNOHANG);
+    if (r == st->dead_pid || (r < 0 && errno == ECHILD)) {
+        st->dead_pid = 0;
+        return true;
+    }
+    return false;
+}
+
+/* Stop tracking the child: stop reading, end it (and its group) unless it
+ * already exited, and reap it now or on a later tick. A command that printed
+ * enough or closed stdout but keeps running is killed: we have its value. */
 static void exec_reap(exec_state *st, bool hard) {
     if (st->fd >= 0) {
         close(st->fd);
         st->fd = -1;
     }
     if (st->pid > 0) {
-        if (hard) {
-            kill(st->pid, SIGKILL);
+        int status;
+        if (hard || waitpid(st->pid, &status, WNOHANG) != st->pid) {
+            exec_kill(st->pid);
+            st->dead_pid = st->pid;
+            exec_try_wait(st);
         }
-        /* Blocking wait is safe: either it already exited, or we just killed
-         * it. Without this each interval would leak a zombie. */
-        int status = 0;
-        waitpid(st->pid, &status, 0);
         st->pid = 0;
     }
     st->buf_len = 0;
@@ -192,6 +213,8 @@ static void exec_reap(exec_state *st, bool hard) {
 static void exec_close(void *self) {
     exec_state *st = self;
     exec_reap(st, true);
+    /* Closing for good: the child was SIGKILLed, so this wait is short. */
+    if (st->dead_pid > 0) waitpid(st->dead_pid, NULL, 0);
     free(st);
 }
 
@@ -211,6 +234,7 @@ static void exec_spawn(exec_state *st, uint64_t now_ms) {
     if (pid == 0) {
         /* Child. Wire stdout to the pipe, silence stdin/stderr so a chatty
          * command cannot scribble on the daemon's log. */
+        setpgid(0, 0);
         nw_child_reset_signals();
         close(fds[0]);
         dup2(fds[1], STDOUT_FILENO);
@@ -230,6 +254,7 @@ static void exec_spawn(exec_state *st, uint64_t now_ms) {
     }
 
     /* Parent. Non-blocking read end so ticking never stalls a frame. */
+    setpgid(pid, pid);   /* also here, so a kill right away reaches the group */
     close(fds[1]);
     int flags = fcntl(fds[0], F_GETFL, 0);
     if (flags >= 0) {
@@ -285,6 +310,9 @@ static void exec_finish(exec_state *st) {
 static void exec_tick(void *self, const nw_source_ctx *ctx) {
     exec_state *st = self;
 
+    /* Last run's child hasn't been reaped yet (killed, still dying): one
+     * at a time, so a stuck command can't fork a new one every interval. */
+    if (!exec_try_wait(st)) return;
     if (st->pid > 0) {
         /* A command still running when its next tick arrives is slower than
          * its interval. Let it finish; kill it only at the deadline. */
