@@ -31,7 +31,9 @@
 #include <unistd.h>
 
 #include "neowall/cli/cli.h"
+#include "neowall/config/config.h"
 #include "neowall/core/log.h"
+#include "neowall/core/util.h"
 #include "neowall/core/wall_clock.h"
 #include "neowall/output/state_file.h"
 #include "neowall/shader/engine.h"
@@ -63,6 +65,7 @@ typedef struct {
     int n_set;
     char set_name[WALLSHADER_MAX_OVERRIDES][48];
     float set_value[WALLSHADER_MAX_OVERRIDES];
+    const char *palette;
 } render_opts;
 
 static void render_usage(FILE *f) {
@@ -85,6 +88,8 @@ static void render_usage(FILE *f) {
             "      --at HH:MM        local time of day (iTimeOfDay, iSun, iDate)\n"
             "      --mouse X,Y       pointer, 0..1 (iMouse)\n"
             "      --set NAME=VALUE  pin any float uniform (iAudioBeat=1, iCpu=0.8, uMy=2)\n"
+            "      --palette P       iPalette: \"#1a1b26 #c0caf5 #7aa2f7 ...\" or a theme file\n"
+            "                        (default: the `palette` in your config.vibe, if any)\n"
             "      --live            use the real CPU/audio/battery readings instead\n"
             "\n"
             "Diagnostics\n"
@@ -169,6 +174,9 @@ static int parse_args(int argc, char **argv, render_opts *o) {
             memcpy(o->set_name[o->n_set], v, n);
             o->set_name[o->n_set][n] = '\0';
             o->set_value[o->n_set++] = (float)atof(eq + 1);
+        } else if (!strcmp(a, "--palette")) {
+            NEXT();
+            o->palette = v;
         } else if (!strcmp(a, "--bench")) {
             o->bench = true;
         } else if (!strcmp(a, "--check")) {
@@ -489,6 +497,18 @@ int cmd_render(int argc, char *argv[]) {
     int npass      = nw_engine_pass_count(eng);
     if (!o.live) pin_calm_inputs(s);
     for (int i = 0; i < o.n_set; i++) wallshader_set_override(s, o.set_name[i], o.set_value[i]);
+    {
+        /* --palette, else the config's default `palette`, else built-in */
+        float pal[NW_PALETTE_MAX][3];
+        int np = 0;
+        if (o.palette) {
+            np = neowall_palette_parse(o.palette, pal, NW_PALETTE_MAX);
+            if (np == 0) fprintf(stderr, "neowall render: --palette: no colours in '%s'\n", o.palette);
+        } else {
+            np = config_default_palette(pal, NW_PALETTE_MAX);
+        }
+        wallshader_set_palette(s, np ? (const float (*)[3])pal : NULL, np);
+    }
     if (o.bench) nw_engine_set_profiling(eng, true);
 
     /* RGBA16F target: keeps NaN/Inf (an RGBA8 one would clamp them to black) */

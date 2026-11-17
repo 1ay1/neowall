@@ -127,6 +127,9 @@ static void output_install_shader(struct output_state *output, wallshader *fresh
     if (output->config->type == WALLPAPER_SHADER) render_snapshot_for_swap(output);
     wallshader_free(output->shader);
     output->shader = fresh;
+    /* the config's `palette` becomes iPalette (built-in one when unset) */
+    wallshader_set_palette(fresh, (const float (*)[3])output->config->palette,
+                           output->config->palette_count);
     /* the config's `channels` fill the iChannels the shader leaves open */
     (void)render_load_channel_textures(output, output->config);
 

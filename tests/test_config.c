@@ -136,6 +136,8 @@ int main(void) {
         "default {\n  channels 3\n  shader a.glsl\n}\n",             /* not an array */
         "default {\n  shader a.glsl\n",                              /* syntax */
         "default {\n  channels [ a b c d e ]\n  shader a.glsl\n}\n", /* > 4 channels */
+        "default {\n  shader a.glsl\n  palette \"no colours here\"\n}\n", /* bad palette */
+        "default {\n  path /x.png\n  palette \"#112233\"\n}\n",     /* palette on an image */
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         write_cfg(bad[i]);
@@ -283,6 +285,14 @@ int main(void) {
     atomic_store(&st.mouse_interaction, true);
     CHECK(app_config_load(&st, cfg));
     CHECK(!atomic_load(&st.mouse_interaction));
+
+    /* `palette`: inline colours reach the output's config; garbage is an error */
+    snprintf(text, sizeof(text),
+             "default {\n  shader %s\n  palette \"#1a1b26 #c0caf5 #7aa2f7\"\n}\n", a);
+    write_cfg(text);
+    CHECK(app_config_load(&st, cfg));
+    CHECK(left.config && left.config->palette_count == 3);
+    CHECK(left.config && left.config->palette[2][2] > 0.96f);
 
     /* first run with no file writes a starter config and loads it */
     char fresh[600];

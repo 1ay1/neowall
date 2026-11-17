@@ -21,6 +21,14 @@ bool neowall_find_data(const char *rel, char *out, size_t size);
 /* Call `fn` on each existing data dir, same order, until it returns true. */
 bool neowall_each_data_dir(bool (*fn)(const char *dir, void *ctx), void *ctx);
 
+/* A colour palette for shaders (`palette` in the config, `render --palette`).
+ * `spec` is either inline colours ("#1a1b26 #7aa2f7 ...", any separators) or
+ * a path to a file containing them (~ expanded; anything that isn't a 6-digit
+ * hex colour is ignored, so a CSS/kitty/ghostty theme file works as-is).
+ * Writes up to `max` RGB triplets in 0..1, returns how many (0 on error). */
+#define NW_PALETTE_MAX 16
+int neowall_palette_parse(const char *spec, float (*out)[3], int max);
+
 /* Copy src into a fixed-size field. Safe when src IS dst. NULL clears it. */
 void config_str_set(char *dst, size_t dst_size, const char *src);
 

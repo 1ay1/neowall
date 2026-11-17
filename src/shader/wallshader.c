@@ -57,6 +57,8 @@ struct wallshader {
     char override_name[WALLSHADER_MAX_OVERRIDES][48];
     float override_value[WALLSHADER_MAX_OVERRIDES];
     bool no_persist; /* don't write iState to disk (offline renders) */
+    float palette[16 * 4];
+    float palette_size;
 };
 
 static nw_str g_errors;
@@ -272,6 +274,31 @@ void wallshader_set_persist(wallshader *s, bool persist) {
     if (s) s->no_persist = !persist;
 }
 
+/* neowall's built-in palette, used until a config sets one: a calm night
+ * (bg, fg, then blue, cyan, magenta, red, orange, yellow, green, teal). */
+static const float default_palette[][3] = {
+    {0.102f, 0.106f, 0.149f}, {0.753f, 0.792f, 0.961f}, {0.478f, 0.635f, 0.969f},
+    {0.490f, 0.812f, 1.000f}, {0.733f, 0.604f, 0.969f}, {0.969f, 0.463f, 0.557f},
+    {1.000f, 0.620f, 0.392f}, {0.878f, 0.686f, 0.408f}, {0.620f, 0.808f, 0.416f},
+    {0.451f, 0.855f, 0.792f}};
+
+void wallshader_set_palette(wallshader *s, const float (*rgb)[3], int n) {
+    if (!s) return;
+    if (!rgb || n <= 0) {
+        rgb = default_palette;
+        n   = (int)NW_COUNTOF(default_palette);
+    }
+    if (n > 16) n = 16;
+    memset(s->palette, 0, sizeof(s->palette));
+    for (int i = 0; i < n; i++) {
+        s->palette[i * 4 + 0] = rgb[i][0];
+        s->palette[i * 4 + 1] = rgb[i][1];
+        s->palette[i * 4 + 2] = rgb[i][2];
+        s->palette[i * 4 + 3] = 1.0f;
+    }
+    s->palette_size = (float)n;
+}
+
 bool wallshader_set_override(wallshader *s, const char *name, float value) {
     if (!s || !name || !name[0] || strlen(name) >= sizeof(s->override_name[0])) return false;
     for (int i = 0; i < s->n_override; i++)
@@ -456,6 +483,9 @@ void wallshader_draw(wallshader *s, const wallshader_frame *f) {
     s->state_age = nw_shader_state_age(&s->state);
     push(s, "iState", NW_STATE_FLOATS, s->state.values);
     push(s, "iStateAge", 1, &s->state_age);
+    if (s->palette_size <= 0) wallshader_set_palette(s, NULL, 0);
+    push(s, "iPalette", 16 * 4, s->palette);
+    push_int(s, "iPaletteSize", &s->palette_size);
     if (s->n_override) apply_overrides(s);
 
     const nw_uniform_value *tu = NULL;

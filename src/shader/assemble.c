@@ -185,6 +185,7 @@ size_t nw_shader_preamble_chunks(const char **out, size_t max) {
         channels,
         neowall_reactive_uniforms,
         neowall_glsl_stdlib,
+        neowall_glsl_palette,
         neowall_glsl_stdlib2,
         neowall_glsl_stdlib3,
         neowall_glsl_stdlib4,
@@ -233,9 +234,9 @@ nw_result nw_shader_assemble(const nw_shader_source *src, int pass, char **text,
                  c);
         ok = put_injected(&b, line);
     }
-    const char *const lib[] = {neowall_glsl_stdlib,  neowall_glsl_stdlib2, neowall_glsl_stdlib3,
-                               neowall_glsl_stdlib4, neowall_glsl_stdlib5, neowall_glsl_stdlib6,
-                               neowall_glsl_stdlib7};
+    const char *const lib[] = {neowall_glsl_stdlib,  neowall_glsl_palette, neowall_glsl_stdlib2,
+                               neowall_glsl_stdlib3, neowall_glsl_stdlib4, neowall_glsl_stdlib5,
+                               neowall_glsl_stdlib6, neowall_glsl_stdlib7};
     for (size_t i = 0; ok && i < NW_COUNTOF(lib); i++)
         ok = put_injected(&b, lib[i]);
     for (size_t i = 0; ok && i < NEOWALL_STDLIB_ALIAS_COUNT; i++)

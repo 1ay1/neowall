@@ -763,12 +763,13 @@ static bool parse_cycle_source(struct wallpaper_config *config, const char *src,
 
 /* The keys every wallpaper type shares: display, cycling, timing, pausing. */
 static bool parse_common_keys(VibeValue *obj, struct wallpaper_config *config, const char *ctx) {
-    const char *mode = NULL, *transition = NULL;
+    const char *mode = NULL, *transition = NULL, *palette = NULL;
     double duration = 0, trans_dur = 0, speed = 0, fps = 0, coverage = 0;
     bool has_dur, has_trans_dur, has_speed, has_fps, has_vsync, has_coverage;
 
     if (!read_string(obj, "mode", &mode, ctx) ||
         !read_string(obj, "transition", &transition, ctx) ||
+        !read_string(obj, "palette", &palette, ctx) ||
         !read_number(obj, "duration", &duration, &has_dur, ctx) ||
         !read_number(obj, "transition_duration", &trans_dur, &has_trans_dur, ctx) ||
         !read_number(obj, "shader_speed", &speed, &has_speed, ctx) ||
@@ -834,6 +835,16 @@ static bool parse_common_keys(VibeValue *obj, struct wallpaper_config *config, c
         config->shader_fps = (int)fps;
     }
     if (has_vsync && !key_allowed(config, "vsync", FOR_SHADER | FOR_TERMINAL, ctx)) return false;
+    if (palette) {
+        if (!key_allowed(config, "palette", FOR_SHADER, ctx)) return false;
+        config->palette_count = neowall_palette_parse(palette, config->palette, NW_PALETTE_MAX);
+        if (config->palette_count == 0) {
+            log_error("[%s] 'palette': no colours in '%s' (inline \"#rrggbb #rrggbb ...\" or a "
+                      "file containing them)",
+                      ctx, palette);
+            return false;
+        }
+    }
     if (has_coverage) {
         if (coverage < 0.0 || coverage > 1.0) {
             log_error("[%s] 'pause_coverage_threshold' must be between 0.0 and 1.0, got %.3f", ctx,
@@ -879,6 +890,7 @@ static void warn_unknown_keys(VibeValue *obj, const char *ctx) {
         "shader_speed",
         "channels",
         "shader_fps",
+        "palette",
         "vsync",
         "show_fps",
         "pause_on_fullscreen",
@@ -1496,4 +1508,24 @@ config_globals config_doc_globals(const config_doc *doc) {
 
 void config_wallpaper_defaults(struct wallpaper_config *out) {
     init_wallpaper_config_defaults(out);
+}
+
+/* The `palette` of the user's config `default` block, for tools that render
+ * outside the daemon (`neowall render`). 0 when there is none. */
+int config_default_palette(float (*out)[3], int max) {
+    const char *path = config_get_default_path();
+    if (!path || access(path, R_OK) != 0) return 0;
+    int quiet = log_get_level();
+    log_set_level(LOG_LEVEL_ERROR);
+    config_doc *doc = config_doc_load(path);
+    log_set_level(quiet);
+    if (!doc) return 0;
+    VibeValue *def = vibe_object_get(doc->root->as_object, "default");
+    int n          = 0;
+    if (def && def->type == VIBE_TYPE_OBJECT) {
+        VibeValue *p = vibe_object_get(def->as_object, "palette");
+        if (p && p->type == VIBE_TYPE_STRING) n = neowall_palette_parse(p->as_string, out, max);
+    }
+    config_doc_free(doc);
+    return n;
 }

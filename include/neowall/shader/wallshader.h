@@ -83,5 +83,8 @@ nw_engine *wallshader_engine(wallshader *s);
 bool wallshader_set_override(wallshader *s, const char *name, float value);
 /* false: never write iState to disk (offline renders must not leave traces). */
 void wallshader_set_persist(wallshader *s, bool persist);
+/* The theme palette shaders see as iPalette/iPaletteSize (up to 16 RGB in
+ * 0..1). NULL/0 = neowall's built-in palette. */
+void wallshader_set_palette(wallshader *s, const float (*rgb)[3], int n);
 
 #endif /* NEOWALL_WALLSHADER_H */
