@@ -66,6 +66,7 @@ static struct {
     int n_clients;
     uint64_t attempt_ms; /* throttles retries */
     uint64_t ok_ms;      /* freshness of the snapshot */
+    uint64_t gen;        /* bumps on every new snapshot (coverage cache key) */
 } g_hypr = {.lock = PTHREAD_MUTEX_INITIALIZER};
 
 /* ---------- IPC ---------- */
@@ -449,6 +450,7 @@ void hyprland_coverage_refresh(void) {
         parse_monitors(mjson);
         parse_clients(cjson);
         g_hypr.ok_ms = now;
+        g_hypr.gen++;
     }
     pthread_mutex_unlock(&g_hypr.lock);
 
@@ -485,6 +487,18 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
     if (!m || m->w <= 0 || m->h <= 0) {
         pthread_mutex_unlock(&g_hypr.lock);
         return false;
+    }
+
+    /* The answer only changes when a new snapshot lands (every few hundred
+     * ms), but this runs every frame: rasterise once per snapshot and
+     * monitor, then reuse the covered fraction. */
+    static uint64_t cache_gen = 0;
+    static int cache_monitor = -1;
+    static float cache_frac  = 0.0f;
+    if (cache_gen == g_hypr.gen && cache_monitor == m->id) {
+        float f = cache_frac;
+        pthread_mutex_unlock(&g_hypr.lock);
+        return f >= threshold;
     }
 
     /* Wallpaper region = monitor rect minus reserved zones (layer-shell
@@ -546,9 +560,12 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
             covered += grid[y][x];
         }
     }
+    float frac    = (float)covered / (float)(GRID_W * GRID_H);
+    cache_gen     = g_hypr.gen;
+    cache_monitor = m->id;
+    cache_frac    = frac;
     pthread_mutex_unlock(&g_hypr.lock);
 
-    float frac = (float)covered / (float)(GRID_W * GRID_H);
     return frac >= threshold;
 }
 

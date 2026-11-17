@@ -16,6 +16,7 @@
 #include "neowall/config/config.h"
 #include "neowall/output/output.h"
 #include "neowall/app/app.h"
+#include "version.h" /* NEOWALL_DATADIR */
 #include <stdatomic.h>
 
 /* ---- stub: record the last config applied to each output ---- */
@@ -316,9 +317,17 @@ int main(void) {
         fclose(bf);
     }
     CHECK(strstr(cfgtext, "\n  path ") == NULL);
-    CHECK(strstr(cfgtext, "shader neowall_default.glsl") != NULL);
-    snprintf(shader, sizeof(shader), "%s/bare/neowall/shaders/neowall_default.glsl", dir);
-    CHECK(access(shader, R_OK) == 0);
+    /* with nothing installed it writes the built-in shader; if this machine
+     * has neowall installed (NEOWALL_DATADIR), it copies that config instead */
+    char installed[700];
+    snprintf(installed, sizeof(installed), "%s/config.vibe", NEOWALL_DATADIR);
+    if (access(installed, R_OK) != 0) {
+        CHECK(strstr(cfgtext, "shader neowall_default.glsl") != NULL);
+        snprintf(shader, sizeof(shader), "%s/bare/neowall/shaders/neowall_default.glsl", dir);
+        CHECK(access(shader, R_OK) == 0);
+    } else {
+        CHECK(strstr(cfgtext, "shader") != NULL);
+    }
     unsetenv("XDG_DATA_HOME");
     unsetenv("XDG_DATA_DIRS");
 
