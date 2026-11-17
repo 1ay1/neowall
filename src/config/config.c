@@ -1134,21 +1134,56 @@ bool config_create_default(const char *config_path) {
         return true;
     }
 
-    /* Nothing installed (running from a build tree): write a minimal config
-     * that points at a shader we know works without any files. */
+    /* Nothing installed (a bare binary, or a build tree): ship a small shader
+     * inside the binary, write it to the user's shader dir and point the
+     * config at it, so a first run always shows something alive. */
     log_info("No example config installed, writing a minimal one");
+    static const char fallback_shader[] =
+        "// neowall_default.glsl \xe2\x80\x94 written by neowall on first run because no example\n"
+        "// shaders were installed next to it. Edit freely, or point config.vibe\n"
+        "// at another shader. Try: neowall render neowall_default --sheet 4\n"
+        "void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n"
+        "    vec2 p = fragCoord / iResolution.y;\n"
+        "    float t = iTime * 0.05;\n"
+        "    vec3 col = mix(vec3(0.06, 0.06, 0.10), vec3(0.10, 0.11, 0.18), p.y);\n"
+        "    for (int i = 0; i < 3; i++) {\n"
+        "        float fi = float(i);\n"
+        "        float y = 0.55 + 0.12 * sin(p.x * (1.3 + fi * 0.4) + t * (3.0 + fi) + fi * 2.0)\n"
+        "                + 0.08 * (nwFbm(vec2(p.x * 1.5 + fi * 7.0, t * 2.0), 4) - 0.5);\n"
+        "        float band = exp(-abs(p.y - y + fi * 0.06) * (18.0 - fi * 4.0));\n"
+        "        vec3 tint = nwPalette(fi * 0.18 + p.x * 0.05 + t,\n"
+        "                              vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.55, 0.65, 0.80));\n"
+        "        col += tint * band * 0.35;\n"
+        "    }\n"
+        "    vec2 v = fragCoord / iResolution.xy - 0.5;\n"
+        "    col *= 1.0 - 0.5 * dot(v, v);\n"
+        "    fragColor = vec4(col, 1.0);\n"
+        "}\n";
     static const char fallback_config[] =
         "# NeoWall configuration. See neowall.vibe next to this file, or\n"
         "# `man neowall.vibe`, for every option.\n"
         "#\n"
         "# Image:      default { path ~/Pictures/wallpaper.png  mode fill }\n"
         "# Slideshow:  default { path ~/Pictures/Wallpapers/  duration 300 }\n"
-        "# Shader:     default { shader garden.glsl }\n"
+        "# Shader:     default { shader garden }\n"
         "\n"
         "default {\n"
-        "  path ~/Pictures/wallpaper.png\n"
-        "  mode fill\n"
+        "  shader neowall_default.glsl\n"
         "}\n";
+    {
+        char sdir[NW_PATH_MAX], spath[NW_PATH_MAX];
+        snprintf(sdir, sizeof(sdir), "%s", config_path);
+        char *slash = strrchr(sdir, '/');
+        if (slash) *slash = '\0';
+        int sn = snprintf(spath, sizeof(spath), "%s/shaders/neowall_default.glsl", sdir);
+        if (sn > 0 && (size_t)sn < sizeof(spath) && access(spath, F_OK) != 0) {
+            FILE *sf = fopen(spath, "w");
+            if (sf) {
+                fputs(fallback_shader, sf);
+                fclose(sf);
+            }
+        }
+    }
     char tmp[NW_PATH_MAX];
     n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", config_path);
     if (n <= 0 || (size_t)n >= sizeof(tmp)) return false;

@@ -290,6 +290,28 @@ int main(void) {
     CHECK(app_config_load(&st, fresh));
     CHECK(access(fresh, R_OK) == 0);
 
+    /* ...and with NOTHING installed (a bare binary from a release tarball)
+     * that config must point at a shader that exists, not at a missing
+     * ~/Pictures/wallpaper.png */
+    char bare[600], cfgtext[2048] = "", shader[700];
+    snprintf(bare, sizeof(bare), "%s/bare/neowall/config.vibe", dir);
+    setenv("XDG_DATA_HOME", "/nonexistent-neowall-test", 1);
+    setenv("XDG_DATA_DIRS", "/nonexistent-neowall-test", 1);
+    CHECK(config_create_default(bare));
+    FILE *bf = fopen(bare, "r");
+    CHECK(bf != NULL);
+    if (bf) {
+        size_t got   = fread(cfgtext, 1, sizeof(cfgtext) - 1, bf);
+        cfgtext[got] = '\0';
+        fclose(bf);
+    }
+    CHECK(strstr(cfgtext, "\n  path ") == NULL);
+    CHECK(strstr(cfgtext, "shader neowall_default.glsl") != NULL);
+    snprintf(shader, sizeof(shader), "%s/bare/neowall/shaders/neowall_default.glsl", dir);
+    CHECK(access(shader, R_OK) == 0);
+    unsetenv("XDG_DATA_HOME");
+    unsetenv("XDG_DATA_DIRS");
+
     free(left.config);
     free(right.config);
     char cmd[700];

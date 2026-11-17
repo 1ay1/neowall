@@ -131,6 +131,25 @@ bool neowall_each_data_dir(bool (*fn)(const char *dir, void *ctx), void *ctx) {
     if (!seen_builtin && access(NEOWALL_DATADIR, F_OK) == 0 && fn(NEOWALL_DATADIR, ctx)) {
         return true;
     }
+
+    /* Last: next to the executable, so an extracted release tarball
+     * (./neowall + ./share/neowall), a /opt prefix or a build tree run in
+     * place still finds its shaders and config templates. */
+    char exe[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (len > 0) {
+        exe[len]    = '\0';
+        char *slash = strrchr(exe, '/');
+        if (slash) {
+            *slash                           = '\0';
+            static const char *const rel[] = {"share/neowall", "../share/neowall"};
+            for (size_t i = 0; i < sizeof(rel) / sizeof(rel[0]); i++) {
+                n = snprintf(dir, sizeof(dir), "%s/%s", exe, rel[i]);
+                if (n > 0 && (size_t)n < sizeof(dir) && access(dir, F_OK) == 0 && fn(dir, ctx))
+                    return true;
+            }
+        }
+    }
     return false;
 }
 
