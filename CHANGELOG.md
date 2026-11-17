@@ -2,7 +2,7 @@
 
 All notable changes to neowall. Dates are release dates.
 
-## Unreleased
+## 0.10.0 - 2026-11-18
 
 ### Added
 - `neowall render <shader>`: draw a shader offscreen to a PNG on a headless
@@ -33,6 +33,13 @@ All notable changes to neowall. Dates are release dates.
   `~/Pictures/wallpaper.png` (a black screen). The tarballs now carry
   `share/neowall` (found next to the binary, installed to `/usr/share/neowall`
   by the package), and a bare binary writes a built-in shader on first run.
+
+### Performance
+- Audio analysis is skipped in silence (it decays exactly as a silent
+  spectrum would) and entirely while no output is showing the wallpaper. It
+  was ~10% of the daemon's CPU even when nothing was playing.
+- Hyprland window coverage is computed once per IPC snapshot instead of
+  every frame. A covered shader wallpaper now idles at ~0.1% CPU.
 
 ### Docs
 - SHADER_NOTES: an authoring workflow built on `render`/`--bench`/`--check`, theme

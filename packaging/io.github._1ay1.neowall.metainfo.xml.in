@@ -50,7 +50,21 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="@VERSION@" date="2026-11-14">
+    <release version="@VERSION@" date="2026-11-18">
+      <description>
+        <p>Shader authoring and performance release.</p>
+        <ul>
+          <li>New neowall render: draw a shader to a PNG offscreen, with contact sheets, time of day and pinned inputs</li>
+          <li>render --bench reports real GPU time per pass; render --check finds NaN and Inf pixels per pass</li>
+          <li>The palette setting lets shaders follow the desktop colour theme</li>
+          <li>Shaders can be named without an extension</li>
+          <li>Preview no longer replaces the daemon's reported wallpaper</li>
+          <li>Release tarballs ship the example shaders, and a bare binary starts with a working shader</li>
+          <li>Near-zero CPU while the wallpaper is covered; idle audio analysis is skipped</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.9.0" date="2026-11-14">
       <description>
         <p>Packaging and robustness release.</p>
         <ul>
