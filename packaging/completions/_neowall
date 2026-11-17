@@ -5,6 +5,7 @@ commands=(
   'new:create a shader from a template'
   'import:import a Shadertoy export'
   'docs:list shader helpers and uniforms'
+  'render:draw a shader offscreen to a PNG (bench, NaN check)'
   'preview:run one shader in the foreground'
   'watch:preview a shader and reload it on save'
   'kill:stop the running daemon'
@@ -39,6 +40,17 @@ case $state in
     case $words[1] in
       new) _arguments '--template=[template]:template:(scene flat reactive)' \
                       '(-f --force)'{-f,--force}'[overwrite]' '--list[list templates]' '1:name' ;;
+      render) _arguments \
+          '(-o --output)'{-o,--output}'[PNG to write]:png:_files -g "*.png"' \
+          '(-s --size)'{-s,--size}'[resolution WxH]:size:(1920x1080 2560x1440 3440x1440 3840x2160)' \
+          '(-t --time)'{-t,--time}'[iTime of the frame]:seconds:' \
+          '--fps[simulation rate]:fps:' '--frames[frames to simulate]:n:' \
+          '--sheet[contact sheet of N moments]:n:' '--passes[save every buffer pass]' \
+          '--at[local time of day]:HH\:MM:' '--mouse[pointer X,Y in 0..1]:x,y:' \
+          '*--set[pin a uniform NAME=VALUE]:name=value:' '--palette[colours or a theme file]:palette:_files' \
+          '--live[real CPU/audio readings]' '--bench[GPU time per pass]' \
+          '--check[find NaN/Inf per pass]' '(-q --quiet)'{-q,--quiet}'[only errors]' \
+          '1:shader:_files -g "*.(glsl|frag|neowall)"' ;;
       import) _arguments '(-f --force)'{-f,--force}'[overwrite]' \
                          '1:export:_files -g "*.json"' '2:name' ;;
       preview|watch) _arguments '--date=[shift the shader clock]:offset' \

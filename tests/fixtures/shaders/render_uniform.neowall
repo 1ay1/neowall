@@ -1,0 +1,4 @@
+shader render_uniform.glsl
+uniforms {
+  uLevel 0.5
+}

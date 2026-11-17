@@ -763,12 +763,13 @@ static bool parse_cycle_source(struct wallpaper_config *config, const char *src,
 
 /* The keys every wallpaper type shares: display, cycling, timing, pausing. */
 static bool parse_common_keys(VibeValue *obj, struct wallpaper_config *config, const char *ctx) {
-    const char *mode = NULL, *transition = NULL;
+    const char *mode = NULL, *transition = NULL, *palette = NULL;
     double duration = 0, trans_dur = 0, speed = 0, fps = 0, coverage = 0;
     bool has_dur, has_trans_dur, has_speed, has_fps, has_vsync, has_coverage;
 
     if (!read_string(obj, "mode", &mode, ctx) ||
         !read_string(obj, "transition", &transition, ctx) ||
+        !read_string(obj, "palette", &palette, ctx) ||
         !read_number(obj, "duration", &duration, &has_dur, ctx) ||
         !read_number(obj, "transition_duration", &trans_dur, &has_trans_dur, ctx) ||
         !read_number(obj, "shader_speed", &speed, &has_speed, ctx) ||
@@ -834,6 +835,16 @@ static bool parse_common_keys(VibeValue *obj, struct wallpaper_config *config, c
         config->shader_fps = (int)fps;
     }
     if (has_vsync && !key_allowed(config, "vsync", FOR_SHADER | FOR_TERMINAL, ctx)) return false;
+    if (palette) {
+        if (!key_allowed(config, "palette", FOR_SHADER, ctx)) return false;
+        config->palette_count = neowall_palette_parse(palette, config->palette, NW_PALETTE_MAX);
+        if (config->palette_count == 0) {
+            log_error("[%s] 'palette': no colours in '%s' (inline \"#rrggbb #rrggbb ...\" or a "
+                      "file containing them)",
+                      ctx, palette);
+            return false;
+        }
+    }
     if (has_coverage) {
         if (coverage < 0.0 || coverage > 1.0) {
             log_error("[%s] 'pause_coverage_threshold' must be between 0.0 and 1.0, got %.3f", ctx,
@@ -879,6 +890,7 @@ static void warn_unknown_keys(VibeValue *obj, const char *ctx) {
         "shader_speed",
         "channels",
         "shader_fps",
+        "palette",
         "vsync",
         "show_fps",
         "pause_on_fullscreen",
@@ -1134,21 +1146,56 @@ bool config_create_default(const char *config_path) {
         return true;
     }
 
-    /* Nothing installed (running from a build tree): write a minimal config
-     * that points at a shader we know works without any files. */
+    /* Nothing installed (a bare binary, or a build tree): ship a small shader
+     * inside the binary, write it to the user's shader dir and point the
+     * config at it, so a first run always shows something alive. */
     log_info("No example config installed, writing a minimal one");
+    static const char fallback_shader[] =
+        "// neowall_default.glsl \xe2\x80\x94 written by neowall on first run because no example\n"
+        "// shaders were installed next to it. Edit freely, or point config.vibe\n"
+        "// at another shader. Try: neowall render neowall_default --sheet 4\n"
+        "void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n"
+        "    vec2 p = fragCoord / iResolution.y;\n"
+        "    float t = iTime * 0.05;\n"
+        "    vec3 col = mix(vec3(0.06, 0.06, 0.10), vec3(0.10, 0.11, 0.18), p.y);\n"
+        "    for (int i = 0; i < 3; i++) {\n"
+        "        float fi = float(i);\n"
+        "        float y = 0.55 + 0.12 * sin(p.x * (1.3 + fi * 0.4) + t * (3.0 + fi) + fi * 2.0)\n"
+        "                + 0.08 * (nwFbm(vec2(p.x * 1.5 + fi * 7.0, t * 2.0), 4) - 0.5);\n"
+        "        float band = exp(-abs(p.y - y + fi * 0.06) * (18.0 - fi * 4.0));\n"
+        "        vec3 tint = nwPalette(fi * 0.18 + p.x * 0.05 + t,\n"
+        "                              vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.55, 0.65, 0.80));\n"
+        "        col += tint * band * 0.35;\n"
+        "    }\n"
+        "    vec2 v = fragCoord / iResolution.xy - 0.5;\n"
+        "    col *= 1.0 - 0.5 * dot(v, v);\n"
+        "    fragColor = vec4(col, 1.0);\n"
+        "}\n";
     static const char fallback_config[] =
         "# NeoWall configuration. See neowall.vibe next to this file, or\n"
         "# `man neowall.vibe`, for every option.\n"
         "#\n"
         "# Image:      default { path ~/Pictures/wallpaper.png  mode fill }\n"
         "# Slideshow:  default { path ~/Pictures/Wallpapers/  duration 300 }\n"
-        "# Shader:     default { shader garden.glsl }\n"
+        "# Shader:     default { shader garden }\n"
         "\n"
         "default {\n"
-        "  path ~/Pictures/wallpaper.png\n"
-        "  mode fill\n"
+        "  shader neowall_default.glsl\n"
         "}\n";
+    {
+        char sdir[NW_PATH_MAX], spath[NW_PATH_MAX];
+        snprintf(sdir, sizeof(sdir), "%s", config_path);
+        char *slash = strrchr(sdir, '/');
+        if (slash) *slash = '\0';
+        int sn = snprintf(spath, sizeof(spath), "%s/shaders/neowall_default.glsl", sdir);
+        if (sn > 0 && (size_t)sn < sizeof(spath) && access(spath, F_OK) != 0) {
+            FILE *sf = fopen(spath, "w");
+            if (sf) {
+                fputs(fallback_shader, sf);
+                fclose(sf);
+            }
+        }
+    }
     char tmp[NW_PATH_MAX];
     n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", config_path);
     if (n <= 0 || (size_t)n >= sizeof(tmp)) return false;
@@ -1461,4 +1508,24 @@ config_globals config_doc_globals(const config_doc *doc) {
 
 void config_wallpaper_defaults(struct wallpaper_config *out) {
     init_wallpaper_config_defaults(out);
+}
+
+/* The `palette` of the user's config `default` block, for tools that render
+ * outside the daemon (`neowall render`). 0 when there is none. */
+int config_default_palette(float (*out)[3], int max) {
+    const char *path = config_get_default_path();
+    if (!path || access(path, R_OK) != 0) return 0;
+    int quiet = log_get_level();
+    log_set_level(LOG_LEVEL_ERROR);
+    config_doc *doc = config_doc_load(path);
+    log_set_level(quiet);
+    if (!doc) return 0;
+    VibeValue *def = vibe_object_get(doc->root->as_object, "default");
+    int n          = 0;
+    if (def && def->type == VIBE_TYPE_OBJECT) {
+        VibeValue *p = vibe_object_get(def->as_object, "palette");
+        if (p && p->type == VIBE_TYPE_STRING) n = neowall_palette_parse(p->as_string, out, max);
+    }
+    config_doc_free(doc);
+    return n;
 }

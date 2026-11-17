@@ -109,4 +109,14 @@ bool nw_engine_read_state(nw_engine *e, float out[16]);
 /* Whether the shader changes over time (else it can be drawn once). */
 bool nw_engine_animated(const nw_engine *e);
 
+/* ── authoring tools (`neowall render`) ── GL thread, context current. */
+/* Time every pass with GL_TIME_ELAPSED queries from the next frame on. */
+bool nw_engine_set_profiling(nw_engine *e, bool on);
+int nw_engine_pass_count(const nw_engine *e);
+const char *nw_engine_pass_name(const nw_engine *e, int i);
+/* GPU ms of pass i in the last frame (blocks for the result); -1 if unknown. */
+double nw_engine_pass_ms(nw_engine *e, int i);
+/* Texture pass i wrote last frame, and its size; 0 for the image pass. */
+unsigned nw_engine_pass_texture(const nw_engine *e, int i, int *w, int *h);
+
 #endif /* NEOWALL_SHADER_ENGINE_H */

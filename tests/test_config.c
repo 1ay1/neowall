@@ -16,6 +16,7 @@
 #include "neowall/config/config.h"
 #include "neowall/output/output.h"
 #include "neowall/app/app.h"
+#include "version.h" /* NEOWALL_DATADIR */
 #include <stdatomic.h>
 
 /* ---- stub: record the last config applied to each output ---- */
@@ -136,6 +137,8 @@ int main(void) {
         "default {\n  channels 3\n  shader a.glsl\n}\n",             /* not an array */
         "default {\n  shader a.glsl\n",                              /* syntax */
         "default {\n  channels [ a b c d e ]\n  shader a.glsl\n}\n", /* > 4 channels */
+        "default {\n  shader a.glsl\n  palette \"no colours here\"\n}\n", /* bad palette */
+        "default {\n  path /x.png\n  palette \"#112233\"\n}\n",     /* palette on an image */
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         write_cfg(bad[i]);
@@ -284,11 +287,49 @@ int main(void) {
     CHECK(app_config_load(&st, cfg));
     CHECK(!atomic_load(&st.mouse_interaction));
 
+    /* `palette`: inline colours reach the output's config; garbage is an error */
+    snprintf(text, sizeof(text),
+             "default {\n  shader %s\n  palette \"#1a1b26 #c0caf5 #7aa2f7\"\n}\n", a);
+    write_cfg(text);
+    CHECK(app_config_load(&st, cfg));
+    CHECK(left.config && left.config->palette_count == 3);
+    CHECK(left.config && left.config->palette[2][2] > 0.96f);
+
     /* first run with no file writes a starter config and loads it */
     char fresh[600];
     snprintf(fresh, sizeof(fresh), "%s/new/neowall/config.vibe", dir);
     CHECK(app_config_load(&st, fresh));
     CHECK(access(fresh, R_OK) == 0);
+
+    /* ...and with NOTHING installed (a bare binary from a release tarball)
+     * that config must point at a shader that exists, not at a missing
+     * ~/Pictures/wallpaper.png */
+    char bare[600], cfgtext[2048] = "", shader[700];
+    snprintf(bare, sizeof(bare), "%s/bare/neowall/config.vibe", dir);
+    setenv("XDG_DATA_HOME", "/nonexistent-neowall-test", 1);
+    setenv("XDG_DATA_DIRS", "/nonexistent-neowall-test", 1);
+    CHECK(config_create_default(bare));
+    FILE *bf = fopen(bare, "r");
+    CHECK(bf != NULL);
+    if (bf) {
+        size_t got   = fread(cfgtext, 1, sizeof(cfgtext) - 1, bf);
+        cfgtext[got] = '\0';
+        fclose(bf);
+    }
+    CHECK(strstr(cfgtext, "\n  path ") == NULL);
+    /* with nothing installed it writes the built-in shader; if this machine
+     * has neowall installed (NEOWALL_DATADIR), it copies that config instead */
+    char installed[700];
+    snprintf(installed, sizeof(installed), "%s/config.vibe", NEOWALL_DATADIR);
+    if (access(installed, R_OK) != 0) {
+        CHECK(strstr(cfgtext, "shader neowall_default.glsl") != NULL);
+        snprintf(shader, sizeof(shader), "%s/bare/neowall/shaders/neowall_default.glsl", dir);
+        CHECK(access(shader, R_OK) == 0);
+    } else {
+        CHECK(strstr(cfgtext, "shader") != NULL);
+    }
+    unsetenv("XDG_DATA_HOME");
+    unsetenv("XDG_DATA_DIRS");
 
     free(left.config);
     free(right.config);

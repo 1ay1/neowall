@@ -2,6 +2,50 @@
 
 All notable changes to neowall. Dates are release dates.
 
+## 0.10.0 - 2026-11-18
+
+### Added
+- `neowall render <shader>`: draw a shader offscreen to a PNG on a headless
+  EGL context. It needs no compositor or daemon (an EGL device, so NVIDIA works),
+  and it never touches a running daemon. `--size`, `--time`, `--sheet N`
+  (contact sheet over time), `--passes` (every buffer as a PNG), `--at HH:MM`
+  (time of day), `--mouse`, `--set NAME=VALUE` (pin any float uniform),
+  `--palette`. Inputs are pinned to calm values unless `--live`, so renders are
+  deterministic.
+- `neowall render --bench`: real GPU milliseconds per pass (timer queries) and
+  what that costs at 30/60 fps. `--check`: finds NaN/Inf pixels in every pass,
+  names the pass they start in with a bounding box, paints them magenta, and
+  exits 2.
+- `palette` config key and `iPalette`/`iPaletteSize` with `nwPal()`,
+  `nwPalBg()`, `nwPalFg()`, `nwPalAccent()`, `nwPalSmooth()`: shaders follow
+  the desktop colour theme. Inline colours or any file containing `#rrggbb`
+  (kitty, ghostty, CSS themes work as is).
+- Shader names work without an extension everywhere (`shader garden`,
+  `neowall render garden`); `.neowall` is preferred over `.glsl`.
+
+### Fixed
+- `neowall preview`/`watch` wrote the daemon's state file, so after a preview
+  exited `neowall current` kept reporting the preview's shader.
+- Declaring a manifest uniform yourself (`uniform float uGlow;`), as the
+  docs suggest, failed with "declaration conflicts with previous declaration".
+- Release tarballs and `neowall-bin` shipped only the binary: no example
+  shaders, and the first-run config pointed at a missing
+  `~/Pictures/wallpaper.png` (a black screen). The tarballs now carry
+  `share/neowall` (found next to the binary, installed to `/usr/share/neowall`
+  by the package), and a bare binary writes a built-in shader on first run.
+
+### Performance
+- Audio analysis is skipped in silence (it decays exactly as a silent
+  spectrum would) and entirely while no output is showing the wallpaper. It
+  was ~10% of the daemon's CPU even when nothing was playing.
+- Hyprland window coverage is computed once per IPC snapshot instead of
+  every frame. A covered shader wallpaper now idles at ~0.1% CPU.
+
+### Docs
+- SHADER_NOTES: an authoring workflow built on `render`/`--bench`/`--check`, theme
+  palettes, and the per-pass `scale`/`format`/`filter`/`wrap`/`size` keys,
+  which existed but were undocumented.
+
 ## 0.9.0 - 2026-11-14
 
 ### Fixed

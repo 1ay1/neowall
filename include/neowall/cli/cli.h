@@ -20,6 +20,8 @@ bool cli_control_command(size_t i, const char **name, const char **description);
 int cmd_new(int argc, char *argv[]);
 int cmd_import(int argc, char *argv[]);
 int cmd_docs(int argc, char *argv[]);
+/* render.c: draw a shader offscreen to a PNG (+ --bench, --check). */
+int cmd_render(int argc, char *argv[]);
 
 
 #endif /* NEOWALL_CLI_H */

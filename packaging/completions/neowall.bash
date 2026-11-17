@@ -4,7 +4,7 @@ _neowall() {
     local cur prev words cword
     _init_completion -n = || return
 
-    local commands="new import docs preview watch kill next pause resume reload
+    local commands="new import docs render preview watch kill next pause resume reload
         set list current status ping pause-shader resume-shader set-terminal"
     local opts="--config --foreground --verbose --help --version --date --timelapse"
 
@@ -43,6 +43,19 @@ _neowall() {
             ;;
         import)
             [[ $cur == -* ]] && COMPREPLY=($(compgen -W "--force" -- "$cur")) || _filedir json
+            ;;
+        render)
+            case $prev in
+                -o | --output) _filedir png; return ;;
+                -s | --size) COMPREPLY=($(compgen -W "1920x1080 2560x1440 3440x1440 3840x2160" -- "$cur")); return ;;
+                --palette) _filedir; return ;;
+                -t | --time | --fps | --frames | --sheet | --at | --mouse | --set) return ;;
+            esac
+            if [[ $cur == -* ]]; then
+                COMPREPLY=($(compgen -W "--output --size --time --fps --frames --sheet --passes --at --mouse --set --palette --live --bench --check --quiet --help" -- "$cur"))
+            else
+                _filedir '@(glsl|frag|neowall)'
+            fi
             ;;
         preview | watch)
             if [[ $cur == -* ]]; then

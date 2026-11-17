@@ -56,6 +56,8 @@ struct wallpaper_config {
     float transition_duration;       /* Transition duration in seconds */
     float shader_speed;              /* Shader animation speed multiplier (default 1.0) */
     int shader_fps;                  /* Target FPS for shader rendering (default 60) */
+    float palette[16][3];            /* `palette`: colours for iPalette (0..1 RGB) */
+    int palette_count;               /* 0 = none set: shaders use the built-in one */
     bool vsync;               /* Enable vsync (sync to monitor refresh, ignores shader_fps) */
     bool show_fps;            /* Show FPS watermark on screen (default false) */
     bool pause_on_fullscreen; /* Pause rendering when output is occluded by fullscreen window */

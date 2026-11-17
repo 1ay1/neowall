@@ -33,6 +33,7 @@
 #include "neowall/config/config.h"
 #include "neowall/core/util.h"
 #include "neowall/output/output.h"
+#include "neowall/output/state_file.h"
 #include "neowall/shader/term_gpu.h"
 #include "neowall/shader/wallshader.h"
 #include "version.h"
@@ -64,6 +65,7 @@ int main(int argc, char *argv[]) {
     if (argc >= 2 && strcmp(argv[1], "new") == 0) return cmd_new(argc, argv);
     if (argc >= 2 && strcmp(argv[1], "import") == 0) return cmd_import(argc, argv);
     if (argc >= 2 && strcmp(argv[1], "docs") == 0) return cmd_docs(argc, argv);
+    if (argc >= 2 && strcmp(argv[1], "render") == 0) return cmd_render(argc, argv);
 
     /* `preview`/`watch` are run modes, not daemon commands: they run one
      * shader in the foreground alongside the real wallpaper without touching
@@ -287,6 +289,9 @@ int main(int argc, char *argv[]) {
      * size, which is exactly the case the warning targets). */
     snprintf(state.config_path, sizeof(state.config_path), "%s", config_path);
     state.is_preview = preview_shader != NULL;
+    /* A preview shares the daemon's runtime dir; keep its hands off the state
+     * file so `neowall current`/`list` keep describing the real wallpaper. */
+    state_file_set_readonly(state.is_preview);
     pthread_mutex_init(&state.state_mutex, NULL);
     pthread_rwlock_init(&state.output_list_lock, NULL);
     app_attach(&state);

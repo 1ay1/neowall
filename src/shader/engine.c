@@ -142,6 +142,10 @@ struct nw_engine {
     GLuint vao;
     GLuint tex_audio, tex_keyboard;
     bool uses_audio, uses_keyboard; /* some pass samples it: worth uploading */
+    /* optional per-pass GPU timing (`neowall render --bench`); off by default */
+    bool profiling;
+    GLuint *queries; /* one GL_TIME_ELAPSED query per pass */
+    double *pass_ms; /* last completed result per pass */
 };
 
 static nw_str g_errors;
@@ -598,7 +602,62 @@ void nw_engine_free(nw_engine *e) {
         if (ts[i]) glDeleteTextures(1, &ts[i]);
     nw_list_free(&e->param_values);
     if (e->vao) glDeleteVertexArrays(1, &e->vao);
+    if (e->queries) glDeleteQueries((GLsizei)e->passes.len, e->queries);
+    free(e->queries);
+    free(e->pass_ms);
     free(e);
+}
+
+/* ── authoring tools: per-pass timing and access to each pass's output ─── */
+
+bool nw_engine_set_profiling(nw_engine *e, bool on) {
+    if (!e) return false;
+    if (on && !e->queries) {
+        size_t n   = e->passes.len;
+        e->queries = calloc(n ? n : 1, sizeof(GLuint));
+        e->pass_ms = calloc(n ? n : 1, sizeof(double));
+        if (!e->queries || !e->pass_ms) {
+            free(e->queries);
+            free(e->pass_ms);
+            e->queries = NULL;
+            e->pass_ms = NULL;
+            return false;
+        }
+        glGenQueries((GLsizei)n, e->queries);
+    }
+    e->profiling = on;
+    return true;
+}
+
+int nw_engine_pass_count(const nw_engine *e) {
+    return e ? (int)e->passes.len : 0;
+}
+
+const char *nw_engine_pass_name(const nw_engine *e, int i) {
+    if (!e || i < 0 || (size_t)i >= e->passes.len) return NULL;
+    return e->src->passes.data[i].name;
+}
+
+/* GPU time of pass `i` in the last frame, ms; blocks until it's known. */
+double nw_engine_pass_ms(nw_engine *e, int i) {
+    if (!e || !e->profiling || i < 0 || (size_t)i >= e->passes.len) return -1.0;
+    if (!glIsQuery(e->queries[i])) return -1.0; /* pass didn't run (static cube) */
+    GLuint64 ns = 0;
+    glGetQueryObjectui64v(e->queries[i], GL_QUERY_RESULT, &ns);
+    e->pass_ms[i] = (double)ns / 1.0e6;
+    return e->pass_ms[i];
+}
+
+/* The texture pass `i` rendered this frame (buffer passes only; 0 for the
+ * image pass, which draws into the caller's framebuffer). After the frame's
+ * swap the freshly written texture is the "read" side. */
+unsigned nw_engine_pass_texture(const nw_engine *e, int i, int *w, int *h) {
+    if (!e || i < 0 || (size_t)i >= e->passes.len) return 0;
+    const pass_gl *g = &e->passes.data[i];
+    if (!g->target || e->src->passes.data[i].is_cube) return 0;
+    if (w) *w = g->w;
+    if (h) *h = g->h;
+    return nw_target_read_tex(g->target);
 }
 
 bool nw_engine_read_state(nw_engine *e, float out[16]) {
@@ -992,11 +1051,13 @@ void nw_engine_frame(nw_engine *e, const nw_frame_in *in) {
         glViewport(0, 0, w, h);
         glUseProgram(g->prog);
         set_uniforms(e, i, g, in, w, h);
+        if (e->profiling) glBeginQuery(GL_TIME_ELAPSED, e->queries[i]);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         if (!is_image && e->src->passes.data[i].filter == NW_FILTER_MIPMAP) {
             glBindTexture(GL_TEXTURE_2D, nw_target_write_tex(g->target));
             glGenerateMipmap(GL_TEXTURE_2D);
         }
+        if (e->profiling) glEndQuery(GL_TIME_ELAPSED);
     }
     for (size_t i = 0; i < e->passes.len; i++)
         if (e->passes.data[i].target) nw_gfx_target_swap(&e->passes.data[i].target->t);

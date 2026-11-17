@@ -69,6 +69,19 @@ static atomic_bool g_nv_wanted    = false;
  * setting the time) can't stall the sampler. */
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 static void audio_read(capture_run *c, int fd, void *ctx);
+static uint64_t mono_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+
+/* When a frame last read the snapshot (reactive_get). Nobody reading for
+ * SAMPLER_IDLE_MS means every output is hidden or paused: the samplers stop
+ * doing work nobody will see. */
+static _Atomic uint64_t g_last_read_ms = 0;
+#define SAMPLER_IDLE_MS 2000
+
 static void nv_read(capture_run *c, int fd, void *ctx);
 static char *const kParecArgv[] = {
     "parec",
@@ -530,6 +543,34 @@ static void audio_read(capture_run *c, int fd, void *ctx) {
                 sum2 += pcm[k] * pcm[k];
             float rms = sqrtf(sum2 / FFT_SIZE);
 
+            /* Silence (nothing playing, -80 dBFS): the spectrum would be all
+             * zeros, so skip the FFT and the 512 log10f calls and just decay
+             * the snapshot exactly as a zero spectrum would. This is the
+             * common case: a desktop is quiet most of the day. */
+            /* Nothing on screen reads the audio (all outputs hidden or paused):
+             * keep draining the pipe, skip the analysis. */
+            bool watched = mono_ms() - atomic_load(&g_last_read_ms) < SAMPLER_IDLE_MS;
+            if (!watched) continue;
+
+            if (rms < 1e-4f) {
+                beat_avg = beat_avg * 0.92f;
+                pthread_mutex_lock(&g_lock);
+                float sm            = 0.6f;
+                g_snap.audio_active = true;
+                g_snap.audio_level *= sm;
+                g_snap.audio_bass *= sm;
+                g_snap.audio_mid *= sm;
+                g_snap.audio_treble *= sm;
+                g_snap.audio_beat *= 0.85f;
+                for (int k = 0; k < REACTIVE_AUDIO_BINS; k++) {
+                    g_snap.audio_spectrum[k] *= 0.5f;
+                    g_snap.audio_waveform[k] =
+                        clampf(pcm[k * (FFT_SIZE / REACTIVE_AUDIO_BINS)] * 0.5f + 0.5f, 0, 1);
+                }
+                pthread_mutex_unlock(&g_lock);
+                continue;
+            }
+
             float re[FFT_SIZE], im[FFT_SIZE];
             for (int k = 0; k < FFT_SIZE; k++) {
                 re[k] = pcm[k] * window[k];
@@ -817,14 +858,7 @@ void reactive_sample(void) {
 /* Last time anyone read the snapshot (reactive_get), monotonic ms. The
  * sampler sleeps once nobody has for a while, so a static image or a covered
  * screen doesn't read /proc and /sys four times a second for no one. */
-static _Atomic uint64_t g_last_read_ms = 0;
-#define SAMPLER_IDLE_MS 2000
 
-static uint64_t mono_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
-}
 
 static void *sys_thread_fn(void *arg) {
     (void)arg;

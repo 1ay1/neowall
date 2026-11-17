@@ -11,6 +11,11 @@
  * place exists. Static buffer. */
 const char *get_state_file_path(void);
 
+/* Turn every write into a no-op (and restore into "nothing saved"). Set by
+ * `neowall preview` / `watch`, which must not clobber the daemon's entries. */
+void state_file_set_readonly(bool readonly);
+bool state_file_is_readonly(void);
+
 bool write_wallpaper_state(const char *output_name, const char *wallpaper_path, const char *mode,
                            int cycle_index, int cycle_total, const char *status);
 /* Atomically remove one output, or keep only the given output names. An

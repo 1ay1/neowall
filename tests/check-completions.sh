@@ -8,7 +8,7 @@ fail=0
 cmds=$(XDG_RUNTIME_DIR=/nonexistent "$nw" --help | sed -n '/Daemon Control/,/^$/p' | awk 'NR > 1 && NF { print $1 }')
 tmpls=$("$nw" new --list 2>&1 | awk 'NR > 1 && NF { print $1 }')
 [ -n "$cmds" ] && [ -n "$tmpls" ] || { echo "couldn't read commands from $nw"; exit 1; }
-for w in $cmds $tmpls new import docs preview watch; do
+for w in $cmds $tmpls new import docs render preview watch; do
     for f in neowall.bash _neowall neowall.fish; do
         grep -qw -- "$w" "$f" || { echo "$f is missing '$w'"; fail=1; }
     done

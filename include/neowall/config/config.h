@@ -43,6 +43,8 @@ void config_wallpaper_defaults(struct wallpaper_config *out);
 /* Write the starter config (copied from the data dir) at `path`. */
 bool config_create_default(const char *path);
 const char *config_get_default_path(void);
+/* `palette` from the user config's `default` block (0 if none). */
+int config_default_palette(float (*out)[3], int max);
 
 void config_free_wallpaper(struct wallpaper_config *config);
 

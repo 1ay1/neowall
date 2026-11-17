@@ -55,10 +55,15 @@ jobs:
 
       - name: Plain tarball
         run: |
-          mkdir -p dist
+          mkdir -p dist/share/neowall
           install -m755 build/neowall dist/neowall
           strip dist/neowall
-          tar -C dist -czf dist/neowall-linux-x86_64-arch.tar.gz neowall
+          # the example shaders and config templates ride along: neowall looks
+          # in ./share/neowall next to its binary, so the extracted tarball works
+          # in place, and the -bin package installs them to /usr/share/neowall
+          cp -r examples/shaders dist/share/neowall/shaders
+          install -m644 config/config.vibe config/neowall.vibe dist/share/neowall/
+          tar -C dist -czf dist/neowall-linux-x86_64-arch.tar.gz neowall share
 
       - name: Build pacman package
         run: |
@@ -137,10 +142,12 @@ jobs:
 
       - name: Plain tarball
         run: |
-          mkdir -p dist
+          mkdir -p dist/share/neowall
           install -m755 build/neowall dist/neowall
           strip dist/neowall
-          tar -C dist -czf dist/neowall-linux-x86_64-debian.tar.gz neowall
+          cp -r examples/shaders dist/share/neowall/shaders
+          install -m644 config/config.vibe config/neowall.vibe dist/share/neowall/
+          tar -C dist -czf dist/neowall-linux-x86_64-debian.tar.gz neowall share
           rm -f dist/neowall
 
       - name: Build .deb
@@ -264,10 +271,12 @@ jobs:
 
       - name: Plain tarball
         run: |
-          mkdir -p dist
+          mkdir -p dist/share/neowall
           install -m755 build/neowall dist/neowall
           strip dist/neowall
-          tar -C dist -czf dist/neowall-linux-x86_64-fedora.tar.gz neowall
+          cp -r examples/shaders dist/share/neowall/shaders
+          install -m644 config/config.vibe config/neowall.vibe dist/share/neowall/
+          tar -C dist -czf dist/neowall-linux-x86_64-fedora.tar.gz neowall share
           rm -f dist/neowall
 
       - name: Build .rpm
@@ -555,7 +564,10 @@ jobs:
 
             ```bash
             tar -xzf neowall-linux-x86_64-*.tar.gz
+            ./neowall                       # runs in place (finds ./share/neowall)
+            # or install system-wide:
             sudo install -m755 neowall /usr/local/bin/
+            sudo mkdir -p /usr/local/share && sudo cp -r share/neowall /usr/local/share/
             ```
 
             #### Arch (AUR, tracks git)
@@ -770,6 +782,11 @@ jobs:
 
           package() {
             install -Dm755 "\$srcdir/neowall" "\$pkgdir/usr/bin/neowall"
+            if [ -d "\$srcdir/share/neowall" ]; then
+              install -dm755 "\$pkgdir/usr/share"
+              cp -r "\$srcdir/share/neowall" "\$pkgdir/usr/share/neowall"
+              find "\$pkgdir/usr/share/neowall" -type f -exec chmod 644 {} +
+            fi
             install -Dm644 "\$srcdir/LICENSE-\$pkgver" "\$pkgdir/usr/share/licenses/\$pkgname/LICENSE"
           }
           EOF

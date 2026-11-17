@@ -51,6 +51,14 @@ struct wallshader {
     float windows[NW_SHADER_MAX_WINDOWS * 4];
     NW_LIST(nw_uniform_value) unis;
     NW_LIST(nw_uniform_value) extra; /* the terminal's */
+
+    /* authoring: pin reactive uniforms to fixed values (`render --set`) */
+    int n_override;
+    char override_name[WALLSHADER_MAX_OVERRIDES][48];
+    float override_value[WALLSHADER_MAX_OVERRIDES];
+    bool no_persist; /* don't write iState to disk (offline renders) */
+    float palette[16 * 4];
+    float palette_size;
 };
 
 static nw_str g_errors;
@@ -209,6 +217,7 @@ nw_result wallshader_load_text(const char *text, const char *name, wallshader **
 /* Read back the state pass and persist it, at most once a second (it
  * stalls the GPU). A blown-up simulation (NaN) is never saved. */
 static void save_state(wallshader *s, double now) {
+    if (s->no_persist) return;
     if (!s->src->state_pass || !s->src->path || now - s->state_checked_at < 1.0) return;
     s->state_checked_at = now;
     float v[NW_STATE_FLOATS];
@@ -255,6 +264,60 @@ void wallshader_set_visible(wallshader *s, bool visible) {
 }
 int wallshader_pass_count(const wallshader *s) {
     return (int)s->src->passes.len;
+}
+
+nw_engine *wallshader_engine(wallshader *s) {
+    return s ? s->eng : NULL;
+}
+
+void wallshader_set_persist(wallshader *s, bool persist) {
+    if (s) s->no_persist = !persist;
+}
+
+/* neowall's built-in palette, used until a config sets one: a calm night
+ * (bg, fg, then blue, cyan, magenta, red, orange, yellow, green, teal). */
+static const float default_palette[][3] = {
+    {0.102f, 0.106f, 0.149f}, {0.753f, 0.792f, 0.961f}, {0.478f, 0.635f, 0.969f},
+    {0.490f, 0.812f, 1.000f}, {0.733f, 0.604f, 0.969f}, {0.969f, 0.463f, 0.557f},
+    {1.000f, 0.620f, 0.392f}, {0.878f, 0.686f, 0.408f}, {0.620f, 0.808f, 0.416f},
+    {0.451f, 0.855f, 0.792f}};
+
+void wallshader_set_palette(wallshader *s, const float (*rgb)[3], int n) {
+    if (!s) return;
+    if (!rgb || n <= 0) {
+        rgb = default_palette;
+        n   = (int)NW_COUNTOF(default_palette);
+    }
+    if (n > 16) n = 16;
+    memset(s->palette, 0, sizeof(s->palette));
+    for (int i = 0; i < n; i++) {
+        s->palette[i * 4 + 0] = rgb[i][0];
+        s->palette[i * 4 + 1] = rgb[i][1];
+        s->palette[i * 4 + 2] = rgb[i][2];
+        s->palette[i * 4 + 3] = 1.0f;
+    }
+    s->palette_size = (float)n;
+}
+
+bool wallshader_set_override(wallshader *s, const char *name, float value) {
+    if (!s || !name || !name[0] || strlen(name) >= sizeof(s->override_name[0])) return false;
+    for (int i = 0; i < s->n_override; i++)
+        if (!strcmp(s->override_name[i], name)) {
+            s->override_value[i] = value;
+            return true;
+        }
+    if (s->n_override >= WALLSHADER_MAX_OVERRIDES) return false;
+    snprintf(s->override_name[s->n_override], sizeof(s->override_name[0]), "%s", name);
+    s->override_value[s->n_override++] = value;
+    return true;
+}
+
+/* Point the matching reactive uniforms at the pinned values. */
+static void apply_overrides(wallshader *s) {
+    for (size_t u = 0; u < s->unis.len; u++)
+        for (int i = 0; i < s->n_override; i++)
+            if (s->unis.data[u].count == 1 && !strcmp(s->unis.data[u].name, s->override_name[i]))
+                s->unis.data[u].v = &s->override_value[i];
 }
 
 /* One snapshot per frame, eased over ~250ms so a 4Hz sampler doesn't step. */
@@ -420,6 +483,10 @@ void wallshader_draw(wallshader *s, const wallshader_frame *f) {
     s->state_age = nw_shader_state_age(&s->state);
     push(s, "iState", NW_STATE_FLOATS, s->state.values);
     push(s, "iStateAge", 1, &s->state_age);
+    if (s->palette_size <= 0) wallshader_set_palette(s, NULL, 0);
+    push(s, "iPalette", 16 * 4, s->palette);
+    push_int(s, "iPaletteSize", &s->palette_size);
+    if (s->n_override) apply_overrides(s);
 
     const nw_uniform_value *tu = NULL;
     const nw_texture_value *tt = NULL;

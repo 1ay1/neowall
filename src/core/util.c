@@ -5,6 +5,7 @@
 #define _DEFAULT_SOURCE /* lstat, localtime_r, PATH_MAX, clock_gettime */
 #endif
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -131,6 +132,25 @@ bool neowall_each_data_dir(bool (*fn)(const char *dir, void *ctx), void *ctx) {
     if (!seen_builtin && access(NEOWALL_DATADIR, F_OK) == 0 && fn(NEOWALL_DATADIR, ctx)) {
         return true;
     }
+
+    /* Last: next to the executable, so an extracted release tarball
+     * (./neowall + ./share/neowall), a /opt prefix or a build tree run in
+     * place still finds its shaders and config templates. */
+    char exe[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (len > 0) {
+        exe[len]    = '\0';
+        char *slash = strrchr(exe, '/');
+        if (slash) {
+            *slash                           = '\0';
+            static const char *const rel[] = {"share/neowall", "../share/neowall"};
+            for (size_t i = 0; i < sizeof(rel) / sizeof(rel[0]); i++) {
+                n = snprintf(dir, sizeof(dir), "%s/%s", exe, rel[i]);
+                if (n > 0 && (size_t)n < sizeof(dir) && access(dir, F_OK) == 0 && fn(dir, ctx))
+                    return true;
+            }
+        }
+    }
     return false;
 }
 
@@ -222,4 +242,67 @@ const char *neowall_secure_runtime_dir(void) {
     }
 
     return NULL;
+}
+
+/* ── palettes ── */
+
+static int hexval(int c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* Every standalone #rrggbb / #rrggbbaa / 0xrrggbb / rrggbb token, in order
+ * (alpha is ignored). "Standalone" = not glued to letters/digits/_ on either
+ * side, so words like "deadbeefcafe" or identifiers don't count. */
+static int palette_scan(const char *s, float (*out)[3], int max) {
+    int n = 0;
+    for (const char *p = s; *p && n < max; p++) {
+        if (p > s && (isalnum((unsigned char)p[-1]) || p[-1] == '_')) continue;
+        const char *h = p;
+        bool prefixed = true;
+        if (*h == '#')
+            h++;
+        else if (h[0] == '0' && (h[1] == 'x' || h[1] == 'X'))
+            h += 2;
+        else
+            prefixed = false;
+        int v[8], k = 0;
+        while (k < 8 && (v[k] = hexval((unsigned char)h[k])) >= 0) k++;
+        if ((k != 6 && k != 8) || isalnum((unsigned char)h[k]) || h[k] == '_') continue;
+        /* bare tokens need a digit: "decade", "facade" are words, not colours */
+        if (!prefixed) {
+            bool digit = false;
+            for (int i = 0; i < k; i++) digit |= isdigit((unsigned char)h[i]) != 0;
+            if (!digit) continue;
+        }
+        for (int c = 0; c < 3; c++) out[n][c] = (float)(v[c * 2] * 16 + v[c * 2 + 1]) / 255.0f;
+        n++;
+        p = h + k - 1;
+    }
+    return n;
+}
+
+int neowall_palette_parse(const char *spec, float (*out)[3], int max) {
+    if (!spec || !out || max <= 0) return 0;
+    while (*spec == ' ' || *spec == '\t') spec++;
+    if (!*spec) return 0;
+    /* inline when it starts with a colour; otherwise it names a file */
+    if (spec[0] == '#' || (spec[0] == '0' && (spec[1] == 'x' || spec[1] == 'X')))
+        return palette_scan(spec, out, max);
+    char path[PATH_MAX];
+    if (!expand_path(spec, path, sizeof(path))) snprintf(path, sizeof(path), "%s", spec);
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        log_error("palette: can't read '%s': %s", path, strerror(errno));
+        return 0;
+    }
+    char buf[16384];
+    size_t len = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[len] = '\0';
+    int n    = palette_scan(buf, out, max);
+    if (n == 0) log_error("palette: no #rrggbb colours in '%s'", path);
+    return n;
 }

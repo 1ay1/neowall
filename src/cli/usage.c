@@ -22,6 +22,9 @@ void print_usage(const char *program_name) {
     printf("       %s watch <shader.glsl>\n", program_name);
     printf("                         Like preview, but recompile on every save and\n");
     printf("                         print errors inline (keeps the last good shader)\n");
+    printf("       %s render <shader> [-o out.png]\n", program_name);
+    printf("                         Draw it offscreen to a PNG; --sheet N, --at HH:MM,\n");
+    printf("                         --bench (GPU ms per pass), --check (NaN/Inf)\n");
     printf("       %s docs [word]\n", program_name);
     printf("                         List the helpers and uniforms shaders can use\n\n");
     printf("Options:\n");

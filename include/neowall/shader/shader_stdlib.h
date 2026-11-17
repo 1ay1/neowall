@@ -184,6 +184,27 @@ static const char *neowall_glsl_stdlib =
 
 /* Continuation of the std-lib (split to satisfy the C99 4095-char string
  * literal limit; the two are concatenated at injection time). */
+/* The theme palette: uniforms + helpers (own chunk: C99 caps a string
+ * literal at 4095 chars). Comes after the reactive uniforms and stdlib. */
+static const char *neowall_glsl_palette =
+    "// Your colour theme: `palette` in config.vibe (inline \"#1a1b26 #7aa2f7 ...\"\n"
+    "// or a theme file). Write shaders against it and they recolour when the\n"
+    "// desktop theme changes. Unset, it holds neowall's built-in night palette.\n"
+    "// Convention: [0] background, [1] foreground, [2..] accents.\n"
+    "uniform vec4  iPalette[16];    // rgb in 0..1 (alpha unused)\n"
+    "uniform int   iPaletteSize;    // how many entries are set (1..16)\n"
+    "\n"
+    "// Theme palette helpers (see iPalette). nwPal(i) wraps around the size;\n"
+    "// nwPalBg/nwPalFg are entries 0 and 1; nwPalAccent(k) is accent k (from 2);\n"
+    "// nwPalSmooth(t) blends the accents across t in 0..1 (wraps).\n"
+    "vec3 nwPal(int i){ int n = max(iPaletteSize, 1); return iPalette[((i % n) + n) % n].rgb; }\n"
+    "vec3 nwPalBg(){ return nwPal(0); }\n"
+    "vec3 nwPalFg(){ return nwPal(1); }\n"
+    "vec3 nwPalAccent(int k){ int a = max(iPaletteSize - 2, 1); return nwPal(2 + ((k % a) + a) % a); }\n"
+    "vec3 nwPalSmooth(float t){ int a = max(iPaletteSize - 2, 1); float x = fract(t) * float(a);\n"
+    "    int i = int(floor(x)); return mix(nwPalAccent(i), nwPalAccent(i + 1), smoothstep(0.0, 1.0, fract(x))); }\n"
+    "\n";
+
 static const char *neowall_glsl_stdlib2 =
     "// ---- 2D SDFs + ops ----\n"
     "float nwSdCircle(vec2 p,float r){ return length(p)-r; }\n"
