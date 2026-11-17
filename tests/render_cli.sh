@@ -46,5 +46,11 @@ grep -E "Buffer A +[0-9]+ NaN" "$T/nan" >/dev/null || fail "NaN not attributed t
 "$NW" render definitely_not_a_shader -q 2> "$T/err"; [ $? -eq 1 ] || fail "missing shader exit"
 grep -q "can't find" "$T/err" || fail "missing-shader message: $(cat "$T/err")"
 
+# a manifest uniform the author declared too: compiles, and the value arrives
+"$NW" render "$FIX/render_uniform.neowall" -s 8x8 -o "$T/u.png" -q ||
+    fail "self-declared manifest uniform does not compile"
+"$NW" render "$FIX/render_uniform.neowall" -s 8x8 --set uLevel=1 -o "$T/u1.png" -q || fail "--set manifest uniform"
+cmp -s "$T/u.png" "$T/u1.png" && fail "--set did not override a manifest uniform"
+
 [ -e "$T/state/neowall/state" ] && fail "render wrote the daemon state file"
 echo "ok - neowall render"

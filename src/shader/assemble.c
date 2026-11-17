@@ -17,6 +17,7 @@
 #include "neowall/core/log.h"
 
 #include <stdio.h>
+#include <ctype.h>
 #include <string.h>
 
 #include "neowall/shader/glsl_shadow.h"
@@ -125,6 +126,46 @@ static bool put_tagged(builder *b, const nw_shader_source *src, const char *s) {
     return true;
 }
 
+/* Does `text` declare `uniform <type> <name>` itself (outside // and block
+ * comments)? Precision qualifiers are allowed: `uniform highp float uX;`. */
+static bool declares_uniform(const char *text, const char *name) {
+    if (!text || !name || !name[0]) return false;
+    size_t nl = strlen(name);
+    bool line_comment = false, block_comment = false;
+    for (const char *p = text; *p; p++) {
+        if (line_comment) {
+            if (*p == '\n') line_comment = false;
+            continue;
+        }
+        if (block_comment) {
+            if (p[0] == '*' && p[1] == '/') block_comment = false, p++;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '/') {
+            line_comment = true;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            block_comment = true;
+            p++;
+            continue;
+        }
+        if (strncmp(p, "uniform", 7) || (p > text && (isalnum((unsigned char)p[-1]) || p[-1] == '_')) ||
+            !isspace((unsigned char)p[7]))
+            continue;
+        /* walk the words up to ';' and look for the name as a whole word */
+        const char *q = p + 7;
+        while (*q && *q != ';' && *q != '{') {
+            while (*q && isspace((unsigned char)*q)) q++;
+            const char *w = q;
+            while (*q && (isalnum((unsigned char)*q) || *q == '_')) q++;
+            if ((size_t)(q - w) == nl && !strncmp(w, name, nl)) return true;
+            if (q == w) q++; /* punctuation: `[`, `,` ... */
+        }
+    }
+    return false;
+}
+
 static bool decl_param(builder *b, const nw_param *p) {
     char line[160];
     snprintf(line, sizeof(line), "uniform %s %s;\n", p->type, p->name);
@@ -215,14 +256,17 @@ nw_result nw_shader_assemble(const nw_shader_source *src, int pass, char **text,
     for (size_t i = 0; ok && i < src->params.len; i++)
         ok = decl_param(&b, &src->params.data[i]);
     for (size_t i = 0; ok && i < src->binds.len; i++) {
-        bool is_param = false;
+        const char *name = src->binds.data[i].name;
+        bool is_param    = false;
         for (size_t k = 0; k < src->params.len; k++)
-            if (!strcmp(src->params.data[k].name, src->binds.data[i].name)) is_param = true;
-        if (!is_param) {
-            char line[128];
-            snprintf(line, sizeof(line), "uniform float %s;\n", src->binds.data[i].name);
-            ok = put_injected(&b, line);
-        }
+            if (!strcmp(src->params.data[k].name, name)) is_param = true;
+        /* The docs say a manifest uniform arrives as a `uniform float` you
+         * declare yourself; tolerate exactly that instead of failing with
+         * "declaration conflicts with previous declaration". */
+        if (is_param || declares_uniform(body, name) || declares_uniform(common, name)) continue;
+        char line[128];
+        snprintf(line, sizeof(line), "uniform float %s;\n", name);
+        ok = put_injected(&b, line);
     }
 
     if (ok && common) ok = put_tagged(&b, src, common);
