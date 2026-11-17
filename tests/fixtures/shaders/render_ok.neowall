@@ -1,0 +1,3 @@
+shader render_ok.glsl
+bufferA { ch0 self }
+image   { ch0 bufferA }

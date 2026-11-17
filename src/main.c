@@ -65,6 +65,7 @@ int main(int argc, char *argv[]) {
     if (argc >= 2 && strcmp(argv[1], "new") == 0) return cmd_new(argc, argv);
     if (argc >= 2 && strcmp(argv[1], "import") == 0) return cmd_import(argc, argv);
     if (argc >= 2 && strcmp(argv[1], "docs") == 0) return cmd_docs(argc, argv);
+    if (argc >= 2 && strcmp(argv[1], "render") == 0) return cmd_render(argc, argv);
 
     /* `preview`/`watch` are run modes, not daemon commands: they run one
      * shader in the foreground alongside the real wallpaper without touching

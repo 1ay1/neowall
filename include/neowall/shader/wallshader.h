@@ -74,4 +74,14 @@ void wallshader_set_visible(wallshader *s, bool visible);
 bool wallshader_animated(const wallshader *s);
 int wallshader_pass_count(const wallshader *s);
 
+/* ── authoring tools (`neowall render`) ── */
+#define WALLSHADER_MAX_OVERRIDES 32
+/* The underlying engine (per-pass timing, pass textures). */
+nw_engine *wallshader_engine(wallshader *s);
+/* Pin a scalar uniform (iTimeOfDay, iAudioBeat, iCpu, a manifest uniform...)
+ * to a fixed value for every following frame. False if the table is full. */
+bool wallshader_set_override(wallshader *s, const char *name, float value);
+/* false: never write iState to disk (offline renders must not leave traces). */
+void wallshader_set_persist(wallshader *s, bool persist);
+
 #endif /* NEOWALL_WALLSHADER_H */

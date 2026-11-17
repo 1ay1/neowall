@@ -200,6 +200,7 @@ cli_sources = files(
   'src/proto/socket.c',
   'src/cli/control.c',
   'src/cli/tools.c',
+  'src/cli/render.c',
   'src/cli/usage.c',
 )
 
@@ -1147,6 +1148,12 @@ if has_x11
     env: {'NEOWALL_E2E_X11': '1'},
     depends: neowall_exe, suite: 'e2e', timeout: 180, is_parallel: false)
 endif
+
+# `neowall render`: headless offscreen PNG, determinism, --at/--set/--passes,
+# --bench/--check (a NaN fixture must be caught). Skips (77) without EGL/GL.
+test('render_cli', find_program('tests/render_cli.sh'),
+  args: [neowall_exe.full_path(), meson.project_source_root()],
+  depends: neowall_exe, suite: 'e2e', timeout: 120)
 
 # =============================================================================
 # Fuzzers
