@@ -100,6 +100,19 @@ frames are paced by
 Target frame rate when vsync is off.
 Default 60.
 .TP
+.BI palette " spec"
+Your colour theme, as the shader's
+.B iPalette
+(up to 16 colours;
+.B nwPal(i)
+and friends in GLSL). Either inline,
+.BR "palette \(dq#1a1b26 #c0caf5 #7aa2f7 #bb9af7\(dq" ,
+or a path to any file that contains
+.B #rrggbb
+colours (a kitty, ghostty or CSS theme works as is), read in order.
+Convention: background, foreground, then accents.
+Unset, shaders see a built\-in night palette.
+.TP
 .BI channels " [a b ...]"
 Up to four
 .B iChannel

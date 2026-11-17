@@ -1,6 +1,6 @@
 # fish completion for neowall
 
-set -l cmds new import docs preview watch kill next pause resume reload set list current status ping pause-shader resume-shader set-terminal
+set -l cmds new import docs render preview watch kill next pause resume reload set list current status ping pause-shader resume-shader set-terminal
 
 complete -c neowall -f
 complete -c neowall -s c -l config -rF -d 'Config file'
@@ -13,6 +13,7 @@ complete -c neowall -l timelapse -x -d 'Speed up the shader clock (30d/20s)'
 
 complete -c neowall -n "not __fish_seen_subcommand_from $cmds" -a new -d 'Create a shader from a template'
 complete -c neowall -n "not __fish_seen_subcommand_from $cmds" -a import -d 'Import a Shadertoy export'
+complete -c neowall -n "not __fish_seen_subcommand_from $cmds" -a render -d 'Draw a shader offscreen to a PNG'
 complete -c neowall -n "not __fish_seen_subcommand_from $cmds" -a docs -d 'Shader helpers and uniforms'
 complete -c neowall -n "not __fish_seen_subcommand_from $cmds" -a preview -d 'Run one shader in the foreground'
 complete -c neowall -n "not __fish_seen_subcommand_from $cmds" -a watch -d 'Preview and reload on save'
@@ -36,3 +37,22 @@ complete -c neowall -n "__fish_seen_subcommand_from new" -l list -d 'List templa
 complete -c neowall -n "__fish_seen_subcommand_from import" -F -a '(__fish_complete_suffix .json)'
 complete -c neowall -n "__fish_seen_subcommand_from preview watch" -F -a '(__fish_complete_suffix .glsl .frag .neowall)'
 complete -c neowall -n "__fish_seen_subcommand_from set-terminal" -xa '(__fish_complete_command)'
+
+# render
+set -l r "__fish_seen_subcommand_from render"
+complete -c neowall -n $r -F -a '(__fish_complete_suffix .glsl; __fish_complete_suffix .neowall)'
+complete -c neowall -n $r -s o -l output -r -d 'PNG to write'
+complete -c neowall -n $r -s s -l size -x -a '1920x1080 2560x1440 3440x1440 3840x2160' -d 'Resolution WxH'
+complete -c neowall -n $r -s t -l time -x -d 'iTime of the frame (s)'
+complete -c neowall -n $r -l fps -x -d 'Simulation rate'
+complete -c neowall -n $r -l frames -x -d 'Frames simulated'
+complete -c neowall -n $r -l sheet -x -d 'Contact sheet of N moments'
+complete -c neowall -n $r -l passes -d 'Save every buffer pass'
+complete -c neowall -n $r -l at -x -d 'Local time HH:MM'
+complete -c neowall -n $r -l mouse -x -d 'Pointer X,Y in 0..1'
+complete -c neowall -n $r -l set -x -d 'Pin a uniform NAME=VALUE'
+complete -c neowall -n $r -l palette -r -d 'Colours or a theme file'
+complete -c neowall -n $r -l live -d 'Real CPU/audio readings'
+complete -c neowall -n $r -l bench -d 'GPU time per pass'
+complete -c neowall -n $r -l check -d 'Find NaN/Inf per pass'
+complete -c neowall -n $r -s q -l quiet -d 'Only errors'

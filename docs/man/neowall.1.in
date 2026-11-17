@@ -129,6 +129,62 @@ A broken save keeps the last good shader on screen.
 .TP
 .BR docs " [\fIword\fR]"
 List the helpers and uniforms shaders can use, optionally filtered.
+.TP
+.BI render " shader" " \fR[\fPoptions\fR]\fP"
+Draw a shader offscreen (headless EGL: no compositor or daemon needed, and it
+never touches a running daemon) and write a PNG.
+Inputs are pinned to calm values unless
+.BR \-\-live ,
+so the same command gives the same picture.
+.RS
+.TP
+.BR \-o ", " \-\-output " \fIfile\fR"
+PNG to write (default
+.IR shader .png).
+.TP
+.BR \-s ", " \-\-size " \fIW\fRx\fIH\fR"
+Resolution (default 1920x1080).
+.TP
+.BR \-t ", " \-\-time " \fIseconds\fR"
+.B iTime
+of the frame (default 3); feedback buffers are simulated up to it at
+.B \-\-fps
+(default 30), or
+.B \-\-frames
+.IR n .
+.TP
+.BI \-\-sheet " n"
+A contact sheet of
+.I n
+moments spread over 0..\-\-time.
+.TP
+.B \-\-passes
+Also save every buffer pass as
+.IR file . pass .png.
+.TP
+.BI \-\-at " HH:MM"
+Local time of day, for
+.BR iTimeOfDay ", " iSun ", " iDate .
+.TP
+.BI \-\-mouse " x,y"
+The pointer, 0..1.
+.TP
+.BI \-\-set " name=value"
+Pin any float uniform, e.g.
+.BR iAudioBeat=1 " or a manifest uniform. Repeatable."
+.TP
+.BI \-\-palette " spec"
+.B iPalette
+for this render: inline colours or a theme file (default: the config's
+.BR palette ).
+.TP
+.B \-\-bench
+GPU time per pass and what it costs at 30 and 60 fps.
+.TP
+.B \-\-check
+Find NaN/Inf pixels in every pass; reports the first pass they appear in and
+a bounding box, paints them magenta in the PNG, and exits 2.
+.RE
 .SH FILES
 .TP
 .I $XDG_CONFIG_HOME/neowall/config.vibe

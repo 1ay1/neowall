@@ -164,6 +164,10 @@ available.
 ### Color
 
 - `nwPalette(t)` and `nwPalette(t, a, b, c, d)` — cosine palette (Inigo Quilez form)
+- `nwPal(i)`, `nwPalBg()`, `nwPalFg()`, `nwPalAccent(k)`, `nwPalSmooth(t)` — the
+  user's **theme palette** (`iPalette[16]`, `iPaletteSize`), set with `palette` in
+  config.vibe. Write against these and the wallpaper recolours with the desktop
+  theme; unset, they hold a built-in night palette. See "Following the theme".
 - `nwHsv2rgb` — HSV to RGB
 - `nwSaturate` — clamp to 0..1
 - `nwTonemap` — ACES filmic tonemap
@@ -369,8 +373,28 @@ uniforms {
 }
 ```
 
-In the shader, `uHeat` and `uPulse` arrive as ordinary `uniform float`s you declare
-yourself; the bind keyword tells the daemon what live value to feed them each frame.
+In the shader, `uHeat` and `uPulse` arrive as ordinary `uniform float`s. You can
+declare them yourself (`uniform float uHeat;`) or leave that out: either works.
+The bind keyword tells the daemon what live value to feed them each frame.
+
+### Per-pass options: resolution, format, filtering
+
+Every buffer block (and named `pass { "Blur" { ... } }` block) also takes:
+
+```
+bufferC {
+  ch0    bufferB
+  scale  0.5        # render at half the output size (blur, bloom, glow passes)
+  format rgba16f    # rgba8 | rgba16f (default) | rgba32f
+  filter mipmap     # linear (default) | nearest | mipmap (enables textureLod)
+  wrap   clamp      # clamp (default) | repeat | mirror
+}
+bufferD { size 512x512 }   # a fixed size instead of following the output
+```
+
+`iResolution` in that pass is its own size, and readers see it in
+`iChannelResolution`, so a `scale 0.5` blur pass needs no code changes. Blur
+and bloom passes at `scale 0.5` cost a quarter as much and look the same.
 
 ### Rules and gotchas
 
@@ -414,6 +438,80 @@ yourself; the bind keyword tells the daemon what live value to feed them each fr
 ---
 
 ## Authoring workflow
+
+### See it without a compositor: `neowall render`
+
+```bash
+neowall render myshader                        # → myshader.png, 1920x1080, t=3s
+neowall render myshader --sheet 6 --time 30    # contact sheet: 6 moments over 30 s
+neowall render myshader --at 19:30             # how it looks at dusk (iTimeOfDay/iSun/iDate)
+neowall render myshader --set iAudioBeat=1 --set iAudioActive=1   # on the beat
+neowall render myshader --mouse 0.2,0.5        # pointer on the left
+neowall render myshader --palette ~/.config/kitty/current-theme.conf
+neowall render myshader --passes               # also myshader.buffer_a.png, ...
+```
+
+Renders offscreen on a headless EGL context (an EGL device, so NVIDIA works;
+Mesa surfaceless otherwise): no compositor, no daemon, works over SSH and in
+CI, and never touches a running daemon or its state file. Feedback buffers are
+simulated frame by frame up to `--time`, and every reactive input is pinned to
+a calm value (idle CPU, no audio, mains power), so the same command always
+produces the same image. `--live` uses the real readings instead. `--set`
+pins any float uniform, including manifest uniforms.
+
+### Is it fast enough? `--bench`
+
+```
+$ neowall render tokyo_night -s 3440x1440 --bench
+GPU time per frame (3440x1440, mean of 87 frames):
+  Buffer A          1.20 ms
+  Buffer B          0.18 ms
+  Buffer C          0.25 ms
+  Buffer D          0.09 ms
+  Image             0.36 ms
+  total             2.09 ms
+  busy:    6% of the GPU at 30 fps,   13% at 60 fps
+```
+
+Real GPU time per pass (timer queries), not a utilisation graph. A GPU at
+power-saving clocks reports high "utilisation" for tiny workloads, so
+`nvidia-smi` overstates a wallpaper's cost. Measure at your monitor's resolution.
+
+### Black blobs? `--check`
+
+```
+$ neowall render myshader --check
+NaN/Inf check (90 frames):
+  Buffer A       11929 NaN, 0 Inf  (frame 0, t=0.00s)  box x=0..959 y=93..121
+  Image          12941 NaN, 0 Inf  (frame 0, t=0.00s)  box x=0..959 y=93..121
+  → the first pass listed is where it starts; later passes inherit it.
+```
+
+NaN shows on screen as black, and a blur or bloom pass smears one bad pixel
+into a large black rectangle, which is hard to trace by eye. `--check` scans every
+pass over the run and names the pass where it starts, with a bounding box. NaN
+pixels are magenta in the PNG, and the exit code is 2, so it works in CI.
+Common causes: `x/0`, `sqrt`/`log`/`pow` of a negative, `normalize(vec3(0))`, `exp()`
+of a large positive value. That includes `step(...) * exp(huge)`, because
+`0 * inf` is NaN.
+
+### Following the theme: `iPalette`
+
+```glsl
+vec3 sky   = mix(nwPalBg(), nwPalAccent(0), uv.y * 0.3);
+vec3 neon  = nwPalSmooth(id * 0.17);       // walks the accents
+vec3 text  = nwPalFg();
+```
+
+```
+default { shader skyline  palette "#1a1b26 #c0caf5 #7aa2f7 #7dcfff #bb9af7 #f7768e" }
+default { shader skyline  palette ~/.config/kitty/current-theme.conf }
+```
+
+The convention is background, foreground, then accents, up to 16 colours. Any file with
+`#rrggbb` colours works, read in order. Point it at the theme file your theme
+switcher rewrites, run `neowall reload`, and the wallpaper changes theme along
+with the rest of the desktop.
 
 ### Preview without disturbing anything
 
