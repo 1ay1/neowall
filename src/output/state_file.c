@@ -137,9 +137,24 @@ typedef struct {
 /* Serializes every read-modify-rename transaction on the singleton state file. */
 static pthread_mutex_t state_file_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/* A `neowall preview` / `watch` is a second, throwaway instance on the same
+ * outputs. It must never touch the daemon's state file: if it did, its shader
+ * would overwrite the daemon's entry for that connector and `neowall current`
+ * would keep reporting the preview long after it exited. */
+static bool state_file_readonly = false;
+
+void state_file_set_readonly(bool readonly) {
+    state_file_readonly = readonly;
+}
+
+bool state_file_is_readonly(void) {
+    return state_file_readonly;
+}
+
 /* Write current wallpaper state for multi-monitor support */
 bool write_wallpaper_state(const char *output_name, const char *wallpaper_path, const char *mode,
                            int cycle_index, int cycle_total, const char *status) {
+    if (state_file_readonly) return true;
     /* Serialize concurrent read-modify-rename transactions. */
 
     const char *state_path = get_state_file_path();
@@ -377,6 +392,7 @@ static bool state_name_retained(const char *name, const char *const *names, size
 }
 
 bool prune_wallpaper_state(const char *const *output_names, size_t output_count) {
+    if (state_file_readonly) return true;
     if (output_count > 0 && !output_names) return false;
     const char *path = get_state_file_path();
     if (!path || !path[0]) return false;
@@ -406,6 +422,7 @@ bool prune_wallpaper_state(const char *const *output_names, size_t output_count)
 }
 
 bool remove_wallpaper_state(const char *output_name) {
+    if (state_file_readonly) return true;
     if (!output_name || !output_name[0]) return false;
     const char *path = get_state_file_path();
     if (!path || !path[0]) return false;
@@ -436,6 +453,7 @@ bool remove_wallpaper_state(const char *output_name) {
 
 /* Restore cycle index from state file for the given output */
 int restore_cycle_index_from_state(const char *output_name) {
+    if (state_file_readonly) return -1; /* a preview has its own one-entry config */
     const char *state_path = get_state_file_path();
     FILE *fp               = fopen(state_path, "r");
 
@@ -605,6 +623,7 @@ bool read_wallpaper_state(void) {
 
 /* Write cycle list to file (called by daemon when config is loaded) */
 bool write_cycle_list(const char *output_name, char **paths, size_t count, size_t current_index) {
+    if (state_file_readonly) return true;
     if (!output_name || !paths || count == 0) {
         return false;
     }

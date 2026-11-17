@@ -202,6 +202,50 @@ static void touch(const char *path) {
     if (f) fclose(f);
 }
 
+/* Regression: a `neowall preview` shares the daemon's state file. While it
+ * runs read-only, every writer must be a no-op so the daemon's entries survive
+ * (previously the preview's shader stayed in `neowall current` after it exited). */
+static void test_state_readonly_for_preview(void) {
+    char base[256];
+    snprintf(base, sizeof(base), "/tmp/nw-ro-test-%d-%ld", (int)getpid(), (long)time(NULL));
+    CHECK(mkdir(base, 0700) == 0);
+    setenv("XDG_STATE_HOME", base, 1);
+
+    /* the daemon records its wallpaper */
+    CHECK(write_wallpaper_state("DP-1", "/daemon.glsl", "fill", 2, 5, "active"));
+    char *paths[] = {(char *)"/a.glsl", (char *)"/b.glsl"};
+    CHECK(write_cycle_list("DP-1", paths, 2, 1));
+
+    /* a preview starts on the same output */
+    state_file_set_readonly(true);
+    CHECK(state_file_is_readonly());
+    CHECK(write_wallpaper_state("DP-1", "/preview.glsl", "fill", 0, 1, "active"));
+    CHECK(write_cycle_list("DP-1", paths, 1, 0));
+    CHECK(remove_wallpaper_state("DP-1"));
+    const char *none[] = {"HDMI-9"};
+    CHECK(prune_wallpaper_state(none, 1));
+    CHECK(restore_cycle_index_from_state("DP-1") == -1);   /* preview restores nothing */
+    state_file_set_readonly(false);
+
+    /* the daemon's entry is untouched */
+    CHECK(restore_cycle_index_from_state("DP-1") == 2);
+    char state_file[320];
+    snprintf(state_file, sizeof(state_file), "%s/neowall/state", base);
+    FILE *f = fopen(state_file, "r");
+    CHECK(f != NULL);
+    char buf[4096] = "";
+    size_t n = f ? fread(buf, 1, sizeof(buf) - 1, f) : 0;
+    buf[n] = '\0';
+    if (f) fclose(f);
+    CHECK(strstr(buf, "/daemon.glsl") != NULL);
+    CHECK(strstr(buf, "/preview.glsl") == NULL);
+
+    unsetenv("XDG_STATE_HOME");
+    char cmd[400];
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", base);
+    CHECK(system(cmd) == 0);
+}
+
 /* neowall_find_data(): $XDG_DATA_HOME first, then $XDG_DATA_DIRS in order,
  * relative entries ignored, missing files reported as not found. */
 static void test_find_data(void) {
@@ -253,6 +297,7 @@ int main(void) {
     test_parse_index();
     test_secure_runtime_dir();
     test_persisted_state_pruning();
+    test_state_readonly_for_preview();
     test_find_data();
 
     if (failures == 0) {
