@@ -380,6 +380,9 @@ bool output_init_render(struct output_state *output);
 
 /* Frame timing */
 int output_get_frame_timer_fd(struct output_state *output);
+/* Drawn on the compositor's frame callbacks (vsync, Wayland, no shader_fps
+ * cap) rather than on a timer. */
+bool output_frame_paced(const struct output_state *output);
 
 /* Phase-locked frame pacer. Call once per output immediately after its buffer
  * swap, passing a CLOCK_MONOTONIC timestamp (ns) captured just after the swap.

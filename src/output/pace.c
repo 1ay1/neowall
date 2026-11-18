@@ -12,6 +12,15 @@
 
 /* Helper function to configure vsync (swap interval) for shader rendering
  * DRY principle: Single source of truth for vsync configuration logic */
+/* Paced by the compositor's frame callbacks (vsync on Wayland, no fps cap):
+ * draw once per refresh, and not at all while hidden. Otherwise a timer paces
+ * the output: vsync off, X11, or an explicit `shader_fps` cap. A capped vsync
+ * output still swaps without blocking and is presented tear-free. */
+bool output_frame_paced(const struct output_state *output) {
+    return output->config->vsync && !output->config->fps_cap &&
+           compositor_surface_supports_frame_pacing(output->compositor_surface);
+}
+
 void output_configure_vsync(struct output_state *output) {
     if (!output || !output->compositor_surface ||
         output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
@@ -33,9 +42,8 @@ void output_configure_vsync(struct output_state *output) {
      *   rest (#85). So the interval is 0 there.
      * - vsync=true without frame callbacks (X11): interval 1, so presents land
      *   on the refresh; the frame timer paces the loop at the refresh rate. */
-    bool paced        = output->config->vsync &&
-                        compositor_surface_supports_frame_pacing(output->compositor_surface);
-    int swap_interval = (output->config->vsync && !paced) ? 1 : 0;
+    bool callbacks    = compositor_surface_supports_frame_pacing(output->compositor_surface);
+    int swap_interval = (output->config->vsync && !callbacks) ? 1 : 0;
 
     if (!eglSwapInterval(output->state->egl_display, swap_interval)) {
         EGLint err = eglGetError();
@@ -75,8 +83,7 @@ bool output_configure_frame_timer(struct output_state *output) {
      * block at all (measured on Xwayland: 2 fps on the old loop, 280 on the
      * new). There the timer paces it too: vsync still keeps each present on
      * the refresh, the timer keeps the loop at the refresh rate. */
-    bool paced_by_callback = compositor_surface_supports_frame_pacing(output->compositor_surface);
-    if (output->config->vsync && paced_by_callback) {
+    if (output_frame_paced(output)) {
         if (output->frame_timer_fd >= 0) {
             close(output->frame_timer_fd);
             output->frame_timer_fd = -1;

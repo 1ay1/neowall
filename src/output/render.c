@@ -1125,8 +1125,8 @@ bool render_frame_shader(struct output_state *output) {
 
     /* Shader wallpapers need continuous redraw for animation
      * - vsync mode: always set needs_redraw (monitor refresh drives rendering)
-     * - vsync off: only set if frame timer hasn't expired (timer drives rendering) */
-    if (output->config->vsync) {
+     * - vsync off, or a `shader_fps` cap: the frame timer drives rendering */
+    if (output->config->vsync && !output->config->fps_cap) {
         atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
     } else {
         /* Frame timer controls redraw scheduling in vsync-off mode */

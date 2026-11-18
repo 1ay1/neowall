@@ -54,9 +54,8 @@ static bool output_wants_frame(const struct frame *f, struct output_state *outpu
      * The swap doesn't block (interval 0), so a slow monitor can't stall the
      * others. vsync=false keeps its own timerfd: gating both on one output
      * makes two pacers beat (~23 FPS). */
-    bool frame_paced = output->config->vsync &&
-                       compositor_surface_supports_frame_pacing(output->compositor_surface);
-    return !frame_paced || compositor_surface_frame_ready(output->compositor_surface);
+    return !output_frame_paced(output) ||
+           compositor_surface_frame_ready(output->compositor_surface);
 }
 
 /* Advance an image cross-fade to `now`. */
@@ -83,7 +82,7 @@ static void output_meter_fps(struct output_state *output, uint64_t frame_start,
     float fps           = (float)output->fps_frame_count / ((float)elapsed / 1000.0f);
     output->fps_current = fps;
     uint64_t frame_time = frame_end - frame_start;
-    if (output->config->vsync) {
+    if (output->config->vsync && !output->config->fps_cap) {
         log_info("FPS [%s]: %.1f FPS (vsync: monitor sync, frame_time: %lums, worst gap: %lums)",
                  output->model, fps, frame_time, output->fps_worst_gap);
     } else {
@@ -188,10 +187,7 @@ static void output_present(struct frame *f, struct output_state *output, uint64_
      * requested before it. */
     if (wallpaper_is_animated(output->config->type))
         compositor_surface_present_feedback(output->compositor_surface);
-    if (output->config->vsync &&
-        compositor_surface_supports_frame_pacing(output->compositor_surface)) {
-        compositor_surface_frame_request(output->compositor_surface);
-    }
+    if (output_frame_paced(output)) compositor_surface_frame_request(output->compositor_surface);
 
     bool swap_ok;
     if (partial && state->swap_with_damage) {
@@ -709,7 +705,7 @@ int64_t app_wait_hint(void *self) {
     }
     app_arm_output_wake(want_wake);
     for (struct output_state *o = state->outputs; o; o = o->next) {
-        if (!o->config->vsync || output_get_frame_timer_fd(o) >= 0) continue;
+        if (!output_frame_paced(o) || output_get_frame_timer_fd(o) >= 0) continue;
         if (o->compositor_surface && o->compositor_surface->frame_cb) {
             hint = 50 * 1000000LL;
             break;

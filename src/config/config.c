@@ -833,6 +833,7 @@ static bool parse_common_keys(VibeValue *obj, struct wallpaper_config *config, c
         }
         if (!key_allowed(config, "shader_fps", FOR_SHADER | FOR_TERMINAL, ctx)) return false;
         config->shader_fps = (int)fps;
+        config->fps_cap    = true;
     }
     if (has_vsync && !key_allowed(config, "vsync", FOR_SHADER | FOR_TERMINAL, ctx)) return false;
     if (palette) {

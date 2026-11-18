@@ -265,6 +265,17 @@ static bool send_daemon_signal(int signal, const char *action, bool check_cycle)
     return true;
 }
 
+/* A daemon is running: its pid file names a live process. */
+static bool daemon_alive(void) {
+    const char *pid_path = get_pid_file_path();
+    FILE *fp             = pid_path ? fopen(pid_path, "r") : NULL;
+    if (!fp) return false;
+    long pid    = 0;
+    int scanned = fscanf(fp, "%ld", &pid);
+    fclose(fp);
+    return scanned == 1 && pid > 0 && (kill((pid_t)pid, 0) == 0 || errno == EPERM);
+}
+
 /* Print which binary the running daemon is actually executing, and shout if it
  * differs from this CLI.
  *
@@ -452,7 +463,13 @@ int cmd_control(int argc, char *argv[]) {
     }
 
     if (strcmp(cmd, "kill") == 0) return kill_daemon() ? EXIT_SUCCESS : EXIT_FAILURE;
-    if (strcmp(cmd, "list") == 0) return read_cycle_list() ? EXIT_SUCCESS : EXIT_FAILURE;
+    if (strcmp(cmd, "list") == 0) {
+        if (!daemon_alive()) {
+            fprintf(stderr, "No running neowall daemon (start it with: neowall)\n");
+            return EXIT_FAILURE;
+        }
+        return read_cycle_list() ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
 
     /* Real-time signals aren't compile-time constants, so these can't live
      * in the daemon_commands table. */
@@ -472,6 +489,12 @@ int cmd_control(int argc, char *argv[]) {
     for (size_t i = 0; daemon_commands[i].name != NULL; i++) {
         if (strcmp(cmd, daemon_commands[i].name) != 0) continue;
         if (daemon_commands[i].needs_state_check) {
+            /* the state file outlives the daemon: don't report a dead
+             * process's wallpaper as active */
+            if (!daemon_alive()) {
+                fprintf(stderr, "No running neowall daemon (start it with: neowall)\n");
+                return EXIT_FAILURE;
+            }
             bool ok = read_wallpaper_state();
             report_daemon_version();
             return ok ? EXIT_SUCCESS : EXIT_FAILURE;
