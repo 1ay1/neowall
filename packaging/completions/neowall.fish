@@ -10,6 +10,7 @@ complete -c neowall -s h -l help -d 'Show help'
 complete -c neowall -s V -l version -d 'Show version'
 complete -c neowall -l date -x -d 'Shift the shader clock (+6d)'
 complete -c neowall -l timelapse -x -d 'Speed up the shader clock (30d/20s)'
+complete -c neowall -l allow-exec -d 'Let manifest uniforms run commands'
 
 complete -c neowall -n "not __fish_seen_subcommand_from $cmds" -a new -d 'Create a shader from a template'
 complete -c neowall -n "not __fish_seen_subcommand_from $cmds" -a import -d 'Import a Shadertoy export'

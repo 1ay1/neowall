@@ -165,7 +165,8 @@ typedef struct {
 
 static void *exec_open(const nw_source_spec *spec, char *err, size_t err_cap) {
     if (!g_exec_allowed) {
-        snprintf(err, err_cap, "exec() is disabled; pass --allow-exec to enable it");
+        snprintf(err, err_cap,
+                 "exec() is off; enable it with `allow_exec true` in config.vibe or --allow-exec");
         return NULL;
     }
     if (!spec->arg[0]) {

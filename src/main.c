@@ -57,6 +57,7 @@ int main(int argc, char *argv[]) {
     char config_path[NW_PATH_MAX] = {0};
     bool daemon_mode              = true; /* Default to daemon mode */
     bool verbose                  = false;
+    bool allow_exec               = false; /* --allow-exec */
     bool clock_shifted            = false; /* --date/--timelapse moved the shader clock */
     const char *preview_shader    = NULL;  /* `preview <shader>`: run this, not the config */
     bool watch_mode               = false; /* `watch <shader>`: recompile on save */
@@ -96,6 +97,7 @@ int main(int argc, char *argv[]) {
         {"help",       no_argument,       0, 'h'},
         {"version",    no_argument,       0, 'V'},
         {"date",       required_argument, 0, 'D'},
+        {"allow-exec", no_argument,       0, 'X'},
         {"timelapse",  required_argument, 0, 'T'},
         {0,            0,                 0, 0  }
     };
@@ -107,6 +109,7 @@ int main(int argc, char *argv[]) {
         case 'f':
             daemon_mode = false; /* Explicit foreground */
             break;
+        case 'X': allow_exec = true; break;
         case 'v':
             /* Verbose mode - enable debug logging */
             verbose = true;
@@ -288,7 +291,8 @@ int main(int argc, char *argv[]) {
      * -Wstringop-truncation (config_path and state.config_path are the same
      * size, which is exactly the case the warning targets). */
     snprintf(state.config_path, sizeof(state.config_path), "%s", config_path);
-    state.is_preview = preview_shader != NULL;
+    state.allow_exec_cli = allow_exec;
+    state.is_preview     = preview_shader != NULL;
     /* A preview shares the daemon's runtime dir; keep its hands off the state
      * file so `neowall current`/`list` keep describing the real wallpaper. */
     state_file_set_readonly(state.is_preview);

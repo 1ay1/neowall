@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 
 #include "app_internal.h"
+#include "neowall/source/source.h"
 #include "neowall/app/app.h"
 #include "neowall/surface/surface.h"
 #include "neowall/config/config.h"
@@ -45,6 +46,9 @@ static void apply_globals(struct neowall_state *state, const config_doc *doc) {
         atomic_store_explicit(&state->mouse_interaction, g.mouse_interaction, memory_order_release);
     if (g.has_term_raw_input)
         atomic_store_explicit(&state->term_raw_input, g.term_raw_input, memory_order_release);
+    /* exec("...") manifest uniforms run commands: only with an explicit opt-in
+     * in the user's own config or on the command line, never from a shader */
+    nw_source_exec_set_allowed(state->allow_exec_cli || g.allow_exec);
     const struct compositor_backend *b = state->compositor_backend;
     if (b && b->ops && b->ops->apply_input_config) b->ops->apply_input_config(b->data, state);
 }

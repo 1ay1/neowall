@@ -1419,6 +1419,12 @@ static bool validate_config_tree(VibeValue *root, bool *out_has_config) {
         return false;
     }
 
+    VibeValue *exec_val = vibe_object_get(root->as_object, "allow_exec");
+    if (exec_val && exec_val->type != VIBE_TYPE_BOOLEAN) {
+        log_error("Top-level 'allow_exec' must be a boolean (true or false)");
+        return false;
+    }
+
     VibeValue *default_obj = vibe_object_get(root->as_object, "default");
     if (default_obj) {
         if (default_obj->type != VIBE_TYPE_OBJECT) {
@@ -1504,6 +1510,8 @@ config_globals config_doc_globals(const config_doc *doc) {
         g.has_term_raw_input = true;
         g.term_raw_input     = v->as_boolean;
     }
+    v            = vibe_object_get(doc->root->as_object, "allow_exec");
+    g.allow_exec = v && v->type == VIBE_TYPE_BOOLEAN && v->as_boolean;
     return g;
 }
 

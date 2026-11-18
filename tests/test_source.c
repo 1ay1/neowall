@@ -347,7 +347,7 @@ static void test_exec_is_opt_in(void) {
     CHECK(!nw_source_exec_allowed(), "exec off by default");
     CHECK(nw_is_err(nw_source_open_text("exec(\"echo 1\")", &src, err, sizeof(err))),
           "exec must refuse while disabled");
-    CHECK(strstr(err, "disabled") != NULL, "error says why, got '%s'", err);
+    CHECK(strstr(err, "off") && strstr(err, "allow_exec"), "error says why and how, got '%s'", err);
 
     nw_source_exec_set_allowed(true);
     CHECK(nw_source_exec_allowed(), "exec can be enabled");

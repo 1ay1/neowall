@@ -19,6 +19,12 @@
 #include "version.h" /* NEOWALL_DATADIR */
 #include <stdatomic.h>
 
+/* ---- stub: the exec() gate apply_globals sets ---- */
+static int g_exec_allowed = -1;
+void nw_source_exec_set_allowed(bool allowed) {
+    g_exec_allowed = allowed;
+}
+
 /* ---- stub: record the last config applied to each output ---- */
 static int g_applied;
 bool output_apply_config(struct output_state *o, struct wallpaper_config *c) {
@@ -139,6 +145,7 @@ int main(void) {
         "default {\n  channels [ a b c d e ]\n  shader a.glsl\n}\n",      /* > 4 channels */
         "default {\n  shader a.glsl\n  palette \"no colours here\"\n}\n", /* bad palette */
         "default {\n  path /x.png\n  palette \"#112233\"\n}\n",           /* palette on an image */
+        "allow_exec yes\ndefault {\n  shader a.glsl\n}\n",                /* not a boolean */
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         write_cfg(bad[i]);
@@ -286,6 +293,13 @@ int main(void) {
     atomic_store(&st.mouse_interaction, true);
     CHECK(app_config_load(&st, cfg));
     CHECK(!atomic_load(&st.mouse_interaction));
+    CHECK(g_exec_allowed == 0); /* exec() stays off unless asked for */
+
+    /* allow_exec in the user's config turns exec() uniforms on */
+    snprintf(text, sizeof(text), "allow_exec true\ndefault {\n  shader %s\n}\n", a);
+    write_cfg(text);
+    CHECK(app_config_load(&st, cfg));
+    CHECK(g_exec_allowed == 1);
 
     /* `palette`: inline colours reach the output's config; garbage is an error */
     snprintf(text, sizeof(text),

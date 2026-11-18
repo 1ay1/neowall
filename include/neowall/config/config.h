@@ -21,6 +21,7 @@ typedef struct config_doc config_doc;
 typedef struct {
     bool has_mouse_interaction, mouse_interaction;
     bool has_term_raw_input, term_raw_input;
+    bool allow_exec; /* manifest uniforms may run exec("...") commands */
 } config_globals;
 
 /* Read, parse and validate the whole file. NULL on any problem, logged

@@ -41,6 +41,7 @@ struct neowall_state {
     atomic_bool running;           /* false once the daemon is stopping */
     atomic_bool mouse_interaction; /* bind the pointer, feed iMouse */
     atomic_bool term_raw_input;    /* pass Ctrl-C/D/\/Z to a focused terminal */
+    bool allow_exec_cli;           /* --allow-exec: exec() uniforms on, whatever the config */
 
     /* Lock order: output_list_lock, then state_mutex, never the reverse.
      * state_file_lock serialises state-file writes. */

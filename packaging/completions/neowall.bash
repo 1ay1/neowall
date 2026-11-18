@@ -6,7 +6,7 @@ _neowall() {
 
     local commands="new import docs render preview watch kill next pause resume reload
         set list current status ping pause-shader resume-shader set-terminal"
-    local opts="--config --foreground --verbose --help --version --date --timelapse"
+    local opts="--config --foreground --verbose --help --version --date --timelapse --allow-exec"
 
     # the subcommand, if any
     local cmd="" i

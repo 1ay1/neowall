@@ -31,6 +31,7 @@ void print_usage(const char *program_name) {
     printf("  -c, --config PATH     Path to configuration file\n");
     printf("  -f, --foreground      Run in foreground (for debugging)\n");
     printf("  -v, --verbose         Enable verbose logging\n");
+    printf("      --allow-exec      Let manifest uniforms run commands (exec(\"...\"))\n");
     printf("      --date OFFSET     Shift the shader clock (+6d, -2h, 90m, 3600)\n");
     printf("      --timelapse SPEC  Compress shader time (SPAN/DURATION, e.g. 30d/20s)\n");
     printf("  -h, --help            Show this help message\n");

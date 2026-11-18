@@ -31,6 +31,7 @@ _arguments -C \
   '(- *)'{-V,--version}'[show version]' \
   '--date=[shift the shader clock]:offset' \
   '--timelapse=[speed up the shader clock]:span/duration' \
+  '--allow-exec[let manifest uniforms run commands]' \
   '1: :->cmd' \
   '*:: :->args' && return
 
