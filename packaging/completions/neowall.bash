@@ -20,7 +20,7 @@ _neowall() {
 
     case $prev in
         -c | --config) _filedir vibe; return ;;
-        --date | --timelapse) return ;;
+        --date | --timelapse | --ease-ms) return ;;
         --template) COMPREPLY=($(compgen -W "scene flat reactive" -- "$cur")); return ;;
     esac
 
@@ -69,6 +69,9 @@ _neowall() {
             ;;
         set-terminal)
             COMPREPLY=($(compgen -c -- "$cur"))
+            ;;
+        pause-shader)
+            COMPREPLY=($(compgen -W "--ease-ms" -- "$cur"))
             ;;
     esac
 } && complete -F _neowall neowall

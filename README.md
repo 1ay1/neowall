@@ -79,9 +79,14 @@ different wallpaper per monitor are a few lines more; see
 |---------|-|
 | `neowall next`, `set <n>`, `list` | Move through a slideshow or a directory of shaders |
 | `neowall pause`, `resume` | Stop and restart cycling |
-| `neowall pause-shader`, `resume-shader` | Freeze the animation |
+| `neowall pause-shader [--ease-ms MS]`, `resume-shader` | Freeze the animation, optionally easing the shader clock to a stop |
 | `neowall current` | Show what each monitor displays |
 | `neowall reload`, `kill` | Re-read the config, stop the daemon |
+
+`neowall pause-shader --ease-ms 850` slows the shader's `iTime` clock over
+850 milliseconds, then holds the last frame without drawing new ones.
+`neowall resume-shader` continues from that clock position. Use
+`neowall pause-shader` for an immediate freeze.
 
 ## Shaders
 

@@ -222,7 +222,7 @@ for that output, so new output still shows within a frame.
 | state | stops | set by |
 |---|---|---|
 | cycle pause | wallpaper cycling: no `CYCLE_DUE` subscriptions | `pause` / `resume` |
-| shader pause | the shader clock and its draws; resumes on the same frame | `pause-shader` / `resume-shader` |
+| shader pause | the shader clock and its draws; resumes from the frozen clock position | `pause-shader [--ease-ms MS]` / `resume-shader` |
 | `output->occluded` | that output's draws and its frame timer | the backend's occlusion signals |
 
 ## The control socket
@@ -242,6 +242,7 @@ ok skipping to next wallpaper
 | `set <n>` | `ok`, or `err index n is out of range (0-k)` |
 | `reload` | `ok`, or `err reload failed; the previous configuration is still in effect` |
 | `pause-shader`, `resume-shader` | `ok ...` |
+| `pause-shader-ease MS` | `ok ...` or invalid duration |
 | `set-terminal <cmd>` | `ok`, or `err no output is running a terminal wallpaper` |
 | `kill` | `ok stopping` |
 

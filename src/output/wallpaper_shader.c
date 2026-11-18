@@ -141,7 +141,8 @@ static void output_install_shader(struct output_state *output, wallshader *fresh
     /* A freshly loaded shader starts from a clean timeline; clear any frozen
      * baseline so a pending resume doesn't shift start_time into the future
      * (which would underflow the elapsed-time calculation in render.c). */
-    output->shader_paused_at = 0;
+    output->shader_pause            = (shader_pause_clock){0};
+    output->shader_pause_final_draw = false;
 
     log_info("Loaded shader with %d pass(es): %s", wallshader_pass_count(output->shader),
              shader_path);

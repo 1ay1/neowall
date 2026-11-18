@@ -139,7 +139,6 @@ struct output_state *output_new(struct neowall_state *state, void *native_output
     out->config->channel_count = 0;
 
     nw_frame_clock_init(&out->frame_clock);
-    out->shader_paused_at = 0;
 
     /* Initialize FPS tracking */
     out->fps_last_log_time = 0;

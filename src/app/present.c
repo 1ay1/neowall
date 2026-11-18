@@ -36,6 +36,10 @@ struct frame {
     bool gpu_lost;
 };
 
+bool app_shader_is_parked(const struct app_model *model, const struct output_state *output) {
+    return output->config->type == WALLPAPER_SHADER && model->shader_paused &&
+           (output->shader_pause.duration_ms == 0 || output->shader_pause.parked);
+}
 
 /* Whether this output draws this step. Pure gating: no GL, no side effects. */
 static bool output_wants_frame(const struct frame *f, struct output_state *output) {
@@ -45,7 +49,7 @@ static bool output_wants_frame(const struct frame *f, struct output_state *outpu
     }
     /* Shader pause keeps the last frame on screen with the GPU idle; the
      * clock is reconciled on resume (apply_shader_pause). */
-    if (output->config->type == WALLPAPER_SHADER && f->m->shader_paused) return false;
+    if (app_shader_is_parked(f->m, output)) return false;
     if (!atomic_load_explicit(&output->needs_redraw, memory_order_acquire) ||
         !output->compositor_surface || output->compositor_surface->egl_surface == EGL_NO_SURFACE) {
         return false;
@@ -215,6 +219,10 @@ static void output_present(struct frame *f, struct output_state *output, uint64_
     }
     gpu_health_swap_result(&output->swap_fail_streak, true);
     compositor_surface_commit(output->compositor_surface);
+    if (output->config->type == WALLPAPER_SHADER && output->shader_pause_final_draw) {
+        output->shader_pause.parked     = true;
+        output->shader_pause_final_draw = false;
+    }
 
     /* Phase-lock vsync-off animated outputs to this present (no-op otherwise). */
     struct timespec now;
@@ -595,7 +603,7 @@ static void mark_animated(struct neowall_state *state, const struct app_model *m
         if (!wallpaper_is_animated(o->config->type)) continue;
         if (o->shader_load_failed) continue;
         if (o->shader == NULL) continue;
-        if (o->config->type == WALLPAPER_SHADER && m->shader_paused) continue;
+        if (app_shader_is_parked(m, o)) continue;
 
         /* A static shader painted its one frame. */
         bool is_static = o->config->type == WALLPAPER_SHADER && !wallshader_animated(o->shader) &&
@@ -716,7 +724,7 @@ int64_t app_wait_hint(void *self) {
          * can't draw (paused shader, hidden output): needs_redraw stays set
          * for those, and treating it as owed work would spin the loop. */
         if (!wallpaper_is_animated(o->config->type)) continue;
-        if (o->config->type == WALLPAPER_SHADER && m->shader_paused) continue;
+        if (app_shader_is_parked(m, o)) continue;
         if (o->config->pause_on_fullscreen &&
             atomic_load_explicit(&o->occluded, memory_order_acquire))
             continue;

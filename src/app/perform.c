@@ -31,16 +31,21 @@ static struct output_state *output_by_id(struct neowall_state *state, uint32_t i
 
 /* Freezing records the instant it stopped; unfreezing moves each shader's
  * start_time on by the frozen time, so it resumes on the frame it stopped. */
-static void shader_pause(struct neowall_state *state, bool paused) {
+static void shader_pause(struct neowall_state *state, int64_t duration_ms) {
     uint64_t now = get_time_ms();
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o; o = o->next) {
         if (o->config->type != WALLPAPER_SHADER) continue;
-        if (paused) {
-            if (o->shader_paused_at == 0) o->shader_paused_at = now;
-        } else if (o->shader_paused_at != 0) {
-            o->shader_start_time += now - o->shader_paused_at;
-            o->shader_paused_at = 0;
+        if (duration_ms >= 0) {
+            o->shader_pause = shader_pause_begin(now * 1000, (uint32_t)duration_ms);
+        } else if (o->shader_pause.start_us != 0) {
+            bool final_frame;
+            uint64_t time_us  = shader_pause_sample(&o->shader_pause, now * 1000, &final_frame);
+            uint64_t shift_ms = now - time_us / 1000;
+            o->shader_start_time += shift_ms;
+            if (o->span_start_time) o->span_start_time += shift_ms;
+            o->shader_pause            = (shader_pause_clock){0};
+            o->shader_pause_final_draw = false;
             atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
         }
     }
@@ -53,7 +58,7 @@ static void frame_due(struct app *a, uint32_t id) {
     struct neowall_state *state = a->state;
     pthread_rwlock_rdlock(&state->output_list_lock);
     struct output_state *o = output_by_id(state, id);
-    if (o && !(o->config->type == WALLPAPER_SHADER && a->model.shader_paused)) {
+    if (o && !app_shader_is_parked(&a->model, o)) {
         bool idle = o->config->type == WALLPAPER_TERMINAL && o->shader && o->frames_rendered > 0 &&
                     !term_gpu_animating(wallshader_terminal(o->shader), APP_TERM_FX_SETTLE_MS);
         if (!idle) atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
@@ -142,7 +147,7 @@ void app_perform(void *self, rt_loop *loop, const rt_cmd *c) {
         break;
     }
 
-    case APP_CMD_SHADER_PAUSE: shader_pause(state, c->v.i != 0); break;
+    case APP_CMD_SHADER_PAUSE: shader_pause(state, c->v.i); break;
 
     case APP_CMD_REDRAW_ALL: app_mark_redraw_all(state); break;
 

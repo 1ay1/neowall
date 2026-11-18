@@ -44,7 +44,8 @@ void print_usage(const char *program_name) {
     for (size_t i = 0; cli_control_command(i, &name, &desc); i++)
         printf("  %-21s %s\n", name, desc);
     /* Shader-animation freeze controls (handled outside the table — RT signals). */
-    printf("  %-21s %s\n", "pause-shader", "Freeze the shader animation in place");
+    printf("  %-21s %s\n", "pause-shader",
+           "Freeze the shader (add --ease-ms MS to ease to a stop)");
     printf("  %-21s %s\n", "resume-shader", "Resume a frozen shader animation");
     printf("  %-21s %s\n", "ping", "Exit 0 if a daemon is running and answering");
     printf("  %-21s %s\n", "set-terminal <cmd>", "Swap the live terminal-wallpaper command");
