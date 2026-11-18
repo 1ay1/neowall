@@ -2,6 +2,28 @@
 
 #include "neowall/shader/shader_clock.h"
 
+shader_pause_clock shader_pause_begin(uint64_t now_us, uint32_t duration_ms) {
+    return (shader_pause_clock){
+        .start_us = now_us, .duration_ms = duration_ms, .parked = duration_ms == 0};
+}
+
+uint64_t shader_pause_sample(const shader_pause_clock *pause, uint64_t now_us, bool *final_frame) {
+    *final_frame = false;
+    if (!pause->start_us || now_us < pause->start_us) return now_us;
+
+    uint64_t elapsed  = now_us - pause->start_us;
+    uint64_t duration = (uint64_t)pause->duration_ms * 1000;
+    if (elapsed >= duration) {
+        *final_frame = true;
+        return pause->start_us + duration / 3;
+    }
+
+    /* Integrate the velocity (1-u)^2. That preserves the incoming speed
+     * at u=0 and brings it to zero at u=1. */
+    double u = (double)elapsed / (double)duration;
+    return pause->start_us + (uint64_t)((double)duration * u * (1.0 - u + u * u / 3.0));
+}
+
 bool shader_clock_should_rebase(const shader_clock_state *st, double threshold_seconds) {
     if (!st) return false;
 

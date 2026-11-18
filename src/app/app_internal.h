@@ -38,9 +38,8 @@ struct app_model {
     bool outputs_need_init; /* reconnect / hotplug: bring outputs up */
     uint32_t outputs_gen;
 
-    bool cycle_paused;         /* `neowall pause` */
-    bool shader_paused;        /* `neowall pause-shader` */
-    bool shader_pause_applied; /* what the last SHADER_PAUSE command did */
+    bool cycle_paused;  /* `neowall pause` */
+    bool shader_paused; /* A manual pause is active, including its ease-out. */
 
     /* A reload in flight: applied, but a shader is still compiling in the
      * background. Clients that asked wait here for the real outcome, and
@@ -51,6 +50,9 @@ struct app_model {
 
     bool has_occlusion; /* fixed at start */
 };
+
+struct output_state;
+bool app_shader_is_parked(const struct app_model *model, const struct output_state *output);
 
 /* What present used up this frame (NW_MSG_APPLIED's payload). The index and
  * generations say which request it was, so a newer one isn't cleared. */
@@ -105,7 +107,7 @@ enum {
     APP_CMD_WATCH_BUILDS,       /* start reporting when staged builds settle */
     APP_CMD_READ_INDEX_FILE,    /* old CLI: index is in a file -> SET_INDEX */
     APP_CMD_READ_TERMINAL_FILE, /* old CLI: command is in a file -> SET_TERMINAL */
-    APP_CMD_SHADER_PAUSE,       /* v.i = 1 freeze / 0 unfreeze shader clocks */
+    APP_CMD_SHADER_PAUSE,       /* v.i = ease duration in ms, or -1 to resume */
     APP_CMD_REDRAW_ALL,         /* mark every output dirty */
     APP_CMD_FRAME,              /* id = output: a paced frame is due */
     APP_CMD_OCCLUSION,          /* re-check fullscreen windows */

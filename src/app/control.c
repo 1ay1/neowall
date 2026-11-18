@@ -100,6 +100,18 @@ void app_on_ipc_request(void *ctx, rt_loop *loop, const nw_ipc_request_t *r) {
         return;
     }
 
+    if (strcmp(r->verb, "pause-shader-ease") == 0) {
+        long duration;
+        if (!neowall_parse_index(r->arg, &duration) || (unsigned long)duration > UINT32_MAX) {
+            ipc_server_reply(a->host.ipc, r->conn, false,
+                             "ease duration must be a non-negative integer in milliseconds");
+            return;
+        }
+        app_send(loop, NW_MSG_SHADER_PAUSE, 0, duration);
+        ipc_server_reply(a->host.ipc, r->conn, true, "pausing shader animation");
+        return;
+    }
+
     if (strcmp(r->verb, "next") == 0 && summarize_outputs(a->state).longest_cycle <= 1) {
         ipc_server_reply(a->host.ipc, r->conn, false,
                          "nothing to cycle: only one wallpaper or shader is configured");

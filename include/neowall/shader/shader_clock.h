@@ -62,6 +62,16 @@ bool shader_clock_should_fade_rebase(const shader_clock_state *st, double thresh
  * between two halves of one scene shows a phase gap. */
 bool shader_clock_defers_to_group(const shader_clock_state *st);
 
+/* One manual pause of a shader clock. All times use the monotonic clock. */
+typedef struct {
+    uint64_t start_us;
+    uint32_t duration_ms;
+    bool parked;
+} shader_pause_clock;
+
+shader_pause_clock shader_pause_begin(uint64_t now_us, uint32_t duration_ms);
+uint64_t shader_pause_sample(const shader_pause_clock *pause, uint64_t now_us, bool *final_frame);
+
 /* ---------------------------------------------------------------- *
  * Jump tracking (diagnostics)
  *

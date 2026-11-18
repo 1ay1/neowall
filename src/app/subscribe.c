@@ -33,8 +33,7 @@ void app_subscribe(void *self, rt_subs *subs) {
         /* vsync-off animated output: the phase-locked pacer's next deadline.
          * output_pace_advance() moves it after each present. */
         if (!occluded && o->pace_period_ns > 0 && output_get_frame_timer_fd(o) >= 0 &&
-            wallpaper_is_animated(o->config->type) &&
-            !(o->config->type == WALLPAPER_SHADER && a->model.shader_paused) &&
+            wallpaper_is_animated(o->config->type) && !app_shader_is_parked(&a->model, o) &&
             !(o->config->type == WALLPAPER_SHADER && o->shader && !wallshader_animated(o->shader) &&
               o->frames_rendered > 0)) {
             rt_sub_at(subs, NW_MSG_FRAME_DUE, o->name, (int64_t)o->pace_next_deadline_ns);

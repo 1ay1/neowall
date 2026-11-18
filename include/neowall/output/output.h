@@ -201,10 +201,8 @@ struct output_state {
     uint64_t last_cycle_time; /* Last time wallpaper was changed/cycled */
     uint64_t transition_start_time;
     uint64_t shader_start_time;         /* Time when shader was loaded (for animation) */
-    uint64_t shader_paused_at;          /* Wall-clock ms when shader animation was frozen,
-                                         * 0 when running. On resume, shader_start_time is
-                                         * advanced by (now - shader_paused_at) so animation
-                                         * continues from the same frame. Main-thread only. */
+    shader_pause_clock shader_pause;    /* Manual pause, main-thread only. */
+    bool shader_pause_final_draw;       /* The pending buffer contains the final eased frame. */
     uint64_t shader_hidden_since;       /* Wall-clock ms when this output stopped being
                                          * visible (occluded/paused), 0 while visible. Marks
                                          * a window in which the shader clock can be rebased

@@ -153,9 +153,10 @@ nw_result output_set_terminal(struct output_state *output, const char *cmd, cons
     output->shader  = candidate;
     wallshader_free(old);
 
-    output->shader_start_time = get_time_ms();
-    output->frames_rendered   = 0;
-    output->shader_paused_at  = 0;
+    output->shader_start_time       = get_time_ms();
+    output->frames_rendered         = 0;
+    output->shader_pause            = (shader_pause_clock){0};
+    output->shader_pause_final_draw = false;
 
     pthread_mutex_lock(&output->state->state_mutex);
     output->config->type = WALLPAPER_TERMINAL;

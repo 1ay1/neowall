@@ -102,14 +102,20 @@ static void test_set_terminal(rt_cmds *c) {
 static void test_shader_pause(rt_cmds *c) {
     struct app_model a = model();
     step(&a, c, msg(NW_MSG_SHADER_PAUSE, 0, 0));
-    CHECK(a.shader_paused && is_cmd(c, 0, APP_CMD_SHADER_PAUSE) && rt_cmds_at(c, 0)->u.cmd.v.i == 1,
-          "pause freezes the clocks once");
+    CHECK(a.shader_paused && is_cmd(c, 0, APP_CMD_SHADER_PAUSE) && rt_cmds_at(c, 0)->u.cmd.v.i == 0,
+          "pause without an ease duration freezes immediately");
     step(&a, c, msg(NW_MSG_SHADER_PAUSE, 0, 0));
     CHECK(rt_cmds_len(c) == 0, "pausing twice doesn't freeze twice");
     step(&a, c, msg(NW_MSG_SHADER_RESUME, 0, 0));
     CHECK(!a.shader_paused && is_cmd(c, 0, APP_CMD_SHADER_PAUSE) &&
-              rt_cmds_at(c, 0)->u.cmd.v.i == 0,
+              rt_cmds_at(c, 0)->u.cmd.v.i == -1,
           "resume unfreezes");
+    step(&a, c, msg(NW_MSG_SHADER_PAUSE, 0, 850));
+    CHECK(a.shader_paused && is_cmd(c, 0, APP_CMD_SHADER_PAUSE) &&
+              rt_cmds_at(c, 0)->u.cmd.v.i == 850,
+          "an eased pause forwards its duration to the shader clocks");
+    step(&a, c, msg(NW_MSG_SHADER_PAUSE, 0, 500));
+    CHECK(rt_cmds_len(c) == 0, "a repeated request does not restart the ease-out");
 }
 
 /* How many REPLY commands, and to whom, with what outcome. */

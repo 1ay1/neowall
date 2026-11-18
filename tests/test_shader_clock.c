@@ -321,7 +321,41 @@ static void test_fade_rebase_when_never_hidden(void) {
     CHECK(!shader_clock_should_fade_rebase(NULL, 7200.0));
 }
 
+static void test_eased_pause_samples(void) {
+    const uint64_t start     = 1000000;
+    shader_pause_clock pause = shader_pause_begin(start, 900);
+    bool final;
+
+    CHECK(!pause.parked);
+    CHECK(shader_pause_sample(&pause, start - 1, &final) == start - 1);
+    CHECK(!final);
+
+    uint64_t first = shader_pause_sample(&pause, start + 300000, &final);
+    CHECK(!final);
+    uint64_t second = shader_pause_sample(&pause, start + 600000, &final);
+    CHECK(!final);
+    uint64_t stopped = shader_pause_sample(&pause, start + 900000, &final);
+    CHECK(final);
+    CHECK(stopped == start + 300000);
+    CHECK(first - start > second - first && second - first > stopped - second);
+    CHECK(shader_pause_sample(&pause, start + 9000000, &final) == stopped);
+    CHECK(final);
+}
+
+static void test_immediate_pause_samples(void) {
+    shader_pause_clock pause = shader_pause_begin(123000, 0);
+    bool final;
+    CHECK(pause.parked);
+    CHECK(shader_pause_sample(&pause, 999000, &final) == 123000);
+    CHECK(final);
+    pause = (shader_pause_clock){0};
+    CHECK(shader_pause_sample(&pause, 999000, &final) == 999000);
+    CHECK(!final);
+}
+
 int main(void) {
+    test_eased_pause_samples();
+    test_immediate_pause_samples();
     test_visible_output_never_rebases();
     test_long_uptime_alone_does_not_rebase();
     test_threshold();
