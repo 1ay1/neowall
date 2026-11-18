@@ -705,7 +705,8 @@ int64_t app_wait_hint(void *self) {
     }
     app_arm_output_wake(want_wake);
     for (struct output_state *o = state->outputs; o; o = o->next) {
-        if (!output_frame_paced(o) || output_get_frame_timer_fd(o) >= 0) continue;
+        /* a capped output has a frame timer, so it's skipped here too */
+        if (!o->config->vsync || output_get_frame_timer_fd(o) >= 0) continue;
         if (o->compositor_surface && o->compositor_surface->frame_cb) {
             hint = 50 * 1000000LL;
             break;
