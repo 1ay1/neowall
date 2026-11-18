@@ -57,6 +57,10 @@ typedef struct {
     double fps;     /* simulation step */
     int frames;     /* frames simulated up to `time`; 0 = derive */
     int sheet;      /* N > 0: N frames spread over [0, time] in one PNG */
+    char video[4096]; /* --video FILE: encode frames with ffmpeg */
+    double duration, start;
+    bool have_path;   /* --mouse-path: pointer glides x0,y0 -> x1,y1 */
+    float path[2][2];
     bool bench, check, passes, live, quiet;
     bool have_at;
     int at_h, at_m;
@@ -79,6 +83,9 @@ static void render_usage(FILE *f) {
             "  -s, --size WxH        resolution (default 1920x1080)\n"
             "      --sheet N         contact sheet: N moments spread over 0..--time\n"
             "      --passes          also save every buffer pass (FILE.<pass>.png)\n"
+            "      --video FILE      record a clip instead (mp4/mkv/webp/gif, needs ffmpeg)\n"
+            "      --duration SEC    clip length (default 10); --start SEC where it begins\n"
+            "      --mouse-path X0,Y0:X1,Y1   pointer glides across the clip (0..1)\n"
             "\n"
             "Time & inputs (calm & repeatable; --at pins the time of day, else it is now)\n"
             "  -t, --time SEC        iTime of the frame (default 3)\n"
@@ -141,6 +148,32 @@ static int parse_args(int argc, char **argv, render_opts *o) {
         } else if (!strcmp(a, "--frames")) {
             NEXT();
             o->frames = atoi(v);
+        } else if (!strcmp(a, "--video")) {
+            NEXT();
+            if (strchr(v, '\'')) {
+                fprintf(stderr, "neowall render: --video path may not contain a quote\n");
+                return -1;
+            }
+            snprintf(o->video, sizeof(o->video), "%s", v);
+        } else if (!strcmp(a, "--duration")) {
+            NEXT();
+            o->duration = atof(v);
+            if (!(o->duration > 0 && o->duration <= 600)) {
+                fprintf(stderr, "neowall render: --duration wants 0..600 seconds\n");
+                return -1;
+            }
+        } else if (!strcmp(a, "--start")) {
+            NEXT();
+            o->start = atof(v);
+            if (o->start < 0) o->start = 0;
+        } else if (!strcmp(a, "--mouse-path")) {
+            NEXT();
+            if (sscanf(v, "%f,%f:%f,%f", &o->path[0][0], &o->path[0][1], &o->path[1][0],
+                       &o->path[1][1]) != 4) {
+                fprintf(stderr, "neowall render: bad --mouse-path '%s' (want X0,Y0:X1,Y1)\n", v);
+                return -1;
+            }
+            o->have_path = true;
         } else if (!strcmp(a, "--sheet")) {
             NEXT();
             o->sheet = atoi(v);
@@ -436,6 +469,96 @@ typedef struct {
     int ms_n;
 } bench_acc;
 
+/* ── --video: simulate at exactly --fps and pipe RGB frames into ffmpeg ── */
+
+static const char *video_codec_args(const char *path) {
+    const char *dot = strrchr(path, '.');
+    if (dot && !strcasecmp(dot, ".webp"))
+        return "-c:v libwebp_anim -lossless 0 -q:v 72 -compression_level 6 -loop 0";
+    if (dot && !strcasecmp(dot, ".gif"))
+        return "-filter_complex \"split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a\" -loop 0";
+    return "-c:v libx264 -preset slow -crf 16 -pix_fmt yuv420p -movflags +faststart";
+}
+
+static int render_video(const render_opts *o, wallshader *s, GLuint fbo, const headless *hl) {
+    (void)hl;
+    double dur   = o->duration > 0 ? o->duration : 10.0;
+    int frames   = (int)lround(dur * o->fps);
+    double step  = 1.0 / o->fps;
+    double warm  = o->start > 1.0 ? 1.0 : o->start; /* settle feedback buffers first */
+    int warm_n   = (int)lround(warm * o->fps);
+    double wall0 = o->have_at ? 0 : nw_clock_now_f();
+    if (o->have_at) {
+        time_t now = time(NULL);
+        struct tm tm;
+        localtime_r(&now, &tm);
+        tm.tm_hour = o->at_h, tm.tm_min = o->at_m, tm.tm_sec = 0, tm.tm_isdst = -1;
+        wall0 = (double)mktime(&tm);
+    }
+
+    char cmd[8192];
+    snprintf(cmd, sizeof(cmd),
+             "ffmpeg -hide_banner -loglevel error -y -f rawvideo -pix_fmt rgb24 -s %dx%d -r %g -i - "
+             "-vf vflip %s '%s'",
+             o->w, o->h, o->fps, video_codec_args(o->video), o->video);
+    if (strstr(video_codec_args(o->video), "filter_complex")) /* gif: flip inside the graph */
+        snprintf(cmd, sizeof(cmd),
+                 "ffmpeg -hide_banner -loglevel error -y -f rawvideo -pix_fmt rgb24 -s %dx%d -r %g -i - "
+                 "-filter_complex \"vflip,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a\" -loop 0 '%s'",
+                 o->w, o->h, o->fps, o->video);
+    FILE *ff = popen(cmd, "w");
+    if (!ff) {
+        fprintf(stderr, "neowall render: can't start ffmpeg (is it installed?)\n");
+        return 1;
+    }
+    size_t row = (size_t)o->w * 3;
+    uint8_t *px = malloc(row * o->h);
+    if (!px) {
+        pclose(ff);
+        return 1;
+    }
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    double base = 1000.0;
+    bool ok     = true;
+    for (int f = -warm_n; f < frames && ok; f++) {
+        double t = o->start + f * step;
+        if (!o->live || o->have_at) pin_time_of_day(s, wall0 + t);
+        wallshader_frame fr = {.width = o->w, .height = o->h, .time = t,
+                               .present_at = base + (f + warm_n) * step};
+        float mx = -1, my = -1;
+        if (o->have_path) {
+            double u = frames > 1 ? (double)(f < 0 ? 0 : f) / (frames - 1) : 0;
+            u        = u * u * (3.0 - 2.0 * u); /* ease in/out */
+            mx       = (float)(o->path[0][0] + (o->path[1][0] - o->path[0][0]) * u);
+            my       = (float)(o->path[0][1] + (o->path[1][1] - o->path[0][1]) * u);
+        } else if (o->mouse[0] >= 0) {
+            mx = o->mouse[0], my = o->mouse[1];
+        }
+        if (mx >= 0) {
+            fr.mouse[0] = mx * (float)o->w;
+            fr.mouse[1] = my * (float)o->h;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glViewport(0, 0, o->w, o->h);
+        wallshader_draw(s, &fr);
+        if (f < 0) continue;
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+        glReadPixels(0, 0, o->w, o->h, GL_RGB, GL_UNSIGNED_BYTE, px);
+        ok = fwrite(px, 1, row * o->h, ff) == row * o->h;
+        if (!o->quiet && (f % (int)o->fps == 0 || f == frames - 1))
+            fprintf(stderr, "\r  frame %d/%d", f + 1, frames);
+    }
+    free(px);
+    int st = pclose(ff);
+    if (!o->quiet) fprintf(stderr, "\n");
+    if (!ok || st != 0) {
+        fprintf(stderr, "neowall render: ffmpeg failed (exit %d)\n", st);
+        return 1;
+    }
+    if (!o->quiet) printf("wrote %s  (%.1f s at %g fps)\n", o->video, dur, o->fps);
+    return 0;
+}
+
 int cmd_render(int argc, char *argv[]) {
     render_opts o;
     int pr = parse_args(argc, argv, &o);
@@ -533,6 +656,16 @@ int cmd_render(int argc, char *argv[]) {
     if (!o.quiet)
         printf("%s  %dx%d  %d pass%s  [%s, %s]\n", o.shader, o.w, o.h, npass, npass == 1 ? "" : "es",
                (const char *)glGetString(GL_RENDERER), hl.how);
+
+    if (o.video[0]) {
+        int rc = render_video(&o, s, fbo, &hl);
+        glDeleteFramebuffers(1, &fbo);
+        glDeleteTextures(1, &tex);
+        wallshader_free(s);
+        if (o.live) wallshader_inputs_stop();
+        headless_fini(&hl);
+        return rc;
+    }
 
     /* sheet: render N moments into a grid; otherwise one frame at --time */
     int shots    = o.sheet > 0 ? o.sheet : 1;

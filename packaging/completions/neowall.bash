@@ -47,12 +47,14 @@ _neowall() {
         render)
             case $prev in
                 -o | --output) _filedir png; return ;;
+                --video) _filedir '@(mp4|mkv|webp|gif)'; return ;;
+                --duration | --start | --mouse-path) return ;;
                 -s | --size) COMPREPLY=($(compgen -W "1920x1080 2560x1440 3440x1440 3840x2160" -- "$cur")); return ;;
                 --palette) _filedir; return ;;
                 -t | --time | --fps | --frames | --sheet | --at | --mouse | --set) return ;;
             esac
             if [[ $cur == -* ]]; then
-                COMPREPLY=($(compgen -W "--output --size --time --fps --frames --sheet --passes --at --mouse --set --palette --live --bench --check --quiet --help" -- "$cur"))
+                COMPREPLY=($(compgen -W "--output --size --time --fps --frames --sheet --passes --video --duration --start --mouse-path --at --mouse --set --palette --live --bench --check --quiet --help" -- "$cur"))
             else
                 _filedir '@(glsl|frag|neowall)'
             fi

@@ -164,6 +164,18 @@ moments spread over 0..\-\-time.
 Also save every buffer pass as
 .IR file . pass .png.
 .TP
+.BI \-\-video " file"
+Record a clip instead of a still (mp4, mkv, webp or gif, by extension; needs
+.BR ffmpeg ),
+.B \-\-duration
+seconds long (default 10) from
+.B \-\-start
+(default 0), at
+.BR \-\-fps .
+.TP
+.BI \-\-mouse\-path " x0,y0:x1,y1"
+The pointer glides between two points (0..1) over the clip, to show parallax.
+.TP
 .BI \-\-at " HH:MM"
 Local time of day, for
 .BR iTimeOfDay ", " iSun ", " iDate .

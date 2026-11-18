@@ -46,6 +46,8 @@ case $state in
           '(-t --time)'{-t,--time}'[iTime of the frame]:seconds:' \
           '--fps[simulation rate]:fps:' '--frames[frames to simulate]:n:' \
           '--sheet[contact sheet of N moments]:n:' '--passes[save every buffer pass]' \
+        '--video[record a clip]:file:_files -g "*.(mp4|mkv|webp|gif)"' '--duration[clip length]:seconds:' \
+        '--start[clip start]:seconds:' '--mouse-path[pointer glide X0,Y0\:X1,Y1]:path:' \
           '--at[local time of day]:HH\:MM:' '--mouse[pointer X,Y in 0..1]:x,y:' \
           '*--set[pin a uniform NAME=VALUE]:name=value:' '--palette[colours or a theme file]:palette:_files' \
           '--live[real CPU/audio readings]' '--bench[GPU time per pass]' \

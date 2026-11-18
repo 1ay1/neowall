@@ -2,6 +2,16 @@
 
 All notable changes to neowall. Dates are release dates.
 
+## Unreleased
+
+### Added
+- `neowall render --video FILE` records a clip (mp4, mkv, webp or gif) at an
+  exact frame rate with `--duration`/`--start`; `--mouse-path` glides the
+  pointer across it. Made for README demos of your shaders.
+
+### Docs
+- README: a live demo of `tokyo_night` on a Hyprland desktop.
+
 ## 0.10.1 - 2026-11-18
 
 ### Changed

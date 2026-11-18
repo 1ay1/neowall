@@ -449,6 +449,8 @@ neowall render myshader --set iAudioBeat=1 --set iAudioActive=1   # on the beat
 neowall render myshader --mouse 0.2,0.5        # pointer on the left
 neowall render myshader --palette ~/.config/kitty/current-theme.conf
 neowall render myshader --passes               # also myshader.buffer_a.png, ...
+neowall render myshader --video demo.mp4 --duration 12 --mouse-path 0.1,0.5:0.9,0.5
+                                               # a clip for your README (mp4/webp/gif)
 ```
 
 Renders offscreen on a headless EGL context (an EGL device, so NVIDIA works;

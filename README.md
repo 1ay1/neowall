@@ -13,6 +13,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/1ay1/neowall/releases/download/v0.10.1/neowall-demo.mp4"><img src="docs/media/demo.webp" alt="neowall running the tokyo_night shader as the wallpaper of a live Hyprland desktop" width="100%"/></a>
+  <br/>
+  <sub><code>tokyo_night</code>, the default wallpaper, on a live Hyprland desktop: it follows the mouse, glows in the gaps between windows and calms down as the screen fills. <a href="https://github.com/1ay1/neowall/releases/download/v0.10.1/neowall-demo.mp4">Full-quality video</a>.</sub>
+</p>
+
+<p align="center">
   <video src="https://github.com/user-attachments/assets/3a55d4e2-7257-4884-8aa2-9024ec86a560" width="49%" controls autoplay loop muted></video>
   <video src="https://github.com/user-attachments/assets/c1e38d88-5c1e-4db4-9948-da2ad86c6a69" width="49%" controls autoplay loop muted></video>
 </p>

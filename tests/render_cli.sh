@@ -57,5 +57,13 @@ grep -q "can't find" "$T/err" || fail "missing-shader message: $(cat "$T/err")"
 "$NW" render "$FIX/render_uniform.neowall" -s 8x8 --set uLevel=1 -o "$T/u1.png" -q || fail "--set manifest uniform"
 cmp -s "$T/u.png" "$T/u1.png" && fail "--set did not override a manifest uniform"
 
+# --video: a clip with an exact frame count (needs ffmpeg; skipped without)
+if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+    "$NW" render "$FIX/render_ok.glsl" -s 64x36 --fps 10 --duration 2 --mouse-path 0,0:1,1 \
+        --video "$T/clip.mp4" -q || fail "--video"
+    n=$(ffprobe -v error -count_frames -select_streams v -show_entries stream=nb_read_frames -of csv=p=0 "$T/clip.mp4")
+    [ "$n" = 20 ] || fail "--video wrote $n frames (want 20)"
+fi
+
 [ -e "$T/state/neowall/state" ] && fail "render wrote the daemon state file"
 echo "ok - neowall render"
