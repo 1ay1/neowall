@@ -84,6 +84,9 @@ static const char *egl_up(void) {
     setenv("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/share/glvnd/egl_vendor.d/50_mesa.json", 0);
     setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
     setenv("LP_NUM_THREADS", "0", 0); /* llvmpipe threads aren't TSan-instrumented */
+    /* nor are Mesa's shader disk-cache threads (disk$0, ...): TSan flags
+     * their barrier as a race. Same as gl_headless.c. */
+    setenv("MESA_SHADER_CACHE_DISABLE", "true", 0);
     PFNEGLGETPLATFORMDISPLAYEXTPROC get =
         (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
     if (!get) return "no eglGetPlatformDisplayEXT";
