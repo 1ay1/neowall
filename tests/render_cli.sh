@@ -20,6 +20,8 @@ rc=$?
 [ $rc -eq 0 ] || fail "render exited $rc"
 [ -s "$T/a.png" ] || fail "no PNG written"
 head -c 8 "$T/a.png" | od -An -c | grep -q 'P   N   G' || fail "not a PNG"
+# a non-regular target (/dev/null) is written directly, not via FILE.part
+"$NW" render "$FIX/render_ok.glsl" -s 16x9 -t 0 -o /dev/null -q || fail "render -o /dev/null"
 
 # deterministic: same command (time of day pinned with --at), same bytes
 "$NW" render "$FIX/render_ok.glsl" -s 64x36 -t 1 --at 12:00 -o "$T/a.png" -q || fail "render --at"

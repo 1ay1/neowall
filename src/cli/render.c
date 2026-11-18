@@ -28,6 +28,7 @@
 #include <string.h>
 #include <strings.h>
 #include <time.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "neowall/cli/cli.h"
@@ -372,6 +373,17 @@ static void headless_fini(headless *h) {
 static bool write_png_to(FILE *f, const float *rgba, int w, int h, int stride_px);
 
 static bool write_png(const char *path, const float *rgba, int w, int h, int stride_px) {
+    /* /dev/null, a pipe, /dev/stdout: write straight through */
+    struct stat st;
+    if (stat(path, &st) == 0 && !S_ISREG(st.st_mode)) {
+        FILE *f = fopen(path, "wb");
+        if (!f) {
+            fprintf(stderr, "neowall render: can't write %s: %s\n", path, strerror(errno));
+            return false;
+        }
+        bool ok = write_png_to(f, rgba, w, h, stride_px);
+        return (fclose(f) == 0) && ok;
+    }
     char tmp[4200];
     snprintf(tmp, sizeof(tmp), "%s.part", path);
     FILE *f = fopen(tmp, "wb");
