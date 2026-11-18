@@ -9,6 +9,14 @@
  * strings, any non-digit and overflow, which atoi() can't report. */
 bool neowall_parse_index(const char *s, long *out);
 
+/* Longest accepted --ease-ms. Long enough for any deliberate ease, short
+ * enough that a typo can't leave a wallpaper crawling for hours. */
+#define NEOWALL_EASE_MS_MAX 60000u
+
+/* Parse an ease duration: whole milliseconds, an optional `ms` suffix, at
+ * most NEOWALL_EASE_MS_MAX. */
+bool neowall_parse_ease_ms(const char *s, unsigned *out);
+
 /* Expand a leading `~` to $HOME into `expanded`. False if it wouldn't fit;
  * treat that as a failure, never use a truncated path. */
 bool expand_path(const char *path, char *expanded, size_t size);

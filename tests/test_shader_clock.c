@@ -321,41 +321,144 @@ static void test_fade_rebase_when_never_hidden(void) {
     CHECK(!shader_clock_should_fade_rebase(NULL, 7200.0));
 }
 
-static void test_eased_pause_samples(void) {
-    const uint64_t start     = 1000000;
-    shader_pause_clock pause = shader_pause_begin(start, 900);
-    bool final;
+/* ---- pause/resume speed ramp ------------------------------------------ */
 
-    CHECK(!pause.parked);
-    CHECK(shader_pause_sample(&pause, start - 1, &final) == start - 1);
-    CHECK(!final);
+#define MS 1000ull
+#define T0 1000000000ull /* an arbitrary monotonic instant, in us */
 
-    uint64_t first = shader_pause_sample(&pause, start + 300000, &final);
-    CHECK(!final);
-    uint64_t second = shader_pause_sample(&pause, start + 600000, &final);
-    CHECK(!final);
-    uint64_t stopped = shader_pause_sample(&pause, start + 900000, &final);
-    CHECK(final);
-    CHECK(stopped == start + 300000);
-    CHECK(first - start > second - first && second - first > stopped - second);
-    CHECK(shader_pause_sample(&pause, start + 9000000, &final) == stopped);
-    CHECK(final);
+static void test_ramp_idle_is_real_time(void) {
+    shader_clock_ramp r = {0};
+    CHECK(shader_ramp_sample(&r, T0) == T0);
+    CHECK(shader_ramp_speed(&r, T0) == 1.0);
+    CHECK(shader_ramp_target(&r) == 1.0f);
+    CHECK(shader_ramp_running(&r, T0));
+    CHECK(!shader_ramp_stopping(&r));
+    CHECK(shader_ramp_fold_ms(&r, T0) == 0);
 }
 
-static void test_immediate_pause_samples(void) {
-    shader_pause_clock pause = shader_pause_begin(123000, 0);
-    bool final;
-    CHECK(pause.parked);
-    CHECK(shader_pause_sample(&pause, 999000, &final) == 123000);
-    CHECK(final);
-    pause = (shader_pause_clock){0};
-    CHECK(shader_pause_sample(&pause, 999000, &final) == 999000);
-    CHECK(!final);
+static void test_ramp_immediate_pause(void) {
+    shader_clock_ramp r = {0};
+    shader_ramp_retarget(&r, T0, 0.0f, 0);
+    CHECK(r.parked); /* the frame on screen is the frozen one */
+    CHECK(!shader_ramp_stopping(&r));
+    CHECK(shader_ramp_sample(&r, T0 + 5000 * MS) == T0);
+
+    /* an immediate resume carries on from the frozen reading */
+    shader_ramp_retarget(&r, T0 + 5000 * MS, 1.0f, 0);
+    CHECK(!r.parked);
+    CHECK(shader_ramp_running(&r, T0 + 5000 * MS));
+    CHECK(shader_ramp_sample(&r, T0 + 5010 * MS) == T0 + 10 * MS);
+    CHECK(shader_ramp_fold_ms(&r, T0 + 5010 * MS) == 5000);
+    CHECK(r.t0_us == 0);
+}
+
+/* Ease-out: monotonic, speed falls 1 -> 0 along smoothstep, the clock covers
+ * exactly half the ease before stopping, and nothing moves after. */
+static void test_ramp_ease_out(void) {
+    shader_clock_ramp r = {0};
+    shader_ramp_retarget(&r, T0, 0.0f, 800);
+    CHECK(!r.parked && shader_ramp_stopping(&r));
+    CHECK(shader_ramp_end(&r) == T0 + 800 * MS);
+
+    uint64_t prev     = shader_ramp_sample(&r, T0);
+    double prev_speed = 1.0;
+    bool monotonic = true, slowing = true;
+    for (uint64_t t = T0 + MS; t <= T0 + 800 * MS; t += MS) {
+        uint64_t c = shader_ramp_sample(&r, t);
+        double v   = shader_ramp_speed(&r, t);
+        monotonic &= c >= prev;
+        slowing &= v <= prev_speed + 1e-12;
+        prev = c, prev_speed = v;
+    }
+    CHECK(monotonic);
+    CHECK(slowing);
+    CHECK(shader_ramp_sample(&r, T0 + 800 * MS) == T0 + 400 * MS);
+    CHECK(shader_ramp_speed(&r, T0 + 400 * MS) == 0.5);
+    CHECK(shader_ramp_sample(&r, T0 + 99999 * MS) == T0 + 400 * MS);
+    CHECK(shader_ramp_settled(&r, T0 + 800 * MS) && !shader_ramp_settled(&r, T0 + 799 * MS));
+    /* minimum-jerk: the speed barely changes right at either end */
+    CHECK(shader_ramp_speed(&r, T0 + 8 * MS) > 0.999);
+    CHECK(shader_ramp_speed(&r, T0 + 792 * MS) < 0.001);
+    /* a frame stamped before the request still reads the old full speed */
+    CHECK(shader_ramp_sample(&r, T0 - 16 * MS) == T0 - 16 * MS);
+}
+
+/* Eased resume after a full stop: speed 0 -> 1, then real time minus a lag
+ * that folds into the start time without a backward step. */
+static void test_ramp_ease_in_and_fold(void) {
+    shader_clock_ramp r = {0};
+    shader_ramp_retarget(&r, T0, 0.0f, 800);
+    r.parked       = true; /* the final frame was shown */
+    uint64_t froze = shader_ramp_sample(&r, T0 + 800 * MS);
+
+    uint64_t t1 = T0 + 10000 * MS;
+    shader_ramp_retarget(&r, t1, 1.0f, 800);
+    CHECK(!r.parked && !shader_ramp_stopping(&r));
+    CHECK(shader_ramp_sample(&r, t1) == froze);
+    CHECK(!shader_ramp_running(&r, t1 + 400 * MS));
+    CHECK(shader_ramp_fold_ms(&r, t1 + 400 * MS) == 0); /* not settled yet */
+    CHECK(shader_ramp_sample(&r, t1 + 800 * MS) == froze + 400 * MS);
+    CHECK(shader_ramp_running(&r, t1 + 800 * MS));
+
+    uint64_t t2     = t1 + 900 * MS;
+    uint64_t before = shader_ramp_sample(&r, t2);
+    uint64_t lag_ms = shader_ramp_fold_ms(&r, t2);
+    uint64_t after  = t2 - lag_ms * MS; /* clock = real time - folded lag */
+    CHECK(r.t0_us == 0);
+    CHECK(after >= before && after - before < MS);
+}
+
+/* Interrupting an ease is seamless both ways: clock and speed are both
+ * continuous, and the new ramp's length scales with the speed still to go. */
+static void test_ramp_interrupt(void) {
+    shader_clock_ramp r = {0};
+    shader_ramp_retarget(&r, T0, 0.0f, 1000);
+    uint64_t mid   = T0 + 500 * MS; /* speed exactly 0.5 */
+    uint64_t c_mid = shader_ramp_sample(&r, mid);
+    CHECK(shader_ramp_speed(&r, mid) == 0.5);
+
+    shader_ramp_retarget(&r, mid, 1.0f, 1000); /* resume mid-ease */
+    CHECK(!shader_ramp_stopping(&r));
+    CHECK(shader_ramp_sample(&r, mid) == c_mid);
+    CHECK(shader_ramp_speed(&r, mid) == 0.5);
+    CHECK(shader_ramp_end(&r) == mid + 500 * MS); /* half the distance, half the time */
+
+    uint64_t t2 = mid + 250 * MS; /* and pause again on the way back up */
+    uint64_t c2 = shader_ramp_sample(&r, t2);
+    double v2   = shader_ramp_speed(&r, t2);
+    shader_ramp_retarget(&r, t2, 0.0f, 1000);
+    CHECK(shader_ramp_stopping(&r));
+    CHECK(shader_ramp_sample(&r, t2) == c2);
+    CHECK(shader_ramp_speed(&r, t2) == v2);
+    CHECK(shader_ramp_end(&r) == t2 + (uint64_t)(v2 * 1000.0 * MS + 0.5));
+
+    bool monotonic = true;
+    uint64_t prev  = c2;
+    for (uint64_t t = t2; t <= shader_ramp_end(&r) + 10 * MS; t += MS) {
+        uint64_t c = shader_ramp_sample(&r, t);
+        monotonic &= c >= prev;
+        prev = c;
+    }
+    CHECK(monotonic);
+}
+
+/* A shader loaded while paused: stop at once but draw one frame first. */
+static void test_ramp_hold(void) {
+    shader_clock_ramp r = {0};
+    shader_ramp_hold(&r, T0);
+    CHECK(!r.parked && shader_ramp_stopping(&r));
+    CHECK(shader_ramp_target(&r) == 0.0f);
+    CHECK(shader_ramp_end(&r) == T0);
+    CHECK(shader_ramp_sample(&r, T0 + 3000 * MS) == T0);
 }
 
 int main(void) {
-    test_eased_pause_samples();
-    test_immediate_pause_samples();
+    test_ramp_idle_is_real_time();
+    test_ramp_immediate_pause();
+    test_ramp_ease_out();
+    test_ramp_ease_in_and_fold();
+    test_ramp_interrupt();
+    test_ramp_hold();
     test_visible_output_never_rebases();
     test_long_uptime_alone_does_not_rebase();
     test_threshold();

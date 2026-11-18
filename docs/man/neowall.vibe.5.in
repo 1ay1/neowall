@@ -178,6 +178,17 @@ Default
 .BR false .
 Also enabled by
 .BR "neowall \-\-allow\-exec" .
+.TP
+.BR shader_pause_ease_ms " MS"
+Default ease, in milliseconds (0 to 60000), for
+.B pause\-shader
+and
+.BR resume\-shader :
+the shader clock slows to a stop, or speeds back up, over this long.
+.B \-\-ease\-ms
+on either command overrides it. Default
+.BR 0 ,
+an immediate freeze.
 .SH FILES
 .TP
 .I @DATADIR@/neowall.vibe

@@ -2,26 +2,91 @@
 
 #include "neowall/shader/shader_clock.h"
 
-shader_pause_clock shader_pause_begin(uint64_t now_us, uint32_t duration_ms) {
-    return (shader_pause_clock){
-        .start_us = now_us, .duration_ms = duration_ms, .parked = duration_ms == 0};
+/* Round a non-negative double to the nearest integer. Kept libm-free: the
+ * module also links into small test binaries without -lm. */
+static uint64_t round_u64(double x) {
+    return x > 0 ? (uint64_t)(x + 0.5) : 0;
 }
 
-uint64_t shader_pause_sample(const shader_pause_clock *pause, uint64_t now_us, bool *final_frame) {
-    *final_frame = false;
-    if (!pause->start_us || now_us < pause->start_us) return now_us;
+/* Clock reading as a double, so the integral keeps sub-microsecond parts
+ * until the final rounding. */
+static double ramp_clock(const shader_clock_ramp *r, uint64_t t_us) {
+    if (!r->t0_us) return (double)t_us;
 
-    uint64_t elapsed  = now_us - pause->start_us;
-    uint64_t duration = (uint64_t)pause->duration_ms * 1000;
-    if (elapsed >= duration) {
-        *final_frame = true;
-        return pause->start_us + duration / 3;
-    }
+    double e  = (double)t_us - (double)r->t0_us;
+    double d  = (double)r->duration_us;
+    double c0 = (double)r->c0_us;
+    double v0 = r->v0, v1 = r->v1;
 
-    /* Integrate the velocity (1-u)^2. That preserves the incoming speed
-     * at u=0 and brings it to zero at u=1. */
-    double u = (double)elapsed / (double)duration;
-    return pause->start_us + (uint64_t)((double)duration * u * (1.0 - u + u * u / 3.0));
+    /* Before the ramp (a frame stamped earlier than the request): the clock
+     * was moving at v0. */
+    if (e <= 0) return c0 + v0 * e;
+    /* After it: half the speed change happened over d (the mean of s is
+     * 1/2), then v1 holds. */
+    if (e >= d) return c0 + d * (v0 + v1) / 2 + v1 * (e - d);
+
+    /* Integral of v0 + (v1 - v0) s(u) from 0 to u, with s = 3u^2 - 2u^3. */
+    double u = e / d;
+    return c0 + d * (v0 * u + (v1 - v0) * (u * u * u - u * u * u * u / 2));
+}
+
+uint64_t shader_ramp_sample(const shader_clock_ramp *r, uint64_t t_us) {
+    return round_u64(ramp_clock(r, t_us));
+}
+
+double shader_ramp_speed(const shader_clock_ramp *r, uint64_t t_us) {
+    if (!r->t0_us) return 1.0;
+    if (t_us <= r->t0_us) return r->v0;
+    if (t_us - r->t0_us >= r->duration_us) return r->v1;
+    double u = (double)(t_us - r->t0_us) / (double)r->duration_us;
+    return r->v0 + (r->v1 - r->v0) * (3 * u * u - 2 * u * u * u);
+}
+
+void shader_ramp_retarget(shader_clock_ramp *r, uint64_t t_us, float speed, uint32_t ease_ms) {
+    double c = ramp_clock(r, t_us);
+    double v = shader_ramp_speed(r, t_us);
+
+    *r = (shader_clock_ramp){
+        .t0_us       = t_us,
+        .c0_us       = round_u64(c),
+        .duration_us = round_u64((double)ease_ms * 1000.0 * (speed > v ? speed - v : v - speed)),
+        .v0          = (float)v,
+        .v1          = speed,
+    };
+    r->parked = speed == 0.0f && r->duration_us == 0;
+}
+
+void shader_ramp_hold(shader_clock_ramp *r, uint64_t t_us) {
+    shader_ramp_retarget(r, t_us, 0.0f, 0);
+    r->parked = false;
+}
+
+float shader_ramp_target(const shader_clock_ramp *r) {
+    return r->t0_us ? r->v1 : 1.0f;
+}
+
+uint64_t shader_ramp_end(const shader_clock_ramp *r) {
+    return r->t0_us ? r->t0_us + r->duration_us : 0;
+}
+
+bool shader_ramp_settled(const shader_clock_ramp *r, uint64_t t_us) {
+    return !r->t0_us || (t_us >= r->t0_us && t_us - r->t0_us >= r->duration_us);
+}
+
+bool shader_ramp_running(const shader_clock_ramp *r, uint64_t t_us) {
+    return !r->t0_us || (r->v1 == 1.0f && shader_ramp_settled(r, t_us));
+}
+
+bool shader_ramp_stopping(const shader_clock_ramp *r) {
+    return r->t0_us && r->v1 == 0.0f && !r->parked;
+}
+
+uint64_t shader_ramp_fold_ms(shader_clock_ramp *r, uint64_t t_us) {
+    if (!r->t0_us || !shader_ramp_running(r, t_us)) return 0;
+    double end = (double)r->t0_us + (double)r->duration_us;
+    double lag = end - ramp_clock(r, r->t0_us + r->duration_us);
+    *r         = (shader_clock_ramp){0};
+    return lag > 0 ? (uint64_t)(lag / 1000.0) : 0;
 }
 
 bool shader_clock_should_rebase(const shader_clock_state *st, double threshold_seconds) {

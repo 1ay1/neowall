@@ -258,10 +258,13 @@ expect "pause"                          0 "cycling paused"          "$nw" pause
 expect "resume"                         0 "cycling resumed"         "$nw" resume
 expect "pause-shader"                   0 "shader animation paused" "$nw" pause-shader
 expect "resume-shader"                  0 "shader animation resumed" "$nw" resume-shader
-expect "reject malformed eased pause"   1 "non-negative integer"     "$nw" pause-shader --ease-ms -850
+expect "reject malformed eased pause"   1 "whole milliseconds"       "$nw" pause-shader --ease-ms -850
+expect "reject an over-long ease"       1 "whole milliseconds"       "$nw" pause-shader --ease-ms 600000
 expect "reject extra pause argument"    1 "Usage:"                   "$nw" pause-shader 850
-expect "accept eased pause"              0 "pausing shader animation" "$nw" pause-shader --ease-ms 850
-expect "resume during ease"              0 "shader animation resumed" "$nw" resume-shader
+expect "accept eased pause"             0 "easing to a stop over 850 ms" "$nw" pause-shader --ease-ms 850
+expect "resume during ease, eased"      0 "easing back in over 400 ms"   "$nw" resume-shader --ease-ms=400ms
+expect "immediate pause with --ease-ms 0" 0 "shader animation paused"  "$nw" pause-shader --ease-ms 0
+expect "resume-shader"                  0 "shader animation resumed" "$nw" resume-shader
 expect "set-terminal without terminal"  1 "no output is running a terminal" "$nw" set-terminal htop
 
 # ---- reload -----------------------------------------------------------------

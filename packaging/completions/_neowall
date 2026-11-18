@@ -60,7 +60,8 @@ case $state in
                                 '--timelapse=[speed up the shader clock]:span/duration' \
                                 '1:shader:_files -g "*.(glsl|frag|neowall)"' ;;
       set-terminal) _command_names ;;
-      pause-shader) _arguments '--ease-ms[slow the shader clock to a stop]:milliseconds:' ;;
+      pause-shader) _arguments '--ease-ms=[ease the shader clock to a stop]:milliseconds (0-60000):' ;;
+      resume-shader) _arguments '--ease-ms=[ease the shader clock back to full speed]:milliseconds (0-60000):' ;;
     esac
     ;;
 esac

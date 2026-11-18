@@ -49,6 +49,7 @@ static void apply_globals(struct neowall_state *state, const config_doc *doc) {
     /* exec("...") manifest uniforms run commands: only with an explicit opt-in
      * in the user's own config or on the command line, never from a shader */
     nw_source_exec_set_allowed(state->allow_exec_cli || g.allow_exec);
+    atomic_store(&state->shader_ease_ms, g.shader_pause_ease_ms);
     const struct compositor_backend *b = state->compositor_backend;
     if (b && b->ops && b->ops->apply_input_config) b->ops->apply_input_config(b->data, state);
 }

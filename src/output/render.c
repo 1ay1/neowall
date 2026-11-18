@@ -924,10 +924,16 @@ bool render_frame_shader(struct output_state *output) {
         current_time_us = output->frame_target_ns / 1000ull;
         present_at      = (double)output->frame_target_ns / 1e9;
     }
-    bool easing = output->shader_pause.duration_ms > 0 && !output->shader_pause.parked;
-    bool final_frame;
-    current_time_us = shader_pause_sample(&output->shader_pause, current_time_us, &final_frame);
-    uint64_t start_time_us = epoch_ms > 0 ? epoch_ms * 1000ull : current_time_us;
+    /* Pause/resume: the clock runs through the speed ramp (shader_clock.h).
+     * Sample it at the frame's own timestamp, so the ease is as smooth as
+     * the vblank grid. While stopping, the frame sampled at or past the end
+     * of the ramp is the frozen one: once it's on screen, the output parks. */
+    shader_clock_ramp *ramp = &output->shader_ramp;
+    bool stopping           = shader_ramp_stopping(ramp);
+    bool ramping            = ramp->t0_us != 0;
+    bool final_frame        = stopping && current_time_us >= shader_ramp_end(ramp);
+    current_time_us         = shader_ramp_sample(ramp, current_time_us);
+    uint64_t start_time_us  = epoch_ms > 0 ? epoch_ms * 1000ull : current_time_us;
     /* Guard against start_time being (transiently) in the future — subtracting
      * unsigned would wrap to an enormous elapsed value. Can happen around a
      * shader-pause resume that races a shader reload; clamp to 0 instead. */
@@ -968,26 +974,28 @@ bool render_frame_shader(struct output_state *output) {
         .elapsed_seconds = current_time,
         .hidden_since_ms = output->shader_hidden_since,
         .occluded_now    = atomic_load_explicit(&output->occluded, memory_order_acquire),
-        .paused_now      = output->shader_pause.parked,
+        .paused_now      = ramp->parked,
         .spanned         = output->spanned,
     };
     bool did_rebase = false;
 
-    if (!easing && shader_clock_should_rebase(&clock_st, SHADER_TIME_REBASE_SECONDS)) {
+    if (!stopping && shader_clock_should_rebase(&clock_st, SHADER_TIME_REBASE_SECONDS)) {
         /* Rebase to zero and drop the hidden marker; the jump lands entirely
          * inside the invisible window. Spanned outputs rebase as a group
          * elsewhere, so leave their clock alone rather than desync the bezel --
          * but still consume the marker, or the condition stays armed and is
          * retested on every frame for the rest of the process's life. */
         if (!shader_clock_defers_to_group(&clock_st)) {
-            output->shader_start_time = get_time_ms();
+            /* the sampled clock, not real time: they differ while paused
+             * or easing, and iTime is measured on the former */
+            output->shader_start_time = current_time_us / 1000;
             current_time              = 0.0;
             did_rebase                = true;
             log_debug("Rebased shader clock for output %s (float32 precision guard)",
                       output_get_identifier(output));
         }
         output->shader_hidden_since = 0;
-    } else if (!easing && !output->clock_fade_start && output->clock_fade_rebased) {
+    } else if (!ramping && !output->clock_fade_start && output->clock_fade_rebased) {
         /* Last frame on the old clock was captured; switch now. The old
          * frame fades out on top of the new clock. */
         output->clock_fade_rebased = false;
@@ -1100,7 +1108,7 @@ bool render_frame_shader(struct output_state *output) {
             float a = 1.0f - k;
             clock_fade_draw(output, width, height, a * a * (3.0f - 2.0f * a));
         }
-    } else if (!easing && !swap_fade && !did_rebase && !output->clock_fade_rebased &&
+    } else if (!ramping && !swap_fade && !did_rebase && !output->clock_fade_rebased &&
                shader_clock_should_fade_rebase(&clock_st, SHADER_TIME_FADE_REBASE_SECONDS)) {
         /* Visible for hours with no hidden window to rebase in, so float32
          * iTime is getting coarse. Keep this frame (still on the old clock)
@@ -1125,7 +1133,7 @@ bool render_frame_shader(struct output_state *output) {
 
     /* Render FPS watermark if enabled */
     render_fps_watermark(output);
-    output->shader_pause_final_draw = easing && final_frame;
+    output->shader_pause_final_draw = final_frame;
 
     /* Shader wallpapers need continuous redraw for animation
      * - vsync mode: always set needs_redraw (monitor refresh drives rendering)

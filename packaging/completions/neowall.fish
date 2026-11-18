@@ -38,7 +38,8 @@ complete -c neowall -n "__fish_seen_subcommand_from new" -l list -d 'List templa
 complete -c neowall -n "__fish_seen_subcommand_from import" -F -a '(__fish_complete_suffix .json)'
 complete -c neowall -n "__fish_seen_subcommand_from preview watch" -F -a '(__fish_complete_suffix .glsl .frag .neowall)'
 complete -c neowall -n "__fish_seen_subcommand_from set-terminal" -xa '(__fish_complete_command)'
-complete -c neowall -n "__fish_seen_subcommand_from pause-shader" -l ease-ms -x -d 'Ease to a stop over this many milliseconds'
+complete -c neowall -n "__fish_seen_subcommand_from pause-shader" -l ease-ms -x -d 'Ease to a stop over this many milliseconds (0-60000)'
+complete -c neowall -n "__fish_seen_subcommand_from resume-shader" -l ease-ms -x -d 'Ease back to full speed over this many milliseconds (0-60000)'
 
 # render
 set -l r "__fish_seen_subcommand_from render"

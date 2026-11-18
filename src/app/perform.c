@@ -29,27 +29,27 @@ static struct output_state *output_by_id(struct neowall_state *state, uint32_t i
     return NULL;
 }
 
-/* Freezing records the instant it stopped; unfreezing moves each shader's
- * start_time on by the frozen time, so it resumes on the frame it stopped. */
-static void shader_pause(struct neowall_state *state, int64_t duration_ms) {
-    uint64_t now = get_time_ms();
+/* Pause and resume move each shader clock's speed to 0 or 1, at once or
+ * along the ease (shader_clock.h). Spanned outputs get the same ramp at the
+ * same instant, so both halves of a scene stay in phase. `ease_ms` < 0 means
+ * the configured default. */
+static void shader_pause(struct neowall_state *state, bool pause, int64_t ease_ms) {
+    uint32_t ease = ease_ms >= 0 ? (uint32_t)ease_ms : atomic_load(&state->shader_ease_ms);
+    uint64_t now  = get_time_us();
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o; o = o->next) {
         if (o->config->type != WALLPAPER_SHADER) continue;
-        if (duration_ms >= 0) {
-            o->shader_pause = shader_pause_begin(now * 1000, (uint32_t)duration_ms);
-        } else if (o->shader_pause.start_us != 0) {
-            bool final_frame;
-            uint64_t time_us  = shader_pause_sample(&o->shader_pause, now * 1000, &final_frame);
-            uint64_t shift_ms = now - time_us / 1000;
-            o->shader_start_time += shift_ms;
-            if (o->span_start_time) o->span_start_time += shift_ms;
-            o->shader_pause            = (shader_pause_clock){0};
-            o->shader_pause_final_draw = false;
-            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
-        }
+        if (shader_ramp_target(&o->shader_ramp) == (pause ? 0.0f : 1.0f)) continue;
+        shader_ramp_retarget(&o->shader_ramp, now, pause ? 0.0f : 1.0f, ease);
+        o->shader_pause_final_draw = false;
+        atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
     }
     pthread_rwlock_unlock(&state->output_list_lock);
+    if (ease_ms != 0 && ease > 0)
+        log_info("Shader animation %s over %u ms", pause ? "easing to a stop" : "easing back in",
+                 ease);
+    else
+        log_info("Shader animation %s", pause ? "paused" : "resumed");
 }
 
 /* A vsync-off animated output's frame. An idle terminal still gets the tick,
@@ -147,7 +147,7 @@ void app_perform(void *self, rt_loop *loop, const rt_cmd *c) {
         break;
     }
 
-    case APP_CMD_SHADER_PAUSE: shader_pause(state, c->v.i); break;
+    case APP_CMD_SHADER_PAUSE: shader_pause(state, c->id != 0, c->v.i); break;
 
     case APP_CMD_REDRAW_ALL: app_mark_redraw_all(state); break;
 

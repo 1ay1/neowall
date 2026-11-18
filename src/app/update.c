@@ -142,12 +142,12 @@ void app_model_update(struct app_model *a, const rt_msg *m, rt_cmds *cmds) {
 
     case NW_MSG_SHADER_PAUSE:
     case NW_MSG_SHADER_RESUME: {
+        /* v.i is the ease in ms from the socket, or -1 for the configured
+         * default (a bare command, or a signal from an older client). */
         bool want = m->kind == NW_MSG_SHADER_PAUSE;
         if (want == a->shader_paused) return;
         a->shader_paused = want;
-        int64_t duration = from_signal(m) ? 0 : m->v.i;
-        cmd(cmds, APP_CMD_SHADER_PAUSE, 0, want ? duration : -1);
-        log_info("Shader animation %s", want ? "pausing" : "resumed");
+        cmd(cmds, APP_CMD_SHADER_PAUSE, want, from_signal(m) ? -1 : m->v.i);
         return;
     }
 

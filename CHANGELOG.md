@@ -2,6 +2,23 @@
 
 All notable changes to neowall. Dates are release dates.
 
+## Unreleased
+
+### Added
+- `pause-shader --ease-ms MS` glides the animation to a stop before
+  freezing, and `resume-shader --ease-ms MS` speeds it back up from the exact
+  frame it stopped on (#86, #87, thanks @eikooc). The speed follows a
+  minimum-jerk curve, either command can interrupt an ease in progress with
+  no visible step, and spanned monitors ease in lockstep. The ease is capped
+  at 60 s.
+- `shader_pause_ease_ms` (config) sets the default ease, so a battery hook
+  can stay a bare `neowall pause-shader`.
+
+### Fixed
+- A shader loaded while the animation was paused (reload, `next`, a monitor
+  plugged in) never drew, so the new wallpaper didn't appear until resume.
+  It now shows its first frame and stays paused.
+
 ## 0.10.3 - 2026-11-18
 
 ### Added

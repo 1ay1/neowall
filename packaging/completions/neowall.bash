@@ -70,7 +70,7 @@ _neowall() {
         set-terminal)
             COMPREPLY=($(compgen -c -- "$cur"))
             ;;
-        pause-shader)
+        pause-shader|resume-shader)
             COMPREPLY=($(compgen -W "--ease-ms" -- "$cur"))
             ;;
     esac

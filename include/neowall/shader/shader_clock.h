@@ -62,15 +62,71 @@ bool shader_clock_should_fade_rebase(const shader_clock_state *st, double thresh
  * between two halves of one scene shows a phase gap. */
 bool shader_clock_defers_to_group(const shader_clock_state *st);
 
-/* One manual pause of a shader clock. All times use the monotonic clock. */
+/* ---------------------------------------------------------------- *
+ * Speed ramp (`pause-shader` / `resume-shader`, optionally `--ease-ms`)
+ *
+ * The shader clock normally reads real (monotonic) time. A pause or resume
+ * moves its SPEED between 1 (running) and 0 (stopped), either at once or
+ * along a smoothstep: s(u) = 3u^2 - 2u^3. That is the minimum-jerk speed
+ * change with zero acceleration at both ends, so the motion neither lurches
+ * into the ease nor bumps at the end of it. The clock is the integral of
+ * the speed, so it never runs backwards.
+ *
+ * A new request during an ease starts from the clock and speed at that
+ * instant, so interrupting is seamless in either direction, and its length
+ * scales with how far the speed has to travel: resuming a half-finished
+ * pause eases for half the time.
+ *
+ * All times are monotonic microseconds. Zero-initialised means no ramp: the
+ * clock is real time. Pure arithmetic, no GL; see tests/test_shader_clock.c.
+ */
 typedef struct {
-    uint64_t start_us;
-    uint32_t duration_ms;
-    bool parked;
-} shader_pause_clock;
+    uint64_t t0_us;       /* when the current ramp started; 0 = no ramp */
+    uint64_t c0_us;       /* clock reading at t0_us */
+    uint64_t duration_us; /* ramp length; 0 = the speed changed at once */
+    float v0, v1;         /* speed at t0_us and from t0_us + duration_us on */
+    bool parked;          /* stopped and its last frame is on screen: draw nothing */
+} shader_clock_ramp;
 
-shader_pause_clock shader_pause_begin(uint64_t now_us, uint32_t duration_ms);
-uint64_t shader_pause_sample(const shader_pause_clock *pause, uint64_t now_us, bool *final_frame);
+/* Clock reading and speed at `t_us`. With no ramp: t_us and 1. */
+uint64_t shader_ramp_sample(const shader_clock_ramp *r, uint64_t t_us);
+double shader_ramp_speed(const shader_clock_ramp *r, uint64_t t_us);
+
+/* Start moving the speed to `speed` (0 or 1) at `t_us`, over `ease_ms`
+ * scaled by the distance from the current speed. An immediate stop is
+ * parked straight away: the frame already on screen is the frozen one. */
+void shader_ramp_retarget(shader_clock_ramp *r, uint64_t t_us, float speed, uint32_t ease_ms);
+
+/* Stop at once but draw one more frame first: for an output that has not
+ * shown anything yet (a shader loaded while paused). */
+void shader_ramp_hold(shader_clock_ramp *r, uint64_t t_us);
+
+/* The speed the ramp is heading for: 1 with no ramp. */
+float shader_ramp_target(const shader_clock_ramp *r);
+
+/* When the current ramp ends (t0 + duration); 0 with no ramp. */
+uint64_t shader_ramp_end(const shader_clock_ramp *r);
+
+/* True when the ramp has reached its end speed by `t_us`. */
+bool shader_ramp_settled(const shader_clock_ramp *r, uint64_t t_us);
+
+/* True when the clock runs at full speed at `t_us`: no ramp, or a resume
+ * that has settled. After a resume the ramp stays in place, since from then
+ * on it is just real time minus a fixed lag; clearing it is only safe where
+ * the clock may jump anyway (a rebase). */
+bool shader_ramp_running(const shader_clock_ramp *r, uint64_t t_us);
+
+/* True while heading for a stop and not yet parked: the caller draws until
+ * a frame sampled at or past the end is on screen, then sets `parked`. */
+bool shader_ramp_stopping(const shader_clock_ramp *r);
+
+/* A settled resume leaves the clock at real time minus a fixed lag. Clear
+ * the ramp and return that lag in whole ms, for the caller to add to the
+ * shader's start time; the clock then steps forward by under 1 ms, never
+ * back. 0, and no change, unless shader_ramp_running() with a ramp set.
+ * Fold every output of a span group in the same pass, or their epochs
+ * briefly disagree. */
+uint64_t shader_ramp_fold_ms(shader_clock_ramp *r, uint64_t t_us);
 
 /* ---------------------------------------------------------------- *
  * Jump tracking (diagnostics)

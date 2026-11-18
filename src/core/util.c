@@ -59,6 +59,21 @@ bool neowall_parse_index(const char *s, long *out) {
     return true;
 }
 
+bool neowall_parse_ease_ms(const char *s, unsigned *out) {
+    if (!s || !out) return false;
+    char digits[16];
+    size_t n = strlen(s);
+    if (n > 2 && strcmp(s + n - 2, "ms") == 0) n -= 2;
+    if (n == 0 || n >= sizeof(digits)) return false;
+    memcpy(digits, s, n);
+    digits[n] = '\0';
+
+    long v;
+    if (!neowall_parse_index(digits, &v) || v > (long)NEOWALL_EASE_MS_MAX) return false;
+    *out = (unsigned)v;
+    return true;
+}
+
 /* Path expansion (tilde expansion) */
 bool expand_path(const char *path, char *expanded, size_t size) {
     if (!path || !expanded || size == 0) {

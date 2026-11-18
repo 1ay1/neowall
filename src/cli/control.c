@@ -436,19 +436,27 @@ static int cmd_set_terminal_signal(int argc, char *argv[]) {
 int cmd_control(int argc, char *argv[]) {
     const char *cmd = argv[1];
 
-    if (strcmp(cmd, "pause-shader") == 0 && argc > 2) {
-        if (argc != 4 || strcmp(argv[2], "--ease-ms") != 0) {
-            fprintf(stderr, "Usage: %s pause-shader [--ease-ms MILLISECONDS]\n", argv[0]);
+    /* pause-shader / resume-shader [--ease-ms MS | --ease-ms=MS] */
+    bool shader_cmd = strcmp(cmd, "pause-shader") == 0 || strcmp(cmd, "resume-shader") == 0;
+    if (shader_cmd && argc > 2) {
+        const char *ms = NULL;
+        if (argc == 4 && strcmp(argv[2], "--ease-ms") == 0) ms = argv[3];
+        if (argc == 3 && strncmp(argv[2], "--ease-ms=", 10) == 0) ms = argv[2] + 10;
+        if (!ms) {
+            fprintf(stderr, "Usage: %s %s [--ease-ms MILLISECONDS]\n", argv[0], cmd);
             return EXIT_FAILURE;
         }
-        long duration;
-        if (!neowall_parse_index(argv[3], &duration) || (unsigned long)duration > UINT32_MAX) {
-            fprintf(stderr, "Ease duration must be a non-negative integer in milliseconds\n");
+        unsigned ease;
+        if (!neowall_parse_ease_ms(ms, &ease)) {
+            fprintf(stderr, "--ease-ms takes whole milliseconds from 0 to %u, not '%s'\n",
+                    NEOWALL_EASE_MS_MAX, ms);
             return EXIT_FAILURE;
         }
+        char arg[16];
+        snprintf(arg, sizeof(arg), "%u", ease);
         int rc;
-        if (ipc_command("pause-shader-ease", argv[3], &rc)) return rc;
-        fprintf(stderr, "Eased shader pause requires a running daemon with a control socket\n");
+        if (ipc_command(cmd, arg, &rc)) return rc;
+        fprintf(stderr, "--ease-ms needs a running daemon with a control socket\n");
         return EXIT_FAILURE;
     }
 

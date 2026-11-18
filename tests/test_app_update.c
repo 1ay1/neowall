@@ -102,14 +102,15 @@ static void test_set_terminal(rt_cmds *c) {
 static void test_shader_pause(rt_cmds *c) {
     struct app_model a = model();
     step(&a, c, msg(NW_MSG_SHADER_PAUSE, 0, 0));
-    CHECK(a.shader_paused && is_cmd(c, 0, APP_CMD_SHADER_PAUSE) && rt_cmds_at(c, 0)->u.cmd.v.i == 0,
-          "pause without an ease duration freezes immediately");
+    CHECK(a.shader_paused && is_cmd(c, 0, APP_CMD_SHADER_PAUSE) &&
+              rt_cmds_at(c, 0)->u.cmd.id == 1 && rt_cmds_at(c, 0)->u.cmd.v.i == 0,
+          "pause with a zero ease freezes immediately");
     step(&a, c, msg(NW_MSG_SHADER_PAUSE, 0, 0));
     CHECK(rt_cmds_len(c) == 0, "pausing twice doesn't freeze twice");
-    step(&a, c, msg(NW_MSG_SHADER_RESUME, 0, 0));
+    step(&a, c, msg(NW_MSG_SHADER_RESUME, 0, 400));
     CHECK(!a.shader_paused && is_cmd(c, 0, APP_CMD_SHADER_PAUSE) &&
-              rt_cmds_at(c, 0)->u.cmd.v.i == -1,
-          "resume unfreezes");
+              rt_cmds_at(c, 0)->u.cmd.id == 0 && rt_cmds_at(c, 0)->u.cmd.v.i == 400,
+          "resume forwards its own ease");
     step(&a, c, msg(NW_MSG_SHADER_PAUSE, 0, 850));
     CHECK(a.shader_paused && is_cmd(c, 0, APP_CMD_SHADER_PAUSE) &&
               rt_cmds_at(c, 0)->u.cmd.v.i == 850,

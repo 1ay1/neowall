@@ -146,6 +146,9 @@ int main(void) {
         "default {\n  shader a.glsl\n  palette \"no colours here\"\n}\n", /* bad palette */
         "default {\n  path /x.png\n  palette \"#112233\"\n}\n",           /* palette on an image */
         "allow_exec yes\ndefault {\n  shader a.glsl\n}\n",                /* not a boolean */
+        "shader_pause_ease_ms -1\ndefault {\n  shader a.glsl\n}\n",       /* negative ease */
+        "shader_pause_ease_ms 90000\ndefault {\n  shader a.glsl\n}\n",    /* over the cap */
+        "shader_pause_ease_ms 0.5\ndefault {\n  shader a.glsl\n}\n",      /* not whole ms */
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         write_cfg(bad[i]);
@@ -300,6 +303,16 @@ int main(void) {
     write_cfg(text);
     CHECK(app_config_load(&st, cfg));
     CHECK(g_exec_allowed == 1);
+
+    /* shader_pause_ease_ms sets the default ease; dropping it restores 0 */
+    snprintf(text, sizeof(text), "shader_pause_ease_ms 750\ndefault {\n  shader %s\n}\n", a);
+    write_cfg(text);
+    CHECK(app_config_load(&st, cfg));
+    CHECK(atomic_load(&st.shader_ease_ms) == 750);
+    snprintf(text, sizeof(text), "default {\n  shader %s\n}\n", a);
+    write_cfg(text);
+    CHECK(app_config_load(&st, cfg));
+    CHECK(atomic_load(&st.shader_ease_ms) == 0);
 
     /* `palette`: inline colours reach the output's config; garbage is an error */
     snprintf(text, sizeof(text),

@@ -42,6 +42,7 @@ struct neowall_state {
     atomic_bool mouse_interaction; /* bind the pointer, feed iMouse */
     atomic_bool term_raw_input;    /* pass Ctrl-C/D/\/Z to a focused terminal */
     bool allow_exec_cli;           /* --allow-exec: exec() uniforms on, whatever the config */
+    atomic_uint shader_ease_ms;    /* shader_pause_ease_ms: pause/resume ease default */
 
     /* Lock order: output_list_lock, then state_mutex, never the reverse.
      * state_file_lock serialises state-file writes. */

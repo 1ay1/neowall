@@ -110,6 +110,7 @@ These go outside any block.
 | `mouse_interaction` | `true` | Let shaders see the pointer (`iMouse`). |
 | `term_raw_input` | `false` | Pass Ctrl-C and similar keys to a focused terminal wallpaper. |
 | `allow_exec` | `false` | Allow shader manifests to run commands for live values (`exec("...")`, see [SHADERS.md](SHADERS.md#live-values-from-anywhere)). Also enabled by `neowall --allow-exec`. |
+| `shader_pause_ease_ms` | `0` | Milliseconds (0 to 60000) that `pause-shader` and `resume-shader` ease the animation to a stop and back. `--ease-ms` on either command overrides it. |
 
 ## Examples
 

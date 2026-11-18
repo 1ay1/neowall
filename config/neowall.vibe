@@ -11,6 +11,7 @@
 # mouse_interaction true     # let shaders see the pointer (iMouse)
 # term_raw_input false       # pass Ctrl-C etc. to a focused terminal wallpaper
 # allow_exec false           # let shader manifests run commands (exec("..."))
+# shader_pause_ease_ms 0     # ease pause-shader/resume-shader over this many ms
 
 # ---- default: applies to every monitor without its own block ---------------
 

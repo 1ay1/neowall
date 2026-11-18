@@ -1425,6 +1425,15 @@ static bool validate_config_tree(VibeValue *root, bool *out_has_config) {
         return false;
     }
 
+    VibeValue *ease_val = vibe_object_get(root->as_object, "shader_pause_ease_ms");
+    if (ease_val && (ease_val->type != VIBE_TYPE_INTEGER || ease_val->as_integer < 0 ||
+                     ease_val->as_integer > (long long)NEOWALL_EASE_MS_MAX)) {
+        log_error("Top-level 'shader_pause_ease_ms' must be a whole number of milliseconds "
+                  "from 0 to %u",
+                  NEOWALL_EASE_MS_MAX);
+        return false;
+    }
+
     VibeValue *default_obj = vibe_object_get(root->as_object, "default");
     if (default_obj) {
         if (default_obj->type != VIBE_TYPE_OBJECT) {
@@ -1512,6 +1521,10 @@ config_globals config_doc_globals(const config_doc *doc) {
     }
     v            = vibe_object_get(doc->root->as_object, "allow_exec");
     g.allow_exec = v && v->type == VIBE_TYPE_BOOLEAN && v->as_boolean;
+    v            = vibe_object_get(doc->root->as_object, "shader_pause_ease_ms");
+    if (v && v->type == VIBE_TYPE_INTEGER && v->as_integer >= 0 &&
+        v->as_integer <= (long long)NEOWALL_EASE_MS_MAX)
+        g.shader_pause_ease_ms = (unsigned)v->as_integer;
     return g;
 }
 

@@ -37,8 +37,31 @@ struct frame {
 };
 
 bool app_shader_is_parked(const struct app_model *model, const struct output_state *output) {
-    return output->config->type == WALLPAPER_SHADER && model->shader_paused &&
-           (output->shader_pause.duration_ms == 0 || output->shader_pause.parked);
+    (void)model;
+    return output->config->type == WALLPAPER_SHADER && output->shader_ramp.parked;
+}
+
+/* Once per pass, before spans are computed:
+ *  - paused: a shader that loaded after the pause (reload, next, hotplug)
+ *    starts on a fresh full-speed clock. Stop it on its first frame, so it
+ *    shows a picture rather than nothing, then park like the rest.
+ *  - running: a resume that has settled is folded into the start time, so
+ *    the clock is plain real time again. All outputs fold in the same pass,
+ *    so a span group's shared start moves as one. */
+static void sync_shader_pause(struct neowall_state *state, const struct app_model *m) {
+    uint64_t now = get_time_us();
+    pthread_rwlock_rdlock(&state->output_list_lock);
+    for (struct output_state *o = state->outputs; o; o = o->next) {
+        if (o->config->type != WALLPAPER_SHADER) continue;
+        if (m->shader_paused) {
+            if (shader_ramp_target(&o->shader_ramp) == 0.0f) continue;
+            shader_ramp_hold(&o->shader_ramp, now);
+            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
+        } else {
+            o->shader_start_time += shader_ramp_fold_ms(&o->shader_ramp, now);
+        }
+    }
+    pthread_rwlock_unlock(&state->output_list_lock);
 }
 
 /* Whether this output draws this step. Pure gating: no GL, no side effects. */
@@ -220,7 +243,7 @@ static void output_present(struct frame *f, struct output_state *output, uint64_
     gpu_health_swap_result(&output->swap_fail_streak, true);
     compositor_surface_commit(output->compositor_surface);
     if (output->config->type == WALLPAPER_SHADER && output->shader_pause_final_draw) {
-        output->shader_pause.parked     = true;
+        output->shader_ramp.parked      = true;
         output->shader_pause_final_draw = false;
     }
 
@@ -637,6 +660,7 @@ void app_present(void *self, rt_loop *loop) {
     }
 #endif
 
+    sync_shader_pause(state, m);
     mark_animated(state, m);
 
     bool any = m->next_pending > 0 || m->set_index >= 0 || m->terminal_pending;

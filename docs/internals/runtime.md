@@ -222,8 +222,20 @@ for that output, so new output still shows within a frame.
 | state | stops | set by |
 |---|---|---|
 | cycle pause | wallpaper cycling: no `CYCLE_DUE` subscriptions | `pause` / `resume` |
-| shader pause | the shader clock and its draws; resumes from the frozen clock position | `pause-shader [--ease-ms MS]` / `resume-shader` |
+| shader pause | the shader clock and its draws; resumes from the frozen clock position | `pause-shader` / `resume-shader`, either with `--ease-ms MS` |
 | `output->occluded` | that output's draws and its frame timer | the backend's occlusion signals |
+
+Pausing a shader does not stop its clock outright; it moves the clock's
+*speed* between 1 and 0 (`shader_clock_ramp` in `shader_clock.h`). The speed
+follows a smoothstep, the minimum-jerk curve, and the clock is its integral,
+so iTime never runs backwards and an ease of `d` ms advances it by `d/2`. A
+new request mid-ease starts from the current clock and speed, and its length
+scales with how far the speed has to travel, so pausing and resuming can
+interrupt each other with no visible step. With the speed at 0, the output
+draws until the frame sampled at the end of the ramp is on screen, then
+parks: no frame subscription, no GL. A settled resume is folded back into
+`shader_start_time` once per pass, for every output at once, so span groups
+keep a shared epoch.
 
 ## The control socket
 

@@ -84,12 +84,10 @@ void app_on_ipc_request(void *ctx, rt_loop *loop, const nw_ipc_request_t *r) {
         uint32_t kind;
         const char *done;
     } simple[] = {
-        {"next",          NW_MSG_NEXT,          "skipping to next wallpaper"},
-        {"pause",         NW_MSG_CYCLE_PAUSE,   "cycling paused"            },
-        {"resume",        NW_MSG_CYCLE_RESUME,  "cycling resumed"           },
-        {"pause-shader",  NW_MSG_SHADER_PAUSE,  "shader animation paused"   },
-        {"resume-shader", NW_MSG_SHADER_RESUME, "shader animation resumed"  },
-        {"kill",          NW_MSG_QUIT,          "stopping"                  },
+        {"next",   NW_MSG_NEXT,         "skipping to next wallpaper"},
+        {"pause",  NW_MSG_CYCLE_PAUSE,  "cycling paused"            },
+        {"resume", NW_MSG_CYCLE_RESUME, "cycling resumed"           },
+        {"kill",   NW_MSG_QUIT,         "stopping"                  },
     };
     struct app *a = ctx;
     char text[NW_IPC_MAX_LINE];
@@ -100,15 +98,25 @@ void app_on_ipc_request(void *ctx, rt_loop *loop, const nw_ipc_request_t *r) {
         return;
     }
 
-    if (strcmp(r->verb, "pause-shader-ease") == 0) {
-        long duration;
-        if (!neowall_parse_index(r->arg, &duration) || (unsigned long)duration > UINT32_MAX) {
-            ipc_server_reply(a->host.ipc, r->conn, false,
-                             "ease duration must be a non-negative integer in milliseconds");
+    /* pause-shader / resume-shader [EASE_MS]. No argument: the configured
+     * shader_pause_ease_ms, which is 0 (immediate) unless set. */
+    bool pause = strcmp(r->verb, "pause-shader") == 0;
+    if (pause || strcmp(r->verb, "resume-shader") == 0) {
+        unsigned ease = 0;
+        if (r->arg[0] && !neowall_parse_ease_ms(r->arg, &ease)) {
+            snprintf(text, sizeof(text), "ease must be whole milliseconds from 0 to %u",
+                     NEOWALL_EASE_MS_MAX);
+            ipc_server_reply(a->host.ipc, r->conn, false, text);
             return;
         }
-        app_send(loop, NW_MSG_SHADER_PAUSE, 0, duration);
-        ipc_server_reply(a->host.ipc, r->conn, true, "pausing shader animation");
+        if (!r->arg[0]) ease = atomic_load(&a->state->shader_ease_ms);
+        if (ease > 0)
+            snprintf(text, sizeof(text), "shader animation %s over %u ms",
+                     pause ? "easing to a stop" : "easing back in", ease);
+        else
+            snprintf(text, sizeof(text), "shader animation %s", pause ? "paused" : "resumed");
+        ipc_server_reply(a->host.ipc, r->conn, true, text);
+        app_send(loop, pause ? NW_MSG_SHADER_PAUSE : NW_MSG_SHADER_RESUME, 0, (int64_t)ease);
         return;
     }
 

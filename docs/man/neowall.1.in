@@ -80,8 +80,19 @@ Skip to the next wallpaper in a cycle.
 .BR pause ", " resume
 Pause or resume wallpaper cycling.
 .TP
-.BR pause\-shader ", " resume\-shader
-Freeze or resume shader animation.
+.BR pause\-shader " [\-\-ease\-ms " MS ]
+Freeze shader animation. The last frame stays on screen and the GPU idles.
+With
+.BR \-\-ease\-ms ,
+the shader clock slows smoothly to a stop over
+.I MS
+milliseconds (0 to 60000) first. Without it, the
+.B shader_pause_ease_ms
+config key gives the ease, which is 0 (an immediate freeze) unless set.
+.TP
+.BR resume\-shader " [\-\-ease\-ms " MS ]
+Resume from the exact frozen moment, easing back to full speed the same way.
+Either command may interrupt an ease in progress; the motion stays continuous.
 .TP
 .B reload
 Re\-read the config.
@@ -287,6 +298,15 @@ output {
   DP\-1     { shader moon_ocean.glsl }
   HDMI\-A\-1 { path ~/Pictures/ duration 600 }
 }
+.fi
+.RE
+.PP
+Ease the wallpaper to a stop on battery, from a power hook:
+.PP
+.RS
+.nf
+neowall pause\-shader \-\-ease\-ms 850    # on battery
+neowall resume\-shader \-\-ease\-ms 850   # on AC
 .fi
 .RE
 .PP
