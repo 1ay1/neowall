@@ -39,7 +39,6 @@
 #include "neowall/shader/engine.h"
 #include "neowall/shader/shader.h"
 #include "neowall/shader/wallshader.h"
-#include "neowall/source/reactive.h"
 
 #ifndef EGL_PLATFORM_DEVICE_EXT
 #define EGL_PLATFORM_DEVICE_EXT 0x313F
@@ -463,7 +462,7 @@ int cmd_render(int argc, char *argv[]) {
         fprintf(stderr, "neowall render: %s\n", err);
         return 77;
     }
-    if (o.live) reactive_init();
+    if (o.live) wallshader_inputs_start();
 
     char resolved[4096];
     /* a file you point at wins (cwd-relative too, with or without extension);
@@ -672,7 +671,7 @@ int cmd_render(int argc, char *argv[]) {
     glDeleteFramebuffers(1, &fbo);
     glDeleteTextures(1, &tex);
     wallshader_free(s);
-    if (o.live) reactive_shutdown();
+    if (o.live) wallshader_inputs_stop();
     headless_fini(&hl);
     return rc;
 }

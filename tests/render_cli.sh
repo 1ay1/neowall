@@ -8,6 +8,10 @@ FIX=$2/tests/fixtures/shaders
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 export XDG_STATE_HOME="$T/state"   # prove we never write the state file
+# On Mesa's llvmpipe (CI), rasterise on one thread like tests/gl_headless.c:
+# llvmpipe's worker threads race internally, which TSan reports (not ours).
+# No effect on hardware drivers.
+export LP_NUM_THREADS=0
 fail() { echo "FAIL: $*"; exit 1; }
 
 "$NW" render "$FIX/render_ok.glsl" -s 64x36 -t 1 -o "$T/a.png" -q

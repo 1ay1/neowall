@@ -86,5 +86,9 @@ void wallshader_set_persist(wallshader *s, bool persist);
 /* The theme palette shaders see as iPalette/iPaletteSize (up to 16 RGB in
  * 0..1). NULL/0 = neowall's built-in palette. */
 void wallshader_set_palette(wallshader *s, const float (*rgb)[3], int n);
+/* Start/stop the system + audio samplers behind the reactive uniforms (the
+ * daemon does this itself; one-shot tools like `render --live` call these). */
+bool wallshader_inputs_start(void);
+void wallshader_inputs_stop(void);
 
 #endif /* NEOWALL_WALLSHADER_H */

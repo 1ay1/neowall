@@ -34,7 +34,8 @@ allowed() {  # allowed <module> -> space-separated list it may include
     output)     echo "core config egl image shader source state surface terminal textures" ;;
     occlusion)  echo "core state surface" ;;
     backends)   echo "core config egl output shader source state surface" ;;
-    cli)        echo "core output proto runtime shader state" ;;
+    # cli -> config: `render` reads the user's `palette` (config needs only core)
+    cli)        echo "core config output proto runtime shader state" ;;
     app|main)   echo "*" ;;
     *)          echo "?" ;;
     esac

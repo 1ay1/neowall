@@ -270,6 +270,14 @@ nw_engine *wallshader_engine(wallshader *s) {
     return s ? s->eng : NULL;
 }
 
+bool wallshader_inputs_start(void) {
+    return reactive_init();
+}
+
+void wallshader_inputs_stop(void) {
+    reactive_shutdown();
+}
+
 void wallshader_set_persist(wallshader *s, bool persist) {
     if (s) s->no_persist = !persist;
 }
