@@ -19,7 +19,7 @@ src/backends/
 │       ├── wlr_input.c         pointer, keyboard, seat for the wlr backend
 │       ├── wlr_internal.h      shared by the two files above
 │       └── kde_plasma.c        layer shell with an empty input region, for KWin
-└── x11/                        see x11/README.md
+└── x11/                        see docs/internals/x11.md
 ```
 
 ## The interface

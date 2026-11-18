@@ -25,11 +25,11 @@ for that monitor.
 .RS
 .nf
 default {
-  shader garden.glsl
+  shader tokyo_night
 }
 
 output {
-  DP\-1     { shader moon_ocean.glsl }
+  DP\-1     { shader moon_ocean }
   HDMI\-A\-1 { path ~/Pictures/ duration 600 }
 }
 .fi
@@ -97,8 +97,9 @@ frames are paced by
 .BR shader_fps .
 .TP
 .BI shader_fps " n"
-Target frame rate when vsync is off.
-Default 60.
+Cap the frame rate, e.g. 30 to halve a heavy shader's GPU cost.
+Unset, frames follow the monitor's refresh (or 60 with
+.BR "vsync false" ).
 .TP
 .BI palette " spec"
 Your colour theme, as the shader's
@@ -169,12 +170,20 @@ Default
 Pass Ctrl\-C and friends to a focused terminal wallpaper.
 Default
 .BR false .
+.TP
+.BR allow_exec " true|false"
+Allow shader manifests to run commands for live values
+.RB ( exec(\(dq...\(dq) ).
+Default
+.BR false .
+Also enabled by
+.BR "neowall \-\-allow\-exec" .
 .SH FILES
 .TP
 .I @DATADIR@/neowall.vibe
 A fully commented example of every option.
 .TP
-.I @DOCDIR@/CONFIG.md
+.I @DOCDIR@/CONFIGURATION.md
 The long\-form reference.
 .SH SEE ALSO
 .BR neowall (1)

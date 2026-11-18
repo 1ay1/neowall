@@ -1,4 +1,4 @@
-/* The neowall program on the rt runtime. See docs/architecture/RUNTIME.md.
+/* The neowall program on the rt runtime. See docs/internals/runtime.md.
  *
  *   on      signals, the compositor fd, the watch fd, other threads  → msgs
  *   update  folds one msg into the model (struct app); no GL, no I/O

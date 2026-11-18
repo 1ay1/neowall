@@ -1,21 +1,18 @@
 <p align="center">
-  <img src="packaging/io.github._1ay1.neowall.svg" alt="NeoWall" width="280"/>
+  <img src="packaging/io.github._1ay1.neowall.svg" alt="neowall" width="200"/>
 </p>
 
+<h1 align="center">neowall</h1>
+
 <p align="center">
-  <strong>Run GLSL shaders as your Linux wallpaper.</strong>
+  GPU shader wallpapers for Linux. Wayland and X11.
 </p>
 
 <p align="center">
   <a href="https://github.com/1ay1/neowall/actions/workflows/build.yml"><img src="https://github.com/1ay1/neowall/actions/workflows/build.yml/badge.svg" alt="Build"/></a>
-  <a href="https://github.com/1ay1/neowall/blob/main/LICENSE"><img src="https://img.shields.io/github/license/1ay1/neowall?color=blue" alt="License"/></a>
-  <a href="https://github.com/1ay1/neowall/releases"><img src="https://img.shields.io/github/v/release/1ay1/neowall?include_prereleases&color=purple" alt="Release"/></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/1ay1/neowall/releases/download/v0.10.1/neowall-demo.mp4"><img src="docs/media/demo.webp" alt="neowall running the tokyo_night shader as the wallpaper of a live Hyprland desktop" width="100%"/></a>
-  <br/>
-  <sub><code>tokyo_night</code>, the default wallpaper, on a live Hyprland desktop: it follows the mouse, glows in the gaps between windows and calms down as the screen fills. <a href="https://github.com/1ay1/neowall/releases/download/v0.10.1/neowall-demo.mp4">Full-quality video</a>.</sub>
+  <a href="https://github.com/1ay1/neowall/releases"><img src="https://img.shields.io/github/v/release/1ay1/neowall?color=blue" alt="Release"/></a>
+  <a href="https://aur.archlinux.org/packages/neowall-bin"><img src="https://img.shields.io/aur/version/neowall-bin?label=AUR" alt="AUR"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/1ay1/neowall" alt="MIT license"/></a>
 </p>
 
 <p align="center">
@@ -23,124 +20,76 @@
   <video src="https://github.com/user-attachments/assets/c1e38d88-5c1e-4db4-9948-da2ad86c6a69" width="49%" controls autoplay loop muted></video>
 </p>
 
----
+neowall runs GLSL fragment shaders as your desktop background. Shadertoy
+shaders work unmodified, and every shader can react to your music, your
+system, the time of day, your windows and your colour theme. It also shows
+images, slideshows, and terminal programs as wallpaper.
 
-Paste a [Shadertoy](https://www.shadertoy.com/) shader into a file, point neowall at it, get an animated desktop. Wayland + X11, multi-monitor, single static binary, no daemon-in-Python anywhere.
-
-```bash
-neowall
-```
-
-It pauses itself the moment a window covers the wallpaper, so it isn't burning your battery while you actually use the computer.
+- **Light on resources.** Stops rendering when windows cover the wallpaper
+  (about 0.1% CPU), and you can cap the frame rate or render soft passes at a
+  fraction of the resolution. The default wallpaper costs about 1.2 ms of GPU
+  time per frame at 3440×1440.
+- **Made for writing shaders.** Live reload with errors at the real file and
+  line, offline rendering to PNG or video, per-pass GPU timing, and a check
+  that finds the pass producing NaN pixels.
+- **Solid.** A single C binary with no runtime dependencies beyond the
+  graphics stack, tested under address, undefined-behaviour and thread
+  sanitizers, fuzzed, and checked end to end on real Wayland and X11 sessions.
 
 ## Install
 
+| Distribution | |
+|--------------|-|
+| Arch Linux | `paru -S neowall-bin` (prebuilt) or `neowall-git` |
+| Debian, Ubuntu | `.deb` from the [latest release](https://github.com/1ay1/neowall/releases/latest) |
+| Fedora, openSUSE | `.rpm` from the latest release |
+| Nix | `nix run github:1ay1/neowall` |
+| Anything else | the AppImage, or a tarball that runs in place |
+
+Building from source needs a C11 compiler, Meson, Ninja, and the development
+packages for EGL, OpenGL, libpng, libjpeg, Wayland and wayland-protocols, plus
+X11 and Xrandr for the X11 backend and xkbcommon for keyboard input to
+terminal wallpapers:
+
 ```bash
-# Arch (AUR)
-yay -S neowall-bin      # prebuilt, tracks each release
-yay -S neowall-git      # builds from git
-
-# Prebuilt binary
-# https://github.com/1ay1/neowall/releases/latest
-tar -xzf neowall-linux-x86_64-*.tar.gz
-sudo install -m755 neowall /usr/local/bin/
-
-# From source
 git clone https://github.com/1ay1/neowall && cd neowall
 meson setup build && ninja -C build
 sudo ninja -C build install
 ```
 
-<details>
-<summary>Build dependencies</summary>
+## Quick start
 
 ```bash
-# Debian/Ubuntu
-sudo apt install build-essential meson ninja-build libwayland-dev libwayland-bin \
-    libgles2-mesa-dev libpng-dev libjpeg-dev wayland-protocols \
-    libx11-dev libxrandr-dev libxkbcommon-dev
-
-# Arch
-sudo pacman -S base-devel meson ninja wayland mesa libpng libjpeg-turbo \
-    wayland-protocols libx11 libxrandr libxkbcommon
-
-# Fedora
-sudo dnf install gcc meson ninja-build wayland-devel mesa-libGLES-devel \
-    libpng-devel libjpeg-turbo-devel wayland-protocols-devel \
-    libX11-devel libXrandr-devel libxkbcommon-devel
+neowall           # start; the first run shows the default wallpaper
 ```
 
-`libxkbcommon` is optional at build time, but without it the terminal
-wallpaper compiles fine and then silently has no keyboard input — install it.
-</details>
-
-## Config
-
-`~/.config/neowall/config.vibe`
+The configuration lives in `~/.config/neowall/config.vibe`:
 
 ```
 default {
   shader tokyo_night
-  shader_speed 0.8
 }
 ```
 
-Image slideshow:
+`neowall reload` applies changes. A slideshow, a terminal program, or a
+different wallpaper per monitor are a few lines more; see
+[CONFIGURATION.md](docs/CONFIGURATION.md).
 
-```
-default {
-  path ~/Pictures/Wallpapers/
-  duration 300
-  transition glitch
-}
-```
-
-Per-output:
-
-```
-output {
-  DP-1     { shader moon_ocean.glsl }
-  HDMI-A-1 { path ~/Pictures/ duration 600 }
-}
-```
-
-Full reference: [`config/docs/CONFIG.md`](config/docs/CONFIG.md).
-
-## Commands
-
-```bash
-neowall          # start
-neowall kill     # stop
-neowall reload   # re-read the config (a broken file is refused, the old one stays)
-neowall next     # next wallpaper / shader
-neowall pause    # pause cycling
-neowall resume
-neowall pause-shader   # freeze the shader animation in place
-neowall resume-shader  # resume a frozen shader animation
-neowall list     # show queue
-neowall set 3    # jump to index
-neowall current  # print what's playing, and which binary the daemon runs
-neowall set-terminal "btop"  # swap the live terminal-wallpaper command
-```
-
-Writing a shader:
-
-```bash
-neowall new aurora          # scaffold a working shader and tell you how to run it
-neowall new hud --template=reactive   # or: scene (default), flat, reactive
-neowall watch aurora        # live-reload as you edit; errors as file:line + "did you mean"
-neowall preview aurora      # run it once, without touching your wallpaper
-neowall import export.json  # bring in a Shadertoy shader (all passes, cube maps, bindings)
-neowall docs fbm            # look up a built-in helper or uniform
-```
+| Command | |
+|---------|-|
+| `neowall next`, `set <n>`, `list` | Move through a slideshow or a directory of shaders |
+| `neowall pause`, `resume` | Stop and restart cycling |
+| `neowall pause-shader`, `resume-shader` | Freeze the animation |
+| `neowall current` | Show what each monitor displays |
+| `neowall reload`, `kill` | Re-read the config, stop the daemon |
 
 ## Shaders
 
-About 20 in the box, all freely licensed. Bring your own: neowall accepts unmodified [Shadertoy](https://www.shadertoy.com/) GLSL. Drop a `.glsl` file into `~/.config/neowall/shaders/` and reference it from your config.
+About twenty ship with neowall, all freely licensed:
 
 | Vibe | A few |
 |------|-------|
-| Default | `tokyo_night`: rainy neon city, bloom, follows the clock and your mouse |
+| Default | `tokyo_night` |
 | Living | `garden` · `circadian_sky` · `living_aurora` |
 | Nature | `moon_ocean` · `rain_window` · `fireflies` |
 | Reactive | `audio_pulse` · `audio_bars` · `system_deck` |
@@ -148,192 +97,49 @@ About 20 in the box, all freely licensed. Bring your own: neowall accepts unmodi
 | Abstract | `plasma_touch` · `neon_city` · `time` |
 | Space | `star_next` · `starfield_warp` |
 
-More community ports whose licenses don't allow redistribution live in
-[`contrib/shaders-unlicensed/`](contrib/shaders-unlicensed/); they're not
-installed, but copy any of them into `~/.config/neowall/shaders/` for
-personal use.
-
-Pair it with [**GLEditor**](https://github.com/1ay1/gleditor) for a live-preview shader workflow that one-clicks into neowall.
-
-### Reactive shaders — a living desktop
-
-neowall is a **superset of Shadertoy**: on top of full compatibility it feeds
-shaders *live data from your machine* and ships a GLSL std-lib (noise, SDFs,
-palettes, tonemap) injected automatically — no `#include`. Shaders can react to
-system audio (FFT), CPU/RAM/network load, battery, the real time of day, and
-your mouse/keyboard. See [`docs/REACTIVE_SHADERS.md`](docs/REACTIVE_SHADERS.md).
-
-| Shader | Reacts to |
-|--------|-----------|
-| `audio_pulse` · `audio_bars` | system audio — spectrum, bass, beats |
-| `mouse_ripples` | water ripples from your cursor (click = splash) |
-| `plasma_touch` | plasma you push around with the mouse |
-| `fireflies` | a swarm that gathers at your pointer, flares on beat |
-| `starfield_warp` | warp speed scales with mouse motion + audio |
-| `system_monitor` | CPU heat, RAM tide, network pulses, battery |
-| `system_deck` | a command-deck HUD: CPU/RAM gauges, scrolling history graph, per-core meters, net traces, battery, clock |
-| `rain_window` | rain on glass — heavier with network, lightning on beat |
-| `circadian_sky` | a sky synced to your real clock: dawn → noon → dusk → stars |
-
-Drop a `.neowall` sidecar next to any shader for explicit channel bindings and
-custom reactive uniforms (e.g. `uniform uGlow audio_bass`). Audio capture uses
-`parec` (PipeWire/PulseAudio) and degrades to silence if it's not installed. It
-records your **speaker output** (the default sink's monitor), never the
-microphone, and only starts when the loaded shader actually reads audio.
-
-**Changing what feeds `iChannel0..3`** (audio, noise, self-feedback, another
-buffer, a texture, a bitmap font atlas): a bare `.glsl` guesses via a heuristic;
-a `.neowall` sidecar lets you bind each channel explicitly — `channel0 audio`,
-`channel1 self`, `channel2 font`, etc.
-See [`docs/REACTIVE_SHADERS.md`](docs/REACTIVE_SHADERS.md#3-neowall-manifests).
-
-**Window-aware shaders.** On Hyprland a shader can see your windows:
-`iWindows[]` / `iWindowCount` give their rects and `iFocusedWindow` the
-fullscreen one, so the wallpaper can glow around them, light them, or grow
-around them. `window_forge` shows it off. Elsewhere `iWindowCount` is 0.
-
-## Terminal as wallpaper
-
-Any terminal program can *be* the wallpaper. neowall ships its own in-tree,
-dependency-free VT/xterm-class terminal emulator (real PTY, spec-correct
-ANSI/DEC parser, cell grid with SGR truecolour, scroll regions, the alternate
-screen, mouse reporting and colour emoji) and renders its cell grid on the GPU —
-so `btop`, `htop`, `cava`, `vim` or a scrolling `journalctl -f` run live behind
-your windows.
-
-```
-default {
-  terminal btop
-  term_cols 0     # 0 = auto-fit the whole display
-  term_rows 0
-}
-```
-
-```
-default {
-  terminal "journalctl -f"
-  term_font_size 16
-  term_shader crt.glsl    # optional: pipe the terminal through a CRT/glow pass
-}
-```
-
-It's a *real* terminal, not a screenshot: it answers the startup handshake
-(cursor-position report, Device Attributes) so probing TUIs enter their render
-loop and animate, forwards the pointer when the app enables mouse reporting, and
-auto-restarts the command if it exits. No libvterm, no external terminal — every
-byte of the parser and screen model is in-tree, in the same spirit as neowall's
-hand-rolled event loop and config parser.
-
-Full key reference (`term_font`, `term_font_size`, `term_fg`/`term_bg`,
-`term_cwd`, `term_env`, `term_shader`, …) is in
-[`config/docs/CONFIG.md`](config/docs/CONFIG.md#terminal-options).
-
-An idle terminal costs nothing: when the child stops printing and the
-effects settle, neowall stops drawing it until the next byte arrives.
-
-## How it works
-
-Single C binary. One loop thread runs a small Elm-style runtime: signals, the
-compositor socket, the control socket, timers and worker threads all become
-messages folded into one model, and frames are drawn after each step that
-changed something. Sensor sampling, audio capture and terminal PTYs run on
-their own threads and only hand data over. Rendering goes through EGL →
-OpenGL 3.3 core.
-
-```
-config.vibe → runtime loop ─┬─→ EGL / OpenGL 3.3
-                            ├─→ Wayland (layer-shell)
-                            └─→ X11 (root window + EWMH)
-```
-
-Smooth by construction:
-
-- Each monitor is paced by its own frame callback, so a slow one can't stall
-  the rest.
-- On Wayland `iTime` is stamped with the vblank each frame is shown at, so
-  animation moves exactly one refresh per refresh.
-- `iTime` resets before float32 gets coarse, behind a cross-fade if the
-  wallpaper never goes hidden, so a wallpaper that runs for weeks stays as
-  smooth as on day one.
-- Every pass renders at full resolution; neowall never quietly scales your
-  shader down.
-
-More in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
-[`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
-
-Smart pause is the main thing that separates neowall from the obvious one-evening hack:
-
-- Wayland: `wl_surface.frame` watchdog + `wlr-foreign-toplevel` state bits, plus a Hyprland-specific IPC path that handles the awkward "tiled mosaic of small windows covers the wallpaper" case
-- X11: EWMH `_NET_WM_STATE_FULLSCREEN` on every output
-
-Result: while a fullscreen game, a maximized browser, or a wall of tiled terminals is covering the screen, neowall draws zero frames. The moment you switch workspaces, it picks back up.
-
-## Compared to
-
-| | neowall | swww | mpvpaper | hyprpaper |
-|-|---------|------|----------|-----------|
-| Animated GLSL shaders | ✓ | – | – | – |
-| Drop-in Shadertoy support | ✓ | – | – | – |
-| Terminal / TUI as wallpaper | ✓ | – | – | – |
-| Image slideshow | ✓ | ✓ | – | ✓ |
-| Video | – | gifs only | ✓ | – |
-| Wayland | ✓ | ✓ | ✓ | ✓ |
-| X11 | ✓ | – | – | – |
-| Pauses when occluded | ✓ | – | – | – |
-
-If you want video wallpapers, use mpvpaper — neowall is deliberately not that.
-
-## Caveats, honestly
-
-- **KDE Plasma**: native desktop icons may hide while neowall owns the background layer. Use a dock or `plasma-desktop`'s widgets.
-- **GNOME/Mutter and other compositors without layer-shell**: unsupported. Wayland does not allow a client to map a visible wallpaper from a bare `wl_surface`; neowall exits with an actionable error instead of silently selecting a non-visible fallback.
-- **No video**: by design.
-
-## Hacking
+To write your own:
 
 ```bash
-meson setup build --buildtype=debug
-ninja -C build
-./build/neowall -f -v
+neowall new aurora           # a working shader in ~/.config/neowall/shaders/
+neowall watch aurora         # live reload as you edit
+neowall render aurora        # render it offscreen to aurora.png
 ```
 
-Run the test suite with `meson test -C build`. The unit tests are headless;
-the `e2e` suite runs the real daemon under a headless sway (and Xvfb or
-Xwayland for X11) and skips if those aren't installed. For the memory-safety
-and concurrency gates use a sanitized build, the same as CI:
+[SHADERS.md](docs/SHADERS.md) covers the inputs, the standard library, 3D
+scenes, multiple passes and Shadertoy import.
 
-```bash
-meson setup build-asan -Db_sanitize=address,undefined && meson test -C build-asan
-meson setup build-tsan -Db_sanitize=thread -Db_lundef=false && \
-  meson test -C build-tsan output_refcount foundation runtime terminal_wake ipc child_signals
-```
+## Compatibility
 
-Before sending a patch, run `scripts/format.sh` and `scripts/check-layers.sh`;
-CI fails on either.
+neowall draws the wallpaper with the `wlr-layer-shell` protocol on Wayland and
+as the root window on X11.
 
-Docs:
+- **Works on** Hyprland, Sway, river, Wayfire, KDE Plasma and other
+  compositors with layer-shell, and on X11 window managers such as i3,
+  bspwm, awesome, xmonad and qtile.
+- **Window awareness** (shaders reacting to window positions) is available on
+  Hyprland.
+- **GNOME on Wayland is not supported:** Mutter doesn't implement layer-shell,
+  and neowall says so and exits instead of showing nothing.
+- **KDE Plasma:** desktop icons can be hidden while neowall owns the
+  background layer.
+- **Video** is out of scope; for video wallpapers use
+  [mpvpaper](https://github.com/GhostNaN/mpvpaper).
+
+## Documentation
 
 | | |
 |-|-|
-| [`config/docs/CONFIG.md`](config/docs/CONFIG.md) | every config key, daemon commands |
-| [`docs/SHADER_NOTES.md`](docs/SHADER_NOTES.md) | writing shaders: stdlib, scene kit, manifests, workflow |
-| [`docs/REACTIVE_SHADERS.md`](docs/REACTIVE_SHADERS.md) | every reactive uniform, audio, manifests |
-| [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | what costs what, and what to do about it |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | layout, threading, locks, conventions |
-| [`docs/architecture/RUNTIME.md`](docs/architecture/RUNTIME.md) | the event loop and its rules |
-| [`docs/architecture/MODERN_C.md`](docs/architecture/MODERN_C.md) | where the C architecture is headed, and why |
-| [`docs/architecture/BACKEND_ABI.md`](docs/architecture/BACKEND_ABI.md) | the backend interface, and adding a backend |
-| [`docs/MULTI_MONITOR_SYNC.md`](docs/MULTI_MONITOR_SYNC.md) | spanning one scene across monitors |
-| [`docs/PACKAGING.md`](docs/PACKAGING.md) | distro packaging and releases |
+| [Configuration](docs/CONFIGURATION.md) | Every option, with examples |
+| [Writing shaders](docs/SHADERS.md) | Inputs, helpers, passes, the authoring tools |
+| [Performance](docs/PERFORMANCE.md) | Measuring and reducing GPU cost |
+| [Architecture](docs/ARCHITECTURE.md) | How the code is organised, for contributors |
+| [Contributing](CONTRIBUTING.md) | Building, testing and sending changes |
+| [Changelog](CHANGELOG.md) | What changed in each release |
 
-Shaders, bug reports, and compositor coverage PRs are all welcome. Issue tracker is the place.
+`man neowall` and `man neowall.vibe` cover the same ground offline.
 
 ## License
 
-MIT.
-
----
-
-<p align="center">
-  <a href="https://github.com/1ay1/neowall/issues">Issues</a> · <a href="https://github.com/1ay1/neowall/discussions">Discussions</a> · <a href="https://github.com/1ay1/neowall">★ if it's your thing</a>
-</p>
+MIT. The bundled shaders in `examples/shaders/` are MIT too; community ports
+with other licenses live in [`contrib/`](contrib/shaders-unlicensed/) and are
+not installed.

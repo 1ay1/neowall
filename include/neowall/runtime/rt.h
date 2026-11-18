@@ -1,7 +1,7 @@
 #ifndef NEOWALL_RUNTIME_RT_H
 #define NEOWALL_RUNTIME_RT_H
 
-/* rt: a small Elm-style runtime loop (see docs/architecture/RUNTIME.md).
+/* rt: a small Elm-style runtime loop (see docs/internals/runtime.md).
  *
  * The loop owns the thread and waits on three kinds of thing:
  *   - fds a host watches (the Wayland/X11 socket, an inotify fd)

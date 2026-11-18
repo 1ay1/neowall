@@ -2,7 +2,7 @@
  * source.c — registry, spec parsing, and instance lifecycle for the data plane.
  *
  * See include/neowall/source/source.h for the contract, and
- * docs/architecture/SHADER_ENGINE_V2.md for why this layer exists.
+ * docs/ARCHITECTURE.md §8 for why this layer exists.
  *
  * No GL and no display server: everything here is string work, a table, and
  * scheduling arithmetic against an injected clock. That is deliberate — it is

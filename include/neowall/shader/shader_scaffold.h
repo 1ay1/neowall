@@ -1,7 +1,7 @@
 /* Shader scaffolding — `neowall new <name>`.
  *
  * The standard library and scene kit are only useful if an author knows they
- * exist. Discovering them currently means reading SHADER_NOTES.md and typing
+ * exist. Discovering them currently means reading docs/SHADERS.md and typing
  * the boilerplate from memory, which is exactly the friction that stops people
  * trying an idea at all.
  *

@@ -1,7 +1,7 @@
 #ifndef NEOWALL_APP_H
 #define NEOWALL_APP_H
 
-/* The neowall program on the rt runtime (docs/architecture/RUNTIME.md).
+/* The neowall program on the rt runtime (docs/internals/runtime.md).
  *
  * app_run() is the main loop: it builds the program and
  * host, wires signals, and runs the loop until the daemon is told to stop.

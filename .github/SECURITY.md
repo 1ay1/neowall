@@ -1,88 +1,25 @@
-# Security Policy
+# Security policy
 
-**"Sets wallpapers until it... doesn't (securely)"**
+## Supported versions
 
-## Supported Versions
+Security fixes go into the latest release.
 
-We actively maintain and provide security updates for the following versions:
+## Reporting a vulnerability
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
-| < 0.1   | :x:                |
+Please don't open a public issue. Report it privately through GitHub's
+[security advisory form](https://github.com/1ay1/neowall/security/advisories/new),
+with the affected version, steps to reproduce, and the impact you expect.
+You'll get a reply within a few days.
 
-## Reporting a Vulnerability
+## What counts
 
-We take security seriously. If you discover a security vulnerability in NeoWall, please report it responsibly.
+neowall runs as your user and reads files you point it at: its config,
+shaders, images, and Shadertoy exports you import. Problems worth reporting
+include:
 
-### How to Report
-
-**DO NOT** open a public GitHub issue for security vulnerabilities.
-
-Instead, please:
-
-1. **Email:** Send details to the maintainer (check GitHub profile for contact)
-2. **GitHub Security Advisory:** Use the [private vulnerability reporting feature](https://github.com/1ay1/neowall/security/advisories/new)
-
-### What to Include
-
-Please provide:
-
-- Description of the vulnerability
-- Steps to reproduce the issue
-- Affected versions
-- Potential impact
-- Any suggested fixes (if you have them)
-
-### Response Timeline
-
-- **Initial Response:** Within 48 hours
-- **Status Update:** Within 7 days
-- **Fix Timeline:** Depends on severity
-  - Critical: 1-3 days
-  - High: 1-2 weeks
-  - Medium: 2-4 weeks
-  - Low: Next release cycle
-
-### Security Considerations
-
-NeoWall is designed with security in mind:
-
-- **No Root Privileges:** Runs as a normal user
-- **No Network Access:** Purely local, no external connections
-- **Limited Attack Surface:** Minimal dependencies
-- **Input Validation:** All user inputs are validated
-- **Safe File Operations:** Proper bounds checking on file I/O
-- **Memory Safety:** Careful memory management with proper cleanup
-
-### Known Security Boundaries
-
-What NeoWall does NOT protect against:
-
-- **Malicious Images:** We load PNG/JPEG files - ensure your image sources are trusted
-- **Config Injection:** Don't allow untrusted users to modify your config file
-- **Symlink Attacks:** Be cautious with symbolic links in wallpaper directories
-- **File Permissions:** Ensure your wallpaper files have appropriate permissions
-
-### Security Best Practices
-
-When using NeoWall:
-
-1. ✅ Keep NeoWall updated to the latest version
-2. ✅ Use wallpapers from trusted sources
-3. ✅ Set appropriate file permissions on config files (`chmod 600 ~/.config/neowall/config.vibe`)
-4. ✅ Verify image files before using them as wallpapers
-5. ✅ Don't run NeoWall with elevated privileges (unnecessary and dangerous)
-6. ✅ Review config changes if using auto-reload (`--watch`)
-
-### Past Security Issues
-
-None reported yet. We'll maintain a list here if any are discovered.
-
-### Acknowledgments
-
-We appreciate responsible disclosure and will credit security researchers who report vulnerabilities (unless they prefer to remain anonymous).
-
----
-
-**Remember:** Even wallpaper daemons deserve secure code. If you find something, let us know!
+- memory-safety bugs in anything that parses those files (the config, shader
+  manifests, PNG, JPEG and EXIF readers, the terminal emulator, the font
+  reader), all of which are fuzzed in CI;
+- a shader or manifest that can run commands or read files without
+  `allow_exec` being enabled by the user;
+- the control socket accepting commands from another user.

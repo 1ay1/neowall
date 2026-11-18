@@ -215,7 +215,7 @@ clients. neowall exits with a clear message there. GNOME on X11 works.
 /usr/share/bash-completion/completions/neowall
 /usr/share/zsh/site-functions/_neowall
 /usr/share/fish/vendor_completions.d/neowall.fish
-/usr/share/doc/neowall/{README.md,LICENSE,CHANGELOG.md,CONFIG.md}
+/usr/share/doc/neowall/{README.md,LICENSE,CHANGELOG.md,CONFIGURATION.md,SHADERS.md}
 ```
 
 `appstreamcli validate` and `desktop-file-validate` both pass on the

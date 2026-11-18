@@ -228,7 +228,7 @@ egl_sources = files(
 )
 
 # Data-plane sources (open provider registry; see
-# docs/architecture/SHADER_ENGINE_V2.md). GL-free and dependency-free.
+# docs/ARCHITECTURE.md §8). GL-free and dependency-free.
 source_sources = files(
   'src/source/source.c',
   'src/source/builtin_value.c',
@@ -243,7 +243,7 @@ source_reactive_sources = files(
 )
 
 # GL object layer: programs, textures, render targets. No shader semantics.
-# Bottom of the v2 engine (docs/architecture/SHADER_ENGINE_V2.md).
+# Bottom of the v2 engine (docs/ARCHITECTURE.md §8).
 gfx_sources = files(
   'src/gfx/gfx.c',
 )
@@ -538,7 +538,7 @@ install_subdir('examples/shaders',
 
 # Install documentation
 doc_dir = get_option('datadir') / 'doc' / 'neowall'
-install_data('README.md', 'LICENSE', 'CHANGELOG.md', 'config/docs/CONFIG.md',
+install_data('README.md', 'LICENSE', 'CHANGELOG.md', 'docs/CONFIGURATION.md', 'docs/SHADERS.md',
   install_dir: doc_dir)
 
 # Desktop integration, named by the AppStream id

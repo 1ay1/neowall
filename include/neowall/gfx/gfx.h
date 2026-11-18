@@ -3,7 +3,7 @@
  * ============================================================================
  *
  * The bottom layer of the v2 shader engine (see
- * docs/architecture/SHADER_ENGINE_V2.md). Programs, textures, render targets.
+ * docs/ARCHITECTURE.md §8). Programs, textures, render targets.
  * It knows about OpenGL and knows nothing about Shadertoy, passes, channels,
  * multipass, reactive data, or wallpapers. The shader engine's render targets
  * are nw_gfx_targets.

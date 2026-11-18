@@ -1,110 +1,96 @@
 # Performance
 
-How fast a shader wallpaper runs comes down to three numbers multiplied
-together: how many pixels it draws, how much work each pixel does, and how
-many frames a second. This page covers how to see where you are, what neowall
-does about it, and what you can do.
+A shader wallpaper's cost is three numbers multiplied together: how many
+pixels it draws, how much work each pixel does, and how many frames a second.
 
 ## What neowall does for you
 
-- **Every pass is drawn at full resolution, every frame.** neowall used to
-  scale shaders down, render buffer passes at half resolution and skip
-  alternate buffer updates to hit a frame budget. It misjudged often enough
-  (garden's feedback buffer ran at 50% on a fast GPU) that all of it is now
-  off. Adaptive resolution is disabled by default and the scale is pinned to
-  1.0. If a shader looks wrong, it isn't neowall degrading it.
-- **The one skip left is a frame identical to the last.** A shader that never
-  reads `iTime`, the mouse, audio or a reactive uniform paints once and then
-  sleeps. An idle terminal wallpaper sleeps until its child prints.
-- **Hidden wallpapers stop.** With `pause_on_fullscreen` (on by default) an
-  output covered by a fullscreen window, or by tiled windows past
-  `pause_coverage_threshold` on Hyprland, stops rendering.
-- **Monitors don't hold each other up.** With vsync on, each Wayland output is
-  paced by its own frame callback, so one slow or hidden monitor can't stall
-  the others or the event loop.
-- **Nothing slow runs on the render thread.** Sensor reads (hwmon,
-  `gpu_busy_percent`, `/proc`), audio capture and `nvidia-smi` all run on
-  their own threads and hand over a snapshot.
+- **Hidden wallpapers stop.** A monitor covered by a fullscreen window stops
+  rendering (`pause_on_fullscreen`, on by default), and so does one covered by
+  tiled windows past `pause_coverage_threshold` on Hyprland. A covered
+  wallpaper uses about 0.1% CPU.
+- **Static content sleeps.** A shader that reads no time, mouse, audio or live
+  input draws once. An idle terminal wallpaper sleeps until its program prints.
+- **Monitors don't hold each other up.** On Wayland each monitor is paced by
+  its own frame callbacks, so a slow or hidden one can't stall the others.
+- **Nothing slow runs on the render thread.** Sensors, audio capture and
+  `nvidia-smi` run on their own threads; audio analysis is skipped in silence
+  and while no visible shader reads it.
+- **Every pass runs at the resolution you ask for**, every frame. neowall never
+  lowers quality behind your back; you decide with `scale` and `shader_fps`.
 
-## See where you are
+## Measure
 
 ```bash
-neowall preview garden -v        # or: neowall -f -v
+neowall render myshader --size 3440x1440 --bench
 ```
 
-Every two seconds per output:
-
 ```
-FPS [DP-1]: 60.0 FPS (vsync: monitor sync, frame_time: 1ms)
+GPU time per frame (3440x1440, mean of 117 frames):
+  Clouds            0.03 ms
+  Buffer A          0.62 ms
+  Buffer B          0.18 ms
+  Buffer C          0.14 ms
+  Buffer D          0.02 ms
+  Halo              0.01 ms
+  Image             0.20 ms
+  total             1.21 ms
+  busy:    4% of the GPU at 30 fps,    7% at 60 fps
 ```
 
-`frame_time` is CPU time spent in the draw call, not GPU time. If FPS sits
-below your refresh rate while `frame_time` is small, the GPU is the limit.
-`nvidia-smi` / `radeontop` / `intel_gpu_top` will show it pegged.
+This is real GPU time per pass, measured with timer queries, at the size you
+pass (use your monitor's). GPU utilisation graphs such as `nvidia-smi`
+overstate a wallpaper's cost: a light job keeps the GPU at power-saving
+clocks, where a small amount of work shows as a high percentage.
 
-## Pixel count
+`neowall -f -v` also logs the achieved frame rate of each monitor every two
+seconds.
 
-neowall draws at the output's buffer size. On a scaled HiDPI output that's
-the physical size, not the logical one.
+## Reduce the cost
 
-| Output | Pixels per frame | vs 1080p |
-|--------|------------------|----------|
+1. **Cap the frame rate.** Slow-moving scenes look the same at 30 fps and cost
+   half:
+
+   ```
+   default {
+     shader tokyo_night
+     shader_fps 30
+   }
+   ```
+
+2. **Render soft passes at lower resolution.** Blur, bloom, glow, clouds and
+   fog look the same at a fraction of the size. In the shader's manifest:
+
+   ```
+   bufferC { ch0 bufferB  scale 0.25 }
+   ```
+
+   The default `tokyo_night` renders its clouds and bloom at a quarter and its
+   halo at an eighth of the screen, which took it from 2.0 ms to 1.2 ms a frame
+   at 3440×1440 with no visible difference.
+
+3. **Skip work that can't show.** Return early for pixels a feature can't
+   reach (the sky above the tallest building, a band where cars drive), and
+   compute per-object values once instead of per pixel.
+
+4. **Use fewer noise octaves.** `nwFbm(p, 4)` instead of six is often
+   indistinguishable, and noise inside a loop multiplies quickly.
+
+5. **Put heavy shaders on smaller monitors.** Every monitor draws its own
+   frames, and a 4K screen has four times the pixels of a 1080p one.
+
+| Resolution | Pixels | vs 1080p |
+|------------|--------|----------|
 | 1920×1080 | 2.1 M | 1.0× |
 | 2560×1440 | 3.7 M | 1.8× |
 | 3440×1440 | 5.0 M | 2.4× |
 | 3840×2160 | 8.3 M | 4.0× |
 
-Several monitors add up: every output draws its own frames.
+On a scaled HiDPI monitor neowall draws at the physical resolution.
 
-## Per-pixel work
+## What is expensive
 
-What's expensive, roughly in order:
-
-- **Raymarch loops.** A `for` loop calling `map()` 64–128 times per pixel,
-  plus normals (3–6 more calls), soft shadows and AO. `neon_city.glsl` and
-  `moon_ocean.glsl` are in this class.
-- **Reflections and volumetrics.** A second march per pixel, or a march
-  through fog.
-- **Deep noise.** `nwFbm` with 6+ octaves, especially nested inside a loop.
-  Hoist anything that doesn't depend on the pixel out of the per-pixel path:
-  garden's frame cost halved at 3440×1440 by computing a stem's wind
-  turbulence once per plant instead of per sample point.
-- **Many texture reads** are cheap by comparison; plain math is cheaper still.
-
-## What you can do
-
-1. **Pick shaders per monitor.** Put the heavy one on the smaller display:
-
-   ```vibe
-   output {
-     DP-1     { shader plasma_touch.glsl }    # 4K: something light
-     HDMI-A-1 { shader neon_city.glsl }       # 1080p: can afford it
-   }
-   ```
-
-2. **Lower `shader_fps`** with `vsync false`. GPU load drops about linearly:
-
-   ```vibe
-   default {
-     shader neon_city.glsl
-     vsync false
-     shader_fps 30
-   }
-   ```
-
-   With `vsync true` (the default) the display's refresh paces the shader.
-
-3. **Use a lighter shader.** `plasma_touch`, `starfield_warp`, `fireflies`
-   and most of the reactive examples run at 4K on modest GPUs.
-
-4. **Profile your own shader** with `neowall watch myshader.glsl`: it
-   recompiles on save, so you can comment out a pass or cut an octave and
-   watch the FPS line.
-
-## Timing
-
-Smoothness is a separate question from speed. On Wayland each frame's `iTime`
-is stamped with the vblank it will be shown at, so it advances by exactly one
-refresh per refresh even when the draw start jitters. Long-running
-wallpapers reset their clock before float32 precision gets coarse. See
-[ARCHITECTURE.md](ARCHITECTURE.md) §8, "Shader time".
+Roughly in order: raymarch loops (64–128 scene evaluations per pixel, plus
+normals, shadows and ambient occlusion), a second march for reflections or
+fog, deep noise (especially inside loops), then texture reads. Plain
+arithmetic is cheapest.

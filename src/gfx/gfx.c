@@ -2,7 +2,7 @@
  * gfx.c — GL object handling, extracted from shader_multipass.c.
  *
  * See include/neowall/gfx/gfx.h for the contract and
- * docs/architecture/SHADER_ENGINE_V2.md for where this sits.
+ * docs/ARCHITECTURE.md §8 for where this sits.
  *
  * Everything here is mechanical GL. The only real behaviour is the feedback
  * flip in nw_gfx_target, which exists so no caller has to keep track of which

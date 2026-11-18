@@ -98,7 +98,7 @@ compositor_backend_init(state)
             init() → if non-NULL, this is your backend
                    → if NULL, startup fails
 
-every runtime step (see docs/architecture/RUNTIME.md):
+every runtime step (see docs/internals/runtime.md):
     prepare:  prepare_events() ; flush() ; has_pending_events()
     wait:     ppoll(get_fd(), timers, mailbox)
     fd ready: read_events()       (or cancel_read() if it wasn't)

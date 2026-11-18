@@ -11,6 +11,7 @@ neowall \- GPU shader, image and terminal wallpapers for Wayland and X11
 .IR offset ]
 .RB [ \-\-timelapse
 .IR span / duration ]
+.RB [ \-\-allow\-exec ]
 .br
 .B neowall
 .I command
@@ -57,6 +58,13 @@ Handy for previewing time\-of\-day wallpapers.
 Compress shader time, e.g.
 .B 30d/20s
 plays thirty days in twenty seconds.
+.TP
+.B \-\-allow\-exec
+Let shader manifests run commands for live values
+.RB ( exec(\(dq...\(dq) ),
+like
+.B allow_exec
+in the config.
 .TP
 .BR \-h ", " \-\-help
 Print usage and exit.

@@ -111,7 +111,7 @@ static const char *const tmpl_reactive =
     "// %s.glsl -- a wallpaper that watches the machine.\n"
     "//\n"
     "// Every uniform here is live system state. Full catalogue in\n"
-    "// docs/SHADER_NOTES.md; the useful ones are below.\n"
+    "// docs/SHADERS.md; the useful ones are below.\n"
     "//\n"
     "// Live-reload while you edit:   neowall watch %s.glsl\n"
     "\n"

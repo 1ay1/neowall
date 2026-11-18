@@ -4,6 +4,15 @@ This document is the map of the codebase: the module boundaries, the data flow,
 the threading and lock model, and the conventions every file follows. Read it
 before making structural changes.
 
+More detail on individual parts:
+
+| | |
+|-|-|
+| [internals/runtime.md](internals/runtime.md) | The event loop, frame pacing, shader time, the control socket, hot-plug |
+| [internals/backends.md](internals/backends.md) | The compositor backend interface, and adding a backend |
+| [internals/x11.md](internals/x11.md) | The X11 backend |
+| [../src/backends/README.md](../src/backends/README.md) | Backend source layout and selection |
+
 ---
 
 ## 1. One-paragraph mental model
@@ -162,7 +171,7 @@ The CLI talks to a running daemon over a unix socket (`src/runtime/ipc.c`,
 `$XDG_RUNTIME_DIR/neowall.sock`); signals remain as a fallback when nothing
 answers on the socket.
 
-Full description: [architecture/RUNTIME.md](architecture/RUNTIME.md).
+Full description: [internals/runtime.md](internals/runtime.md).
 
 ---
 
@@ -245,7 +254,9 @@ core`. Four layers, each usable on its own:
   parallel where the driver has `KHR_parallel_shader_compile`), owns the
   buffer targets, draws a frame from a plain `nw_frame_in`. Driver errors
   come back as `file:line` with the source line and a caret, including inside
-  `#include`d files. Every pass renders every frame at full resolution.
+  `#include`d files. Every pass renders every frame, at full resolution unless
+  its manifest sets a `scale`. Optional per-pass GPU timer queries and access
+  to each pass's texture serve `neowall render --bench/--check/--passes`.
 - `wallshader.c` — one output's running shader: source + engine + manifest
   bindings (opened as `nw_source` providers) + reactive uniforms + iState
   persistence + an optional terminal (`term_gpu.c`, which owns the PTY and
@@ -270,7 +281,7 @@ they drive steps.
 
 Channel bindings (which texture feeds each `iChannelN`) are recovered by a
 documented best-effort heuristic, since a bare `.glsl` file carries no binding
-metadata.
+metadata; a `.neowall` manifest makes them explicit.
 
 ---
 
@@ -304,6 +315,8 @@ ones that matter most when changing the runtime:
 | `output_refcount` | refcount protocol under concurrency (8 threads × 20 000 iterations) |
 | `shader_source` | passes, includes, params, manifests, default bindings, pass order, line maps |
 | `shader_gl` | the engine on llvmpipe: pixels, feedback, spanning, errors as file:line, every shipped shader |
+| `render_cli` | `neowall render`: PNG and video output, determinism, `--bench`, `--check` catching a NaN fixture |
+| `e2e_wayland`, `e2e_kde`, `e2e_x11` | the whole daemon on headless sway and Xvfb, driven through every control command |
 | `shader_compat` | Shadertoy GLSL ES -> desktop GLSL rewrites |
 | `foundation`, `vibe`, `utils`, ... | pure units |
 
@@ -311,8 +324,8 @@ CI (`.github/workflows/`):
 
 - `build.yml` — multi-distro build matrix (Arch / Debian / Ubuntu, Wayland-only,
   X11-only, both) plus an Xvfb RandR smoke test.
-- `quality.yml` — the full suite under ASan+UBSan, the concurrency tests under
-  **ThreadSanitizer**, clang static analyzer + `clang-tidy`, `gcc -fanalyzer`,
+- `quality.yml` — the full suite under clang ASan+UBSan (including the e2e
+  runs), the whole suite under **ThreadSanitizer**, libFuzzer on every parser, clang static analyzer + `clang-tidy`, `gcc -fanalyzer`,
   `clang-format`, the layer check (`scripts/check-layers.sh`), an unused-code
   check, and a check that every version string agrees.
 - `release.yml` — on a `v*` tag: Arch, Fedora, openSUSE, Debian, Ubuntu
