@@ -52,6 +52,17 @@
   <releases>
     <release version="@VERSION@" date="2026-11-18">
       <description>
+        <p>Bug-fix and documentation release.</p>
+        <ul>
+          <li>shader_fps now caps the frame rate with vsync on</li>
+          <li>allow_exec and --allow-exec enable exec() shader uniforms (off by default)</li>
+          <li>current and list detect a daemon that is no longer running</li>
+          <li>Rewritten, consolidated documentation</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.10.2" date="2026-11-18">
+      <description>
         <p>Bug-fix release.</p>
         <ul>
           <li>Fixes undefined behaviour in the window backends found with sanitizers</li>

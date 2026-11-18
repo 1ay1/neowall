@@ -2,6 +2,28 @@
 
 All notable changes to neowall. Dates are release dates.
 
+## 0.10.3 - 2026-11-18
+
+### Added
+- `allow_exec true` (config) and `--allow-exec` (flag) enable `exec()`
+  manifest uniforms. The feature was documented, but nothing could turn it on.
+  It stays off by default, and a shader cannot enable it on its own.
+
+### Fixed
+- `shader_fps` was ignored with vsync on (the default). It now caps the frame
+  rate while still presenting tear-free; unset, vsync follows the monitor.
+- `neowall current` and `neowall list` reported the last wallpaper as active
+  after the daemon had exited. They now say no daemon is running.
+- `neowall render -o /dev/null` (or any pipe or device) works again.
+- `--help` and `--version` no longer say neowall is Wayland-only, and the
+  unmeasured "60 FPS" and "2% CPU" claims are gone.
+
+### Documentation
+- Rewritten and consolidated: a shorter README, `docs/CONFIGURATION.md` for
+  every option, `docs/SHADERS.md` for shader authoring, `CONTRIBUTING.md`,
+  and backend details under `docs/internals/`. Stale design notes are gone,
+  and the sample config and man pages match the code.
+
 ## 0.10.2 - 2026-11-18
 
 ### Added
