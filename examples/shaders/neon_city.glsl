@@ -44,8 +44,11 @@ float nwMap(vec3 p) {
     float shell = nwOpOnion(nwSdOctahedron(m, 1.25), 0.06);
     float monument = nwOpSmoothInter(shell, nwSdSphere(m, 1.1), 0.05);
 
-    // Keep the city clear of the monument.
+    // Keep the city clear of the monument, and of the ring the camera orbits
+    // on (radius 9.5): otherwise the mouse can swing the camera into a tower
+    // and the whole screen becomes one green wall.
     city = mix(1e4, city, smoothstep(1.6, 3.2, length(p.xz)));
+    city = mix(1e4, city, smoothstep(0.6, 1.4, abs(length(p.xz) - 9.5)));
 
     return min(min(ground, city), monument);
 }
