@@ -52,6 +52,16 @@
   <releases>
     <release version="@VERSION@" date="2026-11-18">
       <description>
+        <p>Eased shader pause.</p>
+        <ul>
+          <li>pause-shader and resume-shader take --ease-ms to glide the animation to a stop and back</li>
+          <li>shader_pause_ease_ms sets the default ease</li>
+          <li>A shader loaded while paused now shows its first frame</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.10.3" date="2026-11-18">
+      <description>
         <p>Bug-fix and documentation release.</p>
         <ul>
           <li>shader_fps now caps the frame rate with vsync on</li>

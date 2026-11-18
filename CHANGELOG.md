@@ -2,7 +2,7 @@
 
 All notable changes to neowall. Dates are release dates.
 
-## Unreleased
+## 0.11.0 - 2026-11-18
 
 ### Added
 - `pause-shader --ease-ms MS` glides the animation to a stop before
