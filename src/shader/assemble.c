@@ -130,7 +130,7 @@ static bool put_tagged(builder *b, const nw_shader_source *src, const char *s) {
  * comments)? Precision qualifiers are allowed: `uniform highp float uX;`. */
 static bool declares_uniform(const char *text, const char *name) {
     if (!text || !name || !name[0]) return false;
-    size_t nl = strlen(name);
+    size_t nl         = strlen(name);
     bool line_comment = false, block_comment = false;
     for (const char *p = text; *p; p++) {
         if (line_comment) {
@@ -150,15 +150,18 @@ static bool declares_uniform(const char *text, const char *name) {
             p++;
             continue;
         }
-        if (strncmp(p, "uniform", 7) || (p > text && (isalnum((unsigned char)p[-1]) || p[-1] == '_')) ||
+        if (strncmp(p, "uniform", 7) ||
+            (p > text && (isalnum((unsigned char)p[-1]) || p[-1] == '_')) ||
             !isspace((unsigned char)p[7]))
             continue;
         /* walk the words up to ';' and look for the name as a whole word */
         const char *q = p + 7;
         while (*q && *q != ';' && *q != '{') {
-            while (*q && isspace((unsigned char)*q)) q++;
+            while (*q && isspace((unsigned char)*q))
+                q++;
             const char *w = q;
-            while (*q && (isalnum((unsigned char)*q) || *q == '_')) q++;
+            while (*q && (isalnum((unsigned char)*q) || *q == '_'))
+                q++;
             if ((size_t)(q - w) == nl && !strncmp(w, name, nl)) return true;
             if (q == w) q++; /* punctuation: `[`, `,` ... */
         }

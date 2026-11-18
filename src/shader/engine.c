@@ -145,6 +145,7 @@ struct nw_engine {
     /* optional per-pass GPU timing (`neowall render --bench`); off by default */
     bool profiling;
     GLuint *queries; /* one GL_TIME_ELAPSED query per pass */
+    size_t n_queries;
     double *pass_ms; /* last completed result per pass */
 };
 
@@ -602,7 +603,7 @@ void nw_engine_free(nw_engine *e) {
         if (ts[i]) glDeleteTextures(1, &ts[i]);
     nw_list_free(&e->param_values);
     if (e->vao) glDeleteVertexArrays(1, &e->vao);
-    if (e->queries) glDeleteQueries((GLsizei)e->passes.len, e->queries);
+    if (e->queries) glDeleteQueries((GLsizei)e->n_queries, e->queries); /* passes.len is 0 by now */
     free(e->queries);
     free(e->pass_ms);
     free(e);
@@ -624,6 +625,7 @@ bool nw_engine_set_profiling(nw_engine *e, bool on) {
             return false;
         }
         glGenQueries((GLsizei)n, e->queries);
+        e->n_queries = n;
     }
     e->profiling = on;
     return true;

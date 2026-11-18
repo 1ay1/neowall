@@ -53,13 +53,13 @@ typedef struct {
     const char *shader;
     char out[4096];
     int w, h;
-    double time;    /* iTime of the (last) frame */
-    double fps;     /* simulation step */
-    int frames;     /* frames simulated up to `time`; 0 = derive */
-    int sheet;      /* N > 0: N frames spread over [0, time] in one PNG */
+    double time;      /* iTime of the (last) frame */
+    double fps;       /* simulation step */
+    int frames;       /* frames simulated up to `time`; 0 = derive */
+    int sheet;        /* N > 0: N frames spread over [0, time] in one PNG */
     char video[4096]; /* --video FILE: encode frames with ffmpeg */
     double duration, start;
-    bool have_path;   /* --mouse-path: pointer glides x0,y0 -> x1,y1 */
+    bool have_path; /* --mouse-path: pointer glides x0,y0 -> x1,y1 */
     float path[2][2];
     bool bench, check, passes, live, quiet;
     bool have_at;
@@ -72,43 +72,47 @@ typedef struct {
 } render_opts;
 
 static void render_usage(FILE *f) {
-    fprintf(f,
-            "Usage: neowall render <shader.glsl|.neowall> [options]\n"
-            "\n"
-            "Draw a shader offscreen and save a PNG. No compositor or daemon needed;\n"
-            "safe to run while the daemon is up (it never touches its outputs).\n"
-            "\n"
-            "Output\n"
-            "  -o, --output FILE     PNG to write (default: <shader>.png in the cwd)\n"
-            "  -s, --size WxH        resolution (default 1920x1080)\n"
-            "      --sheet N         contact sheet: N moments spread over 0..--time\n"
-            "      --passes          also save every buffer pass (FILE.<pass>.png)\n"
-            "      --video FILE      record a clip instead (mp4/mkv/webp/gif, needs ffmpeg)\n"
-            "      --duration SEC    clip length (default 10); --start SEC where it begins\n"
-            "      --mouse-path X0,Y0:X1,Y1   pointer glides across the clip (0..1)\n"
-            "\n"
-            "Time & inputs (calm & repeatable; --at pins the time of day, else it is now)\n"
-            "  -t, --time SEC        iTime of the frame (default 3)\n"
-            "      --fps N           simulation rate for feedback buffers (default 30)\n"
-            "      --frames N        frames simulated to reach --time (default time*fps)\n"
-            "      --at HH:MM        local time of day (iTimeOfDay, iSun, iDate)\n"
-            "      --mouse X,Y       pointer, 0..1 (iMouse)\n"
-            "      --set NAME=VALUE  pin any float uniform (iAudioBeat=1, iCpu=0.8, uMy=2)\n"
-            "      --palette P       iPalette: \"#1a1b26 #c0caf5 #7aa2f7 ...\" or a theme file\n"
-            "                        (default: the `palette` in your config.vibe, if any)\n"
-            "      --live            use the real CPU/audio/battery readings instead\n"
-            "\n"
-            "Diagnostics\n"
-            "      --bench           GPU time per pass, and what it costs at 30/60 fps\n"
-            "      --check           find NaN/Inf pixels in every pass (exit 2 if any)\n"
-            "  -q, --quiet           only errors\n"
-            "\n"
-            "Exit: 0 ok, 1 load/compile error, 2 --check found NaN/Inf, 77 no GPU.\n");
+    fprintf(f, "Usage: neowall render <shader.glsl|.neowall> [options]\n"
+               "\n"
+               "Draw a shader offscreen and save a PNG. No compositor or daemon needed;\n"
+               "safe to run while the daemon is up (it never touches its outputs).\n"
+               "\n"
+               "Output\n"
+               "  -o, --output FILE     PNG to write (default: <shader>.png in the cwd)\n"
+               "  -s, --size WxH        resolution (default 1920x1080)\n"
+               "      --sheet N         contact sheet: N moments spread over 0..--time\n"
+               "      --passes          also save every buffer pass (FILE.<pass>.png)\n"
+               "      --video FILE      record a clip instead (mp4/mkv/webp/gif, needs ffmpeg)\n"
+               "      --duration SEC    clip length (default 10); --start SEC where it begins\n"
+               "      --mouse-path X0,Y0:X1,Y1   pointer glides across the clip (0..1)\n"
+               "\n"
+               "Time & inputs (calm & repeatable; --at pins the time of day, else it is now)\n"
+               "  -t, --time SEC        iTime of the frame (default 3)\n"
+               "      --fps N           simulation rate for feedback buffers (default 30)\n"
+               "      --frames N        frames simulated to reach --time (default time*fps)\n"
+               "      --at HH:MM        local time of day (iTimeOfDay, iSun, iDate)\n"
+               "      --mouse X,Y       pointer, 0..1 (iMouse)\n"
+               "      --set NAME=VALUE  pin any float uniform (iAudioBeat=1, iCpu=0.8, uMy=2)\n"
+               "      --palette P       iPalette: \"#1a1b26 #c0caf5 #7aa2f7 ...\" or a theme file\n"
+               "                        (default: the `palette` in your config.vibe, if any)\n"
+               "      --live            use the real CPU/audio/battery readings instead\n"
+               "\n"
+               "Diagnostics\n"
+               "      --bench           GPU time per pass, and what it costs at 30/60 fps\n"
+               "      --check           find NaN/Inf pixels in every pass (exit 2 if any)\n"
+               "  -q, --quiet           only errors\n"
+               "\n"
+               "Exit: 0 ok, 1 load/compile error, 2 --check found NaN/Inf, 77 no GPU.\n");
 }
 
 static bool parse_size(const char *s, int *w, int *h) {
-    return sscanf(s, "%dx%d", w, h) == 2 && *w > 0 && *h > 0 && *w <= 16384 && *h <= 16384;
+    char tail;
+    return sscanf(s, "%dx%d%c", w, h, &tail) == 2 && *w > 0 && *h > 0 && *w <= 16384 && *h <= 16384;
 }
+
+/* Everything read back is RGBA float (16 B/px): cap what one run may hold so a
+ * typo like --size 16384x16384 --sheet 16 fails cleanly instead of OOM-killing. */
+#define RENDER_MAX_PIXELS (64LL * 1024 * 1024)
 
 static int parse_args(int argc, char **argv, render_opts *o) {
     memset(o, 0, sizeof(*o));
@@ -116,13 +120,13 @@ static int parse_args(int argc, char **argv, render_opts *o) {
     o->mouse[0] = o->mouse[1] = -1.0f;
     for (int i = 2; i < argc; i++) {
         const char *a = argv[i];
-#define NEXT()                                                       \
-    do {                                                             \
-        if (i + 1 >= argc) {                                         \
-            fprintf(stderr, "neowall render: %s needs a value\n", a); \
-            return -1;                                               \
-        }                                                            \
-        v = argv[++i];                                               \
+#define NEXT()                                                                                     \
+    do {                                                                                           \
+        if (i + 1 >= argc) {                                                                       \
+            fprintf(stderr, "neowall render: %s needs a value\n", a);                              \
+            return -1;                                                                             \
+        }                                                                                          \
+        v = argv[++i];                                                                             \
     } while (0)
         const char *v = NULL;
         if (!strcmp(a, "-h") || !strcmp(a, "--help")) {
@@ -199,7 +203,8 @@ static int parse_args(int argc, char **argv, render_opts *o) {
             NEXT();
             const char *eq = strchr(v, '=');
             size_t n       = eq ? (size_t)(eq - v) : 0;
-            if (!eq || n == 0 || n >= sizeof(o->set_name[0]) || o->n_set >= WALLSHADER_MAX_OVERRIDES) {
+            if (!eq || n == 0 || n >= sizeof(o->set_name[0]) ||
+                o->n_set >= WALLSHADER_MAX_OVERRIDES) {
                 fprintf(stderr, "neowall render: bad --set '%s' (want NAME=VALUE)\n", v);
                 return -1;
             }
@@ -245,6 +250,11 @@ static int parse_args(int argc, char **argv, render_opts *o) {
         int f     = (int)lround(o->time * o->fps);
         o->frames = f < 1 ? 1 : (f > 2000 ? 2000 : f);
     }
+    if ((long long)o->w * o->h > RENDER_MAX_PIXELS) {
+        fprintf(stderr, "neowall render: %dx%d is more than %lld Mpx; use a smaller --size\n", o->w,
+                o->h, RENDER_MAX_PIXELS / (1024 * 1024));
+        return -1;
+    }
     return 0;
 }
 
@@ -266,16 +276,25 @@ static bool has_ext(const char *list, const char *name) {
 }
 
 static bool try_context(headless *h) {
+    h->ctx  = EGL_NO_CONTEXT;
+    h->surf = EGL_NO_SURFACE;
     if (!eglInitialize(h->dpy, NULL, NULL)) return false;
     if (!eglBindAPI(EGL_OPENGL_API)) goto fail;
-    const char *ext = eglQueryString(h->dpy, EGL_EXTENSIONS);
-    bool surfaceless = has_ext(ext, "EGL_KHR_surfaceless_context");
-    const EGLint cfg_attr[] = {EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE,
-                               EGL_OPENGL_BIT,   EGL_RED_SIZE,    8,
-                               EGL_GREEN_SIZE,   8,               EGL_BLUE_SIZE,
-                               8,                EGL_NONE};
-    EGLConfig cfg = NULL;
-    EGLint n      = 0;
+    const char *ext         = eglQueryString(h->dpy, EGL_EXTENSIONS);
+    bool surfaceless        = has_ext(ext, "EGL_KHR_surfaceless_context");
+    const EGLint cfg_attr[] = {EGL_SURFACE_TYPE,
+                               EGL_PBUFFER_BIT,
+                               EGL_RENDERABLE_TYPE,
+                               EGL_OPENGL_BIT,
+                               EGL_RED_SIZE,
+                               8,
+                               EGL_GREEN_SIZE,
+                               8,
+                               EGL_BLUE_SIZE,
+                               8,
+                               EGL_NONE};
+    EGLConfig cfg           = NULL;
+    EGLint n                = 0;
     if (!eglChooseConfig(h->dpy, cfg_attr, &cfg, 1, &n) || n < 1) {
         cfg = NULL;
         if (!has_ext(ext, "EGL_KHR_no_config_context")) goto fail;
@@ -287,7 +306,7 @@ static bool try_context(headless *h) {
                                EGL_CONTEXT_OPENGL_PROFILE_MASK,
                                EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
                                EGL_NONE};
-    h->ctx = eglCreateContext(h->dpy, cfg, EGL_NO_CONTEXT, ctx_attr);
+    h->ctx                  = eglCreateContext(h->dpy, cfg, EGL_NO_CONTEXT, ctx_attr);
     if (h->ctx == EGL_NO_CONTEXT) goto fail;
     h->surf = EGL_NO_SURFACE;
     if (!surfaceless) {
@@ -299,6 +318,8 @@ static bool try_context(headless *h) {
     if (!eglMakeCurrent(h->dpy, h->surf, h->surf, h->ctx)) goto fail;
     return true;
 fail:
+    if (h->surf != EGL_NO_SURFACE) eglDestroySurface(h->dpy, h->surf);
+    h->surf = EGL_NO_SURFACE;
     if (h->ctx != EGL_NO_CONTEXT) eglDestroyContext(h->dpy, h->ctx);
     h->ctx = EGL_NO_CONTEXT;
     eglTerminate(h->dpy);
@@ -320,7 +341,8 @@ static const char *headless_init(headless *h) {
         if (query && query(8, devs, &nd)) {
             for (EGLint i = 0; i < nd; i++) {
                 h->dpy = get_dpy(EGL_PLATFORM_DEVICE_EXT, devs[i], NULL);
-                if (h->dpy != EGL_NO_DISPLAY && try_context(h)) return (h->how = "EGL device"), NULL;
+                if (h->dpy != EGL_NO_DISPLAY && try_context(h))
+                    return (h->how = "EGL device"), NULL;
             }
         }
     }
@@ -345,20 +367,35 @@ static void headless_fini(headless *h) {
 
 /* ── pixels ──────────────────────────────────────────────────────────── */
 
-/* RGBA float, bottom-up (GL order) → 8-bit RGB PNG, top-down. */
+/* RGBA float, bottom-up (GL order) → 8-bit RGB PNG, top-down. Written to a
+ * temporary name and renamed, so a failure never leaves a truncated PNG. */
+static bool write_png_to(FILE *f, const float *rgba, int w, int h, int stride_px);
+
 static bool write_png(const char *path, const float *rgba, int w, int h, int stride_px) {
-    FILE *f = fopen(path, "wb");
+    char tmp[4200];
+    snprintf(tmp, sizeof(tmp), "%s.part", path);
+    FILE *f = fopen(tmp, "wb");
     if (!f) {
         fprintf(stderr, "neowall render: can't write %s: %s\n", path, strerror(errno));
         return false;
     }
+    bool ok = write_png_to(f, rgba, w, h, stride_px);
+    ok      = (fclose(f) == 0) && ok;
+    if (ok && rename(tmp, path) != 0) {
+        fprintf(stderr, "neowall render: can't write %s: %s\n", path, strerror(errno));
+        ok = false;
+    }
+    if (!ok) unlink(tmp);
+    return ok;
+}
+
+static bool write_png_to(FILE *f, const float *rgba, int w, int h, int stride_px) {
     png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     png_infop info  = png ? png_create_info_struct(png) : NULL;
     uint8_t *row    = malloc((size_t)w * 3);
     if (!png || !info || !row || setjmp(png_jmpbuf(png))) {
         png_destroy_write_struct(&png, &info);
         free(row);
-        fclose(f);
         return false;
     }
     png_init_io(png, f);
@@ -372,15 +409,15 @@ static bool write_png(const char *path, const float *rgba, int w, int h, int str
                 float v = src[x * 4 + c];
                 /* NaN shows magenta so it can't hide as "black" */
                 if (!isfinite(v)) v = (c == 1) ? 0.0f : 1.0f;
-                v                  = v < 0 ? 0 : (v > 1 ? 1 : v);
-                row[x * 3 + c]     = (uint8_t)lrintf(v * 255.0f);
+                v              = v < 0 ? 0 : (v > 1 ? 1 : v);
+                row[x * 3 + c] = (uint8_t)lrintf(v * 255.0f);
             }
         png_write_row(png, row);
     }
     png_write_end(png, NULL);
     png_destroy_write_struct(&png, &info);
     free(row);
-    return fclose(f) == 0;
+    return true;
 }
 
 typedef struct {
@@ -395,8 +432,10 @@ static badness scan(const float *rgba, int w, int h) {
             const float *p = rgba + ((size_t)y * w + x) * 4;
             bool nan = false, inf = false;
             for (int c = 0; c < 4; c++) {
-                if (isnan(p[c])) nan = true;
-                else if (isinf(p[c])) inf = true;
+                if (isnan(p[c]))
+                    nan = true;
+                else if (isinf(p[c]))
+                    inf = true;
             }
             if (!nan && !inf) continue;
             b.nan += nan;
@@ -423,7 +462,7 @@ static void pass_filename(char *dst, size_t cap, const char *out, const char *pa
     char clean[64];
     size_t j = 0;
     for (size_t i = 0; pass[i] && j + 1 < sizeof(clean); i++) {
-        char c = pass[i];
+        char c     = pass[i];
         clean[j++] = (c == ' ' || c == '/') ? '_' : (char)((c >= 'A' && c <= 'Z') ? c + 32 : c);
     }
     clean[j]        = '\0';
@@ -455,11 +494,22 @@ static void pin_calm_inputs(wallshader *s) {
     static const struct {
         const char *n;
         float v;
-    } calm[] = {{"iBattery", 1.0f},     {"iCharging", 1.0f}, {"iCpu", 0.15f},
-                {"iRam", 0.35f},        {"iLoad", 0.15f},    {"iCpuTemp", 0.25f},
-                {"iCpuTempC", 46.0f},   {"iGpu", 0.10f},     {"iAudioActive", 0.0f},
-                {"iAudioLevel", 0.0f},  {"iAudioBass", 0.0f}, {"iAudioMid", 0.0f},
-                {"iAudioTreble", 0.0f}, {"iAudioBeat", 0.0f}};
+    } calm[] = {
+        {"iBattery",     1.0f },
+        {"iCharging",    1.0f },
+        {"iCpu",         0.15f},
+        {"iRam",         0.35f},
+        {"iLoad",        0.15f},
+        {"iCpuTemp",     0.25f},
+        {"iCpuTempC",    46.0f},
+        {"iGpu",         0.10f},
+        {"iAudioActive", 0.0f },
+        {"iAudioLevel",  0.0f },
+        {"iAudioBass",   0.0f },
+        {"iAudioMid",    0.0f },
+        {"iAudioTreble", 0.0f },
+        {"iAudioBeat",   0.0f }
+    };
     for (size_t i = 0; i < sizeof(calm) / sizeof(calm[0]); i++)
         wallshader_set_override(s, calm[i].n, calm[i].v);
 }
@@ -497,21 +547,23 @@ static int render_video(const render_opts *o, wallshader *s, GLuint fbo, const h
     }
 
     char cmd[8192];
-    snprintf(cmd, sizeof(cmd),
-             "ffmpeg -hide_banner -loglevel error -y -f rawvideo -pix_fmt rgb24 -s %dx%d -r %g -i - "
-             "-vf vflip %s '%s'",
-             o->w, o->h, o->fps, video_codec_args(o->video), o->video);
+    snprintf(
+        cmd, sizeof(cmd),
+        "ffmpeg -hide_banner -loglevel error -y -f rawvideo -pix_fmt rgb24 -s %dx%d -r %g -i - "
+        "-vf vflip %s '%s'",
+        o->w, o->h, o->fps, video_codec_args(o->video), o->video);
     if (strstr(video_codec_args(o->video), "filter_complex")) /* gif: flip inside the graph */
-        snprintf(cmd, sizeof(cmd),
-                 "ffmpeg -hide_banner -loglevel error -y -f rawvideo -pix_fmt rgb24 -s %dx%d -r %g -i - "
-                 "-filter_complex \"vflip,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a\" -loop 0 '%s'",
-                 o->w, o->h, o->fps, o->video);
+        snprintf(
+            cmd, sizeof(cmd),
+            "ffmpeg -hide_banner -loglevel error -y -f rawvideo -pix_fmt rgb24 -s %dx%d -r %g -i - "
+            "-filter_complex \"vflip,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a\" -loop 0 '%s'",
+            o->w, o->h, o->fps, o->video);
     FILE *ff = popen(cmd, "w");
     if (!ff) {
         fprintf(stderr, "neowall render: can't start ffmpeg (is it installed?)\n");
         return 1;
     }
-    size_t row = (size_t)o->w * 3;
+    size_t row  = (size_t)o->w * 3;
     uint8_t *px = malloc(row * o->h);
     if (!px) {
         pclose(ff);
@@ -523,8 +575,8 @@ static int render_video(const render_opts *o, wallshader *s, GLuint fbo, const h
     for (int f = -warm_n; f < frames && ok; f++) {
         double t = o->start + f * step;
         if (!o->live || o->have_at) pin_time_of_day(s, wall0 + t);
-        wallshader_frame fr = {.width = o->w, .height = o->h, .time = t,
-                               .present_at = base + (f + warm_n) * step};
+        wallshader_frame fr = {
+            .width = o->w, .height = o->h, .time = t, .present_at = base + (f + warm_n) * step};
         float mx = -1, my = -1;
         if (o->have_path) {
             double u = frames > 1 ? (double)(f < 0 ? 0 : f) / (frames - 1) : 0;
@@ -569,14 +621,15 @@ int cmd_render(int argc, char *argv[]) {
 
     double at_instant = 0; /* --at: exactly HH:MM:00 today, the same every run */
     if (o.have_at) {
+        /* one instant drives everything: iDate via the shader clock offset,
+         * iTimeOfDay/iSun via pin_time_of_day (computed with mktime, so a
+         * daylight-saving day can't put the two an hour apart) */
         time_t now = time(NULL);
         struct tm tm;
         localtime_r(&now, &tm);
-        long cur  = tm.tm_hour * 3600L + tm.tm_min * 60L + tm.tm_sec;
-        long want = o.at_h * 3600L + o.at_m * 60L;
-        nw_clock_set_offset(want - cur);
         tm.tm_hour = o.at_h, tm.tm_min = o.at_m, tm.tm_sec = 0, tm.tm_isdst = -1;
         at_instant = (double)mktime(&tm);
+        nw_clock_set_offset((long)(at_instant - (double)now));
     }
 
     headless hl;
@@ -610,8 +663,10 @@ int cmd_render(int argc, char *argv[]) {
     if (nw_is_err(r) || !s) {
         const char *e = wallshader_last_errors();
         if (r.status == NW_ERR_IO)
-            fprintf(stderr, "neowall render: can't find '%s' (a path, or a name in "
-                            "~/.config/neowall/shaders)\n", o.shader);
+            fprintf(stderr,
+                    "neowall render: can't find '%s' (a path, or a name in "
+                    "~/.config/neowall/shaders)\n",
+                    o.shader);
         else
             fprintf(stderr, "neowall render: %s failed to compile\n%s", o.shader, e && *e ? e : "");
         headless_fini(&hl);
@@ -621,14 +676,16 @@ int cmd_render(int argc, char *argv[]) {
     nw_engine *eng = wallshader_engine(s);
     int npass      = nw_engine_pass_count(eng);
     if (!o.live) pin_calm_inputs(s);
-    for (int i = 0; i < o.n_set; i++) wallshader_set_override(s, o.set_name[i], o.set_value[i]);
+    for (int i = 0; i < o.n_set; i++)
+        wallshader_set_override(s, o.set_name[i], o.set_value[i]);
     {
         /* --palette, else the config's default `palette`, else built-in */
         float pal[NW_PALETTE_MAX][3];
         int np = 0;
         if (o.palette) {
             np = neowall_palette_parse(o.palette, pal, NW_PALETTE_MAX);
-            if (np == 0) fprintf(stderr, "neowall render: --palette: no colours in '%s'\n", o.palette);
+            if (np == 0)
+                fprintf(stderr, "neowall render: --palette: no colours in '%s'\n", o.palette);
         } else {
             np = config_default_palette(pal, NW_PALETTE_MAX);
         }
@@ -648,14 +705,17 @@ int cmd_render(int argc, char *argv[]) {
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         fprintf(stderr, "neowall render: framebuffer %dx%d not supported\n", o.w, o.h);
+        glDeleteFramebuffers(1, &fbo);
+        glDeleteTextures(1, &tex);
         wallshader_free(s);
+        if (o.live) wallshader_inputs_stop();
         headless_fini(&hl);
         return 1;
     }
 
     if (!o.quiet)
-        printf("%s  %dx%d  %d pass%s  [%s, %s]\n", o.shader, o.w, o.h, npass, npass == 1 ? "" : "es",
-               (const char *)glGetString(GL_RENDERER), hl.how);
+        printf("%s  %dx%d  %d pass%s  [%s, %s]\n", o.shader, o.w, o.h, npass,
+               npass == 1 ? "" : "es", (const char *)glGetString(GL_RENDERER), hl.how);
 
     if (o.video[0]) {
         int rc = render_video(&o, s, fbo, &hl);
@@ -668,33 +728,44 @@ int cmd_render(int argc, char *argv[]) {
     }
 
     /* sheet: render N moments into a grid; otherwise one frame at --time */
-    int shots    = o.sheet > 0 ? o.sheet : 1;
-    int cols     = shots == 1 ? 1 : (shots <= 4 ? 2 : (shots <= 9 ? 3 : 4));
-    int rows     = (shots + cols - 1) / cols;
-    int sw       = o.w, sh = o.h;
+    int shots = o.sheet > 0 ? o.sheet : 1;
+    int cols  = shots == 1 ? 1 : (shots <= 4 ? 2 : (shots <= 9 ? 3 : 4));
+    int rows  = (shots + cols - 1) / cols;
+    int sw = o.w, sh = o.h;
     float *sheet = NULL;
     if (shots > 1) {
-        sheet = calloc((size_t)sw * cols * sh * rows * 4, sizeof(float));
+        long long px_total = (long long)sw * cols * sh * rows;
+        sheet = px_total <= RENDER_MAX_PIXELS ? calloc((size_t)px_total * 4, sizeof(float)) : NULL;
         if (!sheet) {
-            fprintf(stderr, "neowall render: out of memory for a %dx%d sheet\n", sw * cols, sh * rows);
+            fprintf(stderr,
+                    "neowall render: a %dx%d sheet is too large (max %lld Mpx); "
+                    "use a smaller --size or --sheet\n",
+                    sw * cols, sh * rows, RENDER_MAX_PIXELS / (1024 * 1024));
+            glDeleteFramebuffers(1, &fbo);
+            glDeleteTextures(1, &tex);
+            wallshader_free(s);
+            if (o.live) wallshader_inputs_stop();
+            headless_fini(&hl);
             return 1;
         }
     }
 
-    bench_acc ba     = {0};
+    bench_acc ba = {0};
     badness worst[64];
     int worst_frame[64];
-    for (int i = 0; i < 64; i++) worst[i] = (badness){0, 0, 0, 0, -1, -1}, worst_frame[i] = -1;
-    float *last = NULL;
-    double step = 1.0 / o.fps;
-    double base = 1000.0; /* fake monotonic "present" clock: exact dt every frame */
-    int total   = o.frames;
-    int shot    = 0;
+    for (int i = 0; i < 64; i++)
+        worst[i] = (badness){0, 0, 0, 0, -1, -1}, worst_frame[i] = -1;
+    float *last  = NULL;
+    double step  = 1.0 / o.fps;
+    double base  = 1000.0; /* fake monotonic "present" clock: exact dt every frame */
+    int total    = o.frames;
+    int shot     = 0;
     double wall0 = o.have_at ? at_instant : nw_clock_now_f();
     for (int f = 0; f < total; f++) {
         double t = total == 1 ? o.time : o.time * (double)f / (double)(total - 1);
         if (o.have_at || !o.live) pin_time_of_day(s, wall0 + t);
-        wallshader_frame fr = {.width = o.w, .height = o.h, .time = t, .present_at = base + f * step};
+        wallshader_frame fr = {
+            .width = o.w, .height = o.h, .time = t, .present_at = base + f * step};
         if (o.mouse[0] >= 0) {
             fr.mouse[0] = o.mouse[0] * (float)o.w;
             fr.mouse[1] = o.mouse[1] * (float)o.h;
@@ -703,7 +774,10 @@ int cmd_render(int argc, char *argv[]) {
         glViewport(0, 0, o.w, o.h);
         wallshader_draw(s, &fr);
 
-        if (o.bench && f >= 3 && npass <= 64) {
+        /* the first frames include shader compile/warm-up: skip them when
+         * there are enough frames to spare */
+        int bench_from = total > 6 ? 3 : 0;
+        if (o.bench && f >= bench_from && npass <= 64) {
             for (int p = 0; p < npass; p++) {
                 double ms = nw_engine_pass_ms(eng, p);
                 if (ms >= 0) ba.ms_sum[p] += ms;
@@ -722,29 +796,39 @@ int cmd_render(int argc, char *argv[]) {
                 free(px);
             }
         }
-        bool want_shot = shots > 1 ? (f == (int)lround((double)shot * (total - 1) / (double)(shots - 1)))
-                                   : (f == total - 1);
-        if (want_shot) {
-            float *px = read_texture(tex, o.w, o.h);
-            if (px && shots > 1) {
+        /* every sheet tile whose moment is this frame (several tiles share a
+         * frame when there are fewer frames than tiles) */
+        float *px = NULL;
+        while (shot < shots) {
+            int target = shots > 1 ? (int)lround((double)shot * (total - 1) / (double)(shots - 1))
+                                   : total - 1;
+            if (target > f) break;
+            if (!px) px = read_texture(tex, o.w, o.h);
+            if (!px) break;
+            if (shots > 1) {
                 int cx = shot % cols, cy = rows - 1 - shot / cols; /* GL rows are bottom-up */
                 for (int y = 0; y < sh; y++)
                     memcpy(sheet + (((size_t)(cy * sh + y) * sw * cols) + (size_t)cx * sw) * 4,
                            px + (size_t)y * sw * 4, (size_t)sw * 4 * sizeof(float));
+            }
+            shot++;
+        }
+        if (px) {
+            if (shots > 1) {
                 free(px);
             } else {
                 free(last);
                 last = px;
             }
-            shot++;
         }
     }
     glFinish();
 
-    int rc = 0;
+    int rc  = 0;
     bool ok = shots > 1 ? write_png(o.out, sheet, sw * cols, sh * rows, sw * cols)
                         : (last && write_png(o.out, last, o.w, o.h, o.w));
-    if (!ok) rc = 1;
+    if (!ok)
+        rc = 1;
     else if (!o.quiet)
         printf("wrote %s%s\n", o.out, shots > 1 ? " (contact sheet)" : "");
 
@@ -756,7 +840,8 @@ int cmd_render(int argc, char *argv[]) {
             float *px = read_texture(pt, pw, ph);
             char fn[4200];
             pass_filename(fn, sizeof(fn), o.out, nw_engine_pass_name(eng, p));
-            if (px && write_png(fn, px, pw, ph, pw) && !o.quiet) printf("wrote %s  (%dx%d)\n", fn, pw, ph);
+            if (px && write_png(fn, px, pw, ph, pw) && !o.quiet)
+                printf("wrote %s  (%dx%d)\n", fn, pw, ph);
             free(px);
         }
     }
@@ -786,10 +871,11 @@ int cmd_render(int argc, char *argv[]) {
                 continue;
             }
             any = true;
-            printf("  %-14s %ld NaN, %ld Inf  (frame %d, t=%.2fs)  box x=%d..%d y=%d..%d (top-down px)\n",
-                   nw_engine_pass_name(eng, p), b->nan, b->inf, worst_frame[p],
-                   total == 1 ? o.time : o.time * worst_frame[p] / (double)(total - 1), b->x0, b->x1,
-                   b->y0, b->y1);
+            printf(
+                "  %-14s %ld NaN, %ld Inf  (frame %d, t=%.2fs)  box x=%d..%d y=%d..%d (top-down px)\n",
+                nw_engine_pass_name(eng, p), b->nan, b->inf, worst_frame[p],
+                total == 1 ? o.time : o.time * worst_frame[p] / (double)(total - 1), b->x0, b->x1,
+                b->y0, b->y1);
         }
         if (any) {
             printf("  → the first pass listed is where it starts; later passes inherit it.\n"

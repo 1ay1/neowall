@@ -304,7 +304,13 @@ static struct compositor_surface *wlr_create_surface(void *data,
     }
 
     /* Create base Wayland surface */
-    wayland_t *wl                 = wayland_get();
+    wayland_t *wl = wayland_get();
+    if (!wl || !wl->compositor) {
+        log_error("Wayland is not initialised; can't create a surface");
+        free(surface_data);
+        free(surface);
+        return NULL;
+    }
     struct wl_surface *wl_surface = wl_compositor_create_surface(wl->compositor);
     if (!wl_surface) {
         log_error("Failed to create Wayland surface");
@@ -638,11 +644,11 @@ static bool wlr_resize_egl_window(struct compositor_surface *surface, int32_t wi
     return true;
 }
 
-static EGLNativeWindowType wlr_get_native_window(struct compositor_surface *surface) {
+static uintptr_t wlr_get_native_window(struct compositor_surface *surface) {
     if (!surface || !surface->egl_window) {
-        return (EGLNativeWindowType)0;
+        return 0;
     }
-    return (EGLNativeWindowType)surface->egl_window;
+    return (uintptr_t)surface->egl_window;
 }
 
 static void wlr_destroy_egl_window(struct compositor_surface *surface) {

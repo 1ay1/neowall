@@ -224,7 +224,7 @@ static void test_state_readonly_for_preview(void) {
     CHECK(remove_wallpaper_state("DP-1"));
     const char *none[] = {"HDMI-9"};
     CHECK(prune_wallpaper_state(none, 1));
-    CHECK(restore_cycle_index_from_state("DP-1") == -1);   /* preview restores nothing */
+    CHECK(restore_cycle_index_from_state("DP-1") == -1); /* preview restores nothing */
     state_file_set_readonly(false);
 
     /* the daemon's entry is untouched */
@@ -234,8 +234,8 @@ static void test_state_readonly_for_preview(void) {
     FILE *f = fopen(state_file, "r");
     CHECK(f != NULL);
     char buf[4096] = "";
-    size_t n = f ? fread(buf, 1, sizeof(buf) - 1, f) : 0;
-    buf[n] = '\0';
+    size_t n       = f ? fread(buf, 1, sizeof(buf) - 1, f) : 0;
+    buf[n]         = '\0';
     if (f) fclose(f);
     CHECK(strstr(buf, "/daemon.glsl") != NULL);
     CHECK(strstr(buf, "/preview.glsl") == NULL);
@@ -252,12 +252,12 @@ static void test_palette_parse(void) {
     float p[NW_PALETTE_MAX][3];
     CHECK(neowall_palette_parse("#ff0000 #00ff00, 0x0000ff", p, NW_PALETTE_MAX) == 3);
     CHECK(p[0][0] == 1.0f && p[0][1] == 0.0f && p[1][1] == 1.0f && p[2][2] == 1.0f);
-    CHECK(neowall_palette_parse("#7aa2f7cc", p, NW_PALETTE_MAX) == 1);   /* alpha ignored */
+    CHECK(neowall_palette_parse("#7aa2f7cc", p, NW_PALETTE_MAX) == 1); /* alpha ignored */
     CHECK(p[0][0] > 0.47f && p[0][0] < 0.48f);
-    CHECK(neowall_palette_parse("#123", p, NW_PALETTE_MAX) == 0);         /* too short */
-    CHECK(neowall_palette_parse("#1234567", p, NW_PALETTE_MAX) == 0);     /* 7 digits */
+    CHECK(neowall_palette_parse("#123", p, NW_PALETTE_MAX) == 0);     /* too short */
+    CHECK(neowall_palette_parse("#1234567", p, NW_PALETTE_MAX) == 0); /* 7 digits */
     CHECK(neowall_palette_parse("", p, NW_PALETTE_MAX) == 0);
-    CHECK(neowall_palette_parse("#000000 #111111 #222222", p, 2) == 2);  /* capped */
+    CHECK(neowall_palette_parse("#000000 #111111 #222222", p, 2) == 2); /* capped */
 
     char path[256];
     snprintf(path, sizeof(path), "/tmp/nw-palette-%d.conf", (int)getpid());

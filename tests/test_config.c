@@ -129,16 +129,16 @@ int main(void) {
 
     /* reload is strict: each bad file is rejected and nothing changes */
     const char *bad[] = {
-        "default {\n  shader a.glsl\n  path /x.png\n}\n",            /* two sources */
-        "default {\n  shader_speed -3\n  shader a.glsl\n}\n",        /* out of range */
-        "default {\n  shader_fps 2.5\n  shader a.glsl\n}\n",         /* non-integer fps */
-        "default {\n  mode sideways\n  path /x.png\n}\n",            /* unknown mode */
-        "default {\n  transition warp\n  path /x.png\n}\n",          /* unknown transition */
-        "default {\n  channels 3\n  shader a.glsl\n}\n",             /* not an array */
-        "default {\n  shader a.glsl\n",                              /* syntax */
-        "default {\n  channels [ a b c d e ]\n  shader a.glsl\n}\n", /* > 4 channels */
+        "default {\n  shader a.glsl\n  path /x.png\n}\n",                 /* two sources */
+        "default {\n  shader_speed -3\n  shader a.glsl\n}\n",             /* out of range */
+        "default {\n  shader_fps 2.5\n  shader a.glsl\n}\n",              /* non-integer fps */
+        "default {\n  mode sideways\n  path /x.png\n}\n",                 /* unknown mode */
+        "default {\n  transition warp\n  path /x.png\n}\n",               /* unknown transition */
+        "default {\n  channels 3\n  shader a.glsl\n}\n",                  /* not an array */
+        "default {\n  shader a.glsl\n",                                   /* syntax */
+        "default {\n  channels [ a b c d e ]\n  shader a.glsl\n}\n",      /* > 4 channels */
         "default {\n  shader a.glsl\n  palette \"no colours here\"\n}\n", /* bad palette */
-        "default {\n  path /x.png\n  palette \"#112233\"\n}\n",     /* palette on an image */
+        "default {\n  path /x.png\n  palette \"#112233\"\n}\n",           /* palette on an image */
     };
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         write_cfg(bad[i]);

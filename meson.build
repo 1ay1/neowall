@@ -1153,6 +1153,7 @@ endif
 # --bench/--check (a NaN fixture must be caught). Skips (77) without EGL/GL.
 test('render_cli', find_program('tests/render_cli.sh'),
   args: [neowall_exe.full_path(), meson.project_source_root()],
+  env: {'LSAN_OPTIONS': 'suppressions=' + meson.project_source_root() / 'tests/lsan.supp' + ':print_suppressions=0'},
   depends: neowall_exe, suite: 'e2e', timeout: 120)
 
 # =============================================================================

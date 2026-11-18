@@ -140,6 +140,21 @@ int main(void) {
     CHECK(hyprland_output_windows(&other, w, 8) == 0, "unknown output sees no windows");
     CHECK(hyprland_output_windows(&dp, w, 0) == 0, "max 0 writes nothing");
 
+    /* 1b. Coverage is cached per snapshot: alternating two monitors under one
+     *     snapshot must keep each monitor's own answer (DP-1 half covered,
+     *     HDMI barely), and a new snapshot must be seen. */
+    for (int i = 0; i < 3; i++) {
+        CHECK(hyprland_output_covered(&dp, 0.45f), "cached: DP-1 still half covered (%d)", i);
+        CHECK(!hyprland_output_covered(&hdmi, 0.45f), "cached: HDMI not covered (%d)", i);
+    }
+    static const char c1b[] = "[" CLIENT(1, 2, 1000, 0, 1000, 500, "0") "]";
+    serve_json(MONITORS, c1b);
+    refresh();
+    CHECK(hyprland_output_covered(&hdmi, 1.0f), "new snapshot: HDMI fully covered");
+    CHECK(!hyprland_output_covered(&dp, 0.1f), "new snapshot: DP-1 now bare");
+    serve_json(MONITORS, c1);
+    refresh();
+
     /* 2. Full tiling with no gaps covers; the same tiling with 20px gaps
      *    leaves strips that keep it under 100%. */
     static const char tiled[] =

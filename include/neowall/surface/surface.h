@@ -269,7 +269,11 @@ typedef struct compositor_backend_ops {
      * @param surface Surface to get native window for
      * @return EGLNativeWindowType for eglCreateWindowSurface
      */
-    EGLNativeWindowType (*get_native_window)(struct compositor_surface *surface);
+    /* uintptr_t, not EGLNativeWindowType: that type is a pointer or an
+     * integer depending on which platform headers a file saw, so the backends
+     * and the caller disagreed on this function's type (UB, caught by UBSan's
+     * -fsanitize=function). The caller converts. */
+    uintptr_t (*get_native_window)(struct compositor_surface *surface);
 
     /**
      * Destroy EGL window for surface

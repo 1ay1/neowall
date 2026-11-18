@@ -1,0 +1,7 @@
+# LeakSanitizer suppressions for tests that open a real GL context.
+# Only third-party driver internals belong here, never neowall code.
+#
+# NVIDIA's EGL driver opens a D-Bus connection and keeps its queued messages
+# until process exit (no neowall frame in the stack; zero reports on Mesa).
+leak:libdbus-1.so
+leak:libnvidia-

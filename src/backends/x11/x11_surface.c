@@ -699,11 +699,11 @@ bool x11_resize_egl_window(struct compositor_surface *surface, int32_t width, in
  * GET NATIVE WINDOW
  * ============================================================================ */
 
-EGLNativeWindowType x11_get_native_window(struct compositor_surface *surface) {
-    if (!surface) return (EGLNativeWindowType)0;
+uintptr_t x11_get_native_window(struct compositor_surface *surface) {
+    if (!surface) return 0;
 
     x11_surface_data_t *surf_data = surface->backend_data;
-    if (!surf_data) return (EGLNativeWindowType)0;
+    if (!surf_data) return 0;
 
-    return surf_data->native_window;
+    return (uintptr_t)surf_data->native_window;
 }

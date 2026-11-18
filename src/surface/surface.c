@@ -243,7 +243,7 @@ EGLSurface compositor_surface_create_egl(struct compositor_surface *surface, EGL
     /* X11 backend uses native window handle directly, Wayland uses egl_window */
     EGLNativeWindowType native_window;
     if (backend->ops->get_native_window) {
-        native_window = backend->ops->get_native_window(surface);
+        native_window = (EGLNativeWindowType)backend->ops->get_native_window(surface);
     } else if (surface->egl_window) {
         /* Fallback: assume egl_window is the native window handle */
         native_window = (EGLNativeWindowType)surface->egl_window;

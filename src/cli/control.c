@@ -190,7 +190,10 @@ static bool ipc_command(const char *verb, const char *arg, int *rc) {
     char reply[NW_IPC_MAX_LINE];
     /* reload answers after the new config is applied, which can mean a
      * shader compile: a second or more on software GL or a loaded machine */
-    int timeout_ms = strcmp(verb, "reload") == 0 ? 15000 : 3000;
+    /* reload replies only after the new shaders compiled; any other command
+     * can queue behind a synchronous compile (a terminal wallpaper's shader),
+     * which is slow under sanitizers or on a cold driver cache */
+    int timeout_ms = strcmp(verb, "reload") == 0 ? 15000 : 10000;
     nw_ipc_status st =
         nw_ipc_request(proto_socket_path(), verb, arg, reply, sizeof(reply), timeout_ms);
     switch (st) {

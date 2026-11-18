@@ -142,7 +142,7 @@ bool neowall_each_data_dir(bool (*fn)(const char *dir, void *ctx), void *ctx) {
         exe[len]    = '\0';
         char *slash = strrchr(exe, '/');
         if (slash) {
-            *slash                           = '\0';
+            *slash                         = '\0';
             static const char *const rel[] = {"share/neowall", "../share/neowall"};
             for (size_t i = 0; i < sizeof(rel) / sizeof(rel[0]); i++) {
                 n = snprintf(dir, sizeof(dir), "%s/%s", exe, rel[i]);
@@ -269,15 +269,18 @@ static int palette_scan(const char *s, float (*out)[3], int max) {
         else
             prefixed = false;
         int v[8], k = 0;
-        while (k < 8 && (v[k] = hexval((unsigned char)h[k])) >= 0) k++;
+        while (k < 8 && (v[k] = hexval((unsigned char)h[k])) >= 0)
+            k++;
         if ((k != 6 && k != 8) || isalnum((unsigned char)h[k]) || h[k] == '_') continue;
         /* bare tokens need a digit: "decade", "facade" are words, not colours */
         if (!prefixed) {
             bool digit = false;
-            for (int i = 0; i < k; i++) digit |= isdigit((unsigned char)h[i]) != 0;
+            for (int i = 0; i < k; i++)
+                digit |= isdigit((unsigned char)h[i]) != 0;
             if (!digit) continue;
         }
-        for (int c = 0; c < 3; c++) out[n][c] = (float)(v[c * 2] * 16 + v[c * 2 + 1]) / 255.0f;
+        for (int c = 0; c < 3; c++)
+            out[n][c] = (float)(v[c * 2] * 16 + v[c * 2 + 1]) / 255.0f;
         n++;
         p = h + k - 1;
     }
@@ -286,7 +289,8 @@ static int palette_scan(const char *s, float (*out)[3], int max) {
 
 int neowall_palette_parse(const char *spec, float (*out)[3], int max) {
     if (!spec || !out || max <= 0) return 0;
-    while (*spec == ' ' || *spec == '\t') spec++;
+    while (*spec == ' ' || *spec == '\t')
+        spec++;
     if (!*spec) return 0;
     /* inline when it starts with a colour; otherwise it names a file */
     if (spec[0] == '#' || (spec[0] == '0' && (spec[1] == 'x' || spec[1] == 'X')))

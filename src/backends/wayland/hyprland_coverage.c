@@ -492,11 +492,17 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
     /* The answer only changes when a new snapshot lands (every few hundred
      * ms), but this runs every frame: rasterise once per snapshot and
      * monitor, then reuse the covered fraction. */
-    static uint64_t cache_gen = 0;
-    static int cache_monitor = -1;
-    static float cache_frac  = 0.0f;
-    if (cache_gen == g_hypr.gen && cache_monitor == m->id) {
-        float f = cache_frac;
+    /* one slot per monitor (multi-head must not evict each other every frame);
+     * guarded by g_hypr.lock like the snapshot it caches */
+    enum { COVER_SLOTS = 8 };
+    static struct {
+        uint64_t gen;
+        int monitor;
+        float frac;
+    } cache[COVER_SLOTS];
+    int slot = ((unsigned)m->id) % COVER_SLOTS;
+    if (cache[slot].gen == g_hypr.gen && g_hypr.gen != 0 && cache[slot].monitor == m->id) {
+        float f = cache[slot].frac;
         pthread_mutex_unlock(&g_hypr.lock);
         return f >= threshold;
     }
@@ -560,10 +566,10 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
             covered += grid[y][x];
         }
     }
-    float frac    = (float)covered / (float)(GRID_W * GRID_H);
-    cache_gen     = g_hypr.gen;
-    cache_monitor = m->id;
-    cache_frac    = frac;
+    float frac          = (float)covered / (float)(GRID_W * GRID_H);
+    cache[slot].gen     = g_hypr.gen;
+    cache[slot].monitor = m->id;
+    cache[slot].frac    = frac;
     pthread_mutex_unlock(&g_hypr.lock);
 
     return frac >= threshold;

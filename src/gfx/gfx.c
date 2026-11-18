@@ -351,6 +351,7 @@ void nw_gfx_target_bind(nw_gfx_target *target) {
     }
 
     const nw_gfx_texture *write = nw_gfx_target_write(target);
+    if (!write) return; /* a target whose texture failed to allocate */
 
     glBindFramebuffer(GL_FRAMEBUFFER, target->fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, write->id, 0);
@@ -364,6 +365,7 @@ void nw_gfx_target_bind(nw_gfx_target *target) {
 
         if (target->feedback) {
             const nw_gfx_texture *other = nw_gfx_target_read(target);
+            if (!other) return;
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, other->id,
                                    0);
             glClear(GL_COLOR_BUFFER_BIT);

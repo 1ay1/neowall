@@ -50,7 +50,7 @@ vec3 apollonian(vec2 uv) {
     // the signed inverse radius is also called the bend (refer to the article above)
     vec3 dec[4];
     // a DEC is a configuration of 4 circles tangent to each other
-    // the easiest way to build the initial one it to construct a symetric Steiner Chain.
+    // the easiest way to build the initial one it to construct a symmetric Steiner Chain.
     // http://mathworld.wolfram.com/SteinerChain.html
 	float a = 6.283/3.;
 	float ra = 1.+sin(a*.5);
@@ -78,7 +78,7 @@ vec3 apollonian(vec2 uv) {
             fd *= dec[i].z < 0. ? -.5: 1.;
             if (fd>d) {fi = i;d=fd;}
         }
-        // put the cicle found in the last slot, to generate a solution
+        // put the circle found in the last slot, to generate a solution
         // in the "direction" of the point
         vec3 c = dec[3];
         dec[3] = dec[fi];

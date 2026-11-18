@@ -285,10 +285,17 @@ void wallshader_set_persist(wallshader *s, bool persist) {
 /* neowall's built-in palette, used until a config sets one: a calm night
  * (bg, fg, then blue, cyan, magenta, red, orange, yellow, green, teal). */
 static const float default_palette[][3] = {
-    {0.102f, 0.106f, 0.149f}, {0.753f, 0.792f, 0.961f}, {0.478f, 0.635f, 0.969f},
-    {0.490f, 0.812f, 1.000f}, {0.733f, 0.604f, 0.969f}, {0.969f, 0.463f, 0.557f},
-    {1.000f, 0.620f, 0.392f}, {0.878f, 0.686f, 0.408f}, {0.620f, 0.808f, 0.416f},
-    {0.451f, 0.855f, 0.792f}};
+    {0.102f, 0.106f, 0.149f},
+    {0.753f, 0.792f, 0.961f},
+    {0.478f, 0.635f, 0.969f},
+    {0.490f, 0.812f, 1.000f},
+    {0.733f, 0.604f, 0.969f},
+    {0.969f, 0.463f, 0.557f},
+    {1.000f, 0.620f, 0.392f},
+    {0.878f, 0.686f, 0.408f},
+    {0.620f, 0.808f, 0.416f},
+    {0.451f, 0.855f, 0.792f}
+};
 
 void wallshader_set_palette(wallshader *s, const float (*rgb)[3], int n) {
     if (!s) return;

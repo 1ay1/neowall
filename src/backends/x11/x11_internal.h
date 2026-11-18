@@ -188,7 +188,7 @@ void x11_commit_surface(struct compositor_surface *surface);
 bool x11_create_egl_window(struct compositor_surface *surface, int32_t width, int32_t height);
 void x11_destroy_egl_window(struct compositor_surface *surface);
 bool x11_resize_egl_window(struct compositor_surface *surface, int32_t width, int32_t height);
-EGLNativeWindowType x11_get_native_window(struct compositor_surface *surface);
+uintptr_t x11_get_native_window(struct compositor_surface *surface);
 bool x11_attach_surface(struct neowall_state *state, struct output_state *out);
 bool x11_init_outputs(void *backend_data, struct neowall_state *state);
 void x11_reconcile_outputs(x11_backend_data_t *backend);
