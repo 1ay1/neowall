@@ -2,15 +2,29 @@
 
 All notable changes to neowall. Dates are release dates.
 
-## Unreleased
+## 0.10.2 - 2026-11-18
 
 ### Added
 - `neowall render --video FILE` records a clip (mp4, mkv, webp or gif) at an
   exact frame rate with `--duration`/`--start`; `--mouse-path` glides the
-  pointer across it. Made for README demos of your shaders.
+  pointer across it.
 
-### Docs
-- README: a live demo of `tokyo_night` on a Hyprland desktop.
+### Fixed
+- The backend's native-window callback was called through a function pointer
+  of the wrong type (pointer vs integer `EGLNativeWindowType`): undefined
+  behaviour that made sanitizer builds abort at startup. CI now builds the
+  sanitizer job with clang, which catches this class of bug.
+- GPU timer queries used by `render --bench` were never freed.
+- `render --sheet` with fewer frames than tiles left most tiles black.
+- `render` writes PNGs atomically, rejects oversized `--size`/`--sheet`
+  cleanly, frees GPU objects on every error path, and keeps iDate and
+  iTimeOfDay in step on daylight-saving days.
+- Hyprland window coverage: one cache slot per monitor (multi-monitor setups
+  recomputed every frame).
+- `neon_city`: the camera could orbit into a tower and turn the screen solid
+  green.
+- NULL checks in Wayland surface creation and offscreen target setup.
+- CLI commands wait up to 10 s for a busy daemon (was 3 s).
 
 ## 0.10.1 - 2026-11-18
 

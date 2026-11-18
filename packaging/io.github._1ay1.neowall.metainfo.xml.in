@@ -52,6 +52,17 @@
   <releases>
     <release version="@VERSION@" date="2026-11-18">
       <description>
+        <p>Bug-fix release.</p>
+        <ul>
+          <li>Fixes undefined behaviour in the window backends found with sanitizers</li>
+          <li>Fixes several neowall render issues, and adds render --video</li>
+          <li>Fixes the neon_city camera clipping into a tower</li>
+          <li>Multi-monitor Hyprland coverage is cached per monitor</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.10.1" date="2026-11-18">
+      <description>
         <p>New default wallpaper.</p>
         <ul>
           <li>tokyo_night, a rainy neon Tokyo skyline that follows the clock and the mouse, is the default wallpaper</li>
