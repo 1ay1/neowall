@@ -7,7 +7,7 @@
 #include "version.h"
 
 void print_usage(const char *program_name) {
-    printf("NeoWall v%s - GPU-accelerated wallpapers for Wayland. Take the red pill. 🔴\n\n",
+    printf("NeoWall v%s - GPU-accelerated live shader wallpapers for Wayland and X11\n\n",
            NEOWALL_VERSION_STRING);
     printf("Usage: %s [OPTIONS]\n", program_name);
     printf("       %s set <index>   Set wallpaper by index (0-based)\n", program_name);
@@ -78,15 +78,12 @@ void print_usage(const char *program_name) {
 
 void print_version(void) {
     printf("NeoWall v%s\n", NEOWALL_VERSION_STRING);
-    printf("GPU-accelerated wallpapers for Wayland.\n");
-    printf("Take the red pill. 🔴💊\n");
-    printf("\nSupported features:\n");
-    printf("  - Live GPU shaders at 60 FPS (Shadertoy compatible)\n");
-    printf("  - 2%% CPU usage (lighter than video wallpapers)\n");
-    printf("  - Multi-monitor support\n");
-    printf("  - Smooth transitions (fade, slide, glitch, pixelate)\n");
-    printf("  - Works on Hyprland, Sway, River, and other Wayland compositors\n");
-    printf("\nSupported image formats:\n");
-    printf("  - PNG\n");
-    printf("  - JPEG/JPG\n");
+    printf("GPU-accelerated live shader wallpapers for Wayland and X11.\n");
+    printf("\nFeatures:\n");
+    printf("  - Live GLSL shaders (Shadertoy compatible), images and slideshows\n");
+    printf("  - Per-monitor wallpapers\n");
+    printf("  - Transitions: fade, slide-left, slide-right, glitch, pixelate\n");
+    printf("  - Wayland compositors with wlr-layer-shell (Hyprland, Sway, River, ...)\n");
+    printf("    and X11 window managers\n");
+    printf("\nImage formats: PNG, JPEG\n");
 }
