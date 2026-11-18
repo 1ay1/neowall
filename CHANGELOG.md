@@ -2,6 +2,20 @@
 
 All notable changes to neowall. Dates are release dates.
 
+## 0.10.1 - 2026-11-18
+
+### Changed
+- `tokyo_night`, a rainy neon Tokyo skyline in the Tokyo Night palette, is
+  the new default wallpaper. It has seven passes with quarter-resolution clouds and bloom, follows
+  the real clock, parallaxes with the mouse, and costs ~1.2 ms per frame at
+  3440x1440.
+
+### Fixed
+- Builds on musl (Alpine): the GPU timer query used by `render --bench` is
+  looked up at runtime instead of linked, as libGL there doesn't export it.
+- `-Werror` builds of the test suite: the theme-palette GLSL chunk is now in
+  the stdlib namespace audit (test_glsl_shadow).
+
 ## 0.10.0 - 2026-11-18
 
 ### Added

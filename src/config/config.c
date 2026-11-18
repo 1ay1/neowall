@@ -1177,7 +1177,7 @@ bool config_create_default(const char *config_path) {
         "#\n"
         "# Image:      default { path ~/Pictures/wallpaper.png  mode fill }\n"
         "# Slideshow:  default { path ~/Pictures/Wallpapers/  duration 300 }\n"
-        "# Shader:     default { shader garden }\n"
+        "# Shader:     default { shader tokyo_night }\n"
         "\n"
         "default {\n"
         "  shader neowall_default.glsl\n"

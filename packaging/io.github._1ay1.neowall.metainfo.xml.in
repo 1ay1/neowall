@@ -52,6 +52,15 @@
   <releases>
     <release version="@VERSION@" date="2026-11-18">
       <description>
+        <p>New default wallpaper.</p>
+        <ul>
+          <li>tokyo_night, a rainy neon Tokyo skyline that follows the clock and the mouse, is the default wallpaper</li>
+          <li>Builds on musl again</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.10.0" date="2026-11-18">
+      <description>
         <p>Shader authoring and performance release.</p>
         <ul>
           <li>New neowall render: draw a shader to a PNG offscreen, with contact sheets, time of day and pinned inputs</li>

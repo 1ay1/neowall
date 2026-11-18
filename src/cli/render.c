@@ -11,7 +11,7 @@
  * Everything runs on a headless EGL context (EGL device → surfaceless →
  * default display), so it works over SSH, in CI, and next to a running daemon
  * without touching its outputs or its state file. Reactive inputs are pinned
- * to calm, deterministic values (or the real ones with --live), so the same
+ * to calm values (or the real ones with --live), and --at pins the clock, so the same
  * command gives the same picture. */
 #define _GNU_SOURCE
 #include <EGL/egl.h>
@@ -81,7 +81,7 @@ static void render_usage(FILE *f) {
             "      --sheet N         contact sheet: N moments spread over 0..--time\n"
             "      --passes          also save every buffer pass (FILE.<pass>.png)\n"
             "\n"
-            "Time & inputs (deterministic unless --live)\n"
+            "Time & inputs (calm & repeatable; --at pins the time of day, else it is now)\n"
             "  -t, --time SEC        iTime of the frame (default 3)\n"
             "      --fps N           simulation rate for feedback buffers (default 30)\n"
             "      --frames N        frames simulated to reach --time (default time*fps)\n"
@@ -445,6 +445,7 @@ int cmd_render(int argc, char *argv[]) {
     log_set_level(o.quiet ? LOG_LEVEL_ERROR : LOG_LEVEL_WARN);
     state_file_set_readonly(true); /* an offline render is nobody's wallpaper */
 
+    double at_instant = 0; /* --at: exactly HH:MM:00 today, the same every run */
     if (o.have_at) {
         time_t now = time(NULL);
         struct tm tm;
@@ -452,6 +453,8 @@ int cmd_render(int argc, char *argv[]) {
         long cur  = tm.tm_hour * 3600L + tm.tm_min * 60L + tm.tm_sec;
         long want = o.at_h * 3600L + o.at_m * 60L;
         nw_clock_set_offset(want - cur);
+        tm.tm_hour = o.at_h, tm.tm_min = o.at_m, tm.tm_sec = 0, tm.tm_isdst = -1;
+        at_instant = (double)mktime(&tm);
     }
 
     headless hl;
@@ -555,7 +558,7 @@ int cmd_render(int argc, char *argv[]) {
     double base = 1000.0; /* fake monotonic "present" clock: exact dt every frame */
     int total   = o.frames;
     int shot    = 0;
-    double wall0 = nw_clock_now_f();
+    double wall0 = o.have_at ? at_instant : nw_clock_now_f();
     for (int f = 0; f < total; f++) {
         double t = total == 1 ? o.time : o.time * (double)f / (double)(total - 1);
         if (o.have_at || !o.live) pin_time_of_day(s, wall0 + t);

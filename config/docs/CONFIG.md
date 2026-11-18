@@ -20,7 +20,7 @@ Save and changes apply automatically.
 - User config: `~/.config/neowall/config.vibe`
 - System config: `/etc/neowall/config.vibe` (fallback)
 
-Config is auto-created on first run with the `garden` shader as default.
+Config is auto-created on first run with the `tokyo_night` shader as default.
 
 ## VIBE Syntax
 

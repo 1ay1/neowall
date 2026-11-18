@@ -1,4 +1,5 @@
 default {
-  shader garden.glsl
-  shader_speed 1.0
+  shader tokyo_night
+  shader_speed 0.8
+  shader_fps 30
 }

@@ -74,7 +74,7 @@ wallpaper compiles fine and then silently has no keyboard input — install it.
 
 ```
 default {
-  shader garden.glsl
+  shader tokyo_night
   shader_speed 0.8
 }
 ```
@@ -134,6 +134,7 @@ About 20 in the box, all freely licensed. Bring your own: neowall accepts unmodi
 
 | Vibe | A few |
 |------|-------|
+| Default | `tokyo_night`: rainy neon city, bloom, follows the clock and your mouse |
 | Living | `garden` · `circadian_sky` · `living_aurora` |
 | Nature | `moon_ocean` · `rain_window` · `fireflies` |
 | Reactive | `audio_pulse` · `audio_bars` · `system_deck` |

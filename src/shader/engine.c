@@ -642,8 +642,20 @@ const char *nw_engine_pass_name(const nw_engine *e, int i) {
 double nw_engine_pass_ms(nw_engine *e, int i) {
     if (!e || !e->profiling || i < 0 || (size_t)i >= e->passes.len) return -1.0;
     if (!glIsQuery(e->queries[i])) return -1.0; /* pass didn't run (static cube) */
+    /* GL 3.3 entry point, but not exported by every libGL (musl/Alpine):
+     * look it up instead of linking against it */
+    static union {
+        void (*fn)(void);
+        void (*get)(GLuint, GLenum, GLuint64 *);
+    } q;
+    static bool looked = false;
+    if (!looked) {
+        q.fn   = eglGetProcAddress("glGetQueryObjectui64v");
+        looked = true;
+    }
+    if (!q.fn) return -1.0;
     GLuint64 ns = 0;
-    glGetQueryObjectui64v(e->queries[i], GL_QUERY_RESULT, &ns);
+    q.get(e->queries[i], GL_QUERY_RESULT, &ns);
     e->pass_ms[i] = (double)ns / 1.0e6;
     return e->pass_ms[i];
 }

@@ -36,12 +36,13 @@
  *
  * `include_uniforms` selects whether the reactive uniform block (which declares
  * uniforms, not functions) is included along with the library proper. */
-#define MAX_INJECTED_CHUNKS 15
+#define MAX_INJECTED_CHUNKS 16
 
 static size_t injected_chunks(const char *out[MAX_INJECTED_CHUNKS], bool include_uniforms) {
     size_t n = 0;
     if (include_uniforms) out[n++] = neowall_reactive_uniforms;
     out[n++] = neowall_glsl_stdlib;
+    out[n++] = neowall_glsl_palette;
     out[n++] = neowall_glsl_stdlib2;
     out[n++] = neowall_glsl_stdlib3;
     out[n++] = neowall_glsl_stdlib4;

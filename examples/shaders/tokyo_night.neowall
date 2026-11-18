@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: NeoWall contributors
+# tokyo_night.neowall — pass wiring for tokyo_night.glsl
+shader tokyo_night.glsl
+
+# Custom passes. ONE pass block: a second `pass {` would replace this one.
+#   Clouds: clouds + fog at quarter resolution (soft; 1/16 of the pixels)
+#   Halo:   the wide glow, from the bloom, at eighth resolution
+pass {
+  Clouds {
+    scale 0.25
+  }
+  Halo {
+    ch0 bufferD
+    scale 0.125
+  }
+}
+
+# A: the city (reads its own previous frame for the smoothed mouse)
+bufferA {
+  ch0 self
+  ch1 Clouds
+}
+
+# B: water reflection of A
+bufferB {
+  ch0 bufferA
+}
+
+# C: bloom horizontal (bright pass of B)
+bufferC {
+  ch0 bufferB
+  scale 0.25
+}
+
+# D: bloom vertical
+bufferD {
+  ch0 bufferC
+  scale 0.25
+}
+
+# final composite
+image {
+  ch0 bufferB
+  ch1 bufferD
+  ch2 Halo
+}

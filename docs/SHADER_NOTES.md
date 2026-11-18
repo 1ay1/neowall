@@ -455,8 +455,8 @@ Renders offscreen on a headless EGL context (an EGL device, so NVIDIA works;
 Mesa surfaceless otherwise): no compositor, no daemon, works over SSH and in
 CI, and never touches a running daemon or its state file. Feedback buffers are
 simulated frame by frame up to `--time`, and every reactive input is pinned to
-a calm value (idle CPU, no audio, mains power), so the same command always
-produces the same image. `--live` uses the real readings instead. `--set`
+a calm value (idle CPU, no audio, mains power); with `--at` pinning the time
+of day, the same command always produces the same image. `--live` uses the real readings instead. `--set`
 pins any float uniform, including manifest uniforms.
 
 ### Is it fast enough? `--bench`
@@ -854,6 +854,7 @@ the one closest to what you want.
 | `rain_window.glsl` | time | refraction + droplet trails using feedback buffer |
 | `circadian_sky.glsl` | `iTimeOfDay`, `iSun` | day/night gradient driven by real clock |
 | `living_aurora.glsl` | `iAudioMid`, time | layered `nwFbm` curtains, `nwTonemap` finish |
+| `tokyo_night.glsl` | time of day, mouse, beat, windows | the default: a 7-pass pipeline (quarter-res clouds, city, reflection, quarter-res bloom, eighth-res halo, composite), named `// Pass:` buffers, per-pass `scale` |
 
 The two with `.neowall` sidecars (`audio_pulse`, `mouse_ripples`, `system_deck`) are
 the ones to study for manifest wiring — channels, buffers, and named uniform binds.

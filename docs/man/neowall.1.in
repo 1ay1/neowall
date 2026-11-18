@@ -135,7 +135,9 @@ Draw a shader offscreen (headless EGL: no compositor or daemon needed, and it
 never touches a running daemon) and write a PNG.
 Inputs are pinned to calm values unless
 .BR \-\-live ,
-so the same command gives the same picture.
+so the same command with
+.B \-\-at
+gives the same picture (without it, the time of day is now).
 .RS
 .TP
 .BR \-o ", " \-\-output " \fIfile\fR"

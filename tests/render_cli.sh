@@ -17,8 +17,9 @@ rc=$?
 [ -s "$T/a.png" ] || fail "no PNG written"
 head -c 8 "$T/a.png" | od -An -c | grep -q 'P   N   G' || fail "not a PNG"
 
-# deterministic: same command, same bytes
-"$NW" render "$FIX/render_ok.glsl" -s 64x36 -t 1 -o "$T/b.png" -q || fail "second render"
+# deterministic: same command (time of day pinned with --at), same bytes
+"$NW" render "$FIX/render_ok.glsl" -s 64x36 -t 1 --at 12:00 -o "$T/a.png" -q || fail "render --at"
+"$NW" render "$FIX/render_ok.glsl" -s 64x36 -t 1 --at 12:00 -o "$T/b.png" -q || fail "second render"
 cmp -s "$T/a.png" "$T/b.png" || fail "two identical renders differ"
 
 # time of day and pinned uniforms change the picture
