@@ -2,7 +2,7 @@
 
 All notable changes to neowall. Dates are release dates.
 
-## Unreleased
+## 0.11.1 - 2026-11-21
 
 ### Fixed
 - A wallpaper paused by a fullscreen or covering window sometimes stayed

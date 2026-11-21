@@ -50,7 +50,17 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="@VERSION@" date="2026-11-18">
+    <release version="@VERSION@" date="2026-11-21">
+      <description>
+        <p>Bug-fix release: paused wallpapers always come back.</p>
+        <ul>
+          <li>A wallpaper paused by a covering window no longer stays frozen after the window closes</li>
+          <li>Hyprland: a fullscreen window on another workspace no longer keeps the wallpaper paused, and scaled or rotated monitors pause correctly</li>
+          <li>X11: minimised fullscreen windows no longer count as covering</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.11.0" date="2026-11-18">
       <description>
         <p>Eased shader pause.</p>
         <ul>

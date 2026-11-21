@@ -1,7 +1,7 @@
 # NeoWall - GPU-Accelerated Live Wallpapers for Wayland & X11
 
 project('neowall', 'c',
-  version: '0.11.0',
+  version: '0.11.1',
   license: 'MIT',
   meson_version: '>= 0.64.0',
   default_options: [
