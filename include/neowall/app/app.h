@@ -42,6 +42,7 @@ enum {
     NW_MSG_APPLIED,        /* present: requests it used up (struct app_applied) */
     NW_MSG_RELOAD_APPLIED, /* perform: config applied; v.i bit0 = ok, bit1 = shaders building */
     NW_MSG_RELOAD_SETTLED, /* present: the reload's builds are done; v.i = ok */
+    NW_MSG_OCCLUSION_TICK, /* timer: re-check which outputs are covered */
 };
 
 /* Run neowall until it's told to stop. Takes over from main() once the

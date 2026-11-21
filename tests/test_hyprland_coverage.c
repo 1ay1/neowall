@@ -189,6 +189,44 @@ int main(void) {
     refresh();
     CHECK(hyprland_output_windows(&dp, w, 8) == 0, "empty but valid replies clear it");
 
+    /* 4b. The tri-state answer: known-and-bare is an answer (it overrides
+     *     foreign-toplevel's stale FULLSCREEN bit), an unknown monitor isn't. */
+    bool cov = true;
+    serve_json(MONITORS, "[]");
+    refresh();
+    CHECK(hyprland_output_check(&dp, 0.8f, &cov) && !cov, "known monitor, no windows: bare");
+    cov = true;
+    CHECK(!hyprland_output_check(&other, 0.8f, &cov) && !cov, "unknown monitor: no answer");
+
+    /* 4c. A scaled monitor: width/height are mode pixels, windows are in
+     *     layout coordinates. A fullscreen window on a 2000x1000 @2x monitor
+     *     is 1000x500 and must cover all of it (it covered a quarter, so
+     *     HiDPI monitors never paused). */
+    static const char scaled[] =
+        "[{\"id\": 0, \"name\": \"DP-1\", \"x\": 0, \"y\": 0, \"width\": 2000, \"height\": 1000,"
+        "  \"activeWorkspace\": {\"id\": 1}, \"reserved\": [0, 0, 0, 0],"
+        "  \"scale\": 2.00, \"transform\": 0}]";
+    serve_json(scaled, "[" CLIENT(0, 1, 0, 0, 1000, 500, "2") "]");
+    refresh();
+    CHECK(hyprland_output_check(&dp, 1.0f, &cov) && cov, "fullscreen covers a 2x monitor");
+    /* 1.25 parses whatever the locale: 1600x1000 mode = 1280x800 logical. */
+    static const char frac[] =
+        "[{\"id\": 0, \"name\": \"DP-1\", \"x\": 0, \"y\": 0, \"width\": 1600, \"height\": 1000,"
+        "  \"activeWorkspace\": {\"id\": 1}, \"reserved\": [0, 0, 0, 0], \"scale\": 1.25}]";
+    serve_json(frac, "[" CLIENT(0, 1, 0, 0, 1280, 800, "0") "]");
+    refresh();
+    CHECK(hyprland_output_check(&dp, 1.0f, &cov) && cov, "fractional scale 1.25");
+    /* Rotated 90 degrees: a 1000x500 mode is 500 wide, 1000 tall. */
+    static const char rot[] =
+        "[{\"id\": 0, \"name\": \"DP-1\", \"x\": 0, \"y\": 0, \"width\": 1000, \"height\": 500,"
+        "  \"activeWorkspace\": {\"id\": 1}, \"reserved\": [0, 0, 0, 0],"
+        "  \"scale\": 1, \"transform\": 1}]";
+    serve_json(rot, "[" CLIENT(0, 1, 0, 0, 500, 1000, "0") "]");
+    refresh();
+    CHECK(hyprland_output_check(&dp, 1.0f, &cov) && cov, "a rotated monitor swaps its axes");
+    serve_json("[]", "[]");
+    refresh();
+
     /* 5. Stale: once IPC stops answering, after the TTL nothing is reported. */
     serve_json(MONITORS, hang);
     refresh();

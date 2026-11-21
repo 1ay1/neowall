@@ -4,8 +4,8 @@
 /* Generic per-output frame-callback watchdog for Wayland backends.
  *
  * Asks the compositor for a frame callback on each animating output's
- * surface, at most every 250 ms. One unanswered for OCCLUSION_TIMEOUT_MS
- * means the surface is presumed obscured (spec: compositors MAY throttle
+ * surface, at most every 250 ms (frame_watch.h has the rules). One unanswered
+ * for FRAME_WATCH_TIMEOUT_MS means the surface is presumed obscured (spec: compositors MAY throttle
  * frame callbacks for non-visible surfaces). Outputs with nothing to pause
  * (a static image, a settled static shader) aren't watched at all.
  *
@@ -23,8 +23,8 @@ bool frame_watchdog_init(struct neowall_state *state);
 void frame_watchdog_update(struct neowall_state *state);
 
 /* Returns true if the watchdog says this output is occluded. Does not change
- * state. Used by occlusion.c (wlr) to OR with other signals without writing
- * to o->occluded twice. */
+ * state. Callers combine it with other signals and hand the result to
+ * output_set_occluded, the only writer of o->occluded. */
 bool frame_watchdog_output_occluded(struct output_state *o);
 
 /* Whether this output is worth watching: it opted in and it animates. */
@@ -33,6 +33,11 @@ bool frame_watchdog_wanted(const struct output_state *o);
 /* Ensure the watchdog is armed for this output. Called from update; exposed
  * so the wlr occlusion path can prime per-output entries too. */
 void frame_watchdog_arm(struct output_state *o);
+
+/* One step for one output: arm (or re-probe) if it's watched and say whether
+ * it's covered. An output that isn't watched forgets its measurement and is
+ * never covered by this signal. Loop thread. */
+bool frame_watchdog_check(struct output_state *o);
 
 /* Drop the watchdog entry for this output. MUST be called from output_destroy
  * (or any other path that frees an output_state) — otherwise we leak the

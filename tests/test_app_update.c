@@ -204,6 +204,14 @@ static void test_timers_and_display(rt_cmds *c) {
     a.has_occlusion = true;
     step(&a, c, msg(NW_MSG_DISPLAY, 0, 0));
     CHECK(is_cmd(c, 0, APP_CMD_OCCLUSION), "occlusion checked after the display");
+    /* The tick is what brings a covered output back when nothing else
+     * happens: it must always lead to a check. */
+    step(&a, c, msg(NW_MSG_OCCLUSION_TICK, 0, 0));
+    CHECK(rt_cmds_len(c) == 1 && is_cmd(c, 0, APP_CMD_OCCLUSION), "the tick re-checks occlusion");
+    a.has_occlusion = false;
+    step(&a, c, msg(NW_MSG_OCCLUSION_TICK, 0, 0));
+    CHECK(rt_cmds_len(c) == 0, "no tick work without occlusion support");
+    a.has_occlusion = true;
     step(&a, c, msg(NW_MSG_OUTPUTS_NEW, 0, 0));
     CHECK(a.outputs_need_init && rt_cmds_len(c) == 0, "hotplug is a model flag");
 }

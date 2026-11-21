@@ -19,6 +19,12 @@ void hyprland_coverage_refresh(void);
  * Uses the most recently refreshed snapshot. */
 bool hyprland_output_covered(const struct output_state *o, float threshold);
 
+/* The same, but says whether Hyprland gave an answer at all: true when a
+ * fresh snapshot knows this monitor (then *covered is the answer), false when
+ * IPC is unavailable, failing or stale, or the monitor isn't in it. Lets the
+ * caller trust Hyprland over signals that don't know about workspaces. */
+bool hyprland_output_check(const struct output_state *o, float threshold, bool *covered);
+
 /* One window, in wallpaper-local pixels: origin at the output's top-left,
  * y increasing downward (the compositor's convention, not GL's). */
 typedef struct {

@@ -238,6 +238,23 @@ static int parse_int_at(const char *p, int dflt) {
     return (int)v;
 }
 
+/* A non-negative decimal like 1.25, by hand: strtod follows the locale, and
+ * a comma-decimal locale would read Hyprland's "1.25" as 1. */
+static double parse_unsigned_decimal_at(const char *p, double dflt) {
+    if (!p) return dflt;
+    p = skip_ws(p);
+    if (*p < '0' || *p > '9') return dflt;
+    double v = 0.0;
+    while (*p >= '0' && *p <= '9')
+        v = v * 10.0 + (*p++ - '0');
+    if (*p == '.') {
+        double place = 0.1;
+        for (p++; *p >= '0' && *p <= '9'; p++, place *= 0.1)
+            v += (*p - '0') * place;
+    }
+    return v;
+}
+
 /* Parse "[a, b]" array of two ints into out[0], out[1]. */
 static bool parse_int_pair(const char *p, int out[2]) {
     if (!p) return false;
@@ -383,6 +400,22 @@ static void parse_monitors(const char *json) {
         m->reserved_top    = rsv[1] > 0 ? rsv[1] : 0;
         m->reserved_right  = rsv[2] > 0 ? rsv[2] : 0;
         m->reserved_bottom = rsv[3] > 0 ? rsv[3] : 0;
+        /* width/height are the mode in pixels, but x/y, the reserved zones
+         * and every client rect are in layout (logical) coordinates. Convert,
+         * or a scaled monitor's windows cover only 1/scale² of it and it
+         * never counts as covered. A transform of 90/270 degrees (odd values,
+         * flipped or not) swaps the axes. */
+        double scale = parse_unsigned_decimal_at(find_key(obj, "scale"), 1.0);
+        if (!(scale >= 0.1 && scale <= 16.0)) scale = 1.0;
+        int lw = (int)((double)m->w / scale + 0.5);
+        int lh = (int)((double)m->h / scale + 0.5);
+        if (parse_int_at(find_key(obj, "transform"), 0) & 1) {
+            int t = lw;
+            lw    = lh;
+            lh    = t;
+        }
+        m->w = lw;
+        m->h = lh;
         if (m->w > 0 && m->h > 0) {
             g_hypr.n_monitors++;
         }
@@ -471,6 +504,12 @@ static const hypr_monitor_t *find_monitor_for(const struct output_state *o) {
 }
 
 bool hyprland_output_covered(const struct output_state *o, float threshold) {
+    bool covered = false;
+    return hyprland_output_check(o, threshold, &covered) && covered;
+}
+
+bool hyprland_output_check(const struct output_state *o, float threshold, bool *covered) {
+    *covered = false;
     if (!o || !hyprland_coverage_available()) return false;
 
     pthread_mutex_lock(&g_hypr.lock);
@@ -504,7 +543,8 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
     if (cache[slot].gen == g_hypr.gen && g_hypr.gen != 0 && cache[slot].monitor == m->id) {
         float f = cache[slot].frac;
         pthread_mutex_unlock(&g_hypr.lock);
-        return f >= threshold;
+        *covered = f >= threshold;
+        return true;
     }
 
     /* Wallpaper region = monitor rect minus reserved zones (layer-shell
@@ -518,7 +558,7 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
     int wh  = wy1 - wy0;
     if (ww <= 0 || wh <= 0) {
         pthread_mutex_unlock(&g_hypr.lock);
-        return false;
+        return true; /* known: all bar, no wallpaper to cover */
     }
 
     /* Rasterize windows on this monitor's active workspace into a grid over
@@ -560,19 +600,20 @@ bool hyprland_output_covered(const struct output_state *o, float threshold) {
         }
     }
 
-    int covered = 0;
+    int cells = 0;
     for (int y = 0; y < GRID_H; y++) {
         for (int x = 0; x < GRID_W; x++) {
-            covered += grid[y][x];
+            cells += grid[y][x];
         }
     }
-    float frac          = (float)covered / (float)(GRID_W * GRID_H);
+    float frac          = (float)cells / (float)(GRID_W * GRID_H);
     cache[slot].gen     = g_hypr.gen;
     cache[slot].monitor = m->id;
     cache[slot].frac    = frac;
     pthread_mutex_unlock(&g_hypr.lock);
 
-    return frac >= threshold;
+    *covered = frac >= threshold;
+    return true;
 }
 
 int hyprland_output_windows(const struct output_state *o, nw_window_rect *out, int max) {

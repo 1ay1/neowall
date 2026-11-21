@@ -26,6 +26,10 @@ enum { APP_TERMINAL_CMD_MAX = 512 };
 /* Clients that can wait on one reload; more are answered at once. */
 enum { APP_RELOAD_WAITERS = 8 };
 
+/* How often occlusion is re-checked while an output could be covered or is.
+ * Bounds how long a wallpaper stays frozen after its window closes. */
+#define APP_OCCLUSION_TICK_NS (250LL * 1000000LL)
+
 /* The model. Only update writes it; everything else gets it const. */
 struct app_model {
     /* Requests waiting for present. present reports what it used with

@@ -80,7 +80,11 @@ static int occ_error_handler(Display *dpy, XErrorEvent *err) {
     return 0;
 }
 
-static bool window_has_state(const x11_occlusion *occ, Window win, Atom target) {
+/* Whether a window is fullscreen AND actually showing. _NET_WM_STATE keeps
+ * FULLSCREEN on a window that is minimised (HIDDEN) or on another desktop
+ * (unmapped by the WM), and counting those kept the wallpaper paused after
+ * the user had switched away from the game. */
+static bool window_is_visible_fullscreen(const x11_occlusion *occ, Window win) {
     Display *dpy = occ->dpy;
     Atom type;
     int format;
@@ -95,16 +99,18 @@ static bool window_has_state(const x11_occlusion *occ, Window win, Atom target) 
     /* format 32 items are longs in Xlib's buffer; anything else isn't Atoms */
     if (type != XA_ATOM || format != 32) n = 0;
 
-    bool found  = false;
+    bool fullscreen = false, hidden = false;
     Atom *atoms = (Atom *)data;
     for (unsigned long i = 0; i < n; i++) {
-        if (atoms[i] == target) {
-            found = true;
-            break;
-        }
+        if (atoms[i] == occ->wm_state_fullscreen) fullscreen = true;
+        if (atoms[i] == occ->wm_state_hidden) hidden = true;
     }
     XFree(data);
-    return found;
+    if (!fullscreen || hidden) return false;
+
+    XWindowAttributes attr;
+    if (!XGetWindowAttributes(dpy, win, &attr)) return false;
+    return attr.map_state == IsViewable;
 }
 
 static bool get_window_geometry(Display *dpy, Window win, int *x, int *y, int *w, int *h) {
@@ -135,14 +141,16 @@ static void check_fullscreen_state(x11_occlusion *occ) {
     unsigned long n, rem;
     unsigned char *data = NULL;
 
+    /* No list (no WM, or it died and took the property with it) means no
+     * fullscreen windows. Returning early instead would leave every output
+     * paused on the last answer, with nothing left to ever change it. */
     if (XGetWindowProperty(x_display, occ->root, occ->client_list_stacking, 0, 1024, False,
                            XA_WINDOW, &type, &format, &n, &rem, &data) != Success ||
         !data) {
-        return;
-    }
-    if (type != XA_WINDOW || format != 32) {
-        XFree(data);
-        return;
+        data = NULL;
+        n    = 0;
+    } else if (type != XA_WINDOW || format != 32) {
+        n = 0;
     }
     Window *windows = (Window *)data;
 
@@ -163,7 +171,7 @@ static void check_fullscreen_state(x11_occlusion *occ) {
     for (unsigned long i = 0; i < n; i++) {
         occ_x_error = 0;
 
-        bool is_fullscreen = window_has_state(occ, windows[i], occ->wm_state_fullscreen);
+        bool is_fullscreen = window_is_visible_fullscreen(occ, windows[i]);
         if (occ_x_error) {
             continue; /* Window died (silent), or something else went wrong and the
                        * handler logged it. Either way there is no answer to use. */
@@ -194,30 +202,16 @@ static void check_fullscreen_state(x11_occlusion *occ) {
     XSync(x_display, False); /* Deliver any straggling error before we un-install. */
     XSetErrorHandler(prev_handler);
 
-    XFree(data);
+    if (data) XFree(data);
 
     /* Decide occlusion per output: each output is occluded when a fullscreen
-     * window covers its own monitor rect. */
+     * window covers its own monitor rect. Every output is decided, so one
+     * whose option was turned off comes back too (output_set_occluded). */
     pthread_rwlock_rdlock(&g_state->output_list_lock);
 
     for (struct output_state *o = g_state->outputs; o; o = o->next) {
-        if (!o->config->pause_on_fullscreen) {
-            continue;
-        }
-
-        bool was         = atomic_load_explicit(&o->occluded, memory_order_acquire);
         x11_rect_t orect = {o->x_offset, o->y_offset, o->width, o->height};
-        bool now         = x11_rect_is_covered(orect, fs, fs_count);
-
-        atomic_store_explicit(&o->occluded, now, memory_order_release);
-
-        const char *name = o->connector_name[0] ? o->connector_name : o->model;
-        if (was && !now) {
-            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
-            log_info("Output %s un-occluded, resuming rendering", name);
-        } else if (!was && now) {
-            log_info("Output %s occluded by fullscreen window, pausing rendering", name);
-        }
+        output_set_occluded(o, x11_rect_is_covered(orect, fs, fs_count), "fullscreen window");
     }
 
     pthread_rwlock_unlock(&g_state->output_list_lock);
@@ -236,6 +230,7 @@ bool x11_occlusion_init(x11_occlusion *occ, Display *display, struct neowall_sta
         .client_list_stacking = XInternAtom(display, "_NET_CLIENT_LIST_STACKING", False),
         .wm_state             = XInternAtom(display, "_NET_WM_STATE", False),
         .wm_state_fullscreen  = XInternAtom(display, "_NET_WM_STATE_FULLSCREEN", False),
+        .wm_state_hidden      = XInternAtom(display, "_NET_WM_STATE_HIDDEN", False),
         .active               = true,
     };
     check_fullscreen_state(occ);
@@ -244,6 +239,11 @@ bool x11_occlusion_init(x11_occlusion *occ, Display *display, struct neowall_sta
 
 void x11_occlusion_update(x11_occlusion *occ) {
     if (!occ || !occ->active) return;
+    /* Throttled, so a burst of events costs one check. The loop also runs
+     * this on a steady tick while anything is covered, so a check skipped
+     * here is made up within a tick rather than waiting for an event that
+     * may never come (a window leaving fullscreen changes only its own
+     * property, which the root doesn't hear about). */
     uint64_t now = get_time_ms();
     if (occ->last_check_ms && now - occ->last_check_ms < CHECK_INTERVAL_MS) return;
     occ->last_check_ms = now;

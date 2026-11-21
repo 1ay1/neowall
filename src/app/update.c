@@ -195,6 +195,11 @@ void app_model_update(struct app_model *a, const rt_msg *m, rt_cmds *cmds) {
     case NW_MSG_REDRAW_OUTPUT: return;
 
     case NW_MSG_DISPLAY:
+    case NW_MSG_OCCLUSION_TICK:
+        /* After compositor events (a window changed), and on a steady tick
+         * while anything could be covered: the tick is what guarantees an
+         * output comes back, since uncovering need not produce any event
+         * (see subscribe.c). */
         if (a->has_occlusion) cmd(cmds, APP_CMD_OCCLUSION, 0, 0);
         return;
 

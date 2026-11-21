@@ -2,17 +2,23 @@
 
 /* Occlusion detection on wlroots compositors.
  *
- * Combines three independent signals (OR'd together):
+ * Signals, combined per output:
  *
  *   1. Frame-callback watchdog (shared frame_watchdog.c). The compositor MAY
  *      stop sending frame callbacks when our surface is obscured.
  *
- *   2. wlr-foreign-toplevel-management state bits. Catches fullscreen and
- *      active-maximized windows on the output.
+ *   2. Windows. On Hyprland, its IPC (hyprland_coverage.c): fullscreen and
+ *      tiled-mosaic coverage of the active workspace. Elsewhere, or while that
+ *      IPC isn't answering, wlr-foreign-toplevel-management state bits:
+ *      fullscreen and active-maximized windows on the output.
  *
- *   3. Hyprland IPC coverage (hyprland_coverage.c). Catches the tiled-mosaic
- *      case where many small windows together cover >=80% of the wallpaper
- *      region (monitor minus reserved zone). No-op outside Hyprland. */
+ * Covered = 1 OR 2. Only output_set_occluded writes the result.
+ *
+ * Nothing here can be trusted to produce an event when a window goes away
+ * (a held frame callback, a throttled IPC refresh, a compositor that sends
+ * nothing), so the loop also re-runs this on a steady tick while anything is
+ * covered (app/subscribe.c). That tick, not an event, is what guarantees an
+ * uncovered output comes back. */
 
 #include <stdlib.h>
 #include <string.h>
@@ -33,8 +39,9 @@
 
 typedef struct tracked_toplevel {
     struct zwlr_foreign_toplevel_handle_v1 *handle;
-    uint32_t state;
-    output_set outputs; /* every wl_output this toplevel is currently on */
+    uint32_t state;         /* applied on `done`, as the protocol says */
+    uint32_t pending_state; /* the latest `state`, not yet applied */
+    output_set outputs;     /* every wl_output this toplevel is currently on */
     struct tracked_toplevel *next;
 } tracked_toplevel_t;
 
@@ -86,17 +93,20 @@ static void tl_output_leave(void *d, struct zwlr_foreign_toplevel_handle_v1 *h,
 static void tl_state(void *d, struct zwlr_foreign_toplevel_handle_v1 *h, struct wl_array *state) {
     tracked_toplevel_t *tl = d;
     (void)h;
-    tl->state = 0;
+    tl->pending_state = 0;
     uint32_t *s;
     wl_array_for_each(s, state) {
         if (*s <= 3) {
-            tl->state |= (1u << *s);
+            tl->pending_state |= (1u << *s);
         }
     }
 }
 static void tl_done(void *d, struct zwlr_foreign_toplevel_handle_v1 *h) {
-    (void)d;
+    tracked_toplevel_t *tl = d;
     (void)h;
+    /* `done` ends an atomic batch: a window going from fullscreen to
+     * minimised is one change, never a moment of "fullscreen and not". */
+    tl->state = tl->pending_state;
 }
 static void tl_closed(void *d, struct zwlr_foreign_toplevel_handle_v1 *h) {
     (void)h;
@@ -141,6 +151,13 @@ static void mgr_finished(void *d, struct zwlr_foreign_toplevel_manager_v1 *m) {
         zwlr_foreign_toplevel_manager_v1_destroy(m);
     }
     toplevel_manager = NULL;
+    /* No more news about any of them: a window that was fullscreen when the
+     * stream ended would otherwise cover its output forever. */
+    while (toplevels) {
+        tracked_toplevel_t *next = toplevels->next;
+        free_toplevel(toplevels);
+        toplevels = next;
+    }
 }
 static const struct zwlr_foreign_toplevel_manager_v1_listener mgr_listener = {
     .toplevel = mgr_toplevel,
@@ -237,53 +254,41 @@ void wayland_occlusion_update(struct neowall_state *state) {
 
     pthread_rwlock_rdlock(&state->output_list_lock);
 
+    /* Every output gets an answer every time, so none can be left holding a
+     * stale "covered": not opted in, or no surface yet, means uncovered. */
     for (struct output_state *o = state->outputs; o; o = o->next) {
-        if (!o->config->pause_on_fullscreen) {
-            continue;
-        }
-        if (!o->compositor_surface || !o->compositor_surface->native_surface) {
+        if (!o->config->pause_on_fullscreen || !o->compositor_surface ||
+            !o->compositor_surface->native_surface) {
+            frame_watchdog_remove(o);
+            output_set_occluded(o, false, NULL);
             continue;
         }
 
-        /* Keep the shared watchdog armed for outputs that animate; for the
-         * rest the frame-callback signal is simply "visible". */
-        bool cb_says_occluded = false;
-        if (frame_watchdog_wanted(o)) {
-            frame_watchdog_arm(o);
-            cb_says_occluded = frame_watchdog_output_occluded(o);
-        }
-        bool toplevel_says_occluded =
-            any_covering_toplevel_on((struct wl_output *)o->native_output);
+        /* The frame-callback signal: only outputs that animate are watched;
+         * for the rest it is simply "visible". */
+        bool cb_says_occluded = frame_watchdog_check(o);
+
         float threshold = o->config->pause_coverage_threshold;
         if (!(threshold > 0.0f && threshold <= 1.0f)) {
             threshold = 0.80f;
         }
-        bool hypr_says_occluded = hyprland_output_covered(o, threshold);
+        /* Where Hyprland answers, it is the authority on windows: it knows
+         * workspaces, where foreign-toplevel only knows "on this output". A
+         * fullscreen window on a workspace we switched away from is still
+         * FULLSCREEN there, and trusting that kept the wallpaper paused on
+         * an empty desktop. Its snapshot covers fullscreen (the window is
+         * the monitor's size) as well as tiled mosaics. Elsewhere, or while
+         * its IPC is failing, foreign-toplevel is what we have. */
+        bool hypr_covered = false;
+        bool hypr_known   = hyprland_output_check(o, threshold, &hypr_covered);
+        bool window_says_occluded =
+            hypr_known ? hypr_covered
+                       : any_covering_toplevel_on((struct wl_output *)o->native_output);
 
-        bool was    = atomic_load_explicit(&o->occluded, memory_order_acquire);
-        bool nowocc = cb_says_occluded || toplevel_says_occluded || hypr_says_occluded;
-
-        atomic_store_explicit(&o->occluded, nowocc, memory_order_release);
-
-        const char *name = o->connector_name[0] ? o->connector_name : o->model;
-        if (was && !nowocc) {
-            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
-            /* Visible again: close the rebase window. The renderer may only
-             * jump the shader clock while this is non-zero, so leaving it set
-             * would let a rebase land in full view of the user. */
-            o->shader_hidden_since = 0;
-            log_info("Output %s un-occluded, rendering", name);
-        } else if (!was && nowocc) {
-            /* Note when the wallpaper stopped being visible. The renderer uses
-             * this window to rebase a long-running shader clock, where a
-             * discontinuity cannot be seen. */
-            o->shader_hidden_since = get_time_ms();
-            const char *why        = cb_says_occluded ? "compositor stopped frame callbacks"
-                                     : toplevel_says_occluded
-                                         ? "maximized/fullscreen window covering output"
-                                         : "tiled windows cover threshold of wallpaper region";
-            log_info("Output %s occluded (%s), pausing", name, why);
-        }
+        const char *why = cb_says_occluded ? "compositor stopped drawing it"
+                          : hypr_known     ? "windows cover the wallpaper"
+                                           : "fullscreen or maximized window";
+        output_set_occluded(o, cb_says_occluded || window_says_occluded, why);
     }
 
     pthread_rwlock_unlock(&state->output_list_lock);

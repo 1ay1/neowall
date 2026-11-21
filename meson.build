@@ -955,6 +955,14 @@ test_occlusion_set_exe = executable('test_occlusion_set',
 
 test('occlusion_set', test_occlusion_set_exe)
 
+# The frame-callback watchdog's state machine on a fake clock: covered
+# outputs come back, re-probes don't flap, dropped callbacks recover.
+test('frame_watch', executable('test_frame_watch',
+  files('tests/test_frame_watch.c'),
+  include_directories: [inc_dirs, include_directories('src/backends/wayland')],
+  build_by_default: false,
+))
+
 # Reactive audio FFT — pure math, no audio thread / parec needed.
 test_fft_exe = executable('test_reactive_fft',
   files('tests/test_reactive_fft.c', 'tests/reactive_fft_wrapper.c'),

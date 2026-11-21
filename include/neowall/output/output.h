@@ -302,6 +302,15 @@ void output_set_wallpaper(struct output_state *output, const char *path);
  * later from output_process_geometry_change() on the render thread. */
 void output_notify_geometry_change(struct output_state *output);
 void output_process_geometry_change(struct output_state *output);
+
+/* Record whether a window covers this output. The ONE place `occluded` is
+ * written, so every backend gets the same edges: on uncover the output is
+ * marked for a redraw and the loop is woken (state_output_dirty), and the
+ * shader clock's rebase window is closed; on cover it is opened. An output
+ * with pause_on_fullscreen off is always uncovered, whatever `covered` says,
+ * so turning the option off in a reload can never leave one frozen.
+ * `why` names the signal, for the log. Loop thread. */
+void output_set_occluded(struct output_state *output, bool covered, const char *why);
 /* Load `shader_path` and make it this output's live wallpaper.
  *
  * Returns NW_OK once the shader is running, or when the load was deferred

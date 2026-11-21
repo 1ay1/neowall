@@ -973,7 +973,8 @@ bool render_frame_shader(struct output_state *output) {
     shader_clock_state clock_st = {
         .elapsed_seconds = current_time,
         .hidden_since_ms = output->shader_hidden_since,
-        .occluded_now    = atomic_load_explicit(&output->occluded, memory_order_acquire),
+        .occluded_now    = output->config->pause_on_fullscreen &&
+                           atomic_load_explicit(&output->occluded, memory_order_acquire),
         .paused_now      = ramp->parked,
         .spanned         = output->spanned,
     };

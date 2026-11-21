@@ -428,7 +428,8 @@ static void render_outputs(struct frame *f) {
 
         /* a covered output's manifest sources (exec, file, ...) idle too */
         wallshader_set_visible(output->shader,
-                               !atomic_load_explicit(&output->occluded, memory_order_acquire));
+                               !(output->config->pause_on_fullscreen &&
+                                 atomic_load_explicit(&output->occluded, memory_order_acquire)));
 
         if (!output_wants_frame(f, output)) {
             /* not drawing, but a background shader build still has to land */

@@ -2,6 +2,28 @@
 
 All notable changes to neowall. Dates are release dates.
 
+## Unreleased
+
+### Fixed
+- A wallpaper paused by a fullscreen or covering window sometimes stayed
+  frozen after the window closed. Occlusion was only re-checked when the
+  compositor happened to send an event, and uncovering needn't produce one.
+  It is now re-checked every 250 ms while an output is covered (or could
+  be), so a wallpaper comes back within a quarter second.
+- The frame-callback watchdog replaces a request the compositor never
+  answers instead of waiting on it forever, so a dropped callback can't
+  pin an output as covered.
+- Hyprland: a fullscreen window on a workspace you switched away from no
+  longer keeps the wallpaper paused (Hyprland's own view of the active
+  workspace now wins over foreign-toplevel state). Coverage is computed in
+  layout coordinates, so scaled (HiDPI) and rotated monitors pause
+  correctly.
+- X11: a minimised or off-desktop fullscreen window no longer counts as
+  covering, and losing `_NET_CLIENT_LIST_STACKING` (WM restart) uncovers
+  every output instead of leaving them paused.
+- Turning `pause_on_fullscreen` off in a reload un-pauses an output that
+  was covered at the time.
+
 ## 0.11.0 - 2026-11-18
 
 ### Added

@@ -9,6 +9,7 @@
 #include "neowall/config/config.h"
 #include "neowall/core/log.h"
 #include "neowall/state/state.h"
+#include "neowall/core/time.h"
 #include "neowall/egl/egl_core.h"
 
 /* Helper function to get the preferred output identifier
@@ -306,6 +307,31 @@ void output_destroy(struct output_state *output) {
     /* Note: We don't destroy native_output as it's managed by the display server */
 
     free(output);
+}
+
+void output_set_occluded(struct output_state *output, bool covered, const char *why) {
+    if (!output) return;
+    if (!output->config || !output->config->pause_on_fullscreen) covered = false;
+
+    bool was = atomic_exchange_explicit(&output->occluded, covered, memory_order_acq_rel);
+    if (was == covered) return;
+
+    const char *name = output_get_identifier(output);
+    if (covered) {
+        /* Not visible from here on: the shader clock may be rebased unseen
+         * (shader_clock.h). */
+        output->shader_hidden_since = get_time_ms();
+        log_info("Output %s covered (%s), pausing", name, why ? why : "window");
+    } else {
+        /* Visible again: close the rebase window first, so a rebase can't
+         * land in view, then ask for the frame that brings it back. The hook
+         * wakes the loop: needs_redraw alone isn't seen by a loop asleep with
+         * nothing else to do. */
+        output->shader_hidden_since = 0;
+        log_info("Output %s uncovered, rendering", name);
+        atomic_store_explicit(&output->needs_redraw, true, memory_order_release);
+        state_output_dirty(output->state, output);
+    }
 }
 
 void output_ref(struct output_state *output) {

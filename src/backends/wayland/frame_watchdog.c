@@ -1,6 +1,8 @@
 #ifdef HAVE_WAYLAND_BACKEND
 
-/* Generic Wayland frame-callback watchdog. See frame_watchdog.h. */
+/* Generic Wayland frame-callback watchdog: the protocol side. Every decision
+ * (when to ask, when to re-ask, what counts as covered) is in frame_watch.h,
+ * so it can be tested on its own. See frame_watchdog.h for the contract. */
 
 #include <stdlib.h>
 #include <stdatomic.h>
@@ -9,41 +11,44 @@
 #include "neowall/state/state.h"
 #include "neowall/surface/surface.h"
 #include "neowall/shader/wallshader.h"
+#include "frame_watch.h"
 #include "frame_watchdog.h"
 #include "neowall/core/log.h"
 #include "neowall/core/time.h"
 #include "neowall/output/output.h"
 
-/* A callback unanswered this long means the compositor isn't drawing us. */
-#define OCCLUSION_TIMEOUT_MS 500
-/* How often to ask again once one was answered. Asking right away made a
- * loop at the refresh rate: a commit and a wakeup every frame, even for a
- * wallpaper that never changes. */
-#define REARM_MS 250
-
 typedef struct watched_output {
     struct output_state *output;
-    struct wl_callback *callback;
-    uint64_t armed_at_ms;  /* when `callback` was requested */
-    uint64_t last_done_ms; /* when the last one came back; 0 = never */
+    struct wl_callback *callback; /* the request in flight, or NULL */
+    frame_watch state;
     struct watched_output *next;
 } watched_output_t;
 
+/* Everything here runs on the loop thread (the occlusion check, output
+ * removal, and the callbacks, which are dispatched from the compositor fd).
+ * The lock only keeps that honest if a future caller isn't. */
 static watched_output_t *watched = NULL;
 static pthread_mutex_t lock      = PTHREAD_MUTEX_INITIALIZER;
-static const struct wl_callback_listener frame_listener;
 
-static void arm_locked(watched_output_t *w);
+static void drop_callback_locked(watched_output_t *w) {
+    if (w->callback) {
+        /* A destroyed proxy never dispatches, so a late `done` for it can't
+         * reach `w` after it's freed or count for a request it didn't answer. */
+        wl_callback_destroy(w->callback);
+        w->callback = NULL;
+    }
+    w->state.outstanding = false;
+}
 
 static void on_frame_done(void *data, struct wl_callback *cb, uint32_t time) {
     (void)time;
     watched_output_t *w = data;
     pthread_mutex_lock(&lock);
-    if (cb) {
-        wl_callback_destroy(cb);
+    if (w->callback == cb) {
+        w->callback = NULL;
+        frame_watch_done(&w->state, get_time_ms());
     }
-    w->callback     = NULL;
-    w->last_done_ms = get_time_ms();
+    wl_callback_destroy(cb);
     pthread_mutex_unlock(&lock);
 }
 
@@ -51,25 +56,29 @@ static const struct wl_callback_listener frame_listener = {
     .done = on_frame_done,
 };
 
-static void arm_locked(watched_output_t *w) {
-    if (!w || !w->output || !w->output->compositor_surface || w->callback) {
-        return;
-    }
-    struct wl_surface *surf = (struct wl_surface *)w->output->compositor_surface->native_surface;
-    if (!surf) {
-        return;
-    }
-    w->callback = wl_surface_frame(surf);
-    if (w->callback) {
-        wl_callback_add_listener(w->callback, &frame_listener, w);
-        w->armed_at_ms = get_time_ms();
-        /* An explicit commit, so the request is attached even when nothing
-         * else would commit (a paused or settled output). */
-        wl_surface_commit(surf);
-    }
+static struct wl_surface *surface_of(const struct output_state *o) {
+    if (!o || !o->compositor_surface) return NULL;
+    return (struct wl_surface *)o->compositor_surface->native_surface;
 }
 
-static watched_output_t *find_locked(struct output_state *o) {
+/* Send a fresh request, replacing any in flight. */
+static void request_locked(watched_output_t *w, uint64_t now) {
+    struct wl_surface *surf = surface_of(w->output);
+    if (!surf) return;
+    drop_callback_locked(w);
+    struct wl_callback *cb = wl_surface_frame(surf);
+    if (!cb) return;
+    wl_callback_add_listener(cb, &frame_listener, w);
+    w->callback = cb;
+    /* An explicit commit, so the request is attached even when nothing else
+     * commits (a covered, paused or settled output). No damage: a covered
+     * surface's damage could make the compositor repaint (and leave direct
+     * scanout) under a fullscreen game. */
+    wl_surface_commit(surf);
+    frame_watch_armed(&w->state, now);
+}
+
+static watched_output_t *find_locked(const struct output_state *o) {
     for (watched_output_t *w = watched; w; w = w->next) {
         if (w->output == o) return w;
     }
@@ -92,7 +101,7 @@ bool frame_watchdog_init(struct neowall_state *state) {
 
 bool frame_watchdog_wanted(const struct output_state *o) {
     if (!o || !o->config || !o->config->pause_on_fullscreen) return false;
-    if (!o->compositor_surface || !o->compositor_surface->native_surface) return false;
+    if (!surface_of(o)) return false;
     /* Only something that animates has anything to pause. A static image or
      * a shader that painted its one frame costs nothing while covered. */
     if (!wallpaper_is_animated(o->config->type) || !o->shader) return false;
@@ -101,14 +110,16 @@ bool frame_watchdog_wanted(const struct output_state *o) {
 
 void frame_watchdog_arm(struct output_state *o) {
     if (!o) return;
+    uint64_t now = get_time_ms();
     pthread_mutex_lock(&lock);
     watched_output_t *w = find_locked(o);
-    if (!w) {
-        w = add_locked(o);
-    }
-    if (w && !w->callback &&
-        (w->last_done_ms == 0 || get_time_ms() - w->last_done_ms >= REARM_MS)) {
-        arm_locked(w);
+    if (!w) w = add_locked(o);
+    if (w) {
+        switch (frame_watch_next(&w->state, now)) {
+        case FRAME_WATCH_ARM:
+        case FRAME_WATCH_REPROBE: request_locked(w, now); break;
+        case FRAME_WATCH_IDLE: break;
+        }
     }
     pthread_mutex_unlock(&lock);
 }
@@ -116,11 +127,8 @@ void frame_watchdog_arm(struct output_state *o) {
 bool frame_watchdog_output_occluded(struct output_state *o) {
     if (!o) return false;
     pthread_mutex_lock(&lock);
-    watched_output_t *w = find_locked(o);
-    bool occ            = false;
-    if (w && w->callback) {
-        occ = (get_time_ms() - w->armed_at_ms) > OCCLUSION_TIMEOUT_MS;
-    }
+    const watched_output_t *w = find_locked(o);
+    bool occ                  = w && frame_watch_occluded(&w->state, get_time_ms());
     pthread_mutex_unlock(&lock);
     return occ;
 }
@@ -128,24 +136,27 @@ bool frame_watchdog_output_occluded(struct output_state *o) {
 void frame_watchdog_remove(struct output_state *o) {
     if (!o) return;
     pthread_mutex_lock(&lock);
-    watched_output_t **pp = &watched;
-    while (*pp) {
+    for (watched_output_t **pp = &watched; *pp; pp = &(*pp)->next) {
         watched_output_t *cur = *pp;
         if (cur->output == o) {
             *pp = cur->next;
-            if (cur->callback) {
-                /* Detach the listener first: the callback may have queued events
-                 * the compositor hasn't dispatched yet, and we don't want
-                 * on_frame_done firing with a freed `data` pointer. */
-                wl_callback_destroy(cur->callback);
-                cur->callback = NULL;
-            }
+            drop_callback_locked(cur);
             free(cur);
             break;
         }
-        pp = &cur->next;
     }
     pthread_mutex_unlock(&lock);
+}
+
+bool frame_watchdog_check(struct output_state *o) {
+    if (!frame_watchdog_wanted(o)) {
+        /* Not watched: drop any old measurement, so a request left over from
+         * before can't read as "covered" the moment it is watched again. */
+        frame_watchdog_remove(o);
+        return false;
+    }
+    frame_watchdog_arm(o);
+    return frame_watchdog_output_occluded(o);
 }
 
 void frame_watchdog_update(struct neowall_state *state) {
@@ -153,29 +164,7 @@ void frame_watchdog_update(struct neowall_state *state) {
 
     pthread_rwlock_rdlock(&state->output_list_lock);
     for (struct output_state *o = state->outputs; o; o = o->next) {
-        if (!o->config->pause_on_fullscreen) continue;
-
-        bool was    = atomic_load_explicit(&o->occluded, memory_order_acquire);
-        bool nowocc = false;
-        if (frame_watchdog_wanted(o)) {
-            frame_watchdog_arm(o);
-            nowocc = frame_watchdog_output_occluded(o);
-        }
-
-        atomic_store_explicit(&o->occluded, nowocc, memory_order_release);
-
-        const char *name = o->connector_name[0] ? o->connector_name : o->model;
-        if (was && !nowocc) {
-            atomic_store_explicit(&o->needs_redraw, true, memory_order_release);
-            /* Visible again: close the rebase window (see occlusion.c). */
-            o->shader_hidden_since = 0;
-            log_info("Output %s un-occluded, rendering", name);
-        } else if (!was && nowocc) {
-            /* See occlusion.c: marks a window where the shader clock may be
-             * rebased unseen. */
-            o->shader_hidden_since = get_time_ms();
-            log_info("Output %s occluded (compositor stopped frame callbacks), pausing", name);
-        }
+        output_set_occluded(o, frame_watchdog_check(o), "compositor stopped drawing it");
     }
     pthread_rwlock_unlock(&state->output_list_lock);
 }
@@ -184,10 +173,7 @@ void frame_watchdog_cleanup(void) {
     pthread_mutex_lock(&lock);
     while (watched) {
         watched_output_t *next = watched->next;
-        if (watched->callback) {
-            wl_callback_destroy(watched->callback);
-            watched->callback = NULL;
-        }
+        drop_callback_locked(watched);
         free(watched);
         watched = next;
     }
